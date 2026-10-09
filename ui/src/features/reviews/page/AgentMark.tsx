@@ -8,7 +8,7 @@ export function AgentMark({ className }: { className?: string }) {
       alt=""
       aria-hidden
       draggable={false}
-      className={cn("size-3.5 shrink-0 rounded-[3px]", className)}
+      className={cn("size-3.5 shrink-0 rounded-xs", className)}
     />
   )
 }

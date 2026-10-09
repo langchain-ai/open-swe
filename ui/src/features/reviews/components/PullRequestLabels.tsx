@@ -1,14 +1,17 @@
-import { useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { TagIcon } from "@phosphor-icons/react"
-
-import { api } from "@/lib/api"
-import { Input } from "@/components/ui/input"
+import { Button } from "@langchain/macaw-components/Button"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import { Input } from "@langchain/macaw-components/Input"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover"
+} from "@langchain/macaw-components/Popover"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
+import { TagIcon } from "@phosphor-icons/react/dist/ssr/Tag"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
+
+import { api } from "@/lib/api"
 
 interface Label {
   name: string
@@ -66,11 +69,11 @@ export function PullRequestLabels({
   })
   const shown: ReadonlyArray<Label> = catalog.data?.selected ?? initial
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex flex-wrap items-center gap-space-1">
       {shown.map((label) => (
         <span
           key={label.name}
-          className="inline-flex h-5 items-center gap-1 rounded-full border border-border px-1.5 text-[11px]"
+          className="inline-flex h-5 items-center gap-space-1 rounded-full border border-default px-1.5 text-[11px]"
           title={label.description ?? undefined}
         >
           <span
@@ -81,36 +84,37 @@ export function PullRequestLabels({
         </span>
       ))}
       <Popover onOpenChange={(open) => open && setWanted(true)}>
-        <PopoverTrigger
-          onPointerEnter={() => setWanted(true)}
-          onFocus={() => setWanted(true)}
-          render={
-            <button
-              type="button"
-              aria-label="Labels"
-              className="inline-flex h-5 items-center gap-1 rounded-full px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-            />
-          }
-        >
-          <TagIcon className="size-3" />
-          {shown.length === 0 && "Add labels"}
+        <PopoverTrigger asChild>
+          <Button
+            size="xs"
+            color="secondary"
+            variant="plain"
+            leftDecorator={TagIcon}
+            aria-label="Labels"
+            onPointerEnter={() => setWanted(true)}
+            onFocus={() => setWanted(true)}
+          >
+            {shown.length === 0 ? "Add labels" : ""}
+          </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-72 p-2">
+        <PopoverContent align="end" className="w-72 p-space-2">
           <Input
+            size="sm"
+            leftIcon={MagnifyingGlassIcon}
             aria-label="Search labels"
             placeholder="Search labels…"
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={setSearch}
           />
           {catalog.isPending && (
-            <p className="p-2 text-xs text-muted-foreground">Loading labels…</p>
+            <p className="p-space-2 text-xs text-secondary">Loading labels…</p>
           )}
           {catalog.error && (
-            <p role="alert" className="p-2 text-xs text-destructive">
+            <p role="alert" className="p-space-2 text-xs text-error-secondary">
               {catalog.error.message}
             </p>
           )}
-          <div className="mt-2 max-h-64 overflow-y-auto">
+          <div className="mt-space-2 max-h-64 overflow-y-auto">
             {catalog.data?.available
               .filter((label) =>
                 label.name.toLowerCase().includes(search.toLowerCase())
@@ -120,29 +124,29 @@ export function PullRequestLabels({
                   (item) => item.name === label.name
                 )
                 return (
-                  <label
+                  <Checkbox
                     key={label.name}
-                    className="flex cursor-pointer items-center gap-2 rounded p-2 text-xs hover:bg-muted"
+                    containerClassName="rounded-sm p-space-2 hover:bg-elevated-hover"
                     title={label.description ?? undefined}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      disabled={change.isPending}
-                      onChange={() =>
-                        change.mutate({ name: label.name, selected: !selected })
-                      }
-                    />
-                    <span
-                      className="size-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: `#${label.color}` }}
-                    />
-                    {label.name}
-                  </label>
+                    checked={selected}
+                    disabled={change.isPending}
+                    onCheckedChange={() =>
+                      change.mutate({ name: label.name, selected: !selected })
+                    }
+                    label={
+                      <span className="flex items-center gap-space-2 text-xs">
+                        <span
+                          className="size-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: `#${label.color}` }}
+                        />
+                        {label.name}
+                      </span>
+                    }
+                  />
                 )
               })}
             {catalog.data?.available.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">
+              <p className="p-space-2 text-xs text-secondary">
                 No repository labels.
               </p>
             )}

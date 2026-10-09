@@ -1,8 +1,9 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Kbd } from "@langchain/macaw-components/Kbd"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import type { SelectedLineRange } from "@pierre/diffs"
 
-import { Button } from "@/components/ui/button"
-import { Kbd } from "@/components/ui/kbd"
-import { Textarea } from "@/components/ui/textarea"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import {
   buildCommentPayload,
   readableRangeLabel,
@@ -32,6 +33,8 @@ export function Composer({
   const body = useReviewPage((state) => state.composerText)
   const setBody = useReviewPage((state) => state.setComposerText)
   const askAboutLines = useAskAboutLines(pr)
+  const askKey = useShortcutLabel("mod+shift+enter")
+  const addKey = useShortcutLabel("mod+enter")
   const close = () => setComposer(null)
   const addToReview = () => {
     const text = body.trim()
@@ -47,22 +50,24 @@ export function Composer({
   return (
     <NoteFrame>
       <form
-        className="rounded-lg border border-ring/50 bg-card p-2.5 text-xs shadow-sm"
+        className="rounded-lg border border-brand-subtle bg-surface-level-1 p-2.5 text-xs shadow-sm"
         onSubmit={(event) => {
           event.preventDefault()
           addToReview()
         }}
       >
-        <p className="mb-1.5 text-muted-foreground">
+        <p className="mb-1.5 text-secondary">
           Comment on {readableRangeLabel(range)}
         </p>
         <Textarea
+          size="md"
           aria-label="Comment body"
           autoFocus
           rows={4}
+          resize="vertical"
           value={body}
           placeholder="Leave a comment, or ask Open SWE about these lines"
-          onChange={(event) => setBody(event.target.value)}
+          onChange={setBody}
           onKeyDown={(event) => {
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
               event.preventDefault()
@@ -75,21 +80,32 @@ export function Composer({
               if (!body.trim()) close()
             }
           }}
-          className="resize-y text-[13px]"
         />
         {pending.add.error && (
-          <p role="alert" className="mt-1.5 text-destructive">
+          <p role="alert" className="mt-1.5 text-error-secondary">
             {pending.add.error.message}
           </p>
         )}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" variant="ghost" onClick={ask}>
+        <div className="mt-space-2 flex flex-wrap items-center gap-space-2">
+          <Button
+            type="button"
+            size="sm"
+            color="secondary"
+            variant="plain"
+            onClick={ask}
+          >
             <AgentMark />
             Ask Open SWE
-            <Kbd>⇧⌘↩</Kbd>
+            <Kbd>{askKey}</Kbd>
           </Button>
           <span className="flex-1" />
-          <Button type="button" size="sm" variant="ghost" onClick={close}>
+          <Button
+            type="button"
+            size="sm"
+            color="secondary"
+            variant="plain"
+            onClick={close}
+          >
             Cancel
           </Button>
           <Button
@@ -98,9 +114,7 @@ export function Composer({
             disabled={!body.trim() || pending.add.isPending}
           >
             {pending.add.isPending ? "Adding…" : "Add review comment"}
-            <Kbd className="bg-primary-foreground/15 text-primary-foreground">
-              ⌘↩
-            </Kbd>
+            <Kbd variant="inherit">{addKey}</Kbd>
           </Button>
         </div>
       </form>

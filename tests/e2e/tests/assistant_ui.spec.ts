@@ -296,8 +296,8 @@ test("preserves no-project selection despite a default repository", async ({
   });
   await page.goto("/agents?noRepo=true");
   await expect(page).toHaveURL(/\/assistant\?noRepo=true$/);
-  await expect(page.getByRole("combobox", { name: "Repository" })).toHaveValue(
-    "",
+  await expect(page.getByRole("combobox", { name: "Repository" })).toHaveText(
+    "No repository",
   );
   const submitted = page.waitForRequest(
     (request) =>

@@ -1,6 +1,8 @@
 /** @vitest-environment jsdom */
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { QueryClientProvider } from "@tanstack/react-query"
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -29,7 +31,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     openPullRequests: vi.fn(),
     searchPullRequests: vi.fn(),
-    myPullRequestDetails: vi.fn(),
+    pullRequestStatus: vi.fn(),
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
     fixPullRequest: vi.fn(),
@@ -73,6 +75,7 @@ const pull = (
   repo: "acme/app",
   number,
   title: `Change ${number}`,
+  state: "open",
   draft: false,
   additions: number,
   deletions: 3,
@@ -81,6 +84,7 @@ const pull = (
   headSha: "a".repeat(40),
   headRef: "feature/example",
   reviewDecision: "none",
+  reviewers: [],
   reviewRequired: false,
   statusAvailable: true,
   createdAt: `2026-09-0${number}T00:00:00Z`,
@@ -125,7 +129,9 @@ function mount() {
   client.setDefaultOptions({ queries: { retry: false } })
   return render(
     <QueryClientProvider client={client}>
-      <Harness />
+      <TooltipProvider>
+        <Harness />
+      </TooltipProvider>
     </QueryClientProvider>
   )
 }
@@ -216,16 +222,22 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
+const openFilter = (name: string) =>
+  act(() => screen.getByRole("combobox", { name }).focus())
+const repoListOptions = () =>
+  within(screen.getByRole("listbox", { name: /Filter by repository/ }))
+    .getAllByRole("option")
+    .map((option) => option.textContent)
 const repoOptions = async () => {
-  fireEvent.click(screen.getByLabelText("Filter by repository"))
-  return (await screen.findAllByRole("menuitemcheckbox")).map(
-    (option) => option.textContent
-  )
+  openFilter("Filter by repository")
+  await screen.findByRole("listbox", { name: /Filter by repository/ })
+  return repoListOptions()
 }
 const searchRepos = (text: string) =>
-  fireEvent.change(screen.getByLabelText("Search repositories…"), {
-    target: { value: text },
-  })
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "Filter by repository" }),
+    { target: { value: text } }
+  )
 
 describe("My PRs", () => {
   it("does not offer a fix while the associated thread is running", async () => {
@@ -388,10 +400,8 @@ describe("My PRs", () => {
       ["Draft", "Pending"],
       ["Conflicted", "Pending"],
     ])
-    fireEvent.click(screen.getByLabelText("Filter by status"))
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
-    )
+    openFilter("Filter by status")
+    fireEvent.click(await screen.findByRole("option", { name: "Conflicted" }))
     expect(titles()).toEqual(["Change 4"])
   })
   it("shows fix actions on conflicted or failing drafts but not healthy drafts", async () => {
@@ -492,7 +502,7 @@ describe("My PRs", () => {
       ),
     })
     let resolve!: (value: OpenPullRequest) => void
-    vi.mocked(api.myPullRequestDetails).mockImplementation(
+    vi.mocked(api.pullRequestStatus).mockImplementation(
       () =>
         new Promise((done) => {
           resolve = done
@@ -502,9 +512,7 @@ describe("My PRs", () => {
     await screen.findByText("Change 10")
     expect(screen.queryByText("Change 11")).toBeNull()
     expect(cards()).toHaveLength(10)
-    await waitFor(() =>
-      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(10)
-    )
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(10))
     resolve(pull(10))
     await waitFor(() =>
       expect(
@@ -562,11 +570,7 @@ describe("My PRs", () => {
     expect(within(section()).queryAllByRole("listitem")).toHaveLength(0)
     expect(await repoOptions()).toEqual(["acme/app", "acme/other"])
     searchRepos("other")
-    expect(
-      screen
-        .getAllByRole("menuitemcheckbox")
-        .map((option) => option.textContent)
-    ).toEqual(["acme/other"])
+    expect(repoListOptions()).toEqual(["acme/other"])
   })
 
   it("keeps the review verdict while GitHub decides whether the branch merges", async () => {
@@ -654,10 +658,8 @@ describe("My PRs", () => {
       expect((await card(title)).getByText("Draft")).toBeTruthy()
     }
     // Filtering by Conflicted has to reach the conflicted draft.
-    fireEvent.click(screen.getByLabelText("Filter by status"))
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
-    )
+    openFilter("Filter by status")
+    fireEvent.click(await screen.findByRole("option", { name: "Conflicted" }))
     expect(titles()).toEqual(["Change 1"])
   })
 
@@ -804,17 +806,15 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { detailsLoading: true })],
     })
-    vi.mocked(api.myPullRequestDetails)
+    vi.mocked(api.pullRequestStatus)
       .mockResolvedValueOnce(null)
       .mockResolvedValue(pull(1))
     mount()
-    await waitFor(() => expect(api.myPullRequestDetails).toHaveBeenCalledOnce())
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledOnce())
     await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
     expect(await screen.findByText("Change 1")).toBeTruthy()
-    await waitFor(() =>
-      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(2)
-    )
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(2))
   })
 
   it("filters conflicts and sends the applied repository to the server", async () => {
@@ -834,16 +834,17 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 1")
-    fireEvent.click(screen.getByLabelText("Filter by status"))
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
-    )
+    openFilter("Filter by status")
+    fireEvent.click(await screen.findByRole("option", { name: "Conflicted" }))
     expect(titles()).toEqual(["Change 2"])
-    fireEvent.click(
-      screen.getByRole("menuitemcheckbox", { name: "Reviewable" })
-    )
+    fireEvent.click(screen.getByRole("option", { name: "Reviewable" }))
     expect(titles()).toEqual(["Change 2", "Change 1"])
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
+    // Picking an option refocuses the filter on the next frame.
+    await act(() => new Promise(requestAnimationFrame))
+    fireEvent.keyDown(
+      screen.getByRole("combobox", { name: "Filter by status" }),
+      { key: "Escape" }
+    )
     // Options come from the accessible repository list, so globex/quiet is
     // offered even though no PR names it.
     expect(await repoOptions()).toEqual([
@@ -852,14 +853,8 @@ describe("My PRs", () => {
       "globex/quiet",
     ])
     searchRepos("ACME/OT")
-    expect(
-      screen
-        .getAllByRole("menuitemcheckbox")
-        .map((option) => option.textContent)
-    ).toEqual(["acme/other"])
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "acme/other" })
-    )
+    expect(repoListOptions()).toEqual(["acme/other"])
+    fireEvent.click(await screen.findByRole("option", { name: "acme/other" }))
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other",
@@ -870,9 +865,7 @@ describe("My PRs", () => {
       )
     )
     searchRepos("app")
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "acme/app" })
-    )
+    fireEvent.click(await screen.findByRole("option", { name: "acme/app" }))
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other,acme/app",

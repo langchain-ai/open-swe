@@ -6,11 +6,17 @@ import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker"
 import { api } from "@/lib/api"
 import { BROWSER_CACHE_MAX_AGE_MS } from "@/lib/query"
 import { DashboardRequestError } from "@/lib/dashboard-fetch"
+import { useSession } from "@/lib/session"
+import {
+  pullRequestStatusQuery,
+  pullRequestTopic,
+} from "@/features/reviews/lib/cache"
 import {
   reviewKeys,
   type PullRequestRef,
 } from "@/features/reviews/lib/reviewKeys"
 import { getReviewConversation } from "@/features/reviews/lib/conversationApi"
+import { usePullRequestStatus } from "@/features/reviews/lib/usePullRequestStatus"
 import {
   DIFF_WORKER_HIGHLIGHTER_OPTIONS,
   DIFF_WORKER_POOL_OPTIONS,
@@ -29,47 +35,49 @@ export type { PullRequestRef }
 
 // Every file header and note observes these, so each one scrolling in would
 // otherwise revalidate them; a missing PR stays missing, so 4xx isn't retried.
-const SHARED = {
-  gcTime: BROWSER_CACHE_MAX_AGE_MS,
-  staleTime: 60_000,
-  retry: (failures: number, error: Error) => {
-    const status = error instanceof DashboardRequestError ? error.status : 0
-    return failures < 1 && !(status >= 400 && status < 500)
-  },
-} as const
+// The backend says when the PR or its review changes, so nothing polls.
+function shared(pr: PullRequestRef) {
+  return {
+    gcTime: BROWSER_CACHE_MAX_AGE_MS,
+    staleTime: 60_000,
+    retry: (failures: number, error: Error) => {
+      const status = error instanceof DashboardRequestError ? error.status : 0
+      return failures < 1 && !(status >= 400 && status < 500)
+    },
+    meta: { invalidatedBy: [pullRequestTopic(statusRef(pr))] },
+  } as const
+}
+
+/** The PR as the status cache and its topic name it: `repo` is `owner/name`. */
+function statusRef({ owner, repo, number }: PullRequestRef) {
+  return { repo: `${owner}/${repo}`, number }
+}
 
 export const reviewQueries = {
   detail: (pr: PullRequestRef) =>
     queryOptions({
       queryKey: reviewKeys.detail(pr),
       queryFn: () => api.getReview(pr.owner, pr.repo, pr.number),
-      ...SHARED,
-      refetchInterval: (query) =>
-        query.state.data?.status === "running" ||
-        query.state.data?.walkthrough_running
-          ? 5000
-          : false,
+      ...shared(pr),
     }),
   diff: (pr: PullRequestRef) =>
     queryOptions({
       queryKey: reviewKeys.diff(pr),
       queryFn: () => api.getReviewDiff(pr.owner, pr.repo, pr.number),
-      ...SHARED,
+      ...shared(pr),
     }),
   conversation: (pr: PullRequestRef) =>
     queryOptions({
       queryKey: reviewKeys.conversation(pr),
       queryFn: () => getReviewConversation(pr),
-      ...SHARED,
+      ...shared(pr),
     }),
-  status: (pr: PullRequestRef) =>
-    queryOptions({
-      queryKey: reviewKeys.status(pr),
-      queryFn: () =>
-        api.myPullRequestDetails(`${pr.owner}/${pr.repo}`, pr.number),
-      ...SHARED,
-      refetchOnWindowFocus: false,
-    }),
+}
+
+/** The PR's live state on GitHub, from the same cache entry as the PR list. */
+export function useReviewStatus(pr: PullRequestRef) {
+  const { repo, number } = statusRef(pr)
+  return usePullRequestStatus(repo, number)
 }
 
 /**
@@ -115,19 +123,17 @@ export function useFileMarkers(
 /** Refetches what a PR action changed: its status, its detail once merged, its conversation once reviewed. */
 export function useRefreshPullRequest(pr: PullRequestRef) {
   const queryClient = useQueryClient()
+  const login = useSession().data?.login ?? ""
   const refetch = (...keys: ReadonlyArray<QueryKey>) => {
     for (const queryKey of keys)
       void queryClient.invalidateQueries({ queryKey })
   }
+  const status = pullRequestStatusQuery(login, statusRef(pr)).queryKey
   return {
-    status: () => refetch(reviewKeys.status(pr)),
-    merged: () => refetch(reviewKeys.detail(pr), reviewKeys.status(pr)),
+    status: () => refetch(status),
+    merged: () => refetch(reviewKeys.detail(pr), status),
     reviewed: () =>
-      refetch(
-        reviewKeys.detail(pr),
-        reviewKeys.status(pr),
-        reviewKeys.conversation(pr)
-      ),
+      refetch(reviewKeys.detail(pr), status, reviewKeys.conversation(pr)),
   }
 }
 
@@ -136,7 +142,6 @@ export function warmReviewPage(queryClient: QueryClient, pr: PullRequestRef) {
   if (typeof window === "undefined" || !Number.isInteger(pr.number)) return
   void queryClient.prefetchQuery(reviewQueries.detail(pr))
   void queryClient.prefetchQuery(reviewQueries.diff(pr))
-  void queryClient.prefetchQuery(reviewQueries.status(pr))
   void queryClient.prefetchQuery(reviewQueries.conversation(pr))
   getOrCreateWorkerPoolSingleton({
     poolOptions: DIFF_WORKER_POOL_OPTIONS,

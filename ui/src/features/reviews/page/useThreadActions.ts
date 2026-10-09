@@ -14,6 +14,7 @@ import {
   reviewKeys,
   type PullRequestRef,
 } from "@/features/reviews/lib/reviewKeys"
+import { useRefreshPullRequest } from "./queries"
 
 type ThreadChange = (thread: ReviewThread) => ReviewThread
 
@@ -32,6 +33,7 @@ function patchThreads(
 
 function useConversationCache(pr: PullRequestRef) {
   const queryClient = useQueryClient()
+  const pull = useRefreshPullRequest(pr)
   const key = reviewKeys.conversation(pr)
   return {
     optimistic: (ids: ReadonlySet<number>, change: ThreadChange) =>
@@ -43,7 +45,7 @@ function useConversationCache(pr: PullRequestRef) {
         current ? patchThreads(current, ids, change) : current
       ),
     refresh: (conversation: boolean) => {
-      void queryClient.invalidateQueries({ queryKey: reviewKeys.status(pr) })
+      pull.status()
       if (conversation) void queryClient.invalidateQueries({ queryKey: key })
     },
   }

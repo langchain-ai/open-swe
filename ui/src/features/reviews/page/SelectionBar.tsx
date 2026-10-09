@@ -1,8 +1,8 @@
-import { useEffect, useReducer } from "react"
+import { Kbd } from "@langchain/macaw-components/Kbd"
 import type { SelectedLineRange } from "@pierre/diffs"
-import { ChatTextIcon } from "@phosphor-icons/react"
+import { ChatTextIcon } from "@phosphor-icons/react/dist/ssr/ChatText"
+import { useEffect, useReducer } from "react"
 
-import { Kbd } from "@/components/ui/kbd"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { readDiffSelection } from "@/features/agents/utils/diffSelection"
 import { AgentMark } from "./AgentMark"
@@ -85,12 +85,12 @@ export function SelectionBar({
       data-add-to-chat
       onPointerDown={(event) => event.stopPropagation()}
       style={{ left: position.left, top: position.top }}
-      className="fixed z-50 flex items-center gap-0.5 rounded-lg border border-border bg-popover p-0.5 font-sans text-xs shadow-lg"
+      className="fixed z-50 flex items-center gap-0.5 rounded-lg border border-subtle bg-elevated p-0.5 font-sans text-xs shadow-md"
     >
       <button
         type="button"
         onClick={onAsk}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 font-medium hover:bg-accent"
+        className="flex items-center gap-1.5 rounded-md px-2 py-1 font-medium hover:bg-elevated-hover"
       >
         <AgentMark />
         Ask Open SWE
@@ -99,7 +99,7 @@ export function SelectionBar({
       <button
         type="button"
         onClick={onComment}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-accent"
+        className="flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-elevated-hover"
       >
         <ChatTextIcon className="size-3.5" />
         Comment

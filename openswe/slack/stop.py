@@ -24,7 +24,6 @@ from openswe.source_context import SourceContext
 logger = logging.getLogger(__name__)
 
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
-_QUEUE_RECORDS = ((("autofix",), "pending_event"),)
 
 
 def _mapping_value(value: object, key: str) -> object:
@@ -97,12 +96,6 @@ async def _active_run_ids(client: LangGraphClient, thread_id: str) -> list[str]:
                 break
             offset += len(runs)
     return sorted(run_ids)
-
-
-async def _clear_deferred_work(client: LangGraphClient, thread_id: str) -> None:
-    await QueuedMessage.clear(thread_id)
-    for namespace_prefix, key in _QUEUE_RECORDS:
-        await client.store.delete_item((*namespace_prefix, thread_id), key)
 
 
 def _summary_configurable(
@@ -184,7 +177,7 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
             run_ids=run_ids,
             action="interrupt",
         )
-    await _clear_deferred_work(client, thread_id)
+    await QueuedMessage.clear(thread_id)
     await client.threads.update(
         thread_id=thread_id,
         metadata={
@@ -251,7 +244,7 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     run_ids = await _active_run_ids(client, thread_id)
     if run_ids:
         await client.runs.cancel_many(thread_id=thread_id, run_ids=run_ids, action="interrupt")
-    await _clear_deferred_work(client, thread_id)
+    await QueuedMessage.clear(thread_id)
     await client.threads.update(
         thread_id=thread_id,
         metadata={

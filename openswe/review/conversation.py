@@ -3,27 +3,24 @@
 import asyncio
 import logging
 import re
-from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 
-import httpx2
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.dashboard.repo_access import require_repo_access_for_user
-from openswe.github.http import GitHubClient, GraphQLError, RepoClient
+from openswe.github.http import GitHubClient
+from openswe.github.pull_request_status import PullRequestClient
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["review"])
 
-_GITHUB_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 # Hidden markers (Open SWE's finding ids, bot metadata) are not part of what a person wrote.
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # Open SWE stamps everything it publishes, including what it posts with a person's token.
@@ -116,13 +113,13 @@ class _PageInfo(BaseModel):
     endCursor: str | None = None
 
 
-class _ThreadStates(BaseModel):
+class _ThreadStatesPage(BaseModel):
     pageInfo: _PageInfo = _PageInfo()
     nodes: list[_ThreadState] = []
 
 
 class _ThreadStatesPullRequest(BaseModel):
-    reviewThreads: _ThreadStates = _ThreadStates()
+    reviewThreads: _ThreadStatesPage = _ThreadStatesPage()
 
 
 class _ThreadStatesRepository(BaseModel):
@@ -133,9 +130,48 @@ class _ThreadStatesData(BaseModel):
     repository: _ThreadStatesRepository
 
 
-class _GitHubError(BaseModel):
-    message: str | None = None
-    errors: list[dict[str, object] | str] = Field(default_factory=list)
+_THREAD_STATES = """
+query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id isResolved isOutdated comments(first: 1) { nodes { fullDatabaseId } } }
+      }
+    }
+  }
+}
+"""
+
+_RESOLVE_THREAD = """
+mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }
+"""
+
+_UNRESOLVE_THREAD = """
+mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }
+"""
+
+
+@contextmanager
+def _expected_shape(pull: PullRequestClient) -> Iterator[None]:
+    """GitHub answering with an unexpected shape is a 502, logged with the pull request."""
+    try:
+        yield
+    except ValidationError as exc:
+        logger.warning(
+            "GitHub conversation payload invalid",
+            extra={"repo_full_name": pull.repo.full_name, "pr_number": pull.number},
+            exc_info=exc,
+        )
+        raise HTTPException(502, "unexpected GitHub response") from exc
+
+
+def _display_body(body: str | None) -> str:
+    text = body or ""
+    if _OPEN_SWE_MARKER_RE.search(text):
+        for footer in _OPEN_SWE_FOOTER_RES:
+            text = footer.sub("", text)
+    return _BLANK_RUN_RE.sub("\n\n", _HTML_COMMENT_RE.sub("", text)).strip()
 
 
 class ConversationAuthor(BaseModel):
@@ -145,6 +181,15 @@ class ConversationAuthor(BaseModel):
     # Set when Open SWE posted through this person's GitHub account; ``login`` is then Open SWE.
     posted_by: str | None = None
 
+    @classmethod
+    def of(cls, user: _GitHubUser | None, body: str | None = None) -> Self | None:
+        if user is None:
+            return None
+        bot = user.type == "Bot"
+        if not bot and body and _OPEN_SWE_MARKER_RE.search(body):
+            return cls(login=OPEN_SWE_LOGIN, avatar_url="", bot=True, posted_by=user.login)
+        return cls(login=user.login, avatar_url=user.avatar_url, bot=bot)
+
 
 class ConversationComment(BaseModel):
     kind: Literal["comment"] = "comment"
@@ -153,6 +198,22 @@ class ConversationComment(BaseModel):
     created_at: datetime
     body: str
     html_url: str
+
+    @classmethod
+    def of(cls, comment: _GitHubIssueComment) -> Self:
+        return cls(
+            id=comment.id,
+            author=ConversationAuthor.of(comment.user, comment.body),
+            created_at=comment.created_at,
+            body=_display_body(comment.body),
+            html_url=comment.html_url,
+        )
+
+    @classmethod
+    async def post(cls, pull: PullRequestClient, body: str) -> Self:
+        created = await pull.comment(body)
+        with _expected_shape(pull):
+            return cls.of(_GitHubIssueComment.model_validate(created))
 
 
 class ConversationReview(BaseModel):
@@ -188,6 +249,23 @@ class ThreadComment(BaseModel):
     body: str
     html_url: str
 
+    @classmethod
+    def of(cls, comment: _GitHubReviewComment) -> Self:
+        return cls(
+            id=comment.id,
+            review_id=comment.pull_request_review_id,
+            author=ConversationAuthor.of(comment.user, comment.body),
+            created_at=comment.created_at,
+            body=_display_body(comment.body),
+            html_url=comment.html_url,
+        )
+
+    @classmethod
+    async def reply(cls, pull: PullRequestClient, comment_id: int, body: str) -> Self:
+        created = await pull.reply_to_review_comment(comment_id, body)
+        with _expected_shape(pull):
+            return cls.of(_GitHubReviewComment.model_validate(created))
+
 
 class ReviewThread(BaseModel):
     """An inline thread: its first comment's anchor, then every reply in order."""
@@ -204,18 +282,60 @@ class ReviewThread(BaseModel):
     resolved: bool
     comments: list[ThreadComment]
 
+    @classmethod
+    def group(
+        cls, review_comments: list[_GitHubReviewComment], states: Mapping[int, _ThreadState]
+    ) -> list[Self]:
+        """Group inline comments into threads; a reply points at its thread's first comment."""
+        ordered = sorted(review_comments, key=lambda c: c.created_at)
+        replies: dict[int, list[_GitHubReviewComment]] = {}
+        for comment in ordered:
+            if comment.in_reply_to_id is not None:
+                replies.setdefault(comment.in_reply_to_id, []).append(comment)
+        threads: list[Self] = []
+        for root in ordered:
+            if root.in_reply_to_id is not None:
+                continue
+            state = states.get(root.id)
+            threads.append(
+                cls(
+                    id=root.id,
+                    node_id=state.id if state else None,
+                    path=root.path,
+                    line=root.line,
+                    start_line=root.start_line,
+                    side=root.side or "RIGHT",
+                    original_line=root.original_line,
+                    diff_hunk=root.diff_hunk,
+                    outdated=state.isOutdated if state else root.line is None,
+                    resolved=state.isResolved if state else False,
+                    comments=[ThreadComment.of(c) for c in [root, *replies.get(root.id, [])]],
+                )
+            )
+        return threads
 
-class Conversation(BaseModel):
-    items: list[ConversationItem]
-    threads: list[ReviewThread]
+    @staticmethod
+    async def states(pull: PullRequestClient) -> dict[int, _ThreadState]:
+        """Each thread's node id and resolution, keyed by its first comment's id."""
+        states: dict[int, _ThreadState] = {}
+        cursor: str | None = None
+        while True:
+            data = _ThreadStatesData.model_validate(
+                await pull.repo.graphql(_THREAD_STATES, {"number": pull.number, "after": cursor})
+            )
+            page = data.repository.pullRequest.reviewThreads
+            for thread in page.nodes:
+                if thread.comments.nodes:
+                    states[int(thread.comments.nodes[0].fullDatabaseId)] = thread
+            if not page.pageInfo.hasNextPage or not page.pageInfo.endCursor:
+                return states
+            cursor = page.pageInfo.endCursor
 
-
-class ConversationCommentCreate(BaseModel):
-    body: str = Field(max_length=65536)
-
-
-class ThreadResolution(BaseModel):
-    resolved: bool
+    @staticmethod
+    async def set_resolved(pull: PullRequestClient, node_id: str, resolved: bool) -> None:
+        await pull.repo.github.graphql(
+            _RESOLVE_THREAD if resolved else _UNRESOLVE_THREAD, {"id": node_id}
+        )
 
 
 _ISSUE_COMMENTS = TypeAdapter(list[_GitHubIssueComment])
@@ -227,249 +347,93 @@ _REVIEW_STATES: frozenset[str] = frozenset(
     ("APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED")
 )
 
-_THREAD_STATES = """
-query($owner: String!, $repo: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $after) {
-        pageInfo { hasNextPage endCursor }
-        nodes { id isResolved isOutdated comments(first: 1) { nodes { fullDatabaseId } } }
-      }
-    }
-  }
-}
-"""
 
-_RESOLVE_THREAD = """
-mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }
-"""
-
-_UNRESOLVE_THREAD = """
-mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }
-"""
-
-
-def _author(user: _GitHubUser | None, body: str | None = None) -> ConversationAuthor | None:
-    if user is None:
-        return None
-    bot = user.type == "Bot"
-    if not bot and body and _OPEN_SWE_MARKER_RE.search(body):
-        return ConversationAuthor(
-            login=OPEN_SWE_LOGIN, avatar_url="", bot=True, posted_by=user.login
-        )
-    return ConversationAuthor(login=user.login, avatar_url=user.avatar_url, bot=bot)
-
-
-def _display_body(body: str | None) -> str:
-    text = body or ""
-    if _OPEN_SWE_MARKER_RE.search(text):
-        for footer in _OPEN_SWE_FOOTER_RES:
-            text = footer.sub("", text)
-    return _BLANK_RUN_RE.sub("\n\n", _HTML_COMMENT_RE.sub("", text)).strip()
-
-
-def _comment_item(comment: _GitHubIssueComment) -> ConversationComment:
-    return ConversationComment(
-        id=comment.id,
-        author=_author(comment.user, comment.body),
-        created_at=comment.created_at,
-        body=_display_body(comment.body),
-        html_url=comment.html_url,
-    )
-
-
-def _thread_comment(comment: _GitHubReviewComment) -> ThreadComment:
-    return ThreadComment(
-        id=comment.id,
-        review_id=comment.pull_request_review_id,
-        author=_author(comment.user, comment.body),
-        created_at=comment.created_at,
-        body=_display_body(comment.body),
-        html_url=comment.html_url,
-    )
-
-
-def build_timeline(
-    comments: list[_GitHubIssueComment],
-    reviews: list[_GitHubReview],
-    commits: list[_GitHubCommit],
-) -> list[ConversationItem]:
-    items: list[ConversationItem] = [_comment_item(comment) for comment in comments]
-    for review in reviews:
-        if review.state not in _REVIEW_STATES or review.submitted_at is None:
-            continue
-        items.append(
-            ConversationReview(
-                id=review.id,
-                author=_author(review.user, review.body),
-                created_at=review.submitted_at,
-                body=_display_body(review.body),
-                html_url=review.html_url,
-                state=_REVIEW_STATE.validate_python(review.state),
-            )
-        )
-    items.extend(
-        ConversationCommit(
-            sha=commit.sha,
-            author=_author(commit.author),
-            created_at=commit.commit.author.date,
-            message=commit.commit.message,
-            html_url=commit.html_url,
-        )
-        for commit in commits
-    )
-    items.sort(key=lambda item: item.created_at)
-    return items
-
-
-def build_threads(
-    review_comments: list[_GitHubReviewComment], states: Mapping[int, _ThreadState]
-) -> list[ReviewThread]:
-    """Group inline comments into threads; a reply points at its thread's first comment."""
-    ordered = sorted(review_comments, key=lambda c: c.created_at)
-    replies: dict[int, list[_GitHubReviewComment]] = {}
-    for comment in ordered:
-        if comment.in_reply_to_id is not None:
-            replies.setdefault(comment.in_reply_to_id, []).append(comment)
-    threads: list[ReviewThread] = []
-    for root in ordered:
-        if root.in_reply_to_id is not None:
-            continue
-        state = states.get(root.id)
-        threads.append(
-            ReviewThread(
-                id=root.id,
-                node_id=state.id if state else None,
-                path=root.path,
-                line=root.line,
-                start_line=root.start_line,
-                side=root.side or "RIGHT",
-                original_line=root.original_line,
-                diff_hunk=root.diff_hunk,
-                outdated=state.isOutdated if state else root.line is None,
-                resolved=state.isResolved if state else False,
-                comments=[_thread_comment(c) for c in [root, *replies.get(root.id, [])]],
-            )
-        )
-    return threads
-
-
-def _github_error_message(response: httpx2.Response) -> str:
-    fallback = f"GitHub request failed ({response.status_code})"
-    try:
-        error = _GitHubError.model_validate(response.json())
-    except ValueError, ValidationError:
-        return fallback
-    details = "; ".join(
-        str(item["message"]) if isinstance(item, dict) and "message" in item else str(item)
-        for item in error.errors
-    )
-    if error.message and details:
-        return f"{error.message}: {details}"
-    return error.message or details or fallback
-
-
-@dataclass(frozen=True, slots=True)
-class PullRequestConversation:
-    """One pull request's conversation, read and written with the viewer's own GitHub token."""
-
-    repo: RepoClient
-    number: int
+class Conversation(BaseModel):
+    items: list[ConversationItem]
+    threads: list[ReviewThread]
 
     @classmethod
-    @asynccontextmanager
-    async def open(cls, login: str, owner: str, repo: str, number: int) -> AsyncIterator[Self]:
-        """GitHub failures inside the block become HTTP errors carrying GitHub's message."""
-        await require_repo_access_for_user(login, f"{owner}/{repo}")
-        token = await get_valid_access_token(login)
-        if not token:
-            raise HTTPException(401, "GitHub re-auth required")
-        try:
-            async with GitHubClient.connect(token=token, timeout=_GITHUB_TIMEOUT) as github:
-                yield cls(github.repo(owner, repo), number)
-        except httpx2.HTTPStatusError as exc:
-            message = _github_error_message(exc.response)
-            status = exc.response.status_code
-            logger.warning(
-                "GitHub conversation request failed",
-                extra={
-                    "http_method": exc.request.method,
-                    "github_path": exc.request.url.path,
-                    "status_code": status,
-                    "github_message": message,
-                },
+    def of(
+        cls,
+        comments: list[_GitHubIssueComment],
+        reviews: list[_GitHubReview],
+        review_comments: list[_GitHubReviewComment],
+        commits: list[_GitHubCommit],
+        states: Mapping[int, _ThreadState],
+    ) -> Self:
+        items: list[ConversationItem] = [ConversationComment.of(comment) for comment in comments]
+        for review in reviews:
+            if review.state not in _REVIEW_STATES or review.submitted_at is None:
+                continue
+            items.append(
+                ConversationReview(
+                    id=review.id,
+                    author=ConversationAuthor.of(review.user, review.body),
+                    created_at=review.submitted_at,
+                    body=_display_body(review.body),
+                    html_url=review.html_url,
+                    state=_REVIEW_STATE.validate_python(review.state),
+                )
             )
-            raise HTTPException(status if status < 500 else 502, message) from exc
-        except (ValidationError, GraphQLError) as exc:
-            logger.warning(
-                "GitHub conversation payload invalid",
-                extra={"repo_full_name": f"{owner}/{repo}", "pr_number": number},
-                exc_info=exc,
+        items.extend(
+            ConversationCommit(
+                sha=commit.sha,
+                author=ConversationAuthor.of(commit.author),
+                created_at=commit.commit.author.date,
+                message=commit.commit.message,
+                html_url=commit.html_url,
             )
-            raise HTTPException(502, "unexpected GitHub response") from exc
-
-    async def _thread_states(self) -> dict[int, _ThreadState]:
-        """Each thread's node id and resolution, keyed by its first comment's id."""
-        states: dict[int, _ThreadState] = {}
-        cursor: str | None = None
-        while True:
-            data = _ThreadStatesData.model_validate(
-                await self.repo.graphql(_THREAD_STATES, {"number": self.number, "after": cursor})
-            )
-            page = data.repository.pullRequest.reviewThreads
-            for thread in page.nodes:
-                if thread.comments.nodes:
-                    states[int(thread.comments.nodes[0].fullDatabaseId)] = thread
-            if not page.pageInfo.hasNextPage or not page.pageInfo.endCursor:
-                return states
-            cursor = page.pageInfo.endCursor
-
-    async def load(self) -> Conversation:
-        raw_comments, raw_reviews, raw_review_comments, raw_commits, states = await asyncio.gather(
-            self.repo.pages(f"issues/{self.number}/comments"),
-            self.repo.pages(f"pulls/{self.number}/reviews"),
-            self.repo.pages(f"pulls/{self.number}/comments"),
-            self.repo.pages(f"pulls/{self.number}/commits"),
-            self._thread_states(),
+            for commit in commits
         )
-        reviews = _REVIEWS.validate_python(raw_reviews)
-        pending = {review.id for review in reviews if review.state == "PENDING"}
-        # The viewer's unsubmitted comments belong to their pending review, not the conversation.
-        review_comments = [
-            c
-            for c in _REVIEW_COMMENTS.validate_python(raw_review_comments)
-            if c.pull_request_review_id not in pending
-        ]
-        return Conversation(
-            items=build_timeline(
+        items.sort(key=lambda item: item.created_at)
+        return cls(items=items, threads=ReviewThread.group(review_comments, states))
+
+    @classmethod
+    async def load(cls, pull: PullRequestClient) -> Self:
+        with _expected_shape(pull):
+            (
+                raw_comments,
+                raw_reviews,
+                raw_review_comments,
+                raw_commits,
+                states,
+            ) = await asyncio.gather(
+                pull.issue_comments(),
+                pull.reviews(),
+                pull.review_comments(),
+                pull.commits(),
+                ReviewThread.states(pull),
+            )
+            reviews = _REVIEWS.validate_python(raw_reviews)
+            pending = {review.id for review in reviews if review.state == "PENDING"}
+            # The viewer's unsubmitted comments belong to their pending review, not the conversation.
+            review_comments = [
+                c
+                for c in _REVIEW_COMMENTS.validate_python(raw_review_comments)
+                if c.pull_request_review_id not in pending
+            ]
+            return cls.of(
                 _ISSUE_COMMENTS.validate_python(raw_comments),
                 reviews,
+                review_comments,
                 _COMMITS.validate_python(raw_commits),
-            ),
-            threads=build_threads(review_comments, states),
-        )
-
-    async def comment(self, body: str) -> ConversationComment:
-        created = await self.repo.post(f"issues/{self.number}/comments", {"body": body})
-        return _comment_item(_GitHubIssueComment.model_validate(created))
-
-    async def reply(self, comment_id: int, body: str) -> ThreadComment:
-        created = await self.repo.post(
-            f"pulls/{self.number}/comments/{comment_id}/replies", {"body": body}
-        )
-        return _thread_comment(_GitHubReviewComment.model_validate(created))
-
-    async def resolve(self, thread_node_id: str, resolved: bool) -> None:
-        await self.repo.github.graphql(
-            _RESOLVE_THREAD if resolved else _UNRESOLVE_THREAD, {"id": thread_node_id}
-        )
+                states,
+            )
 
 
-def _required_body(body: str) -> str:
-    stripped = body.strip()
-    if not stripped:
-        raise HTTPException(422, "comment body is required")
-    return stripped
+class ConversationCommentCreate(BaseModel):
+    body: str = Field(max_length=65536)
+
+    @property
+    def text(self) -> str:
+        stripped = self.body.strip()
+        if not stripped:
+            raise HTTPException(422, "comment body is required")
+        return stripped
+
+
+class ThreadResolution(BaseModel):
+    resolved: bool
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/conversation")
@@ -479,8 +443,9 @@ async def api_get_review_conversation(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Conversation:
-    async with PullRequestConversation.open(session["sub"], owner, repo, pr_number) as pull:
-        return await pull.load()
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await Conversation.load(github.repo(owner, repo).pull_request(pr_number))
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/conversation/comments")
@@ -492,9 +457,12 @@ async def api_post_review_conversation_comment(
     comment: ConversationCommentCreate,
     session: dict[str, Any] = SESSION_DEP,
 ) -> ConversationComment:
-    body = _required_body(comment.body)
-    async with PullRequestConversation.open(session["sub"], owner, repo, pr_number) as pull:
-        return await pull.comment(body)
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = comment.text
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await ConversationComment.post(
+            github.repo(owner, repo).pull_request(pr_number), body
+        )
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/threads/{comment_id}/replies")
@@ -507,9 +475,12 @@ async def api_reply_to_review_thread(
     comment: ConversationCommentCreate,
     session: dict[str, Any] = SESSION_DEP,
 ) -> ThreadComment:
-    body = _required_body(comment.body)
-    async with PullRequestConversation.open(session["sub"], owner, repo, pr_number) as pull:
-        return await pull.reply(comment_id, body)
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = comment.text
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await ThreadComment.reply(
+            github.repo(owner, repo).pull_request(pr_number), comment_id, body
+        )
 
 
 @router.put(
@@ -524,5 +495,10 @@ async def api_set_review_thread_resolution(
     resolution: ThreadResolution,
     session: dict[str, Any] = SESSION_DEP,
 ) -> None:
-    async with PullRequestConversation.open(session["sub"], owner, repo, pr_number) as pull:
-        await pull.resolve(thread_node_id, resolution.resolved)
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    async with GitHubClient.as_user(session["sub"]) as github:
+        await ReviewThread.set_resolved(
+            github.repo(owner, repo).pull_request(pr_number),
+            thread_node_id,
+            resolution.resolved,
+        )

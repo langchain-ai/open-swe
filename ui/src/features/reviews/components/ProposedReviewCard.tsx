@@ -1,3 +1,7 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Card } from "@langchain/macaw-components/Card"
+import { Text } from "@langchain/macaw-components/Text"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMutation } from "@tanstack/react-query"
 
 import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
@@ -6,17 +10,7 @@ import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
 import { useRefreshPullRequest } from "@/features/reviews/page/queries"
 import { plural } from "@/features/reviews/page/text"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
-import { cn } from "@/lib/utils"
 
 const EVENTS: ReadonlyArray<ReviewEvent> = [
   "COMMENT",
@@ -73,19 +67,20 @@ export function ProposedReviewCard({
   const event: ReviewEvent = isAuthor ? "COMMENT" : draft.event
   const needsBody = event !== "APPROVE" && pendingCount === 0
   return (
-    <Card size="sm" className="w-full shrink-0" data-testid="proposed-review">
-      <CardHeader>
-        <CardTitle>
-          {outcome?.state === "posted"
-            ? `Review submitted: ${EVENT_LABEL[event]}`
-            : outcome?.state === "discarded"
-              ? "Review discarded"
-              : "Draft review"}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
+    <Card
+      className="flex w-full shrink-0 flex-col gap-space-3 p-space-3 text-xs"
+      data-testid="proposed-review"
+    >
+      <Text variant="sm" weight="medium">
+        {outcome?.state === "posted"
+          ? `Review submitted: ${EVENT_LABEL[event]}`
+          : outcome?.state === "discarded"
+            ? "Review discarded"
+            : "Draft review"}
+      </Text>
+      <div className="flex flex-col gap-space-2">
         {!outcome && pendingCount > 0 && (
-          <p className="text-muted-foreground">
+          <p className="text-secondary">
             Includes your {plural(pendingCount, "pending comment")}.
           </p>
         )}
@@ -93,20 +88,20 @@ export function ProposedReviewCard({
           <div
             role="radiogroup"
             aria-label="Review verdict"
-            className="flex gap-1"
+            className="flex gap-space-1"
           >
             {events.map((value) => (
               <Button
                 key={value}
-                size="sm"
+                size="xs"
                 role="radio"
                 aria-checked={event === value}
-                variant={event === value ? "secondary" : "ghost"}
-                className={cn(
-                  event === value &&
-                    value === "REQUEST_CHANGES" &&
-                    "text-destructive"
-                )}
+                color={
+                  event === value && value === "REQUEST_CHANGES"
+                    ? "error"
+                    : "secondary"
+                }
+                variant={event === value ? "outlined" : "plain"}
                 disabled={submit.isPending}
                 onClick={() => drafts.edit(id, { event: value })}
               >
@@ -117,53 +112,56 @@ export function ProposedReviewCard({
         )}
         {outcome ? (
           body && (
-            <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+            <p className="line-clamp-3 whitespace-pre-wrap text-secondary">
               {body}
             </p>
           )
         ) : (
           <Textarea
+            size="md"
             aria-label="Review body"
             value={body}
             placeholder={needsBody ? "Required" : "Optional"}
-            onChange={(e) => drafts.edit(id, { body: e.target.value })}
+            onChange={(next) => drafts.edit(id, { body: next })}
             rows={4}
             disabled={submit.isPending}
           />
         )}
-      </CardContent>
-      <CardFooter className="justify-end gap-2">
-        {outcome?.state === "posted" ? (
+      </div>
+      {outcome?.state === "posted" ? (
+        <div className="flex justify-end">
           <Button
-            size="sm"
-            variant="outline"
-            render={
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            as={
               <a href={outcome.url} target="_blank" rel="noopener noreferrer" />
             }
           >
             View on GitHub
           </Button>
-        ) : outcome ? null : (
-          <>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={submit.isPending}
-              onClick={() => drafts.settle(id, { state: "discarded" })}
-            >
-              Discard
-            </Button>
-            <Button
-              size="sm"
-              variant={event === "REQUEST_CHANGES" ? "destructive" : "default"}
-              disabled={submit.isPending || (needsBody && !body.trim())}
-              onClick={() => submit.mutate()}
-            >
-              {submit.isPending ? "Submitting…" : "Submit as you"}
-            </Button>
-          </>
-        )}
-      </CardFooter>
+        </div>
+      ) : outcome ? null : (
+        <div className="flex justify-end gap-space-2">
+          <Button
+            size="xs"
+            color="secondary"
+            variant="plain"
+            disabled={submit.isPending}
+            onClick={() => drafts.settle(id, { state: "discarded" })}
+          >
+            Discard
+          </Button>
+          <Button
+            size="xs"
+            color={event === "REQUEST_CHANGES" ? "error" : "primary"}
+            disabled={submit.isPending || (needsBody && !body.trim())}
+            onClick={() => submit.mutate()}
+          >
+            {submit.isPending ? "Submitting…" : "Submit as you"}
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }

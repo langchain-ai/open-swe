@@ -1,14 +1,23 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import {
+  TabGroup,
+  TabLabel,
+  TabList,
+  TabPanel,
+  TabPanels,
+} from "@langchain/macaw-components/Tabs"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"
-import { ArrowSquareOutIcon, XIcon } from "@phosphor-icons/react"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { AgentMark } from "./AgentMark"
 import { Discussion } from "./Discussion"
@@ -16,10 +25,12 @@ import { openFindingCounts } from "./findings"
 import {
   reviewQueries,
   useOpenConversations,
+  useReviewStatus,
   type PullRequestRef,
 } from "./queries"
-import { useReviewPage } from "./store"
-import { plural } from "./text"
+import { useReviewPage, type RailTab } from "./store"
+
+const TABS: ReadonlyArray<RailTab> = ["chat", "discussion"]
 
 /** The right column: the agent you can talk to about this PR, and the people who already did. */
 export function Rail({
@@ -35,72 +46,72 @@ export function Rail({
   const open = useOpenConversations(pr)?.threads.length ?? 0
 
   return (
-    <Tabs
-      value={tab}
-      onValueChange={(value) => {
-        if (value === "chat" || value === "discussion") setRailTab(value)
-      }}
-      render={<aside />}
+    <TabGroup
+      as="aside"
+      selectedIndex={TABS.indexOf(tab)}
+      onChange={(index: number) => setRailTab(TABS[index] ?? "chat")}
       data-review-rail
       aria-label="Chat and discussion"
-      className="h-full min-h-0 gap-0 bg-background"
+      className="flex h-full min-h-0 flex-col bg-surface-level-1"
     >
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
-        <TabsList variant="line">
-          <TabsTrigger value="chat">
-            <AgentMark />
-            Chat
-          </TabsTrigger>
-          <TabsTrigger value="discussion">
-            Discussion
-            {open > 0 && (
-              <span
-                title={plural(open, "open conversation")}
-                className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums"
-              >
-                {open}
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
+      <div className="flex h-11 shrink-0 items-center gap-space-2 border-b border-default px-space-3">
+        <TabList className="border-0">
+          <TabLabel label="Chat" icon={AgentMark} />
+          <TabLabel
+            label="Discussion"
+            badgeProps={
+              open > 0
+                ? { children: String(open), color: "secondary" }
+                : undefined
+            }
+          />
+        </TabList>
         <span className="flex-1" />
         {tab === "chat" && chat?.thread_id && (
-          <Link
-            to="/agents/$threadId"
-            params={{ threadId: chat.thread_id }}
-            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          <Button
+            size="xs"
+            color="secondary"
+            variant="plain"
+            rightDecorator={ArrowSquareOutIcon}
             title="Open this conversation as a full thread"
+            as={
+              <Link
+                to="/agents/$threadId"
+                params={{ threadId: chat.thread_id }}
+              />
+            }
           >
             Full thread
-            <ArrowSquareOutIcon className="size-3" />
-          </Link>
+          </Button>
         )}
         {onClose && (
-          <button
-            type="button"
-            aria-label="Close"
+          <IconButton
+            icon={XIcon}
+            label="Close"
+            size="sm"
+            color="secondary"
+            variant="plain"
             onClick={onClose}
-            className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <XIcon className="size-3.5" />
-          </button>
+          />
         )}
       </div>
       {/* Both stay mounted: the chat registers drafted comments the diff shows, and keeps its stream. */}
-      <TabsContent value="chat" keepMounted className="min-h-0">
-        <ReviewChatPanel pr={pr} />
-      </TabsContent>
-      <TabsContent value="discussion" keepMounted className="min-h-0">
-        <Discussion pr={pr} />
-      </TabsContent>
-    </Tabs>
+      <TabPanels className="flex min-h-0 flex-1 flex-col">
+        <TabPanel unmount={false} className="min-h-0 flex-1">
+          <ReviewChatPanel pr={pr} />
+        </TabPanel>
+        <TabPanel unmount={false} className="min-h-0 flex-1">
+          <Discussion pr={pr} />
+        </TabPanel>
+      </TabPanels>
+    </TabGroup>
   )
 }
 
 /** Ways into an empty chat, picked from where this PR stands. They fill the composer; nothing sends unseen. */
 function ChatStarters({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr)).data
-  const status = useQuery(reviewQueries.status(pr)).data
+  const status = useReviewStatus(pr).data
   const open = useOpenConversations(pr)?.threads.length ?? 0
   const askInChat = useReviewPage((state) => state.askInChat)
   const askShortcut = useShortcutLabel("mod+l")
@@ -121,11 +132,11 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
   ].filter((text): text is string => text !== null)
   return (
     <div className="w-full max-w-sm px-4">
-      <p className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
+      <p className="flex items-center gap-1.5 text-[13px] font-medium text-primary">
         <AgentMark />
         Ask about this pull request
       </p>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <p className="mt-1 text-xs text-secondary">
         Or select code in the diff and press {askShortcut} to ask about those
         lines.
       </p>
@@ -135,7 +146,7 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
             <button
               type="button"
               onClick={() => askInChat(text)}
-              className="w-full rounded-lg border border-border px-3 py-2 text-left text-xs text-foreground/90 transition-colors hover:border-ring/40 hover:bg-accent"
+              className="w-full rounded-lg border border-default px-3 py-2 text-left text-xs text-primary transition-colors hover:border-strong hover:bg-surface-level-1-hover"
             >
               {text}
             </button>
@@ -182,7 +193,7 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
     )
   if (meta.isError || !meta.data.available)
     return (
-      <p className="p-4 text-xs text-muted-foreground">
+      <p className="p-4 text-xs text-secondary">
         Chat is unavailable right now. Reload the page to try again.
       </p>
     )

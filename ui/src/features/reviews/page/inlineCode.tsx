@@ -6,7 +6,7 @@ export function InlineCode({ text }: { text: string }): ReactNode {
     part.length >= 2 && part.startsWith("`") && part.endsWith("`") ? (
       <code
         key={i}
-        className="rounded-[4px] bg-muted px-1 py-px font-mono text-[0.88em]"
+        className="rounded-xs bg-surface-level-3 px-space-1 py-px font-mono text-[0.88em]"
       >
         {part.slice(1, -1)}
       </code>

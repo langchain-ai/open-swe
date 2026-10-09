@@ -1,12 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
-import { CircleNotchIcon, ListNumbersIcon } from "@phosphor-icons/react"
+import { CircleNotchIcon } from "@phosphor-icons/react/dist/ssr/CircleNotch"
+import { ListNumbersIcon } from "@phosphor-icons/react/dist/ssr/ListNumbers"
 import { toast } from "sonner"
 
 import { api, type ReviewDetail, type ScoutProgress } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/macaw-components/Button"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { plural } from "./text"
@@ -58,13 +59,13 @@ export function WalkthroughCallout({
   }, [failure, pr, detail.head_sha, detail.walkthrough_scout_thread_id])
 
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3">
-      <ListNumbersIcon className="mt-0.5 size-4 shrink-0 text-primary" />
+    <div className="flex items-start gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3">
+      <ListNumbersIcon className="mt-0.5 size-4 shrink-0 text-brand-primary" />
       <div className="min-w-0 flex-1 text-xs">
-        <p className="text-[13px] font-medium text-foreground">
+        <p className="text-[13px] font-medium text-primary">
           {running ? "Building the walkthrough…" : "Read this PR step by step"}
         </p>
-        <p className="mt-0.5 text-muted-foreground">
+        <p className="mt-0.5 text-secondary">
           {running
             ? "Open SWE is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "Open SWE orders the changes into narrated steps and moves mechanical edits to the end."}
@@ -73,7 +74,7 @@ export function WalkthroughCallout({
           <ScoutProgressPreview progress={detail.walkthrough_progress} />
         )}
         {failureSummary && (
-          <p className="mt-1.5 break-words text-destructive">
+          <p className="mt-1.5 break-words text-error-secondary">
             Last attempt failed: {failureSummary}
           </p>
         )}
@@ -81,7 +82,7 @@ export function WalkthroughCallout({
           <Link
             to="/agents/$threadId"
             params={{ threadId: detail.walkthrough_scout_thread_id }}
-            className="mt-1.5 inline-block text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            className="mt-1.5 inline-block text-secondary underline-offset-2 hover:text-primary hover:underline"
           >
             Open thread
           </Link>
@@ -89,15 +90,12 @@ export function WalkthroughCallout({
       </div>
       <Button
         size="sm"
-        variant="outline"
+        color="secondary"
+        variant="outlined"
+        leftDecorator={ListNumbersIcon}
+        loading={running}
         onClick={() => scout.mutate()}
-        disabled={running}
       >
-        {running ? (
-          <CircleNotchIcon className="animate-spin" />
-        ) : (
-          <ListNumbersIcon />
-        )}
         {running ? "Building…" : "Build walkthrough"}
       </Button>
     </div>
@@ -107,7 +105,7 @@ export function WalkthroughCallout({
 function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   const { recent } = progress
   return (
-    <div className="mt-2 text-muted-foreground">
+    <div className="mt-2 text-secondary">
       <p>{plural(progress.steps, "step")} committed</p>
       {recent.length > 0 && (
         <ol className="mt-1 space-y-0.5 font-mono text-[11px]">
@@ -116,10 +114,7 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
             return (
               <li
                 key={index}
-                className={cn(
-                  "flex min-w-0 gap-2",
-                  current && "text-foreground"
-                )}
+                className={cn("flex min-w-0 gap-2", current && "text-primary")}
               >
                 <span className="shrink-0">
                   {current ? (

@@ -1,17 +1,18 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import {
-  ArrowClockwiseIcon,
-  CaretRightIcon,
-  ChatCircleTextIcon,
-  CheckCircleIcon,
-  CircleDashedIcon,
-  GitMergeIcon,
-  WarningCircleIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCircleText"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { CircleDashedIcon } from "@phosphor-icons/react/dist/ssr/CircleDashed"
+import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
+import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 
 import type {
   OpenPullRequest,
@@ -21,18 +22,18 @@ import type {
 } from "@/lib/api"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { cn, formatRelativeTime } from "@/lib/utils"
-import type { ConversationReview } from "@/features/reviews/lib/conversationApi"
-import { displayName, sameLogin } from "@/features/reviews/lib/logins"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
+import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
 import { MergePullRequest } from "@/features/reviews/components/MergePullRequest"
 import { PullRequestThreadAction } from "@/features/reviews/components/PullRequestThreadAction"
 import { RequestHumanReview } from "@/features/reviews/components/RequestHumanReview"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
+import {
+  ReviewerList,
+  reviewerRows,
+} from "@/features/reviews/components/ReviewerList"
 import { UpdatePullRequestBranch } from "@/features/reviews/components/UpdatePullRequestBranch"
 import {
   canAttemptMerge,
@@ -54,11 +55,11 @@ import {
   rankFindings,
 } from "./findings"
 import { InlineCode } from "./inlineCode"
-import { ProfileLink, ReviewStateMark, reviewStateWords } from "./notes/Byline"
 import {
   reviewQueries,
   useOpenConversations,
   useRefreshPullRequest,
+  useReviewStatus,
   type PullRequestRef,
 } from "./queries"
 import {
@@ -71,19 +72,19 @@ import { useReviewPage } from "./store"
 import { plural } from "./text"
 
 const toneColor: Record<StandingTone, string> = {
-  ready: "var(--success)",
-  blocked: "var(--destructive)",
-  waiting: "var(--warning)",
-  merged: "var(--merged)",
-  closed: "var(--muted-foreground)",
-  unknown: "var(--border)",
+  ready: "var(--icon-success)",
+  blocked: "var(--icon-error)",
+  waiting: "var(--icon-warning)",
+  merged: "var(--text-purple)",
+  closed: "var(--icon-tertiary)",
+  unknown: "var(--border-default)",
 }
 
 /** The PR's standing sentence and what feeds it; the card and the header read the same one. */
 export function usePullRequestStanding(pr: PullRequestRef) {
   const session = useSession()
   const detail = useQuery(reviewQueries.detail(pr)).data
-  const statusQuery = useQuery(reviewQueries.status(pr))
+  const statusQuery = useReviewStatus(pr)
   const open = useOpenConversations(pr)
   if (!detail) return null
   // Undefined while loading; null once GitHub couldn't say.
@@ -152,13 +153,13 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
     <section
       ref={ref}
       aria-label="Pull request status"
-      className="overflow-hidden rounded-xl border border-border bg-card"
+      className="overflow-hidden rounded-xl border border-default bg-surface-level-1"
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-4">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <StandingDot tone={standing.tone} className="mt-[7px]" />
           <div className="min-w-0">
-            <p className="text-[17px] leading-6 font-semibold tracking-[-0.015em] text-foreground">
+            <p className="text-[17px] leading-6 font-semibold tracking-[-0.015em] text-primary">
               {standing.headline}
             </p>
             {standing.details.length > 0 && (
@@ -172,7 +173,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
                         ? showFindings
                         : showOpenConversations
                     }
-                    className="text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground hover:decoration-foreground"
+                    className={subtleLink}
                   >
                     {fact.text}
                   </button>
@@ -183,13 +184,13 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
         </div>
         {/* Every other next step is a button in its row below. */}
         {standing.next?.kind === "review" && (
-          <Button size="lg" onClick={() => openReview()}>
+          <Button size="md" onClick={() => openReview()}>
             Review changes
           </Button>
         )}
       </div>
       {open && status && (
-        <div className="divide-y divide-border border-t border-border">
+        <div className="divide-y border-t border-default">
           <ChecksRow checks={detail.checks} status={status} login={login} />
           <ReviewsRow pr={pr} detail={detail} status={status} login={login} />
           <BranchRow pr={pr} detail={detail} status={status} login={login} />
@@ -200,13 +201,15 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
         </div>
       )}
       {(!open || !status) && (
-        <div className="divide-y divide-border border-t border-border">
+        <div className="divide-y border-t border-default">
           {open &&
             status === undefined &&
             ["Checks", "Reviews"].map((label) => (
               <Row
                 key={label}
-                icon={<span className="size-3.5 rounded-full bg-muted" />}
+                icon={
+                  <span className="size-3.5 rounded-full bg-surface-level-3" />
+                }
                 label={label}
               >
                 <Skeleton className="h-3 w-40" />
@@ -278,16 +281,16 @@ function Row({
       <span className="flex size-4 shrink-0 items-center justify-center">
         {icon}
       </span>
-      <span className="w-[5.5rem] shrink-0 text-xs font-medium text-foreground">
+      <span className="w-[5.5rem] shrink-0 text-xs font-medium text-primary">
         {label}
       </span>
-      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate text-xs text-secondary">
         {children}
       </span>
       {expandable && (
         <CaretRightIcon
           className={cn(
-            "size-3 shrink-0 text-muted-foreground transition-transform",
+            "size-3 shrink-0 text-secondary transition-transform",
             expanded && "rotate-90"
           )}
         />
@@ -316,16 +319,20 @@ function Row({
 }
 
 const passIcon = (
-  <CheckCircleIcon weight="fill" className="size-4 text-success" />
+  <CheckCircleIcon size={16} weight="fill" className="text-icon-success" />
 )
 const failIcon = (
-  <XCircleIcon weight="fill" className="size-4 text-destructive" />
+  <XCircleIcon size={16} weight="fill" className="text-icon-error" />
 )
 const warnIcon = (
-  <WarningCircleIcon weight="fill" className="size-4 text-warning" />
+  <WarningCircleIcon size={16} weight="fill" className="text-icon-warning" />
 )
 const pendingIcon = (
-  <CircleDashedIcon className="size-4 animate-spin text-warning [animation-duration:3s]" />
+  <CircleDashedIcon
+    size={16}
+    weight="regular"
+    className="animate-spin text-icon-warning [animation-duration:3s]"
+  />
 )
 
 function checkState(
@@ -418,18 +425,25 @@ function ChecksRow({
             >
               {state === "fail" ? (
                 <XCircleIcon
+                  size={14}
                   weight="fill"
-                  className="size-3.5 text-destructive"
+                  className="text-icon-error"
                 />
               ) : state === "pending" ? (
-                <CircleDashedIcon className="size-3.5 text-warning" />
+                <CircleDashedIcon
+                  size={14}
+                  weight="regular"
+                  className="text-icon-warning"
+                />
               ) : (
                 <CheckCircleIcon
+                  size={14}
                   weight="fill"
-                  className={cn(
-                    "size-3.5",
-                    state === "skip" ? "text-muted-foreground" : "text-success"
-                  )}
+                  className={
+                    state === "skip"
+                      ? "text-icon-tertiary"
+                      : "text-icon-success"
+                  }
                 />
               )}
               {check.url ? (
@@ -437,7 +451,7 @@ function ChecksRow({
                   href={check.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="min-w-0 truncate text-foreground/90 hover:underline"
+                  className="min-w-0 truncate text-primary hover:underline"
                 >
                   {check.name}
                 </a>
@@ -452,7 +466,7 @@ function ChecksRow({
                       `Why is the \`${check.name}\` check failing on this pull request?`
                     )
                   }
-                  className="ml-auto text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"
+                  className="ml-auto text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100"
                 >
                   Ask why
                 </button>
@@ -463,10 +477,6 @@ function ChecksRow({
       )}
     </div>
   )
-}
-
-function decisive(state: ConversationReview["state"]): boolean {
-  return state === "APPROVED" || state === "CHANGES_REQUESTED"
 }
 
 function ReviewsRow({
@@ -484,21 +494,12 @@ function ReviewsRow({
     (state) => state.showOpenConversations
   )
   const [expanded, setExpanded] = useState(false)
-  const items = useQuery(reviewQueries.conversation(pr)).data?.items
   const open = useOpenConversations(pr)
-  // Each reviewer's standing review, as GitHub's sidebar lists them: a later
-  // comment never replaces an approval or a change request, and the author
-  // replying in threads is not reviewing.
-  const verdicts = new Map<string, ConversationReview>()
-  for (const item of items ?? []) {
-    if (item.kind !== "review" || !item.author) continue
-    if (sameLogin(item.author.login, detail.pr.author?.login)) continue
-    const who = displayName(item.author)
-    const standing = verdicts.get(who)
-    if (item.state === "COMMENTED" && standing && decisive(standing.state))
-      continue
-    verdicts.set(who, item)
-  }
+  const reviewers = reviewerRows(
+    status.reviewers ?? [],
+    detail.pr.requested_reviewers,
+    detail.pr.author?.login
+  )
   const decision =
     status.reviewDecision === "approved"
       ? "Approved"
@@ -513,9 +514,7 @@ function ReviewsRow({
   return (
     <div>
       <Row
-        expandable={
-          verdicts.size > 0 || detail.pr.requested_reviewers.length > 0
-        }
+        expandable={reviewers.length > 0}
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
         icon={
@@ -534,7 +533,7 @@ function ReviewsRow({
               <button
                 type="button"
                 onClick={showOpenConversations}
-                className="text-xs text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground"
+                className={cn("text-xs", subtleLink)}
               >
                 {unresolved} unresolved
               </button>
@@ -554,30 +553,7 @@ function ReviewsRow({
         {decision}
       </Row>
       {expanded && (
-        <ul className="flex flex-col gap-1 pr-4 pb-3 pl-11 text-xs">
-          {[...verdicts.values()].map((review) => (
-            <li key={review.id} className="flex items-center gap-2">
-              <ReviewStateMark state={review.state} />
-              <ProfileLink author={review.author} className="font-medium" />
-              <a
-                href={review.html_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-muted-foreground hover:text-foreground hover:underline"
-              >
-                {reviewStateWords[review.state]}{" "}
-                {formatRelativeTime(new Date(review.created_at).getTime())}
-              </a>
-            </li>
-          ))}
-          {detail.pr.requested_reviewers.map((reviewer) => (
-            <li key={reviewer.login} className="flex items-center gap-2">
-              <CircleDashedIcon className="size-3.5 text-warning" />
-              <ProfileLink author={reviewer} className="font-medium" />
-              <span className="text-muted-foreground">review requested</span>
-            </li>
-          ))}
-        </ul>
+        <ReviewerList rows={reviewers} className="pr-4 pb-3 pl-11" />
       )}
     </div>
   )
@@ -650,7 +626,9 @@ function MergeRow({
   const [merged, setMerged] = useState(false)
   return (
     <Row
-      icon={<GitMergeIcon weight="bold" className="size-4 text-success" />}
+      icon={
+        <GitMergeIcon size={16} weight="bold" className="text-icon-success" />
+      }
       label="Merge"
       action={
         <MergePullRequest
@@ -738,11 +716,7 @@ function OpenSweRow({
     <div>
       <Row
         icon={
-          running ? (
-            <Spinner className="size-4 text-primary" />
-          ) : (
-            <AgentMark className="size-4" />
-          )
+          running ? <Spinner size="xs" /> : <AgentMark className="size-4" />
         }
         label="Open SWE"
         expandable={canExpand}
@@ -754,7 +728,7 @@ function OpenSweRow({
               <Link
                 to="/agents/$threadId"
                 params={{ threadId: detail.thread_id }}
-                className="text-xs text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground"
+                className={cn("text-xs", subtleLink)}
               >
                 {running ? "Watch it work" : "See how it reviewed"}
               </Link>
@@ -762,12 +736,12 @@ function OpenSweRow({
             {prOpen && (
               <Button
                 size="sm"
-                variant="ghost"
+                color="secondary"
+                variant="plain"
+                leftDecorator={ArrowClockwiseIcon}
                 disabled={running}
                 onClick={() => reReview.mutate()}
-                className="text-muted-foreground"
               >
-                <ArrowClockwiseIcon />
                 {detail.status === "none" ? "Review" : "Re-review"}
               </Button>
             )}
@@ -835,13 +809,13 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 aria-expanded={open}
                 onClick={() => setOpenId(open ? null : finding.id)}
                 className={cn(
-                  "min-w-[16ch] flex-1 text-left leading-5 text-foreground hover:underline",
-                  settled && "line-through decoration-muted-foreground/60"
+                  "min-w-[16ch] flex-1 text-left leading-5 text-primary hover:underline",
+                  settled && "line-through decoration-[var(--border-strong)]"
                 )}
               >
                 <InlineCode text={finding.title} />
               </button>
-              <span className="ml-auto flex shrink-0 items-baseline gap-1 text-[11px] text-muted-foreground">
+              <span className="ml-auto flex shrink-0 items-baseline gap-1 text-[11px] text-secondary">
                 <button
                   type="button"
                   disabled={!isAnchored(finding)}
@@ -849,7 +823,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                     if (isAnchored(finding))
                       showFinding(finding.id, findingTarget(finding))
                   }}
-                  className="rounded px-1 py-0.5 font-mono hover:bg-accent hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  className="rounded px-1 py-0.5 font-mono hover:bg-surface-level-1-hover hover:text-primary disabled:hover:bg-transparent disabled:hover:text-secondary"
                   title={finding.file}
                 >
                   {findingLocation(finding)}
@@ -857,7 +831,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 <button
                   type="button"
                   aria-label={`Ask Open SWE about: ${finding.title}`}
-                  className="rounded px-1 py-0.5 hover:bg-accent hover:text-foreground"
+                  className="rounded px-1 py-0.5 hover:bg-surface-level-1-hover hover:text-primary"
                   onClick={() => askInChat(askAboutFinding(finding))}
                 >
                   Ask
@@ -866,7 +840,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                   <button
                     type="button"
                     aria-label={`Ask Open SWE to fix: ${finding.title}`}
-                    className="rounded px-1 py-0.5 hover:bg-accent hover:text-foreground"
+                    className="rounded px-1 py-0.5 hover:bg-surface-level-1-hover hover:text-primary"
                     onClick={() => askInChat(fixFinding(finding))}
                   >
                     Fix it
@@ -875,7 +849,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
               </span>
             </div>
             {open && (
-              <div className="markdown-body mt-1.5 max-w-prose text-xs text-muted-foreground">
+              <div className="markdown-body mt-1.5 max-w-prose text-xs text-secondary">
                 <Markdown content={finding.description} />
                 {finding.resolution_note && (
                   <p className="mt-1 flex items-center gap-1">

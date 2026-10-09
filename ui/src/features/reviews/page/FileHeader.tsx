@@ -1,10 +1,10 @@
-import {
-  ArrowSquareOutIcon,
-  CaretDownIcon,
-  ChatCircleIcon,
-  CheckIcon,
-  CopyIcon,
-} from "@phosphor-icons/react"
+import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import { cn } from "@/lib/utils"
 import { copyText } from "@/features/reviews/lib/copyText"
@@ -28,8 +28,7 @@ const statusLabel = {
   modified: null,
 } as const
 
-const iconButton =
-  "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+const quiet = { size: "xs", color: "secondary", variant: "plain" } as const
 // Shown while the header is hovered or holds focus, so keyboards reach them too.
 const onHover = "hidden group-focus-within/header:flex group-hover/header:flex"
 
@@ -79,29 +78,24 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       }}
       style={{ height: FILE_HEADER_HEIGHT }}
       className={cn(
-        "group/header flex items-center gap-2 border-b border-border bg-[color-mix(in_oklab,var(--background)_94%,var(--foreground))] px-2.5 font-sans text-xs",
+        "group/header flex items-center gap-2 border-b border-default bg-surface-level-2 px-2.5 font-sans text-xs",
         folded && "border-b-transparent"
       )}
     >
-      <button
-        type="button"
-        aria-label={folded ? `Expand ${path}` : `Collapse ${path}`}
+      <IconButton
+        icon={CaretDownIcon}
+        label={folded ? `Expand ${path}` : `Collapse ${path}`}
         aria-expanded={!folded}
         disabled={!renderable}
         onClick={() => toggleCollapsed(path)}
-        className={cn(iconButton, "disabled:opacity-40")}
-      >
-        <CaretDownIcon
-          className={cn(
-            "size-3.5 transition-transform",
-            folded && "-rotate-90"
-          )}
-        />
-      </button>
+        tooltipProps={{ disabled: true }}
+        iconClassName={cn("transition-transform", folded && "-rotate-90")}
+        {...quiet}
+      />
       {entry.step && (
         <span
           title={`Step ${entry.step.index}: ${entry.step.title}`}
-          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/12 text-[10px] font-semibold text-primary tabular-nums"
+          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-[10px] font-semibold text-brand-primary tabular-nums"
         >
           {entry.step.index}
         </span>
@@ -110,42 +104,40 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         className="flex min-w-0 items-baseline overflow-hidden font-mono text-[12px]"
         title={path}
       >
-        <span className="truncate text-left text-muted-foreground [direction:rtl] max-sm:hidden">
+        <span className="truncate text-left text-secondary [direction:rtl] max-sm:hidden">
           <bdi>{dir}</bdi>
         </span>
         <span
           className={cn(
-            "min-w-[6ch] shrink-[0.01] truncate font-medium text-foreground",
-            viewed && "text-muted-foreground"
+            "min-w-[6ch] shrink-[0.01] truncate font-medium text-primary",
+            viewed && "text-secondary"
           )}
         >
           {name}
         </span>
       </span>
-      <button
-        type="button"
-        aria-label={`Copy ${path}`}
+      <IconButton
+        icon={CopyIcon}
+        label={`Copy ${path}`}
         onClick={() => copyText(path, "Copied the path")}
-        className={cn(iconButton, onHover, "size-5")}
-      >
-        <CopyIcon className="size-3" />
-      </button>
+        className={onHover}
+        {...quiet}
+        size="xxs"
+      />
       {status && <Tag className="max-sm:hidden">{status}</Tag>}
       <span className="flex shrink-0 gap-1.5 font-mono text-[11px] tabular-nums">
         {entry.additions > 0 && (
-          <span className="text-success-foreground">+{entry.additions}</span>
+          <span className="text-success-secondary">+{entry.additions}</span>
         )}
         {entry.deletions > 0 && (
-          <span className="text-destructive-foreground">
-            −{entry.deletions}
-          </span>
+          <span className="text-error-secondary">−{entry.deletions}</span>
         )}
       </span>
       {worst && (
         <button
           type="button"
           onClick={() => showFinding(worst.id, findingTarget(worst))}
-          className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] hover:bg-accent"
+          className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] hover:bg-surface-level-1-hover"
           style={{ color: findingGroupColor[worst.group] }}
           title={`${plural(findings.length, "open finding")} from Open SWE; go to the worst`}
         >
@@ -157,7 +149,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         <button
           type="button"
           onClick={() => jumpTo(threadTarget(firstThread))}
-          className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] text-secondary hover:bg-surface-level-1-hover hover:text-primary"
           title={`${plural(threads.length, "open conversation")}; go to the first`}
         >
           <ChatCircleIcon className="size-3" />
@@ -165,32 +157,35 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         </button>
       )}
       {!renderable && (
-        <span className="truncate text-muted-foreground">
+        <span className="truncate text-secondary">
           Binary or too large to show
         </span>
       )}
       <span className="flex-1" />
-      <button
-        type="button"
+      <Button
+        size="xs"
+        color="secondary"
+        variant="plain"
         onClick={() => askInChat(`About \`${path}\` in this pull request: `)}
         aria-label={`Ask Open SWE about ${path}`}
-        className={cn(
-          onHover,
-          "shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        )}
+        className={onHover}
       >
         <AgentMark className="size-3" />
         Ask
-      </button>
-      <a
-        href={githubUrls.file(pr, file.headSha, path)}
-        target="_blank"
-        rel="noreferrer"
-        aria-label={`View ${path} on GitHub`}
-        className={cn(iconButton, onHover)}
+      </Button>
+      <IconButton
+        asChild
+        icon={ArrowSquareOutIcon}
+        label={`View ${path} on GitHub`}
+        className={onHover}
+        {...quiet}
       >
-        <ArrowSquareOutIcon className="size-3.5" />
-      </a>
+        <a
+          href={githubUrls.file(pr, file.headSha, path)}
+          target="_blank"
+          rel="noreferrer"
+        />
+      </IconButton>
       <button
         type="button"
         role="checkbox"
@@ -200,16 +195,16 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         className={cn(
           "flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors",
           viewed
-            ? "border-transparent bg-primary/12 text-primary"
-            : "border-border text-muted-foreground hover:text-foreground"
+            ? "border-transparent bg-brand-subtle text-brand-primary"
+            : "border-default text-secondary hover:text-primary"
         )}
       >
         <span
           className={cn(
-            "flex size-3 items-center justify-center rounded-[3px] border",
+            "flex size-3 items-center justify-center rounded-xs border",
             viewed
-              ? "border-primary bg-primary text-primary-foreground"
-              : "border-muted-foreground/60"
+              ? "border-brand bg-brand text-brand-on-fill"
+              : "border-strong"
           )}
         >
           {viewed && <CheckIcon weight="bold" className="size-2.5" />}

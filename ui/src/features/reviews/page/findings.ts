@@ -11,16 +11,16 @@ export const findingGroupLabel: Record<FindingGroup, string> = {
 
 /** The severity rule colour, as a CSS colour so margins and dots share it. */
 export const findingGroupColor: Record<FindingGroup, string> = {
-  bug: "var(--destructive)",
-  investigate: "var(--warning)",
-  informational: "var(--muted-foreground)",
+  bug: "var(--icon-error)",
+  investigate: "var(--icon-warning)",
+  informational: "var(--icon-tertiary)",
 }
 
 /** The same severities, at text contrast. */
 export const findingGroupTextColor: Record<FindingGroup, string> = {
-  bug: "var(--destructive-foreground)",
-  investigate: "var(--warning-foreground)",
-  informational: "var(--muted-foreground)",
+  bug: "var(--text-error-secondary)",
+  investigate: "var(--text-warning-secondary)",
+  informational: "var(--text-secondary)",
 }
 
 const groupRank: Record<FindingGroup, number> = {

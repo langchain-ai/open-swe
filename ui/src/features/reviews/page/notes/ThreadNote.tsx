@@ -1,17 +1,15 @@
 import { useState } from "react"
-import {
-  ArrowSquareOutIcon,
-  CaretRightIcon,
-  ChatCircleIcon,
-  CheckIcon,
-} from "@phosphor-icons/react"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 
 import type {
   ReviewThread,
   ThreadComment,
 } from "@/features/reviews/lib/conversationApi"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/macaw-components/Button"
 import { cn } from "@/lib/utils"
 import {
   isPlaced,
@@ -75,7 +73,8 @@ export function ResolveButton({
   return (
     <Button
       size="sm"
-      variant="outline"
+      color="secondary"
+      variant="outlined"
       disabled={resolve.isPending}
       onClick={() => {
         resolve.mutate(!thread.resolved)
@@ -124,9 +123,7 @@ export function ThreadSummary({
   const said = (
     <span className="min-w-0 flex-1 truncate">
       <span className="font-medium">{displayName(first.author)}</span>{" "}
-      <span className="text-muted-foreground">
-        {plainFirstLine(first.body)}
-      </span>
+      <span className="text-secondary">{plainFirstLine(first.body)}</span>
     </span>
   )
   const state = (
@@ -134,7 +131,7 @@ export function ThreadSummary({
       {thread.comments.length > 1 && (
         <span
           title={`${thread.comments.length} comments`}
-          className="flex shrink-0 items-center gap-0.5 text-muted-foreground tabular-nums"
+          className="flex shrink-0 items-center gap-0.5 text-secondary tabular-nums"
         >
           <ChatCircleIcon className="size-3" />
           {thread.comments.length}
@@ -143,7 +140,7 @@ export function ThreadSummary({
       {thread.resolved ? (
         <CheckIcon
           aria-label="Resolved"
-          className="size-3 shrink-0 text-muted-foreground"
+          className="size-3 shrink-0 text-secondary"
         />
       ) : (
         thread.outdated && <Tag>Outdated</Tag>
@@ -154,21 +151,21 @@ export function ThreadSummary({
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full min-w-0 flex-col gap-0.5 overflow-hidden rounded-lg border border-border bg-card px-2.5 py-1.5 text-left text-xs hover:bg-accent"
+      className="flex w-full min-w-0 flex-col gap-0.5 overflow-hidden rounded-lg border border-default bg-surface-level-1 px-2.5 py-1.5 text-left text-xs hover:bg-surface-level-1-hover"
     >
       <span className="flex w-full min-w-0 items-center gap-2">
-        <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />
+        <CaretRightIcon className="size-3 shrink-0 text-secondary" />
         <span className="flex shrink-0 -space-x-1">
           {thread.comments.slice(0, 3).map((comment) => (
             <Avatar
               key={comment.id}
               author={comment.author}
-              className="size-4 ring-2 ring-card"
+              className="size-4 ring-2 ring-[var(--bg-surface-level-1)]"
             />
           ))}
         </span>
         {location ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-secondary">
             {location}
           </span>
         ) : (
@@ -178,8 +175,8 @@ export function ThreadSummary({
       </span>
       {location && <span className="flex w-full min-w-0 pl-5">{said}</span>}
       {location && thread.comments.length > 1 && (
-        <span className="w-full truncate pl-5 text-muted-foreground">
-          <span className="font-medium text-foreground/80">
+        <span className="w-full truncate pl-5 text-secondary">
+          <span className="font-medium text-primary">
             {displayName(last.author)}
           </span>{" "}
           {plainFirstLine(last.body)}
@@ -222,15 +219,15 @@ function ThreadContext({ thread }: { thread: ReviewThread }) {
   const lines = thread.diff_hunk.split("\n").filter(Boolean).slice(-6)
   if (lines.length === 0) return null
   return (
-    <pre className="overflow-x-auto border-b border-border bg-muted/40 px-3 py-2 font-mono text-[11px] leading-[18px]">
+    <pre className="overflow-x-auto border-b border-default bg-surface-level-2 px-3 py-2 font-mono text-[11px] leading-[18px]">
       {lines.map((line, index) => (
         <div
           key={index}
           className={cn(
             "whitespace-pre",
-            line.startsWith("+") && "text-success-foreground",
-            line.startsWith("-") && "text-destructive-foreground",
-            line.startsWith("@@") && "text-muted-foreground"
+            line.startsWith("+") && "text-success-secondary",
+            line.startsWith("-") && "text-error-secondary",
+            line.startsWith("@@") && "text-secondary"
           )}
         >
           {line}
@@ -263,13 +260,13 @@ export function ThreadCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-lg border border-border bg-card text-xs shadow-xs",
+        "overflow-hidden rounded-lg border border-default bg-surface-level-1 text-xs shadow-sm",
         thread.resolved && "opacity-90"
       )}
     >
       {withContext && (
-        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 border-b border-default px-3 py-1.5">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-secondary">
             {withLine(thread.path, threadLine(thread))}
           </span>
           {thread.comments[0].html_url && (
@@ -278,7 +275,7 @@ export function ThreadCard({
               target="_blank"
               rel="noreferrer"
               aria-label="View this conversation on GitHub"
-              className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+              className="flex shrink-0 items-center gap-1 text-[11px] text-secondary hover:text-primary hover:underline"
             >
               GitHub
               <ArrowSquareOutIcon className="size-3" />
@@ -287,7 +284,7 @@ export function ThreadCard({
           {isPlaced(thread) ? (
             <button
               type="button"
-              className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+              className="shrink-0 text-[11px] text-secondary hover:text-primary hover:underline"
               onClick={() => jumpTo(threadTarget(thread))}
             >
               Show in diff
@@ -298,7 +295,7 @@ export function ThreadCard({
         </div>
       )}
       {withContext && <ThreadContext thread={thread} />}
-      <ol className="divide-y divide-border">
+      <ol className="divide-y">
         {thread.comments.map((comment) => (
           <li key={comment.id} className="px-3 py-2.5">
             <CommentRow
@@ -308,7 +305,7 @@ export function ThreadCard({
           </li>
         ))}
       </ol>
-      <div className="flex flex-col gap-2 border-t border-border bg-muted/40 px-3 py-2">
+      <div className="flex flex-col gap-2 border-t border-default bg-surface-level-2 px-3 py-2">
         <ReplyBox reply={reply} />
         <div className="flex items-center gap-1">
           <ResolveButton
@@ -318,7 +315,8 @@ export function ThreadCard({
           />
           <Button
             size="sm"
-            variant="ghost"
+            color="secondary"
+            variant="plain"
             onClick={() =>
               askInChat(
                 suggestion
@@ -332,7 +330,7 @@ export function ThreadCard({
           <button
             type="button"
             onClick={onCollapse}
-            className="ml-auto text-muted-foreground hover:text-foreground"
+            className="ml-auto text-secondary hover:text-primary"
           >
             Collapse
           </button>

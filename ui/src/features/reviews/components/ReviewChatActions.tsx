@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
-import { FileCodeIcon, XIcon } from "@phosphor-icons/react"
+import { FileCodeIcon } from "@phosphor-icons/react/dist/ssr/FileCode"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import type { Message } from "@/features/agents/lib/types"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
 import { chatDiffAction } from "@/features/reviews/lib/chatDiffActions"
@@ -119,20 +120,20 @@ export function ReviewExcerptChips() {
         <li
           key={`${excerpt.path}:${excerpt.lineLabel}`}
           title={excerpt.snippet}
-          className="flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted/60 py-0.5 pr-0.5 pl-2 text-[11px]"
+          className="flex max-w-full items-center gap-1.5 rounded-md border border-default bg-surface-level-2 py-0.5 pr-0.5 pl-2 text-[11px]"
         >
-          <FileCodeIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <FileCodeIcon className="size-3.5 shrink-0 text-secondary" />
           <span className="min-w-0 truncate font-mono">
             {excerpt.path.split("/").pop()}
           </span>
-          <span className="shrink-0 text-muted-foreground">
+          <span className="shrink-0 text-secondary">
             {excerptLines(excerpt.lineLabel)}
           </span>
           <button
             type="button"
             aria-label={`Remove ${excerpt.path} ${excerptLines(excerpt.lineLabel)}`}
             onClick={() => review?.removeExcerpt?.(index)}
-            className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex size-4 shrink-0 items-center justify-center rounded text-secondary hover:bg-surface-level-1-hover hover:text-primary"
           >
             <XIcon className="size-3" />
           </button>

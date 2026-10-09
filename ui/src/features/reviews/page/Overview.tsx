@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, formatRelativeTime } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
 import { PullRequestLabels } from "@/features/reviews/components/PullRequestLabels"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
@@ -61,9 +61,9 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       {detail.walkthrough?.human_input && (
         <section
           aria-label="Human input"
-          className="rounded-xl border border-dashed border-border px-4 py-3"
+          className="rounded-xl border border-dashed border-default px-4 py-3"
         >
-          <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-secondary">
             <AgentMark />
             What people asked for
           </p>
@@ -121,7 +121,7 @@ function Description({
   const clamped = overflows && !expanded
   return (
     <article aria-label="Description" className="group/description">
-      <header className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+      <header className="mb-2 flex items-center gap-2 text-xs text-secondary">
         {author?.avatar_url && (
           <img
             src={author.avatar_url}
@@ -130,12 +130,12 @@ function Description({
             loading="lazy"
           />
         )}
-        <ProfileLink author={author} className="font-medium text-foreground" />
+        <ProfileLink author={author} className="font-medium text-primary" />
         <a
           href={githubUrls.pullRequest(pr)}
           target="_blank"
           rel="noreferrer"
-          className="hover:text-foreground hover:underline"
+          className="hover:text-primary hover:underline"
         >
           opened this{" "}
           {createdAt ? formatRelativeTime(new Date(createdAt).getTime()) : ""}
@@ -157,7 +157,7 @@ function Description({
             enlargeImages
           />
         ) : (
-          <p className="text-muted-foreground italic">No description.</p>
+          <p className="text-secondary italic">No description.</p>
         )}
         {clamped && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-background to-transparent" />
@@ -167,7 +167,7 @@ function Description({
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-secondary hover:text-primary"
         >
           <CaretDownIcon
             className={cn(

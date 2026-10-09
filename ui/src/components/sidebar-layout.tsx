@@ -7,7 +7,8 @@ import {
   useState,
 } from "react"
 import { createPortal } from "react-dom"
-import { SidebarSimpleIcon } from "@phosphor-icons/react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr/SidebarSimple"
 
 import { cn } from "@/lib/utils"
 
@@ -132,18 +133,19 @@ export function SidebarFrame({
     // a page header marked draggable would swallow clicks on this floating
     // toggle if it came earlier. Portal it after all content to keep it last.
     return createPortal(
-      <button
-        type="button"
-        aria-label="Expand sidebar"
+      <IconButton
+        icon={SidebarSimpleIcon}
+        label="Expand sidebar"
+        color="secondary"
+        variant="plain"
+        size="sm"
         data-sidebar-expand=""
         onClick={toggle}
         className={cn(
-          "fixed top-2 left-2 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          "fixed top-2 left-2 z-30 size-7",
           isDesktop && "left-[90px]"
         )}
-      >
-        <SidebarSimpleIcon className="size-4" />
-      </button>,
+      />,
       document.body
     )
   }
@@ -155,7 +157,7 @@ export function SidebarFrame({
       className={cn(
         "relative flex h-svh shrink-0 flex-col",
         "max-md:fixed max-md:inset-0 max-md:z-40 max-md:!w-full",
-        "max-md:animate-in max-md:duration-200 max-md:ease-out max-md:fade-in-0 max-md:slide-in-from-left-4",
+        "max-md:duration-200 max-md:ease-out max-md:animate-in max-md:fade-in-0 max-md:slide-in-from-left-4",
         className
       )}
     >
@@ -217,9 +219,9 @@ function ResizeHandle({
       onPointerCancel={onPointerUp}
       className={cn(
         "absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
-        "after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-transparent after:transition-colors",
-        "hover:after:bg-border",
-        dragging && "after:bg-border"
+        "after:absolute after:inset-y-0 after:right-0 after:border-r after:border-transparent after:transition-colors",
+        "hover:after:border-default",
+        dragging && "after:border-default"
       )}
     />
   )
@@ -238,18 +240,19 @@ export function SidebarCollapseButton({
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   return (
-    <button
-      type="button"
-      aria-label="Collapse sidebar"
+    <IconButton
+      icon={SidebarSimpleIcon}
+      label="Collapse sidebar"
+      color="secondary"
+      variant="plain"
+      size="sm"
       data-sidebar-collapse=""
       onClick={onToggle}
       className={cn(
-        "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+        "shrink-0",
         isDesktop && "fixed top-2 left-[90px] z-30 size-7",
         className
       )}
-    >
-      <SidebarSimpleIcon className="size-4" />
-    </button>
+    />
   )
 }

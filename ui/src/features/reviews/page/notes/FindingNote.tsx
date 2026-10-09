@@ -1,11 +1,12 @@
-import { CaretRightIcon, CopyIcon } from "@phosphor-icons/react"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import type { ReviewFinding } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import { copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/macaw-components/Button"
 import { cn } from "@/lib/utils"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
 import {
@@ -53,7 +54,7 @@ export function FindingNote({
     <NoteFrame>
       <div
         className={cn(
-          "rounded-r-lg border-y border-r border-border bg-[color-mix(in_oklab,var(--card)_92%,var(--primary))] text-xs",
+          "rounded-r-lg border-y border-r border-default bg-brand-muted text-xs",
           settled && "opacity-60"
         )}
         style={{ borderLeft: `3px solid ${color}` }}
@@ -73,44 +74,43 @@ export function FindingNote({
           </span>
           <span
             className={cn(
-              "min-w-0 flex-1 leading-5 text-foreground",
+              "min-w-0 flex-1 leading-5 text-primary",
               settled && "line-through"
             )}
           >
             <InlineCode text={finding.title} />
           </span>
           {settled && (
-            <span className="shrink-0 text-muted-foreground capitalize">
+            <span className="shrink-0 text-secondary capitalize">
               {finding.status}
             </span>
           )}
           {thread && thread.comments.length > 1 && (
-            <span className="shrink-0 text-muted-foreground tabular-nums">
+            <span className="shrink-0 text-secondary tabular-nums">
               {plural(thread.comments.length - 1, "reply", "replies")}
             </span>
           )}
           <CaretRightIcon
             className={cn(
-              "mt-1 size-3 shrink-0 text-muted-foreground transition-transform",
+              "mt-1 size-3 shrink-0 text-secondary transition-transform",
               open && "rotate-90"
             )}
           />
         </button>
         {open && (
-          <div className="border-t border-border/70 px-3 pt-2 pb-2.5">
+          <div className="border-t border-subtle px-3 pt-2 pb-2.5">
             <div className="text-[13px] leading-[1.6]">
               <Markdown content={findingMarkdown(finding)} />
             </div>
             {finding.resolution_note && (
-              <p className="mt-2 text-muted-foreground">
-                {finding.resolution_note}
-              </p>
+              <p className="mt-2 text-secondary">{finding.resolution_note}</p>
             )}
             {thread && <FindingReplies pr={pr} thread={thread} />}
             <div className="mt-2 flex flex-wrap items-center gap-1">
               <Button
                 size="sm"
-                variant="outline"
+                color="secondary"
+                variant="outlined"
                 onClick={() => askInChat(askAboutFinding(finding))}
               >
                 Ask Open SWE
@@ -118,7 +118,8 @@ export function FindingNote({
               {!settled && (
                 <Button
                   size="sm"
-                  variant="ghost"
+                  color="secondary"
+                  variant="plain"
                   onClick={() => askInChat(fixFinding(finding))}
                 >
                   Fix it
@@ -126,7 +127,9 @@ export function FindingNote({
               )}
               <Button
                 size="sm"
-                variant="ghost"
+                color="secondary"
+                variant="plain"
+                leftDecorator={CopyIcon}
                 onClick={() =>
                   copyText(
                     `**${finding.title}**\n\n${findingMarkdown(finding)}`,
@@ -134,11 +137,11 @@ export function FindingNote({
                   )
                 }
               >
-                <CopyIcon /> Copy
+                Copy
               </Button>
               {finding.github_review_comment_id !== null && (
                 <a
-                  className="ml-auto text-muted-foreground hover:text-foreground hover:underline"
+                  className="ml-auto text-secondary hover:text-primary hover:underline"
                   href={githubUrls.pullRequest(
                     pr,
                     `#discussion_r${finding.github_review_comment_id}`
@@ -166,7 +169,7 @@ function FindingReplies({
 }) {
   const { reply, resolve } = useThreadActions(pr, thread)
   return (
-    <div className="mt-2.5 flex flex-col gap-2 border-t border-border/70 pt-2.5">
+    <div className="mt-2.5 flex flex-col gap-2 border-t border-subtle pt-2.5">
       {thread.comments.slice(1).map((comment) => (
         <CommentRow key={comment.id} comment={comment} />
       ))}

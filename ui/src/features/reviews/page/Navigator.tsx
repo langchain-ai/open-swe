@@ -1,16 +1,16 @@
+import { Input } from "@langchain/macaw-components/Input"
+import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  CaretDownIcon,
-  ChatCircleIcon,
-  CheckIcon,
-  FolderSimpleIcon,
-  MagnifyingGlassIcon,
-} from "@phosphor-icons/react"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { FolderSimpleIcon } from "@phosphor-icons/react/dist/ssr/FolderSimple"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   buildEntries,
   compareTreePaths,
@@ -26,7 +26,7 @@ import {
   type FileMarkers,
   type PullRequestRef,
 } from "./queries"
-import { Segmented } from "./Segmented"
+import { ReadingOrderTabs } from "./ReadingOrderTabs"
 import { useReviewPage } from "./store"
 import { plural, splitPath } from "./text"
 
@@ -101,7 +101,6 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
   const files = useQuery(reviewQueries.diff(pr)).data?.files
   const walkthrough = useQuery(reviewQueries.detail(pr)).data?.walkthrough
   const order = useReviewPage((state) => state.order)
-  const setOrder = useReviewPage((state) => state.setOrder)
   const viewedCount = useReviewPage(
     (state) => files?.filter((file) => state.viewed.has(file.path)).length ?? 0
   )
@@ -110,30 +109,24 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
 
   return (
     <nav aria-label="Files" className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-col gap-2 px-3 pt-3 pb-2">
+      <div className="flex flex-col gap-space-2 px-space-3 pt-space-3 pb-space-2">
         {steps > 0 && (
-          <Segmented
-            label="Reading order"
-            value={order}
-            onChange={setOrder}
+          <ReadingOrderTabs
+            steps={steps}
+            files={files?.length}
             className="w-full [&>*]:flex-1"
-            options={[
-              { value: "guide", label: `Walkthrough · ${steps}` },
-              { value: "files", label: `Files · ${files?.length ?? "–"}` },
-            ]}
           />
         )}
         {files && (
           <>
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
-              <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-300"
-                  style={{
-                    width: `${files.length ? (viewedCount / files.length) * 100 : 0}%`,
-                  }}
-                />
-              </div>
+            <div className="flex items-center gap-space-2 text-[11px] text-secondary tabular-nums">
+              <ProgressBar
+                aria-label="Files viewed"
+                size="sm"
+                value={viewedCount}
+                max={Math.max(files.length, 1)}
+                className="flex-1"
+              />
               {viewedCount}/{files.length} viewed
             </div>
             <FileFilter />
@@ -204,7 +197,7 @@ function StepList({
   }, [files, walkthrough, fileFilter])
   if (groups.length === 0)
     return (
-      <p className="px-4 py-2 text-xs text-muted-foreground">
+      <p className="px-4 py-2 text-xs text-secondary">
         No step touches a matching file.
       </p>
     )
@@ -219,16 +212,16 @@ function StepList({
               aria-current={active ? "step" : undefined}
               onClick={() => jumpTo({ kind: "entry", id: entries[0]!.id })}
               className={cn(
-                "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs leading-5 hover:bg-accent",
-                active && "bg-accent"
+                "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs leading-5 hover:bg-surface-level-1-hover",
+                active && "bg-selected"
               )}
             >
               <span
                 className={cn(
                   "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold tabular-nums",
                   active
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground"
+                    ? "bg-brand text-brand-on-fill"
+                    : "bg-surface-level-3 text-secondary"
                 )}
               >
                 {step.index}
@@ -236,11 +229,11 @@ function StepList({
               <span
                 className={cn(
                   "min-w-0",
-                  active ? "text-foreground" : "text-muted-foreground"
+                  active ? "text-primary" : "text-secondary"
                 )}
               >
                 <InlineCode text={step.title} />
-                <span className="block text-[11px] text-muted-foreground tabular-nums">
+                <span className="block text-[11px] text-secondary tabular-nums">
                   {stepProgress(entries, viewed)}
                 </span>
               </span>
@@ -257,23 +250,21 @@ function FileFilter() {
   const filter = useReviewPage((state) => state.fileFilter)
   const setFilter = useReviewPage((state) => state.setFileFilter)
   return (
-    <label className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs focus-within:border-ring">
-      <MagnifyingGlassIcon className="size-3.5 text-muted-foreground" />
-      <input
-        type="search"
-        aria-label="Filter files"
-        placeholder="Filter files"
-        value={filter}
-        onChange={(event) => setFilter(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && filter) {
-            event.stopPropagation()
-            setFilter("")
-          }
-        }}
-        className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
-      />
-    </label>
+    <Input
+      size="sm"
+      leftIcon={MagnifyingGlassIcon}
+      aria-label="Filter files"
+      placeholder="Filter files"
+      debounceMs={0}
+      value={filter}
+      onChange={setFilter}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && filter) {
+          event.stopPropagation()
+          setFilter("")
+        }
+      }}
+    />
   )
 }
 
@@ -323,10 +314,10 @@ function FileTree({
 }
 
 const statusTint: Record<ReviewDiffFile["status"], string> = {
-  added: "bg-success",
-  removed: "bg-destructive",
-  renamed: "bg-info",
-  modified: "bg-warning",
+  added: "bg-success-strong",
+  removed: "bg-error-strong",
+  renamed: "bg-brand",
+  modified: "bg-warning-strong",
 }
 
 const TreeRow = memo(function TreeRow({
@@ -358,7 +349,7 @@ const TreeRow = memo(function TreeRow({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         style={{ paddingLeft: 6 + depth * 12 }}
-        className="flex h-6 w-full items-center gap-1 rounded-md pr-2 text-left text-xs text-muted-foreground hover:bg-accent"
+        className="flex h-6 w-full items-center gap-1 rounded-md pr-2 text-left text-xs text-secondary hover:bg-surface-level-1-hover"
       >
         <CaretDownIcon
           className={cn(
@@ -428,16 +419,16 @@ function FileRow({
         title={file.path}
         style={{ paddingLeft: 22 + depth * 12 }}
         className={cn(
-          "relative flex h-6 w-full items-center gap-1.5 rounded-md pr-2 text-left text-xs hover:bg-accent",
+          "relative flex h-6 w-full items-center gap-1.5 rounded-md pr-2 text-left text-xs hover:bg-surface-level-1-hover",
           active
-            ? "bg-accent text-foreground"
+            ? "bg-selected text-primary"
             : viewed
-              ? "text-muted-foreground"
-              : "text-foreground/90"
+              ? "text-secondary"
+              : "text-primary"
         )}
       >
         {active && (
-          <span className="absolute inset-y-1 left-0.5 w-0.5 rounded-full bg-primary" />
+          <span className="absolute inset-y-1 left-0.5 w-0.5 rounded-full bg-brand" />
         )}
         <span
           className={cn(
@@ -448,7 +439,7 @@ function FileRow({
         <span
           className={cn(
             "min-w-0 flex-1 truncate",
-            viewed && "line-through decoration-muted-foreground/40"
+            viewed && "line-through decoration-[var(--border-strong)]"
           )}
         >
           {name}
@@ -461,15 +452,18 @@ function FileRow({
           />
         )}
         {threads > 0 && (
-          <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground">
+          <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-secondary">
             <ChatCircleIcon className="size-3" />
             {threads}
           </span>
         )}
         {viewed ? (
-          <CheckIcon weight="bold" className="size-3 shrink-0 text-primary" />
+          <CheckIcon
+            weight="bold"
+            className="size-3 shrink-0 text-brand-primary"
+          />
         ) : (
-          <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
+          <span className="shrink-0 font-mono text-[10px] text-secondary tabular-nums">
             {changed}
           </span>
         )}

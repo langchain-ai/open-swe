@@ -1,12 +1,17 @@
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { ColumnsIcon } from "@phosphor-icons/react/dist/ssr/Columns"
+import { RowsIcon } from "@phosphor-icons/react/dist/ssr/Rows"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useQuery } from "@tanstack/react-query"
-import { ColumnsIcon, RowsIcon, XIcon } from "@phosphor-icons/react"
 
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
+import { subtleLink } from "@/features/reviews/lib/styles"
 import { matchesFileFilter } from "./diffEntries"
 import { isLive } from "./pullRequestStanding"
 import { reviewQueries, type PullRequestRef } from "./queries"
-import { Segmented } from "./Segmented"
+import { ReadingOrderTabs } from "./ReadingOrderTabs"
 import { useReviewPage } from "./store"
 import { plural } from "./text"
 import { WalkthroughCallout } from "./WalkthroughCallout"
@@ -15,8 +20,6 @@ import { WalkthroughCallout } from "./WalkthroughCallout"
 export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr)).data
   const diff = useQuery(reviewQueries.diff(pr))
-  const order = useReviewPage((state) => state.order)
-  const setOrder = useReviewPage((state) => state.setOrder)
   const diffStyle = useReviewPage((state) => state.diffStyle)
   const setDiffStyle = useReviewPage((state) => state.setDiffStyle)
   const viewed = useReviewPage((state) => state.viewed)
@@ -26,7 +29,7 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
     .filter((file) => !viewed.has(file.path))
     .reduce((total, file) => total + file.additions + file.deletions, 0)
   const viewedCount = files.filter((file) => viewed.has(file.path)).length
-  const hasWalkthrough = (detail?.walkthrough?.steps.length ?? 0) > 0
+  const steps = detail?.walkthrough?.steps.length ?? 0
   const open = detail !== undefined && isLive(detail)
   const fileFilter = useReviewPage((state) => state.fileFilter)
   const setFileFilter = useReviewPage((state) => state.setFileFilter)
@@ -36,15 +39,15 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
 
   return (
     <div className="w-full px-4 pb-3">
-      {detail && !hasWalkthrough && open && files.length > 0 && (
+      {detail && steps === 0 && open && files.length > 0 && (
         <div className="mb-4">
           <WalkthroughCallout pr={pr} detail={detail} />
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border pb-2">
-        <h2 className="text-[13px] font-semibold text-foreground">Changes</h2>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-default pb-2">
+        <h2 className="text-[13px] font-semibold text-primary">Changes</h2>
         {diff.data ? (
-          <span className="text-xs text-muted-foreground tabular-nums">
+          <span className="text-xs text-secondary tabular-nums">
             {plural(files.length, "file")} ·{" "}
             {linesLeft === 0 ? (
               "all lines reviewed"
@@ -53,7 +56,7 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
                 type="button"
                 title="Go to the next file you haven't viewed"
                 onClick={jumpToUnviewed}
-                className="underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground"
+                className={subtleLink}
               >
                 {linesLeft.toLocaleString()} lines left
               </button>
@@ -61,65 +64,49 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
             {viewedCount > 0 && ` · ${viewedCount} viewed`}
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-secondary">
             {diff.isError ? "Unavailable" : "Loading…"}
           </span>
         )}
         {diff.data && fileFilter.trim() && (
-          <span className="flex items-center gap-1 rounded-md bg-primary/10 py-0.5 pr-0.5 pl-1.5 text-xs text-primary tabular-nums">
+          <span className="flex items-center gap-1 rounded-md bg-brand-subtle py-0.5 pr-0.5 pl-1.5 text-xs text-brand-primary tabular-nums">
             Showing {shownCount} of {files.length} matching “{fileFilter.trim()}
             ”
-            <button
-              type="button"
-              aria-label="Clear the file filter"
+            <IconButton
+              icon={XIcon}
+              label="Clear the file filter"
+              size="xxs"
+              color="secondary"
+              variant="plain"
               onClick={() => setFileFilter("")}
-              className="flex size-4 items-center justify-center rounded hover:bg-primary/15"
-            >
-              <XIcon className="size-3" />
-            </button>
+            />
           </span>
         )}
         <span className="flex-1" />
-        {hasWalkthrough && (
-          <Segmented
-            label="Order"
-            value={order}
-            onChange={setOrder}
-            options={[
-              {
-                value: "guide",
-                label: "Walkthrough",
-                title: "Open SWE's reading order",
-              },
-              {
-                value: "files",
-                label: "Files",
-                title: "Every file in tree order",
-              },
-            ]}
-          />
-        )}
-        <Segmented
-          label="Diff layout"
+        {steps > 0 && <ReadingOrderTabs steps={steps} files={files.length} />}
+        <GroupedTabs
+          size="xs"
           value={diffStyle}
           onChange={setDiffStyle}
           options={[
             {
               value: "unified",
-              label: <RowsIcon className="size-3.5" />,
-              title: "Unified",
+              icon: RowsIcon,
+              tooltip: "Unified",
+              "aria-label": "Unified",
             },
             {
               value: "split",
-              label: <ColumnsIcon className="size-3.5" />,
-              title: "Split",
+              icon: ColumnsIcon,
+              tooltip: "Split",
+              "aria-label": "Split",
             },
           ]}
         />
         <DiffWrapToggle />
       </div>
       {diff.data?.truncated && (
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mt-2 text-xs text-secondary">
           GitHub only returned some of this PR&apos;s files.{" "}
           <a
             className="underline"

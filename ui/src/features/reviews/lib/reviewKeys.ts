@@ -13,8 +13,6 @@ export const reviewKeys = {
     ["reviewDiff", owner, repo, number] as const,
   conversation: ({ owner, repo, number }: PullRequestRef) =>
     ["review-conversation", owner, repo, number] as const,
-  status: ({ owner, repo, number }: PullRequestRef) =>
-    ["review-page-pr", `${owner}/${repo}`, number] as const,
 }
 
 /** The PR's chat. Reading it creates the thread, so it waits until the page has found the PR. */

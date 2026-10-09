@@ -1,9 +1,13 @@
 import type { ComponentProps, ReactNode } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react"
-
-import { Button } from "@/components/ui/button"
-import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
-import { Menu, MenuPopup, MenuTrigger } from "@/components/ui/menu"
+import { Button } from "@langchain/macaw-components/Button"
+import { ButtonGroup } from "@langchain/macaw-components/ButtonGroup"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 
 type ButtonProps = ComponentProps<typeof Button>
 
@@ -12,8 +16,9 @@ export function SplitButton({
   children,
   onClick,
   disabled,
-  variant = "outline",
-  size = "sm",
+  color = "secondary",
+  variant = "outlined",
+  size = "xs",
   className,
   "aria-label": ariaLabel,
   menuLabel,
@@ -21,12 +26,16 @@ export function SplitButton({
   menuDisabled = disabled,
   menuOpen,
   onMenuOpenChange,
-  menuPopup,
+  menuAlign = "end",
+  menuSide = "bottom",
+  icon,
 }: {
   children: ReactNode
+  icon?: ButtonProps["leftDecorator"]
   onClick: () => void
   disabled?: boolean
-  variant?: ButtonProps["variant"]
+  color?: "primary" | "secondary"
+  variant?: "normal" | "outlined" | "plain"
   size?: ButtonProps["size"]
   className?: string
   "aria-label"?: string
@@ -37,10 +46,13 @@ export function SplitButton({
   menuDisabled?: boolean
   menuOpen?: boolean
   onMenuOpenChange?: (open: boolean) => void
-  menuPopup?: Omit<ComponentProps<typeof MenuPopup>, "children">
+  menuAlign?: "start" | "end"
+  menuSide?: "top" | "bottom"
 }) {
   const button = (
     <Button
+      leftDecorator={icon}
+      color={color}
       variant={variant}
       size={size}
       disabled={disabled}
@@ -54,22 +66,26 @@ export function SplitButton({
   )
   if (!menu) return button
   return (
-    <ButtonGroup className={className}>
+    <ButtonGroup
+      color={color}
+      variant={variant}
+      size={size}
+      className={className}
+    >
       {button}
-      {/* Borderless buttons need a rule to read as two. */}
-      {variant !== "outline" && <ButtonGroupSeparator />}
-      <Menu open={menuOpen} onOpenChange={onMenuOpenChange}>
-        <MenuTrigger
-          aria-label={menuLabel}
-          disabled={menuDisabled}
-          render={<Button variant={variant} size={size} className="px-1.5" />}
-        >
-          <CaretDownIcon />
-        </MenuTrigger>
-        <MenuPopup align="end" {...menuPopup}>
+      <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
+        <DropdownMenuTrigger asChild>
+          <IconButton
+            icon={CaretDownIcon}
+            label={menuLabel}
+            disabled={menuDisabled}
+            tooltipProps={{ disabled: true }}
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align={menuAlign} side={menuSide} sideOffset={6}>
           {menu}
-        </MenuPopup>
-      </Menu>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </ButtonGroup>
   )
 }

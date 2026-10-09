@@ -1,7 +1,6 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useState } from "react"
-
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 
 /** A one-line "Reply…" that grows into a composer, as on GitHub. ⌘↩ sends. */
 export function ReplyBox({
@@ -35,19 +34,21 @@ export function ReplyBox({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:border-ring/40"
+        className="w-full rounded-md border border-default bg-surface-level-1 px-2.5 py-1.5 text-left text-xs text-placeholder hover:border-strong"
       >
         {placeholder}
       </button>
     )
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-space-2">
       <Textarea
+        size="sm"
         aria-label="Reply"
         autoFocus
         rows={3}
+        resize="vertical"
         value={body}
-        onChange={(event) => setBody(event.target.value)}
+        onChange={setBody}
         onKeyDown={(event) => {
           if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
             event.preventDefault()
@@ -58,10 +59,14 @@ export function ReplyBox({
             setOpen(false)
           }
         }}
-        className="resize-y text-xs"
       />
-      <div className="flex justify-end gap-2">
-        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+      <div className="flex justify-end gap-space-2">
+        <Button
+          size="sm"
+          color="secondary"
+          variant="plain"
+          onClick={() => setOpen(false)}
+        >
           Cancel
         </Button>
         <Button size="sm" disabled={!body.trim() || pending} onClick={send}>

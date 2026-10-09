@@ -424,7 +424,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
               options={options}
               // Each file is a card on the page's gutter, as on GitHub. The
               // outline is a shadow, so it adds nothing CodeView must measure.
-              className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip [&_diffs-container]:shadow-[0_0_0_1px_var(--border)] sm:[&_diffs-container]:mx-4 sm:[&_diffs-container]:rounded-lg"
+              className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip [&_diffs-container]:shadow-[0_0_0_1px_var(--border-default)] sm:[&_diffs-container]:mx-4 sm:[&_diffs-container]:rounded-lg"
               renderCodeViewHeader={renderHeader}
               renderCustomHeader={renderCustomHeader}
               renderAnnotation={renderAnnotation}
@@ -433,7 +433,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
             {diff.isError && (
               <p
                 role="alert"
-                className="absolute inset-x-0 bottom-6 mx-auto w-fit rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                className="absolute inset-x-0 bottom-6 mx-auto w-fit rounded-lg bg-error-subtle px-3 py-2 text-xs text-error-secondary"
               >
                 Couldn&apos;t load the changes: {diff.error.message}
               </p>
@@ -537,15 +537,15 @@ function StepIntro({ entryId }: { entryId: string }) {
   if (!step) return null
   return (
     <NoteFrame className="py-3">
-      <p className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
+      <p className="flex items-center gap-1.5 text-[11px] font-medium text-brand-primary">
         <AgentMark className="size-3" />
         Step {step.index} of {step.count}
       </p>
-      <p className="mt-0.5 text-[13px] leading-5 font-semibold text-foreground">
+      <p className="mt-0.5 text-[13px] leading-5 font-semibold text-primary">
         <InlineCode text={step.title} />
       </p>
       {step.summary && (
-        <div className="mt-1 max-w-[72ch] text-muted-foreground [&_li]:text-[12.5px] [&_li]:leading-5 [&_p]:text-[12.5px] [&_p]:leading-5">
+        <div className="mt-1 max-w-[72ch] text-secondary [&_li]:text-[12.5px] [&_li]:leading-5 [&_p]:text-[12.5px] [&_p]:leading-5">
           <Markdown content={step.summary} />
         </div>
       )}

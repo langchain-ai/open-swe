@@ -9,7 +9,7 @@ import {
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -23,22 +23,7 @@ export const Route = createFileRoute("/agents")({
   head: () => ({ meta: [{ title: pageTitle("Agents") }] }),
 })
 
-/**
- * The `.agents-ui` class themes the layout subtree, but popovers, tooltips and
- * menus portal to `<body>`. Marking the document root while these routes are
- * mounted is what keeps those in the same palette.
- */
-function useAgentsTheme() {
-  useEffect(() => {
-    document.documentElement.dataset["agentsTheme"] = "true"
-    return () => {
-      delete document.documentElement.dataset["agentsTheme"]
-    }
-  }, [])
-}
-
 function AgentsLayout() {
-  useAgentsTheme()
   const session = useSession()
   const profile = useProfile()
   const experimentalAssistantUi = useExperimentalAssistantUi()
@@ -106,7 +91,7 @@ function AgentsLayout() {
 
   if (session.isLoading) {
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-background p-6">
+      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1 p-6">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )

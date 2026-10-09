@@ -1,11 +1,12 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
-import {
-  ArrowDownIcon,
-  CaretRightIcon,
-  CheckIcon,
-  GitCommitIcon,
-} from "@phosphor-icons/react"
+import { ArrowDownIcon } from "@phosphor-icons/react/dist/ssr/ArrowDown"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { GitCommitIcon } from "@phosphor-icons/react/dist/ssr/GitCommit"
 
 import {
   postReviewConversationComment,
@@ -20,9 +21,6 @@ import {
 } from "@/features/reviews/lib/conversationApi"
 import { sameLogin } from "@/features/reviews/lib/logins"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { threadLocation } from "./findings"
 import {
@@ -75,6 +73,10 @@ type Block =
       reviews: Array<ConversationReview>
       replies: Array<Reply>
     }
+
+// Sits on the timeline's rule, ringed in the page colour so the rule breaks around it.
+const TIMELINE_AVATAR =
+  "absolute top-0 left-0 ring-4 ring-[var(--bg-surface-level-1)]"
 
 const NO_PARTS: ReviewParts = { started: [], replies: [] }
 
@@ -229,18 +231,18 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
             ))}
           </div>
         ) : conversation.isError ? (
-          <p className="text-xs text-destructive">
+          <p className="text-xs text-error-secondary">
             Couldn&apos;t load the conversation: {conversation.error.message}
           </p>
         ) : (
           <>
             {open.length > 0 && <OpenConversations pr={pr} threads={open} />}
             {blocks.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-secondary">
                 No one has commented yet.
               </p>
             ) : (
-              <ol className="relative flex flex-col gap-3 before:absolute before:inset-y-2 before:left-[11px] before:w-px before:bg-border">
+              <ol className="relative flex flex-col gap-3 before:absolute before:inset-y-2 before:left-[11px] before:w-px before:bg-[var(--border-default)]">
                 {blocks.map((block) =>
                   block.kind === "commits" ? (
                     <CommitsBlock key={block.key} commits={block.commits} />
@@ -276,7 +278,7 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
               behavior: "smooth",
             })
           }
-          className="flex shrink-0 items-center justify-center gap-1 border-t border-border py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex shrink-0 items-center justify-center gap-1 border-t border-default py-1 text-[11px] font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
         >
           Jump to the latest
           <ArrowDownIcon className="size-3" />
@@ -320,7 +322,7 @@ function OpenConversations({
           type="button"
           aria-expanded={!folded}
           onClick={() => setFoldedAt(folded ? null : focusKey)}
-          className="flex items-center gap-1.5 text-xs font-medium text-foreground"
+          className="flex items-center gap-1.5 text-xs font-medium text-primary"
         >
           <CaretRightIcon
             className={cn(
@@ -329,7 +331,7 @@ function OpenConversations({
             )}
           />
           Open conversations
-          <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums">
+          <span className="rounded-full bg-surface-level-3 px-1.5 text-[10px] text-secondary tabular-nums">
             {threads.length}
           </span>
         </button>
@@ -339,7 +341,7 @@ function OpenConversations({
             disabled={resolveThreads.isPending}
             onClick={() => resolveThreads.mutate(answered)}
             title="Outdated conversations where the author replied last"
-            className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+            className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-secondary hover:bg-surface-level-1-hover hover:text-primary disabled:opacity-50"
           >
             Resolve {answered.length} answered
           </button>
@@ -390,17 +392,15 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
   ]
   return (
     <li className="relative pl-8 text-xs">
-      <span className="absolute top-0.5 left-[5px] flex size-[13px] items-center justify-center rounded-full bg-background text-muted-foreground ring-4 ring-background">
+      <span className="absolute top-0.5 left-[5px] flex size-[13px] items-center justify-center rounded-full bg-surface-level-1 text-secondary ring-4 ring-[var(--bg-surface-level-1)]">
         <GitCommitIcon className="size-3.5" />
       </span>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="text-left text-muted-foreground hover:text-foreground"
+        className="text-left text-secondary hover:text-primary"
       >
-        <span className="font-medium text-foreground/80">
-          {authors.join(", ")}
-        </span>{" "}
+        <span className="font-medium text-primary">{authors.join(", ")}</span>{" "}
         pushed {plural(commits.length, "commit")}{" "}
         {formatWhen(commits.at(-1)!.created_at)}
         <CaretRightIcon
@@ -418,12 +418,12 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
                 href={commit.html_url}
                 target="_blank"
                 rel="noreferrer"
-                className="group/commit flex items-center gap-2 text-muted-foreground hover:text-foreground"
+                className="group/commit flex items-center gap-2 text-secondary hover:text-primary"
               >
                 <span className="min-w-0 flex-1 truncate font-mono text-[11px] group-hover/commit:underline">
                   {commit.message.split("\n")[0]}
                 </span>
-                <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                <span className="shrink-0 font-mono text-[10px] text-tertiary">
                   {commit.sha.slice(0, 7)}
                 </span>
               </a>
@@ -451,10 +451,7 @@ function RepliesBlock({
   const threadCount = new Set(replies.map((reply) => reply.thread.id)).size
   return (
     <li className="relative pl-8">
-      <Avatar
-        author={author}
-        className="absolute top-0 left-0 size-6 ring-4 ring-background"
-      />
+      <Avatar author={author} size="md" className={TIMELINE_AVATAR} />
       <Byline
         author={author}
         createdAt={latest.created_at}
@@ -489,19 +486,19 @@ function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
       type="button"
       onClick={() => setOpen(true)}
       title={thread.path}
-      className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-accent"
+      className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-surface-level-1-hover"
     >
       {/* Truncates from the left so the line number, which tells rows apart, stays. */}
-      <span className="max-w-[45%] shrink-0 truncate text-left font-mono text-[11px] text-muted-foreground [direction:rtl]">
+      <span className="max-w-[45%] shrink-0 truncate text-left font-mono text-[11px] text-secondary [direction:rtl]">
         <bdi>{threadLocation(thread)}</bdi>
       </span>
-      <span className="min-w-0 flex-1 truncate text-foreground/90">
+      <span className="min-w-0 flex-1 truncate text-primary">
         {plainFirstLine(comment.body)}
       </span>
       {thread.resolved && (
         <CheckIcon
           aria-label="Resolved"
-          className="size-3 shrink-0 self-center text-muted-foreground"
+          className="size-3 shrink-0 self-center text-secondary"
         />
       )}
     </button>
@@ -533,10 +530,7 @@ function ItemBlock({
       : "commented"
   return (
     <li className="relative pl-8">
-      <Avatar
-        author={item.author}
-        className="absolute top-0 left-0 size-6 ring-4 ring-background"
-      />
+      <Avatar author={item.author} size="md" className={TIMELINE_AVATAR} />
       <div className="flex min-w-0 items-center gap-1.5">
         {item.kind === "review" && item.state !== "COMMENTED" && (
           <ReviewStateMark state={item.state} />
@@ -552,7 +546,7 @@ function ItemBlock({
             type="button"
             aria-expanded={showEarlier}
             onClick={() => setShowEarlier((value) => !value)}
-            className="shrink-0 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="shrink-0 rounded px-1 text-[11px] text-secondary hover:bg-surface-level-1-hover hover:text-primary"
             title="Said the same thing before"
           >
             ×{earlier.length + 1}
@@ -560,14 +554,14 @@ function ItemBlock({
         )}
       </div>
       {showEarlier && (
-        <ul className="mt-1 flex flex-col gap-0.5 text-[11px] text-muted-foreground">
+        <ul className="mt-1 flex flex-col gap-0.5 text-[11px] text-secondary">
           {earlier.map((said) => (
             <li key={said.id}>
               <a
                 href={said.html_url}
                 target="_blank"
                 rel="noreferrer"
-                className="hover:text-foreground hover:underline"
+                className="hover:text-primary hover:underline"
               >
                 Said the same {formatWhen(said.created_at)}
               </a>
@@ -577,13 +571,13 @@ function ItemBlock({
       )}
       {body &&
         (open ? (
-          <div className="mt-1.5 rounded-lg border border-border bg-card px-3 py-2 text-[13px] leading-[1.6]">
+          <div className="mt-1.5 rounded-lg border border-default bg-surface-level-1 px-3 py-2 text-[13px] leading-[1.6]">
             <Markdown content={item.body} />
             {bot && (
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="mt-1 text-[11px] text-muted-foreground hover:text-foreground"
+                className="mt-1 text-[11px] text-secondary hover:text-primary"
               >
                 Fold
               </button>
@@ -593,7 +587,7 @@ function ItemBlock({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="mt-0.5 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
+            className="mt-0.5 block w-full truncate text-left text-xs text-secondary hover:text-primary"
           >
             {plainFirstLine(item.body)}
           </button>
@@ -640,23 +634,25 @@ function CommentBox({ pr }: { pr: PullRequestRef }) {
     if (text && !post.isPending) post.mutate(text)
   }
   return (
-    <div className="border-t border-border p-3">
+    <div className="border-t border-default p-3">
       <Textarea
+        size="sm"
         aria-label="Comment on this pull request"
         placeholder="Comment on this pull request"
         rows={2}
+        autoResize
+        maxHeight={192}
         value={body}
-        onChange={(event) => setBody(event.target.value)}
+        onChange={setBody}
         onKeyDown={(event) => {
           if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
             event.preventDefault()
             send()
           }
         }}
-        className="max-h-48 resize-none text-xs"
       />
       {post.error && (
-        <p role="alert" className="mt-1 text-xs text-destructive">
+        <p role="alert" className="mt-1 text-xs text-error-secondary">
           {post.error.message}
         </p>
       )}

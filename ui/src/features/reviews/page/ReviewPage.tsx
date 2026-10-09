@@ -1,15 +1,15 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useLayoutEffect, useRef } from "react"
 import { Link } from "@tanstack/react-router"
+import { useEffect, useLayoutEffect, useRef } from "react"
 
 import { useIsHydrated } from "@/lib/hydration"
-import { Button } from "@/components/ui/button"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { pageTitle } from "@/lib/pageTitle"
-import { useResizableWidth } from "@/lib/useResizableWidth"
-import { Sheet, SheetPopup, SheetTitle } from "@/components/ui/sheet"
+import { SideSheet } from "@/components/SideSheet"
 import { useSidebarControls } from "@/components/sidebar-layout"
-import { RightPanelResizeHandle } from "@/features/agents/components/panel/RightPanelResizeHandle"
+import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
+import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
 import {
   agentThreadKeys,
   markReviewViewed,
@@ -90,19 +90,11 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
       : "pl-14"
     : "pl-3"
 
-  const rail = useResizableWidth({
-    storageKey: "open-swe.review-panel.width",
-    defaultWidth: 420,
-    minWidth: 340,
-    maxWidth: 680,
-    edge: "left",
-  })
-
   const navigatorInline = navigatorOpen && roomForNavigator
 
   return (
     <ChatDraftsProvider>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
         <Header
           pr={pr}
           leftInset={leftInset}
@@ -114,7 +106,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
         ) : (
           <div className="flex min-h-0 flex-1">
             {navigatorInline && (
-              <div className="w-[248px] shrink-0 border-r border-border bg-background">
+              <div className="w-[248px] shrink-0 border-r border-default bg-surface-level-1">
                 <Navigator pr={pr} />
               </div>
             )}
@@ -122,35 +114,37 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
               <Changes pr={pr} />
             </section>
             {wide && (
-              <div
-                className="relative shrink-0 border-l border-border"
-                style={{ width: rail.width }}
+              <RightPanelShell
+                mode="inline"
+                widthStorageKey="open-swe.review-panel.width"
+                defaultWidth={420}
               >
-                <RightPanelResizeHandle handlers={rail.handlers} />
                 <Rail pr={pr} />
-              </div>
+              </RightPanelShell>
             )}
           </div>
         )}
         {!wide && (
-          <Sheet open={railOpen} onOpenChange={setRailOpen}>
-            <SheetPopup
-              side="right"
-              keepMounted
-              showCloseButton={false}
-              className="max-w-[440px] p-0"
-            >
-              <Rail pr={pr} onClose={() => setRailOpen(false)} />
-            </SheetPopup>
-          </Sheet>
+          <SideSheet
+            side="right"
+            title="Chat and discussion"
+            open={railOpen}
+            onClose={() => setRailOpen(false)}
+            className={RIGHT_PANEL_SHEET_CLASS_NAME}
+          >
+            <Rail pr={pr} onClose={() => setRailOpen(false)} />
+          </SideSheet>
         )}
         {!roomForNavigator && (
-          <Sheet open={navigatorOverlay} onOpenChange={setNavigatorOverlay}>
-            <SheetPopup side="left" className="max-w-[300px] p-0 pt-10">
-              <SheetTitle className="sr-only">Files</SheetTitle>
-              <Navigator pr={pr} />
-            </SheetPopup>
-          </Sheet>
+          <SideSheet
+            side="left"
+            title="Files"
+            open={navigatorOverlay}
+            onClose={() => setNavigatorOverlay(false)}
+            className="w-[min(88vw,300px)] pt-10"
+          >
+            <Navigator pr={pr} />
+          </SideSheet>
         )}
       </div>
     </ChatDraftsProvider>
@@ -169,25 +163,27 @@ function PullRequestUnavailable({
       role="alert"
       className="mx-auto flex max-w-md flex-1 flex-col items-start justify-center gap-3 px-6"
     >
-      <p className="text-[17px] font-semibold text-foreground">
+      <p className="text-[17px] font-semibold text-primary">
         Can&apos;t open {pr.owner}/{pr.repo}#{pr.number}
       </p>
-      <p className="text-sm text-muted-foreground">
+      <p className="text-sm text-secondary">
         It doesn&apos;t exist, or your GitHub account can&apos;t see it. GitHub
         said: {message}.
       </p>
-      <div className="flex gap-2">
+      <div className="flex gap-space-2">
         <Button
-          variant="outline"
           size="sm"
-          render={<Link to="/agents/reviews" />}
+          color="secondary"
+          variant="outlined"
+          as={<Link to="/agents/reviews" />}
         >
           Back to reviews
         </Button>
         <Button
-          variant="ghost"
           size="sm"
-          render={
+          color="secondary"
+          variant="plain"
+          as={
             <a
               href={githubUrls.pullRequest(pr)}
               target="_blank"

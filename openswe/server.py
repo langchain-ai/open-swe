@@ -181,10 +181,10 @@ from openswe.sandboxes.state import (
 )
 from openswe.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
 from openswe.sandboxes.tool_runtime import ToolSurface, save_tool_context
-from openswe.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from openswe.threads.blobs import blob_namespace
+from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -1892,20 +1892,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         # their repository. Keep the agent's scratch files out of it.
         skill_routes.update(await desktop_artifact_routes(thread_id))
     else:
-        skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
-        )
+        skill_routes[ORGANIZATION_SKILLS_ROUTE] = skills_backend(None)
         skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         if credential_login:
-            skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
-                StoreBackend(
-                    namespace=lambda _runtime, login=credential_login: (SKILLS_NAMESPACE, login)
-                )
-            )
+            skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
             skill_sources.insert(0, USER_SKILLS_ROUTE)
-        # Offloaded images live in the store so they can be read without the sandbox.
+        # Offloaded images live in PostgreSQL so they can be read without the sandbox.
         skill_routes[BLOBS_ROUTE] = StoreBackend(
-            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id)
+            store=ThreadBlobs(thread_id),
+            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
         )
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)

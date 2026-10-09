@@ -1,8 +1,7 @@
-import {
-  ChatCircleIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react"
+import { Avatar as MacawAvatar } from "@langchain/macaw-components/Avatar"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 
 import type {
   ConversationAuthor,
@@ -44,43 +43,52 @@ export const reviewStateWords: Record<ConversationReviewState, string> = {
 
 export function ReviewStateMark({ state }: { state: ConversationReviewState }) {
   if (state === "APPROVED")
-    return <CheckCircleIcon weight="fill" className="size-3.5 text-success" />
+    return (
+      <CheckCircleIcon
+        aria-hidden
+        size={14}
+        weight="fill"
+        className="shrink-0 text-icon-success"
+      />
+    )
   if (state === "CHANGES_REQUESTED")
-    return <XCircleIcon weight="fill" className="size-3.5 text-destructive" />
-  return <ChatCircleIcon className="size-3.5 text-muted-foreground" />
+    return (
+      <XCircleIcon
+        aria-hidden
+        size={14}
+        weight="fill"
+        className="shrink-0 text-icon-error"
+      />
+    )
+  return (
+    <ChatCircleIcon
+      aria-hidden
+      size={14}
+      weight="regular"
+      className="shrink-0 text-icon-secondary"
+    />
+  )
 }
 
+/** A person's avatar; bots are square, and what Open SWE posted as someone shows its mark. */
 export function Avatar({
   author,
+  size = "sm",
   className,
 }: {
   author: ConversationAuthor | null
+  size?: "xs" | "sm" | "md"
   className?: string
 }) {
-  if (author?.posted_by)
-    return (
-      <span
-        className={cn(
-          "flex size-5 shrink-0 items-center justify-center rounded-[5px] bg-muted",
-          className
-        )}
-      >
-        <AgentMark className="size-[70%]" />
-      </span>
-    )
-  return author?.avatar_url ? (
-    <img
-      src={author.avatar_url}
-      alt=""
-      loading="lazy"
-      className={cn(
-        "size-5 shrink-0 bg-muted",
-        author.bot ? "rounded-[5px]" : "rounded-full",
-        className
-      )}
+  return (
+    <MacawAvatar
+      size={size}
+      shape={author?.bot ? "square" : "circle"}
+      label={author?.posted_by ? "" : displayName(author)}
+      imageUrl={author?.avatar_url || undefined}
+      fallbackIcon={<AgentMark className="size-[70%]" />}
+      className={cn("shrink-0", className)}
     />
-  ) : (
-    <span className={cn("size-5 shrink-0 rounded-full bg-muted", className)} />
   )
 }
 
@@ -116,7 +124,7 @@ export function Byline({
   const when = formatWhen(createdAt)
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-xs">
-      <span className="truncate font-medium text-foreground">
+      <span className="truncate font-medium text-primary">
         {displayName(author)}
       </span>
       {author?.bot && (
@@ -130,19 +138,19 @@ export function Byline({
           {author.posted_by ? `via ${author.posted_by}` : "bot"}
         </Tag>
       )}
-      {verb && <span className="text-muted-foreground">{verb}</span>}
+      {verb && <span className="text-secondary">{verb}</span>}
       {href ? (
         <a
           href={href}
           target="_blank"
           rel="noreferrer"
-          className="shrink-0 text-muted-foreground hover:underline"
+          className="shrink-0 text-secondary hover:underline"
           title={new Date(createdAt).toLocaleString()}
         >
           {when}
         </a>
       ) : (
-        <span className="shrink-0 text-muted-foreground">{when}</span>
+        <span className="shrink-0 text-secondary">{when}</span>
       )}
     </span>
   )

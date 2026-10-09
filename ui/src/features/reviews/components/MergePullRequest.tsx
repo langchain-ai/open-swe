@@ -1,10 +1,11 @@
+import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 import { SplitButton } from "@/components/SplitButton"
-import { MenuRadioGroup, MenuRadioItem } from "@/components/ui/menu"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import {
   mergeMethodCopy,
@@ -68,30 +69,32 @@ export function MergePullRequest({
       menuDisabled={busy}
       menuOpen={menuOpen}
       onMenuOpenChange={setMenuOpen}
-      menuPopup={{ className: "w-72" }}
       menu={
-        options.length > 1 && (
-          <MenuRadioGroup
-            value={method}
-            onValueChange={(value: MergeMethod) => setChoice(value)}
+        options.length > 1 &&
+        options.map((option) => (
+          <DropdownMenuItem
+            key={option}
+            role="menuitemradio"
+            aria-checked={option === method}
+            onSelect={() => setChoice(option)}
+            className="w-72 items-start gap-space-2"
           >
-            {options.map((option) => (
-              <MenuRadioItem
-                key={option}
-                value={option}
-                closeOnClick
-                className="items-start py-1.5"
-              >
-                <span className="block font-medium">
-                  {mergeMethodCopy[option].label}
-                </span>
-                <span className="block text-muted-foreground">
-                  {mergeMethodCopy[option].description}
-                </span>
-              </MenuRadioItem>
-            ))}
-          </MenuRadioGroup>
-        )
+            <CheckIcon
+              aria-hidden
+              size={14}
+              weight="bold"
+              className={option === method ? "mt-0.5" : "invisible mt-0.5"}
+            />
+            <span>
+              <span className="block font-medium">
+                {mergeMethodCopy[option].label}
+              </span>
+              <span className="block text-secondary">
+                {mergeMethodCopy[option].description}
+              </span>
+            </span>
+          </DropdownMenuItem>
+        ))
       }
     >
       {allowed.isPending

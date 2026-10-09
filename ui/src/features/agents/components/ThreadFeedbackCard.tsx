@@ -1,10 +1,11 @@
+import { Button } from "@langchain/macaw-components/Button"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { ThumbsDownIcon } from "@phosphor-icons/react/dist/ssr/ThumbsDown"
+import { ThumbsUpIcon } from "@phosphor-icons/react/dist/ssr/ThumbsUp"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ThumbsDown, ThumbsUp } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { agentsApi } from "@/features/agents/lib/api"
 import type {
   ThreadFeedbackRating,
@@ -15,23 +16,10 @@ import { cn } from "@/lib/utils"
 const ratings: Array<{
   value: ThreadFeedbackRating
   label: string
-  icon: LucideIcon
-  className: string
+  icon: IconComponent
 }> = [
-  {
-    value: "good",
-    label: "Good",
-    icon: ThumbsUp,
-    className:
-      "border-success/40 bg-success/10 text-success-foreground hover:bg-success/20 hover:text-success-foreground dark:bg-success/10",
-  },
-  {
-    value: "bad",
-    label: "Bad",
-    icon: ThumbsDown,
-    className:
-      "border-destructive/40 bg-destructive/10 text-destructive-foreground hover:bg-destructive/20 hover:text-destructive-foreground dark:bg-destructive/10",
-  },
+  { value: "good", label: "Good", icon: ThumbsUpIcon },
+  { value: "bad", label: "Bad", icon: ThumbsDownIcon },
 ]
 
 export function ThreadFeedbackCard({
@@ -123,7 +111,7 @@ export function ThreadFeedbackCard({
     return (
       <div
         role="status"
-        className="mt-4 rounded-lg bg-card px-4 py-3 text-sm text-muted-foreground"
+        className="mt-4 rounded-lg bg-surface-level-1 px-4 py-3 text-sm text-secondary"
       >
         Thanks for your feedback.
       </div>
@@ -134,7 +122,7 @@ export function ThreadFeedbackCard({
     <form
       aria-label="Thread feedback"
       className={cn(
-        "mt-4 rounded-lg bg-card p-4",
+        "mt-4 rounded-lg bg-surface-level-1 p-4",
         showComment
           ? "space-y-3"
           : "flex flex-wrap items-center justify-between gap-x-6 gap-y-3"
@@ -149,18 +137,17 @@ export function ThreadFeedbackCard({
         {showComment ? "How could Open SWE do better?" : "How did Open SWE do?"}
       </p>
       {showComment ? (
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          Comment (optional)
-          <Textarea
-            autoFocus
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-            maxLength={3000}
-            disabled={mutation.isPending}
-            placeholder="What could be better?"
-            className="min-h-20 border-foreground/20 bg-background text-sm"
-          />
-        </label>
+        <Textarea
+          label="Comment (optional)"
+          size="md"
+          autoFocus
+          value={comment}
+          onChange={setComment}
+          maxLength={3000}
+          disabled={mutation.isPending}
+          placeholder="What could be better?"
+          inputClassName="min-h-20"
+        />
       ) : (
         <div
           className="flex flex-wrap items-center gap-2"
@@ -170,22 +157,20 @@ export function ThreadFeedbackCard({
           {ratings.map((option) => (
             <Button
               key={option.value}
-              type="button"
-              variant="outline"
-              size="lg"
-              className={cn("px-3 text-sm", option.className)}
+              color="secondary"
+              variant="outlined"
+              size="md"
+              leftDecorator={option.icon}
               disabled={mutation.isPending}
               onClick={() => mutation.mutate({ rating: option.value })}
             >
-              <option.icon aria-hidden="true" className="size-4" />
               {option.label}
             </Button>
           ))}
           <Button
-            type="button"
-            size="lg"
-            variant="ghost"
-            className="text-muted-foreground"
+            color="secondary"
+            variant="plain"
+            size="md"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate({ action: "dismiss" })}
           >
@@ -197,15 +182,15 @@ export function ThreadFeedbackCard({
         <div className="flex items-center gap-2">
           <Button
             type="submit"
-            size="sm"
+            size="xs"
             disabled={!comment.trim() || mutation.isPending}
           >
             {mutation.isPending ? "Saving…" : "Submit comment"}
           </Button>
           <Button
-            type="button"
-            size="sm"
-            variant="ghost"
+            color="secondary"
+            variant="plain"
+            size="xs"
             disabled={mutation.isPending}
             onClick={() => {
               setShowComment(false)

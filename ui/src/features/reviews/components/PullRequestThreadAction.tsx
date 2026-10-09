@@ -1,10 +1,10 @@
+import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 import { SplitButton } from "@/components/SplitButton"
-import { MenuItem } from "@/components/ui/menu"
 import {
   threadActions,
   type PullRequestThreadActionName,
@@ -106,20 +106,23 @@ export function PullRequestThreadAction({
         }
         onClick={() => run.mutate()}
         menuLabel={`More fixes for PR #${pr.number}`}
-        menuPopup={{ align: "start" }}
+        menuAlign="start"
         menu={
           rest.length > 0 &&
           rest.map((action) => (
-            <MenuItem key={action} onClick={() => runs[action].mutate()}>
+            <DropdownMenuItem
+              key={action}
+              onSelect={() => runs[action].mutate()}
+            >
               {threadActions[action].labels.idle}
-            </MenuItem>
+            </DropdownMenuItem>
           ))
         }
       >
         {label}
       </SplitButton>
       {thread.error && (
-        <p role="alert" className="mt-1 text-destructive">
+        <p role="alert" className="mt-1 text-error-secondary">
           {thread.error.message}
         </p>
       )}

@@ -1,16 +1,24 @@
-import type { ComponentProps } from "react"
+import { Badge } from "@langchain/macaw-components/Badge"
 
-import { cn } from "@/lib/utils"
-
-/** A small outlined label beside a name or path: "bot", "Outdated", "Added". */
-export function Tag({ className, ...props }: ComponentProps<"span">) {
+/** A small label beside a name or path: "bot", "Outdated", "Added". */
+export function Tag({
+  className,
+  title,
+  children,
+}: {
+  className?: string
+  title?: string
+  children: string
+}) {
   return (
-    <span
-      className={cn(
-        "shrink-0 rounded-[4px] border border-border px-1 text-[10px] leading-4 text-muted-foreground",
-        className
-      )}
-      {...props}
-    />
+    <Badge
+      size="xxs"
+      color="secondary"
+      rounded="xs"
+      className={className}
+      title={title}
+    >
+      {children}
+    </Badge>
   )
 }

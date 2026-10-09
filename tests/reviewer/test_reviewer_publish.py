@@ -224,7 +224,7 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
 
     client_cm = AsyncMock()
     client_cm.__aenter__.return_value = client_cm
-    client_cm.post = AsyncMock(return_value=response)
+    client_cm.request = AsyncMock(return_value=response)
 
     with patch("openswe.github.http.httpx2.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(

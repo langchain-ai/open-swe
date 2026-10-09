@@ -1,26 +1,32 @@
-import { useState } from "react"
+import { Avatar } from "@langchain/macaw-components/Avatar"
+import { Button } from "@langchain/macaw-components/Button"
+import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import {
-  AlertTriangle,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  GitPullRequest,
-  MessageCircle,
-  Wrench,
-  XCircle,
-} from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@langchain/macaw-components/HoverCard"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { CaretUpIcon } from "@phosphor-icons/react/dist/ssr/CaretUp"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
+import { WrenchIcon } from "@phosphor-icons/react/dist/ssr/Wrench"
+import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
+import { useState } from "react"
 
 import type {
   AgentPullRequest,
   AgentPullRequestHealth,
   ThreadFixScope,
 } from "@/features/agents/lib/types"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { MenuItem } from "@/components/ui/menu"
 import { SplitButton } from "@/components/SplitButton"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+
+/** Surface for {@link PullRequestHoverCard}; the card sets its own width. */
+export const PULL_REQUEST_HOVER_CARD_CLASS = "w-auto rounded-lg p-space-3"
 
 export type ThreadFix = (
   pullRequest: AgentPullRequest,
@@ -28,10 +34,10 @@ export type ThreadFix = (
 ) => Promise<void> | void
 
 const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
-  draft: "bg-muted text-muted-foreground",
-  open: "bg-success/15 text-success-foreground",
-  merged: "bg-merged/15 text-merged-foreground",
-  closed: "bg-destructive/10 text-destructive",
+  draft: "bg-surface-level-2 text-secondary",
+  open: "bg-success text-success-secondary",
+  merged: "bg-purple text-purple",
+  closed: "bg-error text-error-secondary",
 }
 
 function relativeAge(value: string | null): string {
@@ -82,25 +88,25 @@ function pullRequestTone(
   health: AgentPullRequestHealth | undefined
 ): string {
   const state = pullRequestState(pullRequest, health)
-  if (state === "merged") return "text-info-foreground"
-  if (state === "closed") return "text-destructive"
-  if (hasActionableIssues(pullRequest, health)) return "text-destructive"
-  if (state === "draft") return "text-muted-foreground"
+  if (state === "merged") return "text-brand-primary"
+  if (state === "closed") return "text-error-secondary"
+  if (hasActionableIssues(pullRequest, health)) return "text-error-secondary"
+  if (state === "draft") return "text-secondary"
   if (
     !health?.statusAvailable ||
     !health.checksAvailable ||
     !health.commentsAvailable ||
     health.mergeConflictState !== "mergeable"
   ) {
-    return "text-muted-foreground"
+    return "text-secondary"
   }
   if (
     (health.pendingCheckCount ?? 0) > 0 ||
     (health.inconclusiveCheckCount ?? 0) > 0
   ) {
-    return "text-warning-foreground"
+    return "text-warning-secondary"
   }
-  return "text-success-foreground"
+  return "text-success-secondary"
 }
 
 function healthKey(repoFullName: string, number: number): string {
@@ -113,14 +119,14 @@ function HealthItem({
   count,
   label,
 }: {
-  icon: LucideIcon
+  icon: IconComponent
   iconClassName: string
   count?: number
   label: string
 }) {
   return (
     <span className="flex items-center gap-1 whitespace-nowrap">
-      <Icon className={cn("size-3.5", iconClassName)} />
+      <Icon size={14} weight="regular" className={iconClassName} />
       {count}
       <span className="hidden @xl:inline">
         {count === undefined ? label : ` ${label}`}
@@ -145,31 +151,31 @@ function HealthSummary({
     <>
       {failingCount > 0 && (
         <HealthItem
-          icon={XCircle}
-          iconClassName="text-destructive"
+          icon={XCircleIcon}
+          iconClassName="text-icon-error"
           count={failingCount}
           label={plural(failingCount, "check")}
         />
       )}
       {commentCount > 0 && (
         <HealthItem
-          icon={MessageCircle}
-          iconClassName="text-warning-foreground"
+          icon={ChatCircleIcon}
+          iconClassName="text-icon-warning"
           count={commentCount}
           label={plural(commentCount, "comment")}
         />
       )}
       {health.mergeConflictState === "conflicting" && (
         <HealthItem
-          icon={AlertTriangle}
-          iconClassName="text-destructive"
+          icon={WarningIcon}
+          iconClassName="text-icon-error"
           label="Conflict"
         />
       )}
       {pendingCount > 0 && (
         <HealthItem
-          icon={Clock}
-          iconClassName="text-warning-foreground"
+          icon={ClockIcon}
+          iconClassName="text-icon-warning"
           count={pendingCount}
           label="pending"
         />
@@ -187,39 +193,43 @@ function HealthDetails({
 }) {
   if (unavailable) {
     return (
-      <p className="border-t border-border/70 pt-3 text-xs text-muted-foreground">
+      <p className="border-t border-subtle pt-3 text-xs text-secondary">
         GitHub health is unavailable. This PR is not marked clean.
       </p>
     )
   }
   if (!health) {
-    return <p className="text-xs text-muted-foreground">Loading PR health…</p>
+    return <p className="text-xs text-secondary">Loading PR health…</p>
   }
   const healthUnavailable =
     !health.statusAvailable ||
     !health.checksAvailable ||
     !health.commentsAvailable
   return (
-    <div className="space-y-3 border-t border-border/70 pt-3">
+    <div className="space-y-3 border-t border-subtle pt-3">
       {health.mergeConflictState === "conflicting" && (
-        <div className="flex items-start gap-2 text-sm text-destructive">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <div className="flex items-start gap-2 text-sm text-error-secondary">
+          <WarningIcon size={16} weight="regular" className="mt-0.5 shrink-0" />
           <span>This branch has merge conflicts.</span>
         </div>
       )}
       {health.failingChecks.length > 0 && (
         <div className="space-y-1.5" data-testid="pr-failing-checks">
-          <p className="text-xs font-medium text-foreground">
+          <p className="text-xs font-medium text-primary">
             Failing checks ({health.failingChecks.length})
           </p>
           {health.failingChecks.map((check, index) => {
             const label = check.name || "Unnamed check"
             const content = (
               <>
-                <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+                <WarningIcon
+                  size={14}
+                  weight="regular"
+                  className="shrink-0 text-icon-error"
+                />
                 <span className="min-w-0 flex-1 truncate">{label}</span>
                 {check.conclusion && (
-                  <span className="shrink-0 text-muted-foreground">
+                  <span className="shrink-0 text-secondary">
                     {check.conclusion.replaceAll("_", " ")}
                   </span>
                 )}
@@ -228,7 +238,7 @@ function HealthDetails({
             return (
               <div
                 key={`${label}-${index}`}
-                className="flex items-center gap-2 px-1 py-0.5 text-xs text-foreground"
+                className="flex items-center gap-2 px-1 py-0.5 text-xs text-primary"
               >
                 {content}
               </div>
@@ -238,7 +248,7 @@ function HealthDetails({
       )}
       {(health.unresolvedReviewThreadCount ?? 0) > 0 && (
         <div className="space-y-2" data-testid="pr-unresolved-comments">
-          <p className="text-xs font-medium text-foreground">
+          <p className="text-xs font-medium text-primary">
             Unresolved comments ({health.unresolvedReviewThreadCount})
           </p>
           {health.unresolvedReviewThreads.map((thread, index) => {
@@ -247,13 +257,17 @@ function HealthDetails({
               : "Pull request"
             const content = (
               <>
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <MessageCircle className="size-3 shrink-0" />
+                <div className="flex items-center gap-1.5 text-[11px] text-secondary">
+                  <ChatCircleIcon
+                    size={12}
+                    weight="regular"
+                    className="shrink-0"
+                  />
                   <span>{thread.author ?? "Unknown author"}</span>
                   <span aria-hidden="true">·</span>
                   <span className="truncate">{location}</span>
                 </div>
-                <p className="line-clamp-2 text-xs text-foreground">
+                <p className="line-clamp-2 text-xs text-primary">
                   {thread.body || "No comment text"}
                 </p>
               </>
@@ -270,7 +284,7 @@ function HealthDetails({
         </div>
       )}
       {healthUnavailable && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-secondary">
           Some GitHub health details are unavailable. This PR is not marked
           clean.
         </p>
@@ -289,7 +303,6 @@ export function PullRequestHoverCard({
   healthUnavailable: boolean
 }) {
   const age = relativeAge(pullRequest.createdAt)
-  const authorInitial = pullRequest.author?.slice(0, 1).toUpperCase() || "?"
   const state = pullRequestState(pullRequest, health)
 
   return (
@@ -306,42 +319,41 @@ export function PullRequestHoverCard({
         >
           {state}
         </span>
-        <span className="min-w-0 truncate text-muted-foreground">
+        <span className="min-w-0 truncate text-secondary">
           {pullRequest.repoFullName} #{pullRequest.number}
         </span>
         {age && (
           <time
             dateTime={pullRequest.createdAt ?? undefined}
             suppressHydrationWarning
-            className="ml-auto shrink-0 text-muted-foreground"
+            className="ml-auto shrink-0 text-secondary"
           >
             {age}
           </time>
         )}
       </div>
-      <p className="text-base leading-snug font-medium text-foreground">
+      <p className="text-base leading-snug font-medium text-primary">
         {pullRequest.title}
       </p>
-      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
         <span className="truncate">{pullRequest.baseRef}</span>
         <span aria-hidden="true">←</span>
         <span className="truncate">{pullRequest.headRef}</span>
       </div>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Avatar size="sm">
-          {pullRequest.authorAvatarUrl && (
-            <AvatarImage src={pullRequest.authorAvatarUrl} alt="" />
-          )}
-          <AvatarFallback>{authorInitial}</AvatarFallback>
-        </Avatar>
+      <div className="flex items-center gap-2 text-sm text-secondary">
+        <Avatar
+          size="sm"
+          label={pullRequest.author ?? "Unknown author"}
+          imageUrl={pullRequest.authorAvatarUrl ?? undefined}
+        />
         <span className="min-w-0 truncate">
           {pullRequest.author ?? "Unknown author"}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
-          <span className="text-success-foreground">
+          <span className="text-success-secondary">
             +{pullRequest.diffStats.additions}
           </span>
-          <span className="text-destructive">
+          <span className="text-error-secondary">
             -{pullRequest.diffStats.deletions}
           </span>
           <span>
@@ -373,60 +385,61 @@ function PullRequestLink({
   const scopes = onFix ? fixScopes(pullRequest, health) : []
 
   return (
-    <div className="@container flex min-w-0 items-center gap-1 rounded-xl border border-foreground/20 bg-card p-1 text-xs text-muted-foreground shadow-sm dark:border-foreground/[0.06] dark:bg-[#222] dark:shadow-none">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <a
-              href={pullRequest.url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
-              data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
-              data-pr-tone={tone}
-              className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg px-2 py-1 transition-colors hover:bg-muted dark:hover:bg-muted/50"
+    <div className="@container flex min-w-0 items-center gap-1 rounded-xl border border-default bg-surface-level-1 p-1 text-xs text-secondary shadow-sm">
+      <HoverCard openDelay={250} closeDelay={100}>
+        <HoverCardTrigger asChild>
+          <a
+            href={pullRequest.url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
+            data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
+            data-pr-tone={tone}
+            className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg px-2 py-1 transition-colors hover:bg-surface-level-1-hover"
+          >
+            <GitPullRequestIcon
+              size={14}
+              weight="regular"
+              className={cn("shrink-0", tone)}
             />
-          }
-        >
-          <GitPullRequest className={cn("size-3.5 shrink-0", tone)} />
-          <span className="shrink-0 font-medium text-foreground">
-            #{pullRequest.number}
-          </span>
-          <span className="min-w-0 flex-1 truncate">{pullRequest.title}</span>
-          <span className="flex shrink-0 items-center gap-2 @xl:gap-3">
-            <HealthSummary health={health} />
-            <span className="hidden gap-1 @2xl:flex">
-              <span className="text-success-foreground">
-                +{pullRequest.diffStats.additions}
+            <span className="shrink-0 font-medium text-primary">
+              #{pullRequest.number}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{pullRequest.title}</span>
+            <span className="flex shrink-0 items-center gap-2 @xl:gap-3">
+              <HealthSummary health={health} />
+              <span className="hidden gap-1 @2xl:flex">
+                <span className="text-success-secondary">
+                  +{pullRequest.diffStats.additions}
+                </span>
+                <span className="text-error-secondary">
+                  -{pullRequest.diffStats.deletions}
+                </span>
               </span>
-              <span className="text-destructive">
-                -{pullRequest.diffStats.deletions}
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 font-medium capitalize",
+                  PR_STATE_STYLES[state]
+                )}
+              >
+                {state}
               </span>
             </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 font-medium capitalize",
-                PR_STATE_STYLES[state]
-              )}
-            >
-              {state}
-            </span>
-          </span>
-        </TooltipTrigger>
-        <TooltipPopup
-          variant="glass"
+          </a>
+        </HoverCardTrigger>
+        <HoverCardContent
           side="top"
           align="start"
           sideOffset={8}
-          className="rounded-xl p-3 shadow-2xl"
+          className={PULL_REQUEST_HOVER_CARD_CLASS}
         >
           <PullRequestHoverCard
             pullRequest={pullRequest}
             health={health}
             healthUnavailable={healthUnavailable}
           />
-        </TooltipPopup>
-      </Tooltip>
+        </HoverCardContent>
+      </HoverCard>
       {onFix && scopes.length > 0 && (
         <FixMenu
           pullRequest={pullRequest}
@@ -491,29 +504,28 @@ function FixMenu({
   const primary = failed ?? scopes[0]!
   return (
     <SplitButton
-      variant="ghost"
-      size="default"
-      className="text-foreground"
+      size="md"
+      variant="plain"
+      icon={WrenchIcon}
       disabled={disabled || fixing}
       onClick={() => void handleFix(primary)}
       menuLabel={`Fix PR #${pullRequest.number}`}
-      menuPopup={{ side: "top", sideOffset: 6 }}
+      menuSide="top"
       menu={
         scopes.length > 1 &&
         scopes
           .filter((scope) => scope !== primary)
           .map((scope) => (
-            <MenuItem
+            <DropdownMenuItem
               key={scope}
               aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
-              onClick={() => void handleFix(scope)}
+              onSelect={() => void handleFix(scope)}
             >
               {FIX_LABELS[scope]}
-            </MenuItem>
+            </DropdownMenuItem>
           ))
       }
     >
-      <Wrench />
       {fixing
         ? "Starting…"
         : failed
@@ -563,19 +575,15 @@ export function ThreadPullRequests({
         />
       ))}
       {hiddenCount > 0 && (
-        <button
-          type="button"
+        <Button
+          color="secondary"
+          variant="plain"
           aria-expanded={expanded}
+          leftDecorator={expanded ? CaretUpIcon : CaretDownIcon}
           onClick={() => setExpanded((current) => !current)}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          {expanded ? (
-            <ChevronUp className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
           {expanded ? "Show less" : `Show ${hiddenCount} more`}
-        </button>
+        </Button>
       )}
     </div>
   )

@@ -801,11 +801,15 @@ export function useSidebarRepoThreads({
   )
 }
 
+// Run costs land through a deferred refresh 15s+ after a run ends (see
+// `agent_cost._RETRY_DELAYS_SECONDS`), after the running-state poll has stopped.
+const RUN_COST_REFETCH_DELAYS_MS = [20_000, 60_000, 120_000]
+
 export function useAgentThread(threadId: string) {
   const queryClient = useQueryClient()
   const queryKey = agentThreadKeys.detail(threadId)
 
-  return useQuery({
+  const query = useQuery({
     queryKey,
     queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
@@ -825,6 +829,21 @@ export function useAgentThread(threadId: string) {
     // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
+
+  const isRunning = query.data?.status === "running"
+  const { refetch } = query
+  const wasRunning = useRef(isRunning)
+  useEffect(() => {
+    const settled = wasRunning.current && !isRunning
+    wasRunning.current = isRunning
+    if (!settled) return
+    const timers = RUN_COST_REFETCH_DELAYS_MS.map((delay) =>
+      window.setTimeout(() => void refetch(), delay)
+    )
+    return () => timers.forEach(window.clearTimeout)
+  }, [isRunning, refetch])
+
+  return query
 }
 
 export function useAgentThreadPullRequestStatus(
