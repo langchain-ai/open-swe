@@ -37,6 +37,14 @@ import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
 
 const chunkSize = 10
 
+function selectionSummary(values: string[]) {
+  return values.length ? (
+    <span className="max-w-[60%] truncate text-xs" title={values.join(", ")}>
+      {values.join(", ")}
+    </span>
+  ) : null
+}
+
 const sortOptions = [
   ["Last updated", "updatedAt"],
   ["Created", "createdAt"],
@@ -286,6 +294,8 @@ export function OpenPullRequests({
                 multiple
                 disableCloseOnSelect
                 size="sm"
+                className="h-6 flex-nowrap"
+                renderTags={selectionSummary}
                 aria-label="Filter by repository"
                 placeholder="All repositories"
                 emptyText={
@@ -318,6 +328,8 @@ export function OpenPullRequests({
                 multiple
                 disableCloseOnSelect
                 size="sm"
+                className="h-6 flex-nowrap"
+                renderTags={selectionSummary}
                 aria-label="Filter by status"
                 placeholder="All statuses"
                 options={[...reviewStatuses]}
