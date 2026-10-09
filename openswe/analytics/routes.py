@@ -1,7 +1,7 @@
 """Dashboard API for usage, PR and pipeline analytics."""
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -27,6 +27,39 @@ class TelemetryConfig(BaseModel):
 @router.get("/analytics/config")
 async def api_telemetry_config() -> TelemetryConfig:
     return TelemetryConfig(environment=ENV.DD_ENV.get())
+
+
+class PageView(BaseModel):
+    page_name: Literal[
+        "agents",
+        "review",
+        "usage",
+        "settings",
+        "workspaces",
+        "integrations",
+        "admin",
+        "assistant",
+        "incidents",
+        "cloud-agents",
+        "feature-flags",
+        "other",
+    ]
+
+
+@router.post("/analytics/page", status_code=204)
+async def api_page_view(
+    body: PageView,
+    session: dict[str, Any] = SESSION_DEP,
+) -> None:
+    from openswe.analytics.posthog import record_usage
+
+    await record_usage(
+        login=session["sub"],
+        email=session.get("email"),
+        event_type="page",
+        name=body.page_name,
+        properties={"page_name": body.page_name, "surface": "dashboard"},
+    )
 
 
 @router.get("/agent-usage-leaderboard")

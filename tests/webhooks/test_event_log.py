@@ -1,9 +1,11 @@
+import asyncio
 import json
 from datetime import UTC, date, datetime
 from typing import Literal
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi import BackgroundTasks
 from sqlalchemy import text
@@ -16,6 +18,70 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common, event_log
 from openswe.webhooks.event_log import EventLog, EventRefs
+
+
+async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
+    from openswe.analytics import posthog
+    from openswe.webhooks.event_log import LoggedEvent
+
+    monkeypatch.setenv("POSTHOG_API_KEY", "test-key")
+    monkeypatch.setenv("DD_ENV", "staging")
+    requests: list[dict[str, object]] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200)
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(
+        posthog.httpx,
+        "AsyncClient",
+        lambda **kwargs: client_type(**kwargs, transport=httpx.MockTransport(respond)),
+    )
+    event = LoggedEvent(
+        source="github",
+        event_type="issue_comment",
+        delivery_id="delivery-1",
+        received_at=datetime.now(UTC),
+        user_id=None,
+        workspace_id=None,
+        repository_id=None,
+        pull_request_id=None,
+        payload={"action": "created", "comment": {"body": "private content"}},
+    )
+    await posthog.record_webhook(event)
+    assert requests[0]["properties"]["distinct_id"] == "open-swe:webhook:github"
+    assert requests[0]["event"] == "Webhook Received"
+    assert "private content" not in json.dumps(requests)
+    assert requests[0]["properties"]["action"] == "created"
+    assert requests[0]["properties"]["environment"] == "staging"
+    user_id = uuid4()
+    from openswe.users import User
+
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User(id=user_id)))
+    await posthog.record_webhook(event.model_copy(update={"user_id": user_id}))
+    for event_type in ("page", "track"):
+        await posthog.record_usage(
+            login="alice",
+            email="alice@example.com",
+            event_type=event_type,
+            name="usage",
+            properties={},
+        )
+    assert {request["properties"]["distinct_id"] for request in requests[1:]} == {str(user_id)}
+    assert requests[2]["properties"]["$set"]["github_login"] == "alice"
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
+    await posthog.record_usage(
+        login="unknown",
+        email=None,
+        event_type="page",
+        name="usage",
+        properties={},
+    )
+    assert len(requests) == 4
+    monkeypatch.delenv("POSTHOG_API_KEY")
+    await posthog.record_webhook(event)
+    assert len(requests) == 4
 
 
 async def _partitions() -> set[str]:
@@ -83,6 +149,16 @@ async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) ->
 async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from openswe.analytics import posthog
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_export(event: event_log.LoggedEvent) -> None:
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(posthog, "record_webhook", slow_export)
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
         "openswe.slack.channels.SlackChannel.load",
@@ -109,14 +185,22 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         }
     )
 
-    await EventLog.record(
-        request,
-        b"command=%2Foswe&text=hello+there",
-        "slack",
-        event_type="/oswe",
-        delivery_id="trigger-1",
-        refs=EventRefs(slack_channel_id="CPUBLIC"),
-    )
+    try:
+        await asyncio.wait_for(
+            EventLog.record(
+                request,
+                b"command=%2Foswe&text=hello+there",
+                "slack",
+                event_type="/oswe",
+                delivery_id="trigger-1",
+                refs=EventRefs(slack_channel_id="CPUBLIC"),
+            ),
+            timeout=2,
+        )
+        await asyncio.wait_for(started.wait(), timeout=2)
+    finally:
+        release.set()
+        await asyncio.gather(*event_log._POSTHOG_TASKS)
 
     async with transaction() as conn:
         row = (

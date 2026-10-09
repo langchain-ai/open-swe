@@ -25,6 +25,7 @@ from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 
 from mcp.shared.exceptions import McpError
 from mcp.types import PaginatedRequestParams, Tool
+from openswe.analytics.posthog import record_mcp_tool
 from openswe.mcp.models import MCPConnection
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
@@ -163,6 +164,7 @@ def _wrap_tool(
     sources: tuple[MCPSource, ...],
 ) -> BaseTool:
     async def invoke(**arguments: Any) -> Any:
+        is_error = True
         try:
             for bound_source in sources:
                 if bound_source.namespace == namespace and bound_source.authorize is not None:
@@ -185,7 +187,12 @@ def _wrap_tool(
                 handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
             ) -> MCPToolCallResult:
                 # Preserve remote arguments named `runtime`, reserved by the adapter.
-                return await handler(request.override(args=arguments))
+                nonlocal is_error
+                response = await handler(request.override(args=arguments))
+                is_error = bool(getattr(response, "isError", False)) or (
+                    getattr(response, "status", None) == "error"
+                )
+                return response
 
             fresh = convert_mcp_tool_to_langchain_tool(
                 None,
@@ -198,10 +205,14 @@ def _wrap_tool(
             result = await asyncio.wait_for(fresh.coroutine(), timeout=_TIMEOUT_SECONDS)
             return result
         except ToolException:
+            is_error = True
             raise
         except Exception:
+            is_error = True
             logger.warning("MCP call failed", extra={"mcp_name": name})
             raise ToolException("MCP call failed; check its connection and credentials") from None
+        finally:
+            await record_mcp_tool(definition.name, is_error)
 
     return _MCPTool.from_function(
         coroutine=invoke,

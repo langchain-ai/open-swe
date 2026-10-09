@@ -31,6 +31,14 @@ What a deployment needs:
 
 GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on. Every variable Open SWE reads is declared in `openswe/config.py` with its description and default; that file is the complete reference.
 
+### Optional PostHog usage tracking
+
+Set `POSTHOG_API_KEY` to your PostHog project API key. `POSTHOG_HOST` defaults to `https://us.i.posthog.com`; use `https://eu.i.posthog.com` for EU projects or your self-hosted ingestion host. Without a key, capture is disabled. No frontend key or additional dependency is needed.
+
+Authenticated dashboard navigation sends `$pageview` events with normalized `page_name`; MCP executions send `MCP Tool Called` with tool name and `is_error`; persisted webhook deliveries send `Webhook Received` with source, event type, action, and resolved workspace/repository/PR IDs. `DD_ENV` identifies the deployment. Resolved users share the internal user UUID, with email/GitHub login traits on usage events. Unresolved usage is skipped; unresolved webhooks use a source-specific ID without creating person profiles.
+
+Delivery is best effort, not a durable export or historical backfill. Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; IP geolocation is disabled.
+
 ## 1. Create the deployment
 
 You need the deployment's public URL before the GitHub App can be created, so create the deployment first. Its initial revision may remain stopped until step 6, when you configure the GitHub and Slack variables plus a required login allowlist.
