@@ -73,7 +73,7 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
         ),
         ("details <@U0BOT> /breakout", Command("", prior_text="details")),
         (
-            "<@U0BOT> /workspace:infra /breakout fix it",
+            "<@U0BOT> /WORKSPACE:Infra /breakout fix it",
             Command("fix it", options="/workspace:infra", workspace="infra"),
         ),
         ("<@U0BOT> /breakout:web <#C2> why", Command("<#C2> why")),

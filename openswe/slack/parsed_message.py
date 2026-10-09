@@ -8,7 +8,7 @@ the first words of the message, in any order:
     @Open SWE /breakout #eng investigate this
     @Open SWE /btw how does thread routing work?
 
-Options (`/model:perf`, `/workspace:<name>`) may accompany at most one action
+Options (`/model:perf…`, e.g. `/model:performance`, and `/workspace:<name>`) may accompany at most one action
 (`/btw`, `/breakout`, `/breakout:web`), and the rest of the message is the
 argument. The legacy `workspace:<name>` and `env:<name>` tags, without the slash,
 are still accepted anywhere in the message.
@@ -37,7 +37,7 @@ _QUOTED = re.compile(
 _WORD = re.compile(r"\s*(\S+)")
 _WORKSPACE_OPTION = re.compile(r"/workspace:([A-Za-z0-9][A-Za-z0-9._-]*)", re.IGNORECASE)
 _LEGACY_WORKSPACE_TAG = re.compile(
-    r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)"
+    r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)", re.IGNORECASE
 )
 
 type Span = tuple[int, int]
@@ -82,7 +82,9 @@ class ParsedSlackMessage:
             mentions.append(f"@{bot_username}")
         anchors = [(0, 0)]
         if mentions:
-            pattern = re.compile("|".join(re.escape(mention) for mention in mentions))
+            pattern = re.compile(
+                "|".join(re.escape(mention) for mention in mentions), re.IGNORECASE
+            )
             anchors += [(found.start(), found.end()) for found in pattern.finditer(masked)]
         return anchors
 
@@ -106,7 +108,7 @@ class ParsedSlackMessage:
             token = word[1].lower()
             if action is None and token in SlackAction:
                 action = SlackAction(token)
-            elif performance_span is None and token == PERFORMANCE_MODEL:
+            elif performance_span is None and token.startswith(PERFORMANCE_MODEL):
                 performance_span = word.span(1)
             elif (
                 workspace is None
@@ -141,12 +143,13 @@ class ParsedSlackMessage:
 
     @property
     def options(self) -> str:
-        """Options typed outside the argument, to carry into a thread this message starts."""
-        spans = (self.performance_span, self.workspace_span)
+        """Options typed outside the argument, normalized, to carry into a thread this message starts."""
+        options = (
+            (self.performance_span, PERFORMANCE_MODEL),
+            (self.workspace_span, f"/workspace:{self.workspace}"),
+        )
         return " ".join(
-            self.text[start:end]
-            for start, end in sorted(filter(None, spans))
-            if end <= self.argument_start
+            option for span, option in options if span and span[1] <= self.argument_start
         )
 
     def without(self, *, performance_model: bool = False, workspace: bool = False) -> str:

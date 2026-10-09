@@ -31,9 +31,13 @@ def test_commands_only_lead_the_message_or_follow_this_bots_mention(
     ("text", "performance_model", "workspace", "without"),
     [
         ("<@U0BOT> /model:perf /workspace:Infra fix it", True, "infra", "<@U0BOT> fix it"),
+        ("<@U0BOT> /model:performance fix it", True, None, "<@U0BOT> fix it"),
+        ("<@U0BOT> /MODEL:PERFORM fix it", True, None, "<@U0BOT> fix it"),
         ("<@U0BOT> why did /model:perf fire?", False, None, "<@U0BOT> why did /model:perf fire?"),
         ("<@U0BOT> fix it workspace:infra", False, "infra", "<@U0BOT> fix it"),
         ("env:infra <@U0BOT> fix it", False, "infra", "<@U0BOT> fix it"),
+        ("<@U0BOT> fix it Workspace:Infra", False, "infra", "<@U0BOT> fix it"),
+        ("@OpenSWE /Model:Perf /WORKSPACE:infra fix it", True, "infra", "@OpenSWE fix it"),
         ("<@U0BOT> fix `workspace:infra`", False, None, "<@U0BOT> fix `workspace:infra`"),
     ],
 )
