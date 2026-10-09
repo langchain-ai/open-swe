@@ -198,6 +198,11 @@ def issue_session(*, login: str, email: str | None, avatar_url: str | None, user
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
+def rebind_session(session: dict[str, Any], user_id: str) -> str:
+    """``session`` re-signed for ``user_id``, keeping its expiry."""
+    return jwt.encode({**session, "user_id": user_id}, _secret(), algorithm=JWT_ALG)
+
+
 def session_user_id(session: dict[str, Any]) -> UUID | None:
     """The person a session was minted for, or ``None`` for one issued without."""
     raw = session.get("user_id")
