@@ -37,6 +37,8 @@ type Approval = {
   pr_number: number;
   awaiting_ready: boolean;
   approvers: Array<string>;
+  pull_request_id: string;
+  excluded_hunks: Array<{ path: string; header: string }>;
   votes: Array<{
     github_login: string;
     decision: string;
@@ -82,6 +84,33 @@ async function approvals(request: APIRequestContext): Promise<Array<Approval>> {
     );
   }
   return (await res.json()) as Array<Approval>;
+}
+
+type AuditEntry = {
+  operation_succeeded: boolean | null;
+  enrichments: {
+    expedited_exclusions?: {
+      pull_request_id: string | null;
+      head_sha: string;
+      approvals_md_sha256: string;
+      hunks: Array<{ path: string; guideline: string; reason: string }>;
+    };
+  };
+};
+
+async function auditLogs(
+  request: APIRequestContext,
+  operation: string,
+): Promise<Array<AuditEntry>> {
+  const res = await request.get(
+    `/control/audit-logs?operation_name=${encodeURIComponent(operation)}`,
+  );
+  if (!res.ok()) {
+    throw new Error(
+      `GET /control/audit-logs → ${res.status()}: ${await res.text()}`,
+    );
+  }
+  return (await res.json()) as Array<AuditEntry>;
 }
 
 async function latest(request: APIRequestContext): Promise<Approval> {
@@ -208,6 +237,20 @@ test.describe("Expedited Slack review", () => {
         permission: "write",
       });
     }
+    //    The repository auto-approves release notes and regenerated constants,
+    //    which the agent's change also touches, so it excludes them from the card.
+    await control(request, "/control/repo-file", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      files: {
+        ".open-swe/APPROVALS.md":
+          "Auto-approve release notes appended to CHANGELOG.md and the generated GENERATED_* table at the end of config.py.\n",
+        "CHANGELOG.md": "# Changelog\n",
+        "config.py": Array.from(
+          { length: 30 },
+          (_, index) => `VALUE_${index + 1} = ${index + 1}\n`,
+        ).join(""),
+      },
+    });
 
     // 1. The user asks for the change in Slack.
     const send = await request.post("/mock/slack/send", {
@@ -274,7 +317,49 @@ test.describe("Expedited Slack review", () => {
     ).toHaveCount(0);
     const diff = card(page).locator("img.block-image");
     await expect(diff).toBeVisible();
-    await expect(diff).toHaveAttribute("alt", /greet\.py/);
+    await expect(diff).toHaveAttribute("alt", /config\.py.*greet\.py/);
+    await expect(diff).not.toHaveAttribute("alt", /CHANGELOG/);
+    // 44 lines changed outside tests; only the 4 not covered by APPROVALS.md are
+    // drawn, and the other 40 are listed by guideline.
+    await expect(card(page)).toContainText(
+      /Open SWE judged these auto-approvable under `?\.open-swe\/APPROVALS\.md`? \(not shown\)/,
+    );
+    await expect(card(page)).toContainText(
+      /Release notes_?: `?CHANGELOG\.md`? \+30 −0/,
+    );
+    await expect(card(page)).toContainText(
+      /Generated constants_?: `?config\.py`? 1 hunk \+10 −0/,
+    );
+    // Git appends the enclosing line to a header, so compare only the ranges.
+    expect(
+      posted.excluded_hunks.map((hunk) => [
+        hunk.path,
+        /^@@ [^@]+ @@/.exec(hunk.header)?.[0],
+      ]),
+    ).toEqual([
+      ["CHANGELOG.md", "@@ -1 +1,31 @@"],
+      ["config.py", "@@ -28,3 +28,13 @@"],
+    ]);
+    const audits = await auditLogs(request, "expedite_pr_approval");
+    expect(audits[0]!.operation_succeeded).toBe(true);
+    const audited = audits[0]!.enrichments.expedited_exclusions!;
+    expect(audited.pull_request_id).toBe(posted.pull_request_id);
+    expect(audited.head_sha).toBe(opened.head_sha);
+    expect(audited.approvals_md_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      audited.hunks.map((hunk) => [hunk.path, hunk.guideline, hunk.reason]),
+    ).toEqual([
+      [
+        "CHANGELOG.md",
+        "Release notes",
+        "Only appends release-note bullets to CHANGELOG.md.",
+      ],
+      [
+        "config.py",
+        "Generated constants",
+        "Appends the regenerated GENERATED_* table and edits nothing else.",
+      ],
+    ]);
     expect(
       await diff.evaluate((img: HTMLImageElement) => img.naturalWidth),
       "the diff PNG should have rendered, uploaded and decoded",
@@ -294,7 +379,9 @@ test.describe("Expedited Slack review", () => {
       .toBe(false);
     expect((await pull(request)).draft).toBe(false);
     expect((await latest(request)).approvers).toEqual([]);
-    await expect(card(page)).toHaveCount(0);
+    await expect(card(page)).toContainText("Ready for review.");
+    await expect(card(page).getByRole("button")).toHaveCount(0);
+    await expect(card(page).locator("img")).toHaveCount(0);
     await page.goto("/mock/slack");
     await card(page)
       .getByRole("button", { name: /Broadcast in #/ })
@@ -400,10 +487,8 @@ test.describe("Expedited Slack review", () => {
     await page
       .locator(`[data-channel-id="D_${author!.slack_id.replace(/^U_/, "")}"]`)
       .click();
-    await expect(
-      page
-        .locator(".msg.bot")
-        .filter({ hasText: /Expedited review requested|Expedited review:/i }),
-    ).toHaveCount(0);
+    await expect(card(page)).toContainText("Expedited review: merged");
+    await expect(card(page).getByRole("button")).toHaveCount(0);
+    await expect(card(page).locator("img")).toHaveCount(0);
   });
 });

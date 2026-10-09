@@ -1,8 +1,15 @@
-import { Dialog } from "@base-ui/react/dialog"
-import { X } from "lucide-react"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@langchain/macaw-components/Dialog"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Kbd } from "@langchain/macaw-components/Kbd"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
 import type { AppCommand } from "@/lib/appCommands"
-import { Kbd } from "@/components/ui/kbd"
 import { useShortcutLabel } from "@/lib/hotkeys"
 
 function ShortcutKey({ shortcut }: { shortcut: string }) {
@@ -28,43 +35,47 @@ export function AppShortcutReference({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/45 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <Dialog.Popup
-          className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(40rem,80vh)] w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
-          data-hotkeys="ignore"
-        >
-          <div className="flex items-center justify-between border-b border-border px-5 py-4">
-            <Dialog.Title className="font-heading text-sm font-medium">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-h-[min(40rem,80vh)] w-[min(38rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-default bg-elevated text-primary shadow-lg"
+        childrenClassName="gap-0 p-0"
+        showClose={false}
+      >
+        <div className="flex min-h-0 flex-col" data-hotkeys="ignore">
+          <div className="flex items-center justify-between border-b border-default px-space-5 py-space-4">
+            <DialogTitle className="text-sm font-medium">
               Keyboard shortcuts
-            </Dialog.Title>
-            <Dialog.Close
-              aria-label="Close keyboard shortcuts"
-              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <X className="size-4" />
-            </Dialog.Close>
+            </DialogTitle>
+            <DialogClose asChild>
+              <IconButton
+                color="secondary"
+                icon={XIcon}
+                label="Close keyboard shortcuts"
+                size="xs"
+                tooltipProps={{ disabled: true }}
+                variant="plain"
+              />
+            </DialogClose>
           </div>
-          <Dialog.Description className="sr-only">
+          <DialogDescription className="sr-only">
             Keyboard shortcuts available in the current view.
-          </Dialog.Description>
-          <div className="overflow-y-auto p-5">
+          </DialogDescription>
+          <div className="overflow-y-auto p-space-5">
             {[...groups].map(([group, groupCommands]) => (
-              <section className="mb-6 last:mb-0" key={group}>
-                <h3 className="mb-2 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+              <section className="mb-space-5 last:mb-0" key={group}>
+                <h3 className="mb-space-2 text-xxs font-semibold tracking-wide text-tertiary uppercase">
                   {group}
                 </h3>
-                <div className="divide-y divide-border/60 rounded-lg border border-border">
+                <div className="divide-y divide-subtle rounded-lg border border-default">
                   {groupCommands.map((command) => (
                     <div
-                      className="flex min-h-10 items-center gap-3 px-3 py-2"
+                      className="flex min-h-10 items-center gap-space-3 px-space-3 py-space-2"
                       key={command.id}
                     >
                       <span className="min-w-0 flex-1 text-sm">
                         {command.label}
                       </span>
-                      <div className="flex shrink-0 items-center gap-1">
+                      <div className="flex shrink-0 items-center gap-space-1">
                         {command.shortcuts?.map((shortcut) => (
                           <ShortcutKey
                             key={`${command.id}:${shortcut}`}
@@ -78,8 +89,8 @@ export function AppShortcutReference({
               </section>
             ))}
           </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

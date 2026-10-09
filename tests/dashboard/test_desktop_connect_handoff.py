@@ -122,7 +122,7 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
         assert wrong_verifier.status_code == 400
 
         wrong_provider = client.post(
-            "/dashboard/api/notion/desktop/exchange",
+            "/dashboard/api/langsmith/desktop/exchange",
             json={"code": handoff, "verifier": _VERIFIER},
             headers=_APP_ORIGIN,
         )

@@ -1,3 +1,3 @@
-/** Shared look for the bare inputs and selects in this feature. */
+/** Native select sized to sit beside the xs action buttons. */
 export const control =
-  "rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
+  "h-5 rounded-xs border border-default bg-surface-level-1 px-space-1 text-xs text-primary"

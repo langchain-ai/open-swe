@@ -5,7 +5,8 @@ import re
 
 from sqlalchemy.exc import IntegrityError
 
-from openswe.human_review.people import repo_token
+from openswe.github.http import GitHubAppUnavailable
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import record_pull_request, settle
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
@@ -43,14 +44,15 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
         "slack_channel": channel_id,
         "slack_message_ts": message_ts,
     }
-    token = await repo_token(pr_ref.owner, pr_ref.repo)
-    if token is None:
-        logger.info("Posted pull request is outside the GitHub App's reach", extra=extra)
-        return
     if await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number) is not None:
         logger.info("Posted pull request already has an open review request", extra=extra)
         return
-    recorded = await record_pull_request(pr_ref, token)
+    try:
+        async with PullRequestClient.as_app(pr_ref.owner, pr_ref.repo, pr_ref.number) as pull:
+            recorded = await record_pull_request(pull)
+    except GitHubAppUnavailable:
+        logger.info("Posted pull request is outside the GitHub App's reach", extra=extra)
+        return
     if recorded is None:
         logger.warning("Could not read a pull request posted for review", extra=extra)
         return

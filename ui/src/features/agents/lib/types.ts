@@ -63,7 +63,7 @@ export type AcpToolKind =
   | "slack"
   | "linear"
   | "sql"
-  | "service-connection"
+  | "managed-tools"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
@@ -220,6 +220,8 @@ export interface Message {
   taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
+  /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */
+  invocationIds?: Array<string>
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
   timestampIsFallback?: boolean
@@ -537,6 +539,10 @@ export interface AgentThread {
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
+  /** LangSmith cost of the thread's finished runs so far, in USD. */
+  costUsd?: number | null
+  /** LangSmith cost of each finished run, in USD, by invocation id. */
+  runCosts?: Record<string, number>
   sourceUrl?: string | null
   sourceAppUrl?: string | null
   codeChannelUrl?: string | null

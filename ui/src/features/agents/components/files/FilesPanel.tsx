@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
-import { TreeStructureIcon } from "@phosphor-icons/react"
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
   File,
   Virtualizer,
@@ -34,8 +35,8 @@ function PreviewMessage(props: { children: string; error?: boolean }) {
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground",
-        props.error && "text-destructive"
+        "flex min-h-0 flex-1 items-center justify-center px-space-6 text-center text-xs text-secondary",
+        props.error && "text-error-secondary"
       )}
     >
       {props.children}
@@ -91,7 +92,7 @@ function FilePreview(props: {
   return (
     <>
       {data.truncated ? (
-        <div className="shrink-0 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+        <div className="shrink-0 border-b border-default px-space-3 py-1.5 text-xxs text-secondary">
           Preview limited to the first 1 MB of a {data.size.toLocaleString()}{" "}
           byte file.
         </div>
@@ -114,33 +115,32 @@ export function FilesPanel({
 
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
-      style={{ "--panel-diff-bg": "var(--background)" } as React.CSSProperties}
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-level-1"
+      style={
+        {
+          "--panel-diff-bg": "var(--bg-surface-level-1)",
+        } as React.CSSProperties
+      }
     >
       {relativePath ? (
-        <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-3">
+        <div className="flex h-9 shrink-0 items-center gap-space-1 border-b border-default px-space-3">
           <span
-            className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+            className="min-w-0 flex-1 truncate text-xs text-secondary"
             title={relativePath}
           >
             {relativePath}
           </span>
           <DiffWrapToggle />
-          <button
-            type="button"
-            aria-label={
-              explorerOpen ? "Hide file explorer" : "Show file explorer"
-            }
+          <IconButton
+            icon={TreeStructureIcon}
+            label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
+            size="sm"
+            color="secondary"
+            variant="plain"
             aria-pressed={explorerOpen}
-            title={explorerOpen ? "Hide file explorer" : "Show file explorer"}
             onClick={() => setExplorerOpen((open) => !open)}
-            className={cn(
-              "flex size-6 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground",
-              explorerOpen && "bg-accent text-foreground"
-            )}
-          >
-            <TreeStructureIcon className="size-3.5" />
-          </button>
+            className={cn(explorerOpen && "bg-selected text-primary")}
+          />
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -154,7 +154,7 @@ export function FilesPanel({
             className={cn(
               "flex min-h-0 shrink-0",
               relativePath
-                ? "w-[min(22rem,46%)] min-w-56 border-l border-border"
+                ? "w-[min(22rem,46%)] min-w-56 border-l border-default"
                 : "min-w-0 flex-1"
             )}
           >

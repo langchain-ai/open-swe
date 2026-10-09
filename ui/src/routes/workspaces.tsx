@@ -1,8 +1,8 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 
 import { AppShell } from "@/components/AppShell"
-import { buttonVariants } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { WorkspacesSection } from "@/features/settings/components/WorkspacesSection"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
@@ -18,7 +18,7 @@ function WorkspacesPage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
+      <main className="p-space-6">
         <Skeleton className="h-40 w-full" />
       </main>
     )
@@ -34,14 +34,17 @@ function WorkspacesPage() {
       <WorkspacesSection
         isAdmin={session.data.is_admin}
         renderConfigure={(workspace) => (
-          <Link
-            to="/workspaces/$slug"
-            params={{ slug: workspace.slug }}
+          <Button
+            as={
+              <Link to="/workspaces/$slug" params={{ slug: workspace.slug }} />
+            }
             aria-label={`Configure ${workspace.name}`}
-            className={buttonVariants({ size: "sm", variant: "outline" })}
+            size="xs"
+            color="secondary"
+            variant="outlined"
           >
             Configure
-          </Link>
+          </Button>
         )}
       />
     </AppShell>
