@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.routing import Route
 
 from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
@@ -19,6 +20,7 @@ from openswe.dashboard import router as dashboard_router
 from openswe.github.routes import router as github_webhook_router
 from openswe.linear.routes import router as linear_webhook_router
 from openswe.openai_responses.routes import router as sandbox_openai_router
+from openswe.remote_runtime import server as remote_runtime_server
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
@@ -33,6 +35,8 @@ logger = logging.getLogger(__name__)
 # Before the queue starts: it reads this when it builds its workers, and Open SWE
 # cannot survive them landing on different loops.
 pin_single_event_loop()
+
+REMOTE_RUNTIME = remote_runtime_server.build_mount()
 
 
 @asynccontextmanager
@@ -141,7 +145,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
     try:
-        yield
+        async with REMOTE_RUNTIME.lifespan():
+            yield
     finally:
         blob_import.cancel()
         await HUB.stop()
@@ -191,6 +196,13 @@ def create_app() -> FastAPI:
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
+    # Routed at the exact path so no redirect sits between a remote runtime and its tools.
+    app.router.routes.append(
+        Route(remote_runtime_server.PATH, REMOTE_RUNTIME.app, methods=["GET", "POST", "DELETE"])
+    )
+    app.router.routes.append(
+        Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
+    )
     mount_dashboard_ui(app)
     return app
 
