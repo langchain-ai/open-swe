@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from agent.github import webhook as github_webhooks
+from openswe.github import webhook as github_webhooks
 
 
 def _push_payload(
@@ -56,26 +56,26 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
 
     with (
         patch(
-            "agent.webhooks.common.is_repo_auto_review_enabled",
+            "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.webhooks.common.get_github_app_installation_token",
+            "openswe.webhooks.common.get_github_app_installation_token",
             new_callable=AsyncMock,
             return_value="t",
         ),
         patch(
-            "agent.webhooks.common.fetch_open_pr_for_branch",
+            "openswe.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": False},
         ),
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
     fake_client.runs.create.assert_not_called()
@@ -100,26 +100,26 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
 
     with (
         patch(
-            "agent.github.webhook.PullRequest.link_review",
+            "openswe.github.webhook.PullRequest.link_review",
             AsyncMock(side_effect=RuntimeError("Storage unavailable") if storage_fails else None),
         ) as completion,
         patch(
-            "agent.webhooks.common.is_repo_auto_review_enabled",
+            "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.webhooks.common.get_github_app_installation_token_with_expiry",
+            "openswe.webhooks.common.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("t", None),
         ),
         patch(
-            "agent.webhooks.common.fetch_open_pr_for_branch",
+            "openswe.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={
                 "kind": "reviewer",
@@ -128,22 +128,22 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
             },
         ),
         patch(
-            "agent.webhooks.common._fetch_compare_diff",
+            "openswe.webhooks.common._fetch_compare_diff",
             new_callable=AsyncMock,
             side_effect=["same diff", "same diff"],
         ),
-        patch("agent.webhooks.common.set_reviewer_thread_metadata", new=set_metadata),
+        patch("openswe.webhooks.common.set_reviewer_thread_metadata", new=set_metadata),
         patch(
-            "agent.webhooks.common.create_review_check_run",
+            "openswe.webhooks.common.create_review_check_run",
             new_callable=AsyncMock,
             return_value=42,
         ) as create_check,
         patch(
-            "agent.webhooks.common.complete_review_check_run",
+            "openswe.webhooks.common.complete_review_check_run",
             new_callable=AsyncMock,
             return_value=True,
         ) as complete_check,
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
         if storage_fails:
             with pytest.raises(RuntimeError, match="Storage unavailable"):
@@ -188,27 +188,27 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
 
     with (
         patch(
-            "agent.webhooks.common.is_repo_auto_review_enabled",
+            "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.webhooks.common.get_github_app_installation_token",
+            "openswe.webhooks.common.get_github_app_installation_token",
             new_callable=AsyncMock,
             return_value="t",
         ),
         patch(
-            "agent.webhooks.common.get_github_app_installation_token_with_expiry",
+            "openswe.webhooks.common.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("t", None),
         ),
         patch(
-            "agent.webhooks.common.fetch_open_pr_for_branch",
+            "openswe.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={
                 "kind": "reviewer",
@@ -217,26 +217,26 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             },
         ),
         patch(
-            "agent.webhooks.common._fetch_compare_diff",
+            "openswe.webhooks.common._fetch_compare_diff",
             new_callable=AsyncMock,
             side_effect=["old diff", "new diff"],
         ),
         patch(
-            "agent.webhooks.common.ensure_thread_exists_for_metadata",
+            "openswe.webhooks.common.ensure_thread_exists_for_metadata",
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch("agent.webhooks.common.cache_github_token_for_thread"),
+        patch("openswe.webhooks.common.cache_github_token_for_thread"),
         patch(
-            "agent.webhooks.common.set_reviewer_thread_metadata",
+            "openswe.webhooks.common.set_reviewer_thread_metadata",
             new_callable=AsyncMock,
         ) as set_meta,
         patch(
-            "agent.webhooks.common.create_review_check_run",
+            "openswe.webhooks.common.create_review_check_run",
             new_callable=AsyncMock,
             return_value=99,
         ) as create_check,
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 
@@ -285,22 +285,22 @@ async def test_push_re_review_targets_pushed_head_and_supersedes_previous_check(
 
     with (
         patch(
-            "agent.webhooks.common.is_repo_auto_review_enabled",
+            "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.webhooks.common.get_github_app_installation_token_with_expiry",
+            "openswe.webhooks.common.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("t", None),
         ),
         patch(
-            "agent.webhooks.common.fetch_open_pr_for_branch",
+            "openswe.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={
                 "kind": "reviewer",
@@ -311,31 +311,31 @@ async def test_push_re_review_targets_pushed_head_and_supersedes_previous_check(
             },
         ),
         patch(
-            "agent.webhooks.common._fetch_compare_diff",
+            "openswe.webhooks.common._fetch_compare_diff",
             new_callable=AsyncMock,
             side_effect=["old diff", "new diff"],
         ),
         patch(
-            "agent.webhooks.common.ensure_thread_exists_for_metadata",
+            "openswe.webhooks.common.ensure_thread_exists_for_metadata",
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch("agent.webhooks.common.cache_github_token_for_thread"),
+        patch("openswe.webhooks.common.cache_github_token_for_thread"),
         patch(
-            "agent.webhooks.common.set_reviewer_thread_metadata",
+            "openswe.webhooks.common.set_reviewer_thread_metadata",
             new_callable=AsyncMock,
         ) as set_meta,
         patch(
-            "agent.webhooks.common.create_review_check_run",
+            "openswe.webhooks.common.create_review_check_run",
             new_callable=AsyncMock,
             return_value=99,
         ) as create_check,
         patch(
-            "agent.webhooks.common.complete_review_check_run",
+            "openswe.webhooks.common.complete_review_check_run",
             new_callable=AsyncMock,
             side_effect=lambda **kwargs: kwargs["check_run_id"] != 41,
         ) as complete_check,
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 
@@ -374,22 +374,22 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
 
     with (
         patch(
-            "agent.webhooks.common.is_repo_auto_review_enabled",
+            "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.webhooks.common.get_github_app_installation_token",
+            "openswe.webhooks.common.get_github_app_installation_token",
             new_callable=AsyncMock,
             return_value="t",
         ),
         patch(
-            "agent.webhooks.common.fetch_open_pr_for_branch",
+            "openswe.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={
                 "kind": "reviewer",
@@ -397,7 +397,7 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
                 "last_reviewed_sha": "samesha",
             },
         ),
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
     fake_client.runs.create.assert_not_called()
@@ -420,35 +420,37 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
 
     with (
         patch(
-            "agent.webhooks.common.is_repo_auto_review_enabled",
+            "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token),
+        patch("openswe.webhooks.common.get_github_app_installation_token_with_expiry", get_token),
         patch(
-            "agent.webhooks.common.fetch_open_pr_for_branch",
+            "openswe.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
         patch(
-            "agent.webhooks.common.ensure_thread_exists_for_metadata",
+            "openswe.webhooks.common.ensure_thread_exists_for_metadata",
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch("agent.webhooks.common.cache_github_token_for_thread", cache_token),
+        patch("openswe.webhooks.common.cache_github_token_for_thread", cache_token),
         patch(
-            "agent.webhooks.common.fetch_pr_review_threads", new_callable=AsyncMock, return_value=[]
+            "openswe.webhooks.common.fetch_pr_review_threads",
+            new_callable=AsyncMock,
+            return_value=[],
         ),
         patch(
-            "agent.webhooks.common.reconcile_findings_with_review_threads", new_callable=AsyncMock
+            "openswe.webhooks.common.reconcile_findings_with_review_threads", new_callable=AsyncMock
         ),
-        patch("agent.webhooks.common.set_reviewer_thread_metadata", new_callable=AsyncMock),
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 
@@ -467,16 +469,16 @@ async def test_pr_close_disables_watch() -> None:
 
     with (
         patch(
-            "agent.webhooks.common.is_repo_auto_review_enabled",
+            "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ) as auto_review_enabled,
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
-        patch("agent.webhooks.common.set_reviewer_thread_metadata", side_effect=fake_set),
+        patch("openswe.webhooks.common.set_reviewer_thread_metadata", side_effect=fake_set),
     ):
         await github_webhooks.process_github_pr_close(_pr_close_payload(action="closed"))
     auto_review_enabled.assert_not_awaited()
@@ -492,11 +494,11 @@ async def test_pr_reopened_re_enables_watch() -> None:
 
     with (
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": False},
         ),
-        patch("agent.webhooks.common.set_reviewer_thread_metadata", side_effect=fake_set),
+        patch("openswe.webhooks.common.set_reviewer_thread_metadata", side_effect=fake_set),
     ):
         await github_webhooks.process_github_pr_close(_pr_close_payload(action="reopened"))
     assert captured and captured[0][1]["watch"] is True

@@ -109,6 +109,7 @@ export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
+  hierarchy?: boolean
   limit?: number
   offset?: number
   all?: boolean
@@ -123,6 +124,7 @@ export interface ThreadsPageParams {
   bot?: string
   repo?: string
   ownerless?: boolean
+  owned?: boolean
   sortBy?: ThreadSortBy
 }
 
@@ -227,6 +229,8 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
 
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
+  if (params.hierarchy != null)
+    search.set("hierarchy", String(params.hierarchy))
   if (params.limit != null) search.set("limit", String(params.limit))
   if (params.offset != null) search.set("offset", String(params.offset))
   if (params.all != null) search.set("all", String(params.all))
@@ -241,6 +245,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.repo) search.set("repo", params.repo)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
+  if (params.owned) search.set("owned", "true")
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -249,6 +254,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
 function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
+  owned?: boolean
 }): string {
   const search = new URLSearchParams()
   if (params.includeResolved != null)
@@ -256,6 +262,7 @@ function buildReposQuery(params: {
   if (params.includeAutomations != null) {
     search.set("include_automations", String(params.includeAutomations))
   }
+  if (params.owned) search.set("owned", "true")
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -305,6 +312,7 @@ export const agentsApi = {
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
+      owned?: boolean
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(

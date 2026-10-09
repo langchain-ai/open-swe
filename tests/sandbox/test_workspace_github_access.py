@@ -12,12 +12,12 @@ import httpx
 import httpx2
 import pytest
 
-from agent.github import app, proxy, sandbox_access
-from agent.github.repositories import Repository
-from agent.sandboxes import lifecycle
-from agent.sandboxes.providers.langsmith import LangSmithProvider
-from agent.workspaces.refresh import _create_builder_sandbox
-from agent.workspaces.store import WORKSPACES, Workspace
+from openswe.github import app, proxy, sandbox_access
+from openswe.github.repositories import Repository
+from openswe.sandboxes import lifecycle
+from openswe.sandboxes.providers.langsmith import LangSmithProvider
+from openswe.workspaces.refresh import _create_builder_sandbox
+from openswe.workspaces.store import WORKSPACES, Workspace
 from tests.support.github_sdk import mock_github_sdk
 
 
@@ -368,7 +368,7 @@ async def test_analyzer_resolves_repository_workspace_without_using_user_token(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
 ) -> None:
-    from agent.analyzer import PrepareAnalyzerRunMiddleware
+    from openswe.analyzer import PrepareAnalyzerRunMiddleware
 
     async def load(slug: str) -> Workspace:
         return Workspace(slug=slug, repos=["acme/api"] if slug == "oss" else [])
@@ -377,7 +377,7 @@ async def test_analyzer_resolves_repository_workspace_without_using_user_token(
     monkeypatch.setattr(WORKSPACES, "owner_of_repo", AsyncMock(return_value="oss"))
     monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
     monkeypatch.setattr(
-        "agent.analyzer.resolve_sandbox_work_dir", AsyncMock(return_value="/workspace")
+        "openswe.analyzer.resolve_sandbox_work_dir", AsyncMock(return_value="/workspace")
     )
     middleware = PrepareAnalyzerRunMiddleware(
         thread_id="thread",

@@ -19,10 +19,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import routes
-from agent.dashboard.oauth import COOKIE_NAME, issue_session
-from agent.slack import connect
-from agent.slack.oauth import SlackIdentity
+from openswe.dashboard import routes
+from openswe.dashboard.oauth import COOKIE_NAME, issue_session
+from openswe.slack import connect
+from openswe.slack.oauth import SlackIdentity
 
 _VERIFIER = "desktop-connect-verifier"
 _CHALLENGE = (
@@ -122,7 +122,7 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
         assert wrong_verifier.status_code == 400
 
         wrong_provider = client.post(
-            "/dashboard/api/notion/desktop/exchange",
+            "/dashboard/api/langsmith/desktop/exchange",
             json={"code": handoff, "verifier": _VERIFIER},
             headers=_APP_ORIGIN,
         )

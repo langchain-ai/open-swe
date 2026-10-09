@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { Switch } from "@langchain/macaw-components/Switch"
 
-import { SettingsPage, SettingsSection } from "@/components/AppShell"
+import {
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/AppShell"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
@@ -22,6 +27,20 @@ function ExperimentsPage() {
         <AssistantUiPreference />
       </SettingsSection>
       <SettingsSection title="Agent">
+        <SettingsRow
+          htmlFor="experimental_task_coordination"
+          label="Asynchronous task coordination (experimental) — ALWAYS DISABLED"
+          description="Disabled for everyone, regardless of your saved preference."
+          control={
+            <Switch
+              id="experimental_task_coordination"
+              aria-label="Asynchronous task coordination (experimental)"
+              checked={profile.data?.experimental_task_coordination ?? false}
+              onChange={() => {}}
+              disabled
+            />
+          }
+        />
         <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks (experimental)"

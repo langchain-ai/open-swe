@@ -8,6 +8,7 @@ sees in the UI is exactly what the agent produced.
 import shutil
 import subprocess
 import time
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from e2e_env import (
     SECOND_BARE_REMOTE,
     SECOND_OWNER,
     SECOND_REPO,
+    TEST_USERS,
     TMP,
 )
 
@@ -26,6 +28,7 @@ from e2e_env import (
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
 EPHEMERALS: list[dict[str, Any]] = []
+VIEWS: list[dict[str, Any]] = []
 CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
 _slack_epoch = int(time.time())
@@ -604,6 +607,12 @@ def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def github_user_id(login: str) -> int:
+    """The account id GitHub sends with every user; stable per login across runs."""
+    known = next((user["github_id"] for user in TEST_USERS if user["login"] == login), None)
+    return int(known) if known else zlib.crc32(login.encode())
+
+
 def review_rest_json(review: dict[str, Any], index: int) -> dict[str, Any]:
     """A review as the REST ``/pulls/{n}/reviews`` list returns it.
 
@@ -615,10 +624,15 @@ def review_rest_json(review: dict[str, Any], index: int) -> dict[str, Any]:
     resolved_id = (
         review_id if isinstance(review_id, int) and not isinstance(review_id, bool) else index + 1
     )
+    resolved_login = login if isinstance(login, str) else ""
     return {
         "id": resolved_id,
         "node_id": review.get("node_id") or f"PRR_node_{resolved_id}",
-        "user": {"login": login if isinstance(login, str) else "", "avatar_url": ""},
+        "user": {
+            "id": github_user_id(resolved_login),
+            "login": resolved_login,
+            "avatar_url": "",
+        },
         "state": review.get("state", ""),
         "body": review.get("body", ""),
         "html_url": review.get("url") or f"https://github.com/pullrequestreview-{resolved_id}",
@@ -991,6 +1005,7 @@ def merge_pull(
 def reset() -> None:
     SLACK_MESSAGES.clear()
     EPHEMERALS.clear()
+    VIEWS.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
     REPO_MERGE_METHODS.clear()

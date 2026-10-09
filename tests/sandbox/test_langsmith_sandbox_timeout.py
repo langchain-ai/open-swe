@@ -15,7 +15,7 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
 )
 
-from agent.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 
 
 class _FakeHandle:
@@ -122,7 +122,7 @@ def _patch_base_execute(monkeypatch: pytest.MonkeyPatch, sink: dict[str, Any]) -
         return SimpleNamespace(output="via-http", exit_code=0, truncated=False)
 
     monkeypatch.setattr(
-        "agent.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", fake_base_execute
+        "openswe.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", fake_base_execute
     )
 
 
@@ -208,10 +208,10 @@ async def test_aexecute_retries_a_transient_rejection(monkeypatch: pytest.Monkey
         raise SandboxRetryableConnectionError("WebSocket upgrade temporarily rejected (503)")
 
     monkeypatch.setattr(
-        "agent.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", failing_base_execute
+        "openswe.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", failing_base_execute
     )
     monkeypatch.setattr(sandbox, "run", flaky_run)
-    monkeypatch.setattr("agent.sandboxes.retry.asyncio.sleep", AsyncMock(), raising=True)
+    monkeypatch.setattr("openswe.sandboxes.retry.asyncio.sleep", AsyncMock(), raising=True)
 
     resp = await sb.aexecute("git status", timeout=5)
 

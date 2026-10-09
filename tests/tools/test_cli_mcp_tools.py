@@ -8,9 +8,9 @@ from fastapi import HTTPException
 from mcp.types import Tool
 from pydantic import ValidationError
 
-from agent.mcp import MCPConnection, runtime
-from agent.mcp.cli_tools import CLIArguments, cli_mcp_invoke, cli_mcp_tools
-from agent.tools.access import Access
+from openswe.mcp import MCPConnection, runtime
+from openswe.mcp.cli_tools import CLIArguments, cli_mcp_invoke, cli_mcp_tools
+from openswe.tools.access import Access
 
 
 @pytest.mark.asyncio
@@ -40,11 +40,11 @@ async def test_invoke_rechecks_admin_and_runs_private_admin_tool(
     assert exc.value.status_code == 404
 
     monkeypatch.setattr(
-        "agent.tools.access.resolve_access",
+        "openswe.tools.access.resolve_access",
         AsyncMock(return_value=Access(admin=True, admin_thread=True, admin_surface=True)),
     )
     get_settings = AsyncMock(return_value={"example": True})
-    monkeypatch.setattr("agent.tools.manage_feature_flags.get_instance_settings", get_settings)
+    monkeypatch.setattr("openswe.tools.manage_feature_flags.get_instance_settings", get_settings)
     result = await cli_mcp_invoke("manage_feature_flags", arguments, {"sub": "admin"})
     assert isinstance(result.content, dict)
     assert result.content["scope"] == "instance"
@@ -94,15 +94,15 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
         return runtime.MCPSource(namespace, list_connections, get_connection)
 
     monkeypatch.setattr(
-        "agent.mcp.instance.instance_mcp_source",
+        "openswe.mcp.instance.instance_mcp_source",
         lambda: source(("instance_mcps",), instance),
     )
     monkeypatch.setattr(
-        "agent.mcp.workspace.workspace_mcp_source",
+        "openswe.mcp.workspace.workspace_mcp_source",
         lambda workspace: source(("workspace_mcps", workspace), {}),
     )
     monkeypatch.setattr(
-        "agent.mcp.user.user_mcp_source",
+        "openswe.mcp.user.user_mcp_source",
         lambda login: source(("user_mcps", login), personal if login == "alice" else {}),
     )
 

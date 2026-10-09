@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-import { CaretDownIcon, StackIcon } from "@phosphor-icons/react"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { StackIcon } from "@phosphor-icons/react/dist/ssr/Stack"
 
 import type { WorkspaceOption } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -13,6 +15,7 @@ interface WorkspaceSelectorProps {
   showWithOneWorkspace?: boolean
   /** Shown while nothing is selected. */
   placeholder?: string
+  side?: "top" | "bottom"
 }
 
 /**
@@ -29,6 +32,7 @@ export function WorkspaceSelector({
   disabled = false,
   showWithOneWorkspace = false,
   placeholder = "No workspace",
+  side = "bottom",
 }: WorkspaceSelectorProps) {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -57,17 +61,22 @@ export function WorkspaceSelector({
         disabled={disabled}
         aria-label="Workspace"
         onClick={() => setOpen((value) => !value)}
-        className="flex max-w-[220px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+        className="flex max-w-[220px] cursor-pointer items-center gap-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
       >
-        <StackIcon className="size-3.5 shrink-0" />
+        <StackIcon className="size-3.5 shrink-0" weight="regular" />
         <span className="flex-1 truncate text-left">
           {selected?.name ?? placeholder}
         </span>
-        <CaretDownIcon className="size-3 shrink-0 opacity-70" />
+        <CaretDownIcon className="size-3 shrink-0 opacity-70" weight="bold" />
       </button>
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 flex max-h-72 w-64 flex-col overflow-y-auto rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg">
-          <div className="px-2 pt-2 pb-1 text-muted-foreground">Workspace</div>
+        <div
+          className={cn(
+            "absolute left-0 z-50 flex max-h-72 w-64 flex-col overflow-y-auto rounded-md border border-subtle bg-elevated text-xs text-primary shadow-md",
+            side === "top" ? "bottom-full mb-1" : "top-full mt-1"
+          )}
+        >
+          <div className="px-2 pt-2 pb-1 text-secondary">Workspace</div>
           {workspaces.map((workspace) => {
             const isSelected = workspace.slug === selectedSlug
             return (
@@ -79,18 +88,24 @@ export function WorkspaceSelector({
                   setOpen(false)
                 }}
                 className={cn(
-                  "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
-                  isSelected ? "text-foreground" : "text-muted-foreground"
+                  "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-elevated-hover",
+                  isSelected ? "text-primary" : "text-secondary"
                 )}
               >
                 <span className="truncate">{workspace.name}</span>
                 {!workspace.has_snapshot && (
-                  <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
+                  <span className="ml-2 shrink-0 text-xxs text-tertiary">
                     no snapshot
                   </span>
                 )}
                 {isSelected && (
-                  <span className="ml-auto pl-3 text-muted-foreground">✓</span>
+                  <span className="ml-auto shrink-0 pl-3">
+                    <CheckIcon
+                      aria-hidden="true"
+                      className="size-3.5 text-icon-secondary"
+                      weight="regular"
+                    />
+                  </span>
                 )}
               </button>
             )

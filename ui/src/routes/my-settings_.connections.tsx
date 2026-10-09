@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { SettingsPage, SettingsSection } from "@/components/AppShell"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
+import { ManagedToolsSection } from "@/features/settings/components/ManagedToolsSection"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { pageTitle } from "@/lib/pageTitle"
 
@@ -20,6 +21,7 @@ function ConnectionsPage() {
       {(user) => (
         <>
           <ConnectionsSection user={user} />
+          <ManagedToolsSection />
           <SettingsSection title="Slack">
             <ProfileSwitchRow
               field="concierge_mode"

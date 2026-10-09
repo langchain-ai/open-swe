@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/macaw-components/Button"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { captureElement } from "./elementContext"
 import type { ElementContext } from "./elementContext"
@@ -163,13 +163,13 @@ export function PageAnnotations() {
         <div className="flex items-center justify-between gap-1">
           <strong className="text-sm">Annotate · {annotations.length}</strong>
           <Button
-            variant="ghost"
+            variant="plain"
             size="sm"
             onClick={() => setMinimized((value) => !value)}
           >
             {minimized ? "Expand" : "Hide"}
           </Button>
-          <Button variant="ghost" size="sm" onClick={toggle}>
+          <Button variant="plain" size="sm" onClick={toggle}>
             Close
           </Button>
         </div>
@@ -210,7 +210,7 @@ export function PageAnnotations() {
                   </Button>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="plain"
                     onClick={() => setSelected(null)}
                   >
                     Cancel
@@ -237,7 +237,7 @@ export function PageAnnotations() {
                   {annotation.note}
                 </span>
                 <Button
-                  variant="ghost"
+                  variant="plain"
                   size="sm"
                   aria-label={`Remove annotation ${index + 1}`}
                   onClick={() =>
@@ -257,7 +257,7 @@ export function PageAnnotations() {
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
-                variant="outline"
+                variant="outlined"
                 disabled={!annotations.length || Boolean(selected)}
                 onClick={copy}
               >

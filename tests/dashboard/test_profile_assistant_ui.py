@@ -1,7 +1,7 @@
-from agent.dashboard.profiles import ProfileUpdate, get_profile, upsert_profile
+from openswe.dashboard.profiles import ProfileUpdate, get_profile, upsert_profile
 
 
-async def test_conversation_preference_is_personal_and_survives_other_profile_edits(fake_store):
+async def test_conversation_preference_is_personal_and_survives_other_profile_edits(user_records):
     defaults = {"default_model": "openai:gpt-5.6-sol", "reasoning_effort": "medium"}
     await upsert_profile("alice", "", ProfileUpdate(**defaults, experimental_assistant_ui=True))
     await upsert_profile("bob", "", ProfileUpdate(**defaults, experimental_assistant_ui=False))

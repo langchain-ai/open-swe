@@ -2,8 +2,8 @@ import pytest
 from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
-from agent.slack import http
-from agent.slack.client import remove_slack_reaction
+from openswe.slack import http
+from openswe.slack.client import remove_slack_reaction
 from tests.support.slack_api import SlackAPI, slack_api_server
 
 
@@ -33,7 +33,7 @@ async def test_removing_an_absent_reaction_is_already_settled(slack_api: SlackAP
 
 
 async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
-    from agent.slack.tools.read_thread_messages import slack_read_thread_messages
+    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
 
     slack_api.respond(
         {
@@ -74,7 +74,7 @@ _PUBLIC_CHANNEL = {
 
 
 async def test_read_channel_tool_refuses_a_private_channel(slack_api, grant_tool_access):  # noqa: ANN001
-    from agent.slack.tools.read_channel_messages import slack_read_channel_messages
+    from openswe.slack.tools.read_channel_messages import slack_read_channel_messages
 
     grant_tool_access(private=True)
 

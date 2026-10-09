@@ -1,5 +1,5 @@
-import { Bot, ChevronDown, ChevronRight } from "lucide-react"
-import { IoLogoSlack } from "react-icons/io5"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -7,12 +7,28 @@ import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
+import { ExpandableMessageChip } from "./ExpandableMessageChip"
+import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
+import { cn } from "@/lib/utils"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
 export function UserMessage({ message }: { message: Message }) {
+  if (message.taskEvent) {
+    return (
+      <TaskEventMessage
+        event={message.taskEvent}
+        messageId={message.id}
+        timestamp={message.timestampIsFallback ? undefined : message.timestamp}
+      />
+    )
+  }
+  return <StandardUserMessage message={message} />
+}
+
+function StandardUserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const { excerpts, text } = parseExcerpts(
@@ -39,9 +55,89 @@ export function UserMessage({ message }: { message: Message }) {
     return () => observer.disconnect()
   }, [text])
 
+  const body = (
+    <>
+      {hasBody && (
+        <div
+          className={cn(
+            "relative overflow-hidden rounded-xl p-space-3",
+            isSystem
+              ? "mt-space-1 border border-default bg-surface-level-2"
+              : "bg-surface-level-2"
+          )}
+        >
+          {excerpts.map((excerpt, i) => (
+            <CodeBlock
+              key={i}
+              title={excerpt.location}
+              language={excerpt.language}
+              text={excerpt.code}
+            />
+          ))}
+          {images.length > 0 && (
+            <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">
+              {images.map((img, i) => (
+                <div
+                  key={i}
+                  className="overflow-hidden rounded-lg border border-default bg-surface-level-1"
+                >
+                  <MessageImage
+                    chunk={img}
+                    className="block h-auto max-h-[220px] w-full object-cover"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          {text && (
+            <div
+              ref={textRef}
+              className={cn(
+                "text-sm leading-[1.6] break-words whitespace-pre-wrap text-primary",
+                !isSystem && !expanded && "overflow-hidden"
+              )}
+              style={
+                !isSystem && !expanded
+                  ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX }
+                  : undefined
+              }
+            >
+              {isSlack ? (
+                <SlackMrkdwn text={text} />
+              ) : (
+                <SkillPromptText text={text} />
+              )}
+            </div>
+          )}
+          {!isSystem && isTruncated && (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              aria-expanded={expanded}
+              data-testid="user-message-show-more"
+              className="mt-space-1 rounded-sm text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            >
+              {expanded ? "Show less" : "Show more"}
+            </button>
+          )}
+        </div>
+      )}
+      {!message.timestampIsFallback && (
+        <MessageTimestamp
+          timestamp={message.timestamp}
+          align={isSystem ? "left" : "right"}
+          className="mt-space-1 pr-space-1"
+        />
+      )}
+    </>
+  )
+
   return (
     <div
-      className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
+      className={cn(
+        "group/turn my-4 flex flex-col gap-space-1",
+        isSystem ? "items-start" : "items-end"
+      )}
       data-testid="user-message"
       data-message-id={message.id}
       data-message-delivery-status={message.deliveryStatus}
@@ -49,37 +145,23 @@ export function UserMessage({ message }: { message: Message }) {
       data-message-surface={message.structuredSurface}
     >
       <div className="max-w-[80%]">
-        {isSystem ? (
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            aria-expanded={expanded}
-            data-testid="system-message-toggle"
-            className="flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/30"
-          >
-            {expanded ? (
-              <ChevronDown className="size-3" />
-            ) : (
-              <ChevronRight className="size-3" />
-            )}
-            <span>{message.structuredSenderName || "Context"}</span>
-            {message.structuredSenderNote && (
-              <span className="text-muted-foreground/70">
-                · {message.structuredSenderNote}
-              </span>
-            )}
-          </button>
-        ) : (
+        {!isSystem &&
           (message.structuredSenderName ||
             isSlack ||
             message.structuredSenderIsBot) && (
-            <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
+            <div className="mb-space-1 flex items-center gap-space-1 px-space-1 text-xxs font-medium text-secondary">
               {isSlack && (
-                <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
+                <SlackLogoIcon
+                  size={12}
+                  weight="fill"
+                  role="img"
+                  aria-label="Slack"
+                />
               )}
               {message.structuredSenderIsBot && (
-                <Bot
-                  className="size-3"
+                <RobotIcon
+                  size={12}
+                  weight="regular"
                   role="img"
                   aria-label="Bot"
                   data-testid="user-message-bot-icon"
@@ -89,80 +171,40 @@ export function UserMessage({ message }: { message: Message }) {
                 <span>{message.structuredSenderName}</span>
               )}
               {message.structuredSenderNote && (
-                <span className="font-normal text-muted-foreground/70">
+                <span className="font-normal text-tertiary">
                   {" · "}
                   {message.structuredSenderNote}
                 </span>
               )}
             </div>
-          )
-        )}
-        {(!isSystem || expanded) && hasBody && (
-          <div
-            className={`relative overflow-hidden rounded-2xl p-3 ${
-              isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
-            }`}
-          >
-            {excerpts.map((excerpt, i) => (
-              <CodeBlock
-                key={i}
-                title={excerpt.location}
-                language={excerpt.language}
-                text={excerpt.code}
-              />
-            ))}
-            {images.length > 0 && (
-              <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                {images.map((img, i) => (
-                  <div
-                    key={i}
-                    className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                  >
-                    <MessageImage
-                      chunk={img}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-            {text && (
-              <div
-                ref={textRef}
-                className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground ${
-                  !expanded ? "overflow-hidden" : ""
-                }`}
-                style={
-                  !expanded ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX } : undefined
-                }
-              >
-                {isSlack ? (
-                  <SlackMrkdwn text={text} />
-                ) : (
-                  <SkillPromptText text={text} />
+          )}
+        {isSystem ? (
+          <ExpandableMessageChip
+            testId="system-message-toggle"
+            label={
+              <>
+                <span>{message.structuredSenderName || "Context"}</span>
+                {message.structuredSenderNote && (
+                  <span className="text-tertiary">
+                    · {message.structuredSenderNote}
+                  </span>
                 )}
-              </div>
-            )}
-            {isTruncated && (
-              <button
-                type="button"
-                onClick={() => setExpanded((value) => !value)}
-                aria-expanded={expanded}
-                data-testid="user-message-show-more"
-                className="mt-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {expanded ? "Show less" : "Show more"}
-              </button>
-            )}
-          </div>
+              </>
+            }
+          >
+            {body}
+          </ExpandableMessageChip>
+        ) : (
+          body
         )}
         {message.deliveryStatus && (
           <div
-            className={`mt-1 pr-1 text-right text-[11px] ${
+            className={cn(
+              "mt-space-1 pr-space-1 text-right text-xxs",
               message.deliveryStatus === "failed"
-                ? "text-destructive"
-                : "text-muted-foreground"
-            }`}
+                ? "text-error-secondary"
+                : "text-secondary"
+            )}
           >
             {message.deliveryStatus !== "failed" ? (
               "Sending"
@@ -177,13 +219,6 @@ export function UserMessage({ message }: { message: Message }) {
               </span>
             )}
           </div>
-        )}
-        {!message.timestampIsFallback && (!isSystem || expanded) && (
-          <MessageTimestamp
-            timestamp={message.timestamp}
-            align={isSystem ? "left" : "right"}
-            className="mt-1 pr-1"
-          />
         )}
       </div>
     </div>

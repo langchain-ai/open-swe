@@ -1,22 +1,29 @@
-import { Menu } from "@base-ui/react/menu"
-import {
-  ArchiveIcon,
-  ArrowCounterClockwiseIcon,
-  CopyIcon,
-  PushPinIcon,
-  PushPinSlashIcon,
-  TrashIcon,
-  TreeStructureIcon,
-} from "@phosphor-icons/react"
-import { IoLogoSlack } from "react-icons/io5"
+import { ContextMenuItem } from "@langchain/macaw-components/ContextMenu"
+import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
+import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
+import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
+import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
 
 import type { DesktopLegacyLocalThread } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 
-const menuItemClassName =
-  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+/** Radix scopes items to their menu, so callers name the menu they render in. */
+export type ThreadMenuKind = "dropdown" | "context"
+
+const MENU_ITEM = {
+  dropdown: DropdownMenuItem,
+  context: ContextMenuItem,
+} as const
+
+const ICON_SIZE = 14
 
 export function ThreadMenuItems({
+  menu = "dropdown",
   thread,
   localThread,
   pinned,
@@ -26,6 +33,7 @@ export function ThreadMenuItems({
   onToggleArchived,
   onDelete,
 }: {
+  menu?: ThreadMenuKind
   thread: AgentThread | null
   localThread?: DesktopLegacyLocalThread
   pinned: boolean
@@ -35,95 +43,92 @@ export function ThreadMenuItems({
   onToggleArchived: () => void
   onDelete: () => void
 }) {
+  const Item = MENU_ITEM[menu]
   const threadId = thread?.id ?? localThread?.id
   return (
     <>
       {thread?.traceUrl && (
-        <Menu.LinkItem
-          href={thread.traceUrl}
-          target="_blank"
-          rel="noreferrer"
-          closeOnClick
-          className={menuItemClassName}
-        >
-          <TreeStructureIcon className="size-3.5" />
-          Open trace
-        </Menu.LinkItem>
+        <Item asChild className="gap-space-2">
+          <a href={thread.traceUrl} target="_blank" rel="noreferrer">
+            <TreeStructureIcon size={ICON_SIZE} weight="regular" />
+            Open trace
+          </a>
+        </Item>
       )}
       {localThread && (
-        <Menu.Item
-          onClick={() => {
+        <Item
+          className="gap-space-2"
+          onSelect={() => {
             void window.openSweDesktop?.openLocalTrace(localThread.id)
           }}
-          className={menuItemClassName}
         >
-          <TreeStructureIcon className="size-3.5" />
+          <TreeStructureIcon size={ICON_SIZE} weight="regular" />
           Open trace
-        </Menu.Item>
+        </Item>
       )}
       {thread?.sourceUrl && (
-        <Menu.LinkItem
-          href={thread.sourceAppUrl ?? thread.sourceUrl}
-          target="_blank"
-          rel="noreferrer"
-          closeOnClick
-          className={menuItemClassName}
-        >
-          <IoLogoSlack className="size-3.5" />
-          Open in Slack
-        </Menu.LinkItem>
+        <Item asChild className="gap-space-2">
+          <a
+            href={thread.sourceAppUrl ?? thread.sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <SlackLogoIcon size={ICON_SIZE} weight="regular" />
+            Open in Slack
+          </a>
+        </Item>
       )}
-      <Menu.Item onClick={onTogglePin} className={menuItemClassName}>
+      <Item className="gap-space-2" onSelect={onTogglePin}>
         {pinned ? (
-          <PushPinSlashIcon className="size-3.5" />
+          <PushPinSlashIcon size={ICON_SIZE} weight="regular" />
         ) : (
-          <PushPinIcon className="size-3.5" />
+          <PushPinIcon size={ICON_SIZE} weight="regular" />
         )}
         {pinned ? "Unpin thread" : "Pin thread"}
-      </Menu.Item>
+      </Item>
       {thread && (
-        <Menu.Item
+        <Item
+          className="gap-space-2"
           disabled={!thread.sandboxId}
-          onClick={() => {
+          onSelect={() => {
             if (thread.sandboxId) {
               void navigator.clipboard.writeText(thread.sandboxId)
             }
           }}
           title={thread.sandboxId ?? undefined}
-          className={`${menuItemClassName} data-disabled:pointer-events-none data-disabled:opacity-50`}
         >
-          <CopyIcon className="size-3.5" />
+          <CopyIcon size={ICON_SIZE} weight="regular" />
           Copy sandbox ID
-        </Menu.Item>
+        </Item>
       )}
       {threadId && (
-        <Menu.Item
-          onClick={() => {
+        <Item
+          className="gap-space-2"
+          onSelect={() => {
             void navigator.clipboard.writeText(threadId)
           }}
           title={threadId}
-          className={menuItemClassName}
         >
-          <CopyIcon className="size-3.5" />
+          <CopyIcon size={ICON_SIZE} weight="regular" />
           Copy thread ID
-        </Menu.Item>
+        </Item>
       )}
-      <Menu.Item onClick={onToggleArchived} className={menuItemClassName}>
+      <Item className="gap-space-2" onSelect={onToggleArchived}>
         {archived ? (
-          <ArrowCounterClockwiseIcon className="size-3.5" />
+          <ArrowCounterClockwiseIcon size={ICON_SIZE} weight="regular" />
         ) : (
-          <ArchiveIcon className="size-3.5" />
+          <ArchiveIcon size={ICON_SIZE} weight="regular" />
         )}
         {archived ? "Unarchive thread" : "Archive thread"}
-      </Menu.Item>
-      <Menu.Item
-        onClick={onDelete}
+      </Item>
+      <Item
+        className="gap-space-2 text-error-secondary"
+        onSelect={onDelete}
         disabled={isDeleting}
-        className={`${menuItemClassName} text-destructive data-disabled:pointer-events-none data-disabled:opacity-50`}
       >
-        <TrashIcon className="size-3.5" />
+        <TrashIcon size={ICON_SIZE} weight="regular" />
         Delete thread
-      </Menu.Item>
+      </Item>
     </>
   )
 }

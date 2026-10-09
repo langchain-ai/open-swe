@@ -27,7 +27,10 @@ import {
   isSilentSender,
   parseStructuredInput,
 } from "@/features/agents/lib/structuredInputMessages"
-import { contextTokensFromUsageMetadata } from "@/features/agents/lib/contextUsage"
+import {
+  type ContextUsage,
+  contextUsageFromUsageMetadata,
+} from "@/features/agents/lib/contextUsage"
 import { attachmentUrl, fetchToolOutput } from "./api"
 import type { StructuredEntity } from "@/features/agents/lib/structuredInputMessages"
 import type {
@@ -63,6 +66,8 @@ export interface TranscriptMessageState {
   attachments: ReadonlyArray<TranscriptAttachment>
   /** The GitHub login of a human message's sender, when the server knows it. */
   senderLogin: string | null
+  /** Invocation an AI message ran under, when the provider reported usage. */
+  invocationId?: string
   createdAt: string
 }
 
@@ -126,8 +131,8 @@ export interface TranscriptState {
    * turns have settled and can no longer change.
    */
   olderCursor: string | null
-  /** Context size the newest AI message reported, for the composer's meter. */
-  contextTokens: number | null
+  /** Context size and model the newest AI message reported, for the composer's meter. */
+  contextUsage: ContextUsage | null
   /** Sender entities parsed out of human message text, rebuilt only when that text changes. */
   entities: ReadonlyMap<string, StructuredEntity>
 }
@@ -179,6 +184,7 @@ function indexMessages(
       namespace: row.namespace,
       attachments: row.attachments ?? [],
       senderLogin: row.sender?.login ?? null,
+      invocationId: row.usage?.invocation_id ?? undefined,
       createdAt: row.created_at,
     }
   }
@@ -298,7 +304,7 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
     // `snapshot.messages` is ordered by `created_at`, so the last root AI row
     // is the newest one, and its usage is what the composer's meter reads.
     // Subagents report their own context, which is not this conversation's.
-    contextTokens: contextTokensFromUsageMetadata(
+    contextUsage: contextUsageFromUsageMetadata(
       snapshot.messages.findLast(
         (message) => message.role === "ai" && message.namespace.length === 0
       )?.usage
@@ -335,7 +341,7 @@ export function applySnapshot(
   if (!continuous) {
     return {
       ...fresh,
-      contextTokens: fresh.contextTokens ?? state.contextTokens,
+      contextUsage: fresh.contextUsage ?? state.contextUsage,
     }
   }
   const messages = { ...state.messages, ...fresh.messages }
@@ -351,7 +357,7 @@ export function applySnapshot(
     olderCursor: state.olderCursor,
     // A window whose AI messages reported no usage leaves the last known
     // context size in place rather than blanking the composer's meter.
-    contextTokens: fresh.contextTokens ?? state.contextTokens,
+    contextUsage: fresh.contextUsage ?? state.contextUsage,
     entities: collectStructuredEntities(humanTexts(messages)),
   }
 }
@@ -691,6 +697,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
         senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
+        invocationId: payload.usage?.invocation_id ?? undefined,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
       if (payload.role === "ai" && payload.namespace.length === 0) {
@@ -699,9 +706,9 @@ export function applyEvent(
         // this conversation's, so it never moves the meter. A message the
         // provider reported no usage for leaves the last known size in place
         // rather than blanking the meter.
-        const tokens = contextTokensFromUsageMetadata(payload.usage)
-        if (tokens !== null)
-          draft.state = { ...draft.state, contextTokens: tokens }
+        const usage = contextUsageFromUsageMetadata(payload.usage)
+        if (usage !== null)
+          draft.state = { ...draft.state, contextUsage: usage }
       }
       break
     }
@@ -930,12 +937,14 @@ function buildHumanMessage(
   // Our own replies reach the transcript twice: once forwarded as thread
   // context, once as the `slack_reply` call that sent them.
   if (entity?.senderType === "self") return null
-  const text = parsed.content
+  const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
+  const text = taskEvent?.content ?? parsed.content
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
-  if (!chunks.length) return null
+  if (!chunks.length && !taskEvent) return null
   return {
     id: row.messageId,
+    ...(taskEvent ? { taskEvent } : {}),
     author:
       parsed.type === "message" && parsed.senderKind === "system"
         ? "system"
@@ -966,6 +975,7 @@ interface AgentDraft {
   timestamp: string
   startedAt: string
   turnKey?: string
+  invocationIds: Array<string>
   chunks: Array<Chunk>
 }
 
@@ -1025,12 +1035,20 @@ function turnMessages(
       timestamp: agent.timestamp,
       startedAt: agent.startedAt,
       ...(agent.turnKey ? { turnKey: agent.turnKey } : {}),
+      ...(agent.invocationIds.length
+        ? { invocationIds: agent.invocationIds }
+        : {}),
       chunks: mergeTextChunks(agent.chunks),
     })
     agent = null
   }
 
-  const append = (id: string, timestamp: string, chunks: Array<Chunk>) => {
+  const append = (
+    id: string,
+    timestamp: string,
+    chunks: Array<Chunk>,
+    invocationId?: string
+  ) => {
     if (!chunks.length) return
     if (!agent) {
       agent = {
@@ -1038,11 +1056,14 @@ function turnMessages(
         timestamp,
         startedAt: timestamp,
         turnKey,
+        invocationIds: invocationId ? [invocationId] : [],
         chunks: [...chunks],
       }
       return
     }
     agent.timestamp = timestamp
+    if (invocationId && !agent.invocationIds.includes(invocationId))
+      agent.invocationIds.push(invocationId)
     agent.chunks.push(...chunks)
   }
 
@@ -1064,7 +1085,7 @@ function turnMessages(
       chunks.push(...imageChunks(state.threadId, row.attachments))
       const text = row.text.trim()
       if (text) chunks.push({ kind: "text", text })
-      append(row.messageId, row.createdAt, chunks)
+      append(row.messageId, row.createdAt, chunks, row.invocationId)
       continue
     }
     const call = state.toolCalls[item.id]

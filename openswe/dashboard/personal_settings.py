@@ -1,0 +1,124 @@
+"""Validated partial updates to ordinary server-backed personal settings."""
+
+from collections.abc import Mapping
+
+from openswe.dashboard.feature_flags import feature_flag_names
+from openswe.dashboard.options import default_model_pair
+from openswe.dashboard.profiles import (
+    PROFILES,
+    ProfileUpdate,
+    get_profile,
+    normalize_profile_for_response,
+)
+from openswe.dashboard.user_preferences import (
+    USER_PREFERENCES,
+    UserPreferencesUpdate,
+    set_user_preferences,
+)
+from openswe.store import now_iso
+from openswe.users import User, UserPreferencesPatch
+
+SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
+
+PROFILE_SETTING_KEYS = frozenset(
+    {
+        "default_model",
+        "reasoning_effort",
+        "default_subagent_model",
+        "subagent_reasoning_effort",
+        "default_repo",
+        "base_branch",
+        "branch_prefix",
+        "auto_fix_ci",
+        "model_routing_enabled",
+        "recent_thread_context_enabled",
+        "draft_prs",
+        "review_draft_prs",
+    }
+) | feature_flag_names(ProfileUpdate)
+PREFERENCE_SETTING_KEYS = frozenset(
+    {
+        "default_visibility",
+        "local_tracing_project",
+        "default_workspace",
+        "follow_up_behavior",
+    }
+)
+type SettingValue = str | bool | None
+
+
+async def patch_personal_settings(
+    login: str, settings: Mapping[str, SettingValue]
+) -> dict[str, object]:
+    """Validate every requested change before writing either settings record."""
+    if not settings:
+        raise ValueError("Provide at least one personal setting to update")
+    unknown = settings.keys() - PROFILE_SETTING_KEYS - PREFERENCE_SETTING_KEYS - SQL_SETTING_KEYS
+    if unknown:
+        raise ValueError(f"Unsupported personal settings: {', '.join(sorted(unknown))}")
+    profile_patch = {key: value for key, value in settings.items() if key in PROFILE_SETTING_KEYS}
+    preferences_patch = {
+        key: value for key, value in settings.items() if key in PREFERENCE_SETTING_KEYS
+    }
+    sql_patch = {key: value for key, value in settings.items() if key in SQL_SETTING_KEYS}
+    flag_patch = {
+        key: value
+        for key, value in settings.items()
+        if key in feature_flag_names(ProfileUpdate) | SQL_SETTING_KEYS
+    }
+    if invalid := [key for key, value in flag_patch.items() if not isinstance(value, bool)]:
+        raise ValueError(f"Feature flags must be true or false: {', '.join(sorted(invalid))}")
+    sql_update = UserPreferencesPatch.model_validate(sql_patch) if sql_patch else None
+    profile = None
+    preferences = None
+    if profile_patch:
+        profile = await get_profile(login) or {}
+        model, effort = default_model_pair()
+        merged = {
+            "default_model": model,
+            "reasoning_effort": effort,
+            **{
+                key: value
+                for key, value in normalize_profile_for_response(profile).items()
+                if key in PROFILE_SETTING_KEYS
+            },
+            **profile_patch,
+        }
+        update = ProfileUpdate.model_validate(merged)
+        update.validate_pairing()
+        validated = update.model_dump()
+        profile_patch = {key: validated[key] for key in profile_patch}
+        if "draft_prs" in profile_patch and profile_patch["draft_prs"] is None:
+            profile_patch["draft_prs"] = profile.get("draft_prs", True)
+        for model_key, effort_key in (
+            ("default_model", "reasoning_effort"),
+            ("default_subagent_model", "subagent_reasoning_effort"),
+        ):
+            if model_key in profile_patch or effort_key in profile_patch:
+                for key in (model_key, effort_key):
+                    if validated[key] != profile.get(key):
+                        profile_patch[key] = validated[key]
+    if preferences_patch:
+        existing = await USER_PREFERENCES.get(login) or {}
+        preferences = UserPreferencesUpdate.model_validate(
+            {
+                "default_visibility": "private",
+                **{key: value for key, value in existing.items() if key in PREFERENCE_SETTING_KEYS},
+                **preferences_patch,
+            }
+        )
+    result: dict[str, object] = {}
+    if sql_update is not None:
+        saved_sql = await User.update_preferences(login, sql_update)
+        if saved_sql is None:
+            raise ValueError("No Open SWE user record for this login yet")
+        result.update({key: getattr(saved_sql, key) for key in sql_patch})
+    if profile is not None:
+        await PROFILES.put(
+            login, {**profile, **profile_patch, "login": login, "updated_at": now_iso()}
+        )
+        result.update(profile_patch)
+    if preferences is not None:
+        saved = await set_user_preferences(login, preferences)
+        result.update({key: saved[key] for key in preferences_patch})
+    return result

@@ -147,6 +147,71 @@ test.describe("my pull requests", () => {
     await expect(page.getByText("Someone else's change")).toHaveCount(0);
   });
 
+  test("keeps pending review requests separate from authored PRs", async ({
+    page,
+  }) => {
+    const mine = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "My authored change",
+      ...approved,
+    });
+    const assigned = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Assigned to Alice",
+      author: "bob",
+      ...approved,
+    });
+    const unassigned = await seedOpenPullRequest(page, {
+      repo: COMPANION,
+      title: "Not assigned to Alice",
+      author: "bob",
+      ...approved,
+    });
+    const requested = await page.request.post(
+      `/fake-gh/repos/fakeorg/demo/pulls/${assigned.number}/requested_reviewers`,
+      { data: { reviewers: [SAME_USER.login] } },
+    );
+    expect(requested.ok()).toBeTruthy();
+
+    await openMine(page);
+    await expect(card(page, mine)).toBeVisible();
+    await page.getByRole("button", { name: "To Review", exact: true }).click();
+    await expect(
+      page.getByText("No Open SWE assignments. You’re all caught up."),
+    ).toBeVisible();
+    await expect(card(page, assigned)).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Show my GitHub review requests" })
+      .click();
+    await expect(card(page, assigned)).toBeVisible();
+    await expect(card(page, mine)).toHaveCount(0);
+    await expect(card(page, unassigned)).toHaveCount(0);
+    await page.reload();
+    await expect(card(page, assigned)).toBeVisible();
+    await card(page, assigned)
+      .getByRole("button", { name: "Assigned to Alice", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Close pull request preview" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Mine", exact: true }).click();
+    await expect(card(page, mine)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Close pull request preview" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "To Review", exact: true }).click();
+    await expect(card(page, assigned)).toBeVisible();
+    const closed = await page.request.patch(
+      `/fake-gh/repos/fakeorg/demo/pulls/${assigned.number}`,
+      { data: { state: "closed" } },
+    );
+    expect(closed.ok()).toBeTruthy();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(
+      page.getByText("No pending GitHub review requests."),
+    ).toBeVisible();
+  });
+
   test("closes a pull request from its own card after confirmation", async ({
     page,
   }) => {
@@ -306,18 +371,7 @@ test.describe("my pull requests", () => {
     const method = card(page, mine).getByLabel(
       `Merge method for PR #${mine.number}`,
     );
-    await expect(method).toBeEnabled();
-    await expect(
-      method.getByRole("option", { name: "Rebase merge", exact: true }),
-    ).toHaveCount(1);
-    await expect(
-      method.getByRole("option", { name: "Squash merge", exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      method.getByRole("option", { name: "Merge commit", exact: true }),
-    ).toHaveCount(0);
-
-    await method.selectOption("rebase");
+    await expect(method).toBeHidden();
     await card(page, mine)
       .getByRole("button", { name: "Merge", exact: true })
       .click();

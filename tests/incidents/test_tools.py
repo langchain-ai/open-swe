@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent import run_config
-from agent.incidents import channels, service, tools
-from agent.incidents.models import Incident, IncidentPolicy
-from agent.slack.channels import SlackChannel
+from openswe import run_config
+from openswe.incidents import channels, service, tools
+from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C7",

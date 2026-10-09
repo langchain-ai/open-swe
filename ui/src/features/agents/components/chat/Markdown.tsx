@@ -1,18 +1,18 @@
-import { Component, createElement, memo, useMemo } from "react"
+import { Component, createElement, memo, useMemo, useState } from "react"
+import { ChatCenteredTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCenteredText"
+import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
+import { LightbulbIcon } from "@phosphor-icons/react/dist/ssr/Lightbulb"
+import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
+import { WarningOctagonIcon } from "@phosphor-icons/react/dist/ssr/WarningOctagon"
+import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import {
   Streamdown,
   defaultRemarkPlugins,
   defaultUrlTransform,
 } from "streamdown"
 import type { ComponentProps, ReactNode } from "react"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { Components, ExtraProps } from "streamdown"
-import {
-  Info,
-  Lightbulb,
-  MessageSquareWarning,
-  OctagonAlert,
-  TriangleAlert,
-} from "lucide-react"
 import "streamdown/styles.css"
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
@@ -33,6 +33,7 @@ interface MarkdownProps {
    * leave it as-is.
    */
   transformImageUrl?: (src: string) => string
+  enlargeImages?: boolean
 }
 
 /**
@@ -64,12 +65,12 @@ const SHIKI_THEME: ["github-light", "github-dark"] = [
 ]
 
 /** GitHub's own five alert kinds; the colours live in styles/markdown.css. */
-const ALERTS: Record<string, { label: string; Icon: typeof Info }> = {
-  note: { label: "Note", Icon: Info },
-  tip: { label: "Tip", Icon: Lightbulb },
-  important: { label: "Important", Icon: MessageSquareWarning },
-  warning: { label: "Warning", Icon: TriangleAlert },
-  caution: { label: "Caution", Icon: OctagonAlert },
+const ALERTS: Record<string, { label: string; Icon: IconComponent }> = {
+  note: { label: "Note", Icon: InfoIcon },
+  tip: { label: "Tip", Icon: LightbulbIcon },
+  important: { label: "Important", Icon: ChatCenteredTextIcon },
+  warning: { label: "Warning", Icon: WarningIcon },
+  caution: { label: "Caution", Icon: WarningOctagonIcon },
 }
 
 /**
@@ -173,7 +174,12 @@ const COMPONENTS: Components = {
     return (
       <div role="note" data-alert={props["data-alert"]}>
         <p>
-          <alert.Icon aria-hidden className="size-3.5 shrink-0" />
+          <alert.Icon
+            size={14}
+            weight="regular"
+            aria-hidden
+            className="shrink-0"
+          />
           {alert.label}
         </p>
         {children}
@@ -198,7 +204,7 @@ const COMPONENTS: Components = {
       src={typeof src === "string" ? src : undefined}
       alt={alt ?? ""}
       loading="lazy"
-      className="border border-border/60"
+      className="border border-subtle"
     />
   ),
   a: ({
@@ -243,7 +249,7 @@ class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   render(): ReactNode {
     if (this.state.failed) {
       return (
-        <pre className="font-sans [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-foreground">
+        <pre className="font-sans [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary">
           {this.props.content}
         </pre>
       )
@@ -256,7 +262,40 @@ export const Markdown = memo(function Markdown({
   content,
   isLive = false,
   transformImageUrl,
+  enlargeImages = false,
 }: MarkdownProps) {
+  const [image, setImage] = useState<{ src: string; alt: string } | null>(null)
+  const components = useMemo(
+    () =>
+      enlargeImages
+        ? {
+            ...COMPONENTS,
+            img: ({ src, alt }: ExtraProps & ComponentProps<"img">) => (
+              <img
+                src={typeof src === "string" ? src : undefined}
+                alt={alt ?? ""}
+                loading="lazy"
+                role="button"
+                tabIndex={0}
+                aria-label={`Enlarge ${alt || "image"}`}
+                className="cursor-zoom-in border border-subtle focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  if (typeof src === "string") setImage({ src, alt: alt ?? "" })
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault()
+                    event.currentTarget.click()
+                  }
+                }}
+              />
+            ),
+          }
+        : COMPONENTS,
+    [enlargeImages]
+  )
   const urlTransform = useMemo(() => {
     if (!transformImageUrl) return undefined
     return (
@@ -270,7 +309,7 @@ export const Markdown = memo(function Markdown({
   }, [transformImageUrl])
 
   return (
-    <div className="chat-markdown max-w-full min-w-0 text-[14px] leading-[1.6] [overflow-wrap:anywhere] break-words text-foreground">
+    <div className="chat-markdown max-w-full min-w-0 text-sm leading-[1.6] [overflow-wrap:anywhere] break-words text-primary">
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}
@@ -279,7 +318,7 @@ export const Markdown = memo(function Markdown({
           animated={isLive ? STREAMDOWN_ANIMATED : false}
           shikiTheme={SHIKI_THEME}
           className="streamdown-agent max-w-full min-w-0 space-y-0"
-          components={COMPONENTS}
+          components={components}
           remarkPlugins={REMARK_PLUGINS}
           allowedTags={ALLOWED_TAGS}
           urlTransform={urlTransform}
@@ -287,6 +326,26 @@ export const Markdown = memo(function Markdown({
           {content}
         </Streamdown>
       </MarkdownErrorBoundary>
+      <Dialog
+        open={image !== null}
+        onOpenChange={(open) => {
+          if (!open) setImage(null)
+        }}
+      >
+        <DialogContent
+          title={image?.alt || "Image preview"}
+          className="h-[calc(100dvh-2rem)] w-[95vw] max-w-[95vw]"
+          childrenClassName="flex-1 items-center justify-center"
+        >
+          {image && (
+            <img
+              src={image.src}
+              alt={image.alt}
+              className="h-full min-h-0 w-full object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 })

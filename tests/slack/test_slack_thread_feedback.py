@@ -9,11 +9,11 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk.errors import ConflictError
 
-from agent import thread_feedback as prompt_scheduler
-from agent.slack import routes
-from agent.slack import thread_feedback as feedback
-from agent.slack.channels import SlackChannel
-from agent.slack.payloads import SlackChannelContext
+from openswe import thread_feedback as prompt_scheduler
+from openswe.slack import routes
+from openswe.slack import thread_feedback as feedback
+from openswe.slack.channels import SlackChannel
+from openswe.slack.payloads import SlackChannelContext
 
 _RESPONSE_URL = "https://hooks.slack.com/actions/T1/B1/test-response"
 
