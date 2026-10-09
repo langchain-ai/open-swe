@@ -77,6 +77,10 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
             Command("fix it", options="/workspace:infra", workspace="infra"),
         ),
         ("<@U0BOT> /breakout:web <#C2> why", Command("<#C2> why")),
+        (
+            "<@U0BOT> /breakout fix workspace:infra bug",
+            Command("fix workspace:infra bug", workspace="infra"),
+        ),
     ],
 )
 def test_breakout_command_from_message(text, expected):

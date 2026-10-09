@@ -52,6 +52,7 @@ class ParsedSlackMessage:
     prior_text: str = ""
     """What the sender wrote before mentioning Open SWE, when a command follows the mention."""
     argument: str = ""
+    argument_start: int = 0
     performance_span: Span | None = None
     workspace_span: Span | None = None
 
@@ -125,6 +126,7 @@ class ParsedSlackMessage:
             workspace=workspace,
             prior_text=text[:mention_start].strip(),
             argument=text[position:].strip(),
+            argument_start=position,
             performance_span=performance_span,
             workspace_span=workspace_span,
         )
@@ -139,9 +141,13 @@ class ParsedSlackMessage:
 
     @property
     def options(self) -> str:
-        """The option commands as typed, to carry into a thread this message starts."""
+        """Options typed outside the argument, to carry into a thread this message starts."""
         spans = (self.performance_span, self.workspace_span)
-        return " ".join(self.text[start:end] for start, end in sorted(filter(None, spans)))
+        return " ".join(
+            self.text[start:end]
+            for start, end in sorted(filter(None, spans))
+            if end <= self.argument_start
+        )
 
     def without(self, *, performance_model: bool = False, workspace: bool = False) -> str:
         """The message text with the chosen options removed."""
