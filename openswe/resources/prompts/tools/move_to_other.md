@@ -1,6 +1,6 @@
-Send lines that are still left to Other without showing anything, or take lines back out of Other.
+Send unplanned lines to Other without placing a chunk, or take lines back out of Other.
 
-- `files`: the lines, per `path`, with `added` and `deleted` ranges numbered as for `show_chunk`.
-- `restore`: `true` to take these lines out of Other, so they are left again and can be shown.
+- `files`: the lines, per `path`, with `added` and `deleted` ranges numbered as for `plan_chunk`.
+- `restore`: `true` to take these lines out of Other, so they are unplanned again and can go in a chunk.
 
-Use it when you notice noise, such as a whole lockfile or every import in a file, or when the reader asks to see something you had put in Other.
+Use it for noise, such as a whole lockfile or every import in a file, or when a line you had put in Other turns out to matter.

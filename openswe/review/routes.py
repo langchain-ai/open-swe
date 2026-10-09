@@ -75,8 +75,8 @@ from openswe.review.styles import (
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
 )
-from openswe.review.walkthrough import Walkthrough
 from openswe.threads.handlers import mark_review_session_viewed
+from openswe.walkthrough.record import Walkthrough
 
 router = APIRouter(tags=["review"])
 

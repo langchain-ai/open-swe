@@ -75,7 +75,6 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
-from openswe.review.walkthrough import WalkthroughView
 from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
@@ -107,6 +106,7 @@ from openswe.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from openswe.utils.api_standards_skill import fetch_api_standards_skill
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 

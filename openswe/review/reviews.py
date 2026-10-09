@@ -39,11 +39,11 @@ from openswe.review.findings import (
     is_thread_resolved,
 )
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
-from openswe.review.walkthrough import WalkthroughView
 from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from openswe.thread_ids import reviewer_thread_id
 from openswe.utils.json_types import ThreadLike, as_json_object, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, thread_run_error
+from openswe.walkthrough.record import WalkthroughView
 from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)

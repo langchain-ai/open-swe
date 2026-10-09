@@ -1,1 +1,1 @@
-The reader clicked "Looks good". Show what comes next: `show_queued` when the first queued chunk still fits, otherwise `show_chunk`; `show_other` once nothing is left; `end_walkthrough` once Other is approved.
+The reader clicked "Looks good" and the plan had nothing ready to show them next. Show what comes next: `show_chunk` when a chunk is left for them, otherwise place the next one with `plan_chunk` and show it; `show_other` once every line is in a done chunk or Other; `end_walkthrough` once Other is approved.

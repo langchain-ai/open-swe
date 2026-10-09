@@ -1,5 +1,3 @@
-Post Other, every changed line you sent there, as a short description with its per-file counts and a "Looks good" button. It works only once nothing is left and no chunk is on screen.
-
-- `description`: one or two sentences on what kinds of change Other holds, such as imports, registration and test fixtures.
+Post Other, the lines the plan set aside as not worth reading, as the plan's description of it with per-file counts and a "Looks good" button. It works only once every chunk is approved or skipped, nothing is unplanned and nothing is on screen. Set or update the description with `describe_other` first when it does not fit.
 
 After it posts, end your turn and wait for the reader.

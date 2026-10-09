@@ -2,9 +2,10 @@
 
 Every run first pins the pull request's base and head as refs in the shared
 sandbox, without touching its checkout, attaches the diff to the channel when
-the head moved, carries the walkthrough over to that head, records a "Looks
+the head moved, carries the shared plan and the reader's walk over to that
+head, starts the review scout when the plan is missing lines, records a "Looks
 good" that landed while the previous turn ran, and tells the agent where the
-walkthrough stands. Every model call gets the walkthrough's rules.
+reader stands. Every model call gets the walkthrough's rules.
 """
 
 import logging
@@ -22,19 +23,20 @@ from langgraph.runtime import Runtime
 
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.review.walkthrough import Walkthrough
-from openswe.review_guide import git
 from openswe.review_guide.advance import approve_click
-from openswe.review_guide.context import guide_repo_dir
-from openswe.review_guide.diff import parse
-from openswe.review_guide.github import fetch_head
+from openswe.review_guide.github import PullRequestHead, fetch_head
 from openswe.review_guide.messages import resume, retire
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.review_guide.walk import Walk
+from openswe.review_guide.walk import Reader, Walk
+from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.sandboxes.lifecycle import get_cached_sandbox_backend
 from openswe.slack.code_channels import repo_context_bar_items, set_context_bar, set_view
 from openswe.slack.http import SlackRequestError
 from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.walkthrough.checkout import PinnedCheckout
+from openswe.walkthrough.plan import LineRef
+from openswe.walkthrough.planner import PlanWorkspace
+from openswe.walkthrough.record import Walkthrough
 
 logger = logging.getLogger(__name__)
 
@@ -64,33 +66,28 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
         head = await fetch_head(pr.owner, pr.repo, pr.number)
         if head is None:
             raise RuntimeError("review walkthrough could not read the pull request")
-        backend = get_cached_sandbox_backend(self._thread_id)
-        repo_dir = await guide_repo_dir(backend, pr.repo)
+        checkout = await PinnedCheckout.locate(get_cached_sandbox_backend(self._thread_id), pr.repo)
         author = session.mode == "author"
         rules = prompt(
             "review-guide/main",
             pr_number=pr.number,
             repo_full_name=pr.repo_full_name,
-            repo_dir=repo_dir,
+            repo_dir=checkout.repo_dir,
             author=author,
             draft=head.draft,
             human_input=(await Walkthrough.human_input_for(pr.id) or "") if author else "",
         )
-        if await git.built_for(backend, repo_dir) != (head.base.sha, head.head.sha):
-            await git.fetch(
-                backend,
-                repo_dir,
-                full_name=pr.repo_full_name,
-                pr_number=pr.number,
-                base_sha=head.base.sha,
-                head_sha=head.head.sha,
-            )
-            await git.pin(backend, repo_dir, base_sha=head.base.sha, head_sha=head.head.sha)
+        if await checkout.pin(
+            full_name=pr.repo_full_name,
+            pr_number=pr.number,
+            base_sha=head.base.sha,
+            head_sha=head.head.sha,
+        ):
             try:
                 await set_view(
                     session.slack_channel_id,
                     "diff",
-                    content=await git.pr_diff(backend, repo_dir, zero=False),
+                    content=await checkout.diff(zero=False),
                     base_branch=head.base.ref,
                     head_branch=head.head.ref,
                 )
@@ -115,20 +112,21 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
             )
         await resume(session)
-        changes = parse(await git.pr_diff(backend, repo_dir))
+        workspace = await PlanWorkspace.open(pr, checkout)
+        if not workspace.complete:
+            await self._plan_in_background(session, head)
         walk = session.walk
         moved = walk is not None and walk.head_sha != head.head.sha
         if walk is not None and moved:
-            walk, gone = walk.moved_to(head.head.sha, changes)
+            walk, gone = walk.moved_to(head.head.sha, workspace.changes)
             await session.save_walk(walk)
-            for group in gone:
-                if group.status == "shown":
-                    await retire(
-                        session.slack_channel_id,
-                        group.message_ts,
-                        group.message_text,
-                        "The pull request changed these lines",
-                    )
+            if gone is not None:
+                await retire(
+                    session.slack_channel_id,
+                    gone.message_ts,
+                    gone.message_text,
+                    "The pull request changed these lines",
+                )
             logger.info(
                 "Review walkthrough carried to a newer head",
                 extra={
@@ -138,11 +136,13 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 },
             )
         if walk is None:
-            walk = Walk.start(head.head.sha, changes)
+            walk = Walk(head_sha=head.head.sha)
+            await session.save_walk(walk)
         approved = (
             await approve_click(session, walk, self._approve_ts) if self._approve_ts else None
         )
-        status = walk.status(walk.unseen(changes, await session.seen_lines()))
+        unplanned = [LineRef.of(line) for line in workspace.plan.unplanned(workspace.changes)]
+        reader = Reader.of(walk, workspace.plan, await session.seen_lines(), unplanned)
         return {
             "review_guide_rules": rules,
             "messages": [
@@ -153,11 +153,32 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                         head_sha=head.head.sha,
                         clicked=bool(self._approve_ts),
                         approved=approved.title if approved else "",
-                        status=status.model_dump(),
+                        status=reader.status(unplanned).model_dump(),
                     )
                 )
             ],
         }
+
+    async def _plan_in_background(self, session: ReviewGuideSession, head: PullRequestHead) -> None:
+        """Have the review scout place what the plan is missing, while the guide talks."""
+        pr = session.pull_request
+        target = ReviewScoutTarget(
+            owner=pr.owner,
+            repo=pr.repo,
+            pr_number=pr.number,
+            pr_title=head.title,
+            base_sha=head.base.sha,
+            head_sha=head.head.sha,
+            workspace_slug=session.workspace_slug,
+        )
+        try:
+            await target.start()
+        except Exception:
+            logger.warning(
+                "Could not start the review scout for a review walkthrough",
+                exc_info=True,
+                extra={"agent_thread_id": self._thread_id, **target.log_extra},
+            )
 
     async def awrap_model_call(
         self,
