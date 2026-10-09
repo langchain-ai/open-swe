@@ -2,6 +2,7 @@
 
 import logging
 
+from openswe.config import ENV
 from openswe.input_messages import SystemIdentity
 from openswe.prompts import prompt
 from openswe.slack import webhook
@@ -16,6 +17,7 @@ from openswe.slack.events import claim_slack_event
 from openswe.slack.failures import SlackRequestError, run_slack_task
 from openswe.slack.payloads import SlackChannelContext, SlackEvent
 from openswe.slack.request import SlackRequest
+from openswe.slack.thinking import restore_slack_thinking_status
 from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 
@@ -38,6 +40,8 @@ async def process_slack_summon_reaction(
     team_id: str,
 ) -> None:
     """Treat a summon reaction as its reactor tagging Open SWE on the reacted-to message."""
+    if ENV.OPENSWE_ENV.optional() in {"preview", "staging"}:
+        return
     item = event.item
     user_id = event.resolve_user_id()
     if (
@@ -92,6 +96,9 @@ def _first_summoner(message: dict[str, object]) -> str:
 
 
 async def _dispatch(request: SlackRequest) -> None:
+    if not await claim_slack_event(request.event_id, request.channel_id, request.event_ts):
+        return
+    await restore_slack_thinking_status(request.channel_id, request.thread_ts)
     try:
         thread_id = await resolve_slack_thread_id(
             langgraph_client(), request.channel_id, request.thread_ts
@@ -101,8 +108,6 @@ async def _dispatch(request: SlackRequest) -> None:
             "Open SWE found conflicting state for this Slack thread and will not guess "
             "which agent thread to use."
         ) from exc
-    if not await claim_slack_event(request.event_id, request.channel_id, request.event_ts):
-        return
     repo = await common.get_slack_repo_config(
         request.channel_id,
         request.thread_ts,
