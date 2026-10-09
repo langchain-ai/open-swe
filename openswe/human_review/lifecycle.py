@@ -42,7 +42,6 @@ from openswe.human_review.requests import (
     HumanReviewRequest,
     RequestState,
 )
-from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, block_payload, context, escape, section
 from openswe.slack.cards import origin_footer, repost_thread_card
@@ -194,15 +193,8 @@ async def post_card(approval: HumanReviewRequest, *, title: str, files: list[Cha
         channel = await SlackChannel.load(approval.slack_channel_id)
         if channel is None:
             raise SlackRequestError("channel_not_found")
-        pr = approval.pull_request
-        approval.slack_thread_ts = await channel.post(
-            prompt(
-                "slack/expedited-review-requested",
-                pr_url=pr.url,
-                label=f"{pr.owner}/{pr.repo}#{pr.number}",
-                title=escape(title),
-            )
-        )
+        approval.slack_thread_ts = await channel.post(text, blocks=block_payload(blocks))
+        return approval.slack_thread_ts
     return await post_slack_thread_reply_with_ts(
         approval.slack_channel_id,
         approval.slack_thread_ts,
@@ -533,6 +525,11 @@ async def _repost(
     if not request.has_card or location is None or not request.slack_message_ts:
         return False
     old_ts = request.slack_message_ts
+    if old_ts == request.slack_thread_ts:
+        request.slack_broadcast = broadcast
+        await request.save()
+        await refresh_card(request, outcome=outcome)
+        return True
     request.slack_broadcast = broadcast
     text, blocks = await render(request, outcome)
 
@@ -704,7 +701,11 @@ async def refresh_card_in_thread(
 async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
     """Delete older cards for ``approval``'s PR, so its thread only ever shows one."""
     for stale in await HumanReviewRequest.superseded_on_slack(approval.pull_request_id):
-        if stale.id == approval.id or not stale.has_card:
+        if (
+            stale.id == approval.id
+            or not stale.has_card
+            or stale.slack_message_ts == stale.slack_thread_ts
+        ):
             continue
         if not await delete_slack_message(stale.slack_channel_id, stale.slack_message_ts):
             continue

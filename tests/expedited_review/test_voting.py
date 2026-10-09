@@ -3,6 +3,7 @@
 import re
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import httpx2
 import pytest
@@ -118,6 +119,38 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> _FakeSlack:
     monkeypatch.setattr(cards, "post_slack_thread_reply_with_ts", fake.post)
     monkeypatch.setattr(cards, "delete_slack_message", fake.delete)
     return fake
+
+
+async def test_new_thread_card_is_its_own_root_and_is_not_reposted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    approval = HumanReviewRequest(
+        pull_request_id=uuid4(), head_sha="abc123", kind="expedited", slack_channel_id="C1"
+    )
+    channel = AsyncMock()
+    channel.post.return_value = "1.0"
+    monkeypatch.setattr(
+        lifecycle, "_warn_target", AsyncMock(side_effect=lambda request, card: card)
+    )
+    monkeypatch.setattr(lifecycle.SlackChannel, "load", AsyncMock(return_value=channel))
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "_channel_choices", AsyncMock(return_value=[]))
+    monkeypatch.setattr(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada"))
+    monkeypatch.setattr(lifecycle.expedited_card, "open_card", lambda *a, **kw: ("Card", []))
+    monkeypatch.setattr(HumanReviewRequest, "save", AsyncMock())
+    refreshed = AsyncMock()
+    monkeypatch.setattr(lifecycle, "refresh_card", refreshed)
+    reply = AsyncMock()
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", reply)
+
+    message_ts = await lifecycle.post_card(approval, title="Fix", files=[])
+    assert message_ts == approval.slack_thread_ts == "1.0"
+    approval.slack_message_ts = message_ts
+    assert await lifecycle._repost(approval, broadcast=True)
+    assert approval.slack_message_ts == approval.slack_thread_ts == "1.0"
+    refreshed.assert_awaited_once()
+    reply.assert_not_awaited()
 
 
 async def _click(
