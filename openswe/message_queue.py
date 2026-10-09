@@ -101,8 +101,10 @@ class QueuedMessage(Base):
             await session.execute(delete(cls).where(cls.thread_id == thread_id))
             await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
 
-    def preview(self) -> QueuedPreview:
+    async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""
+        from openswe.incidents.report import context_message
+
         content = self.content
         if isinstance(content, str):
             payload = _QueuedPayload(text=content)
@@ -113,8 +115,8 @@ class QueuedMessage(Base):
         sender = payload.sender
         return QueuedPreview(
             id=self.queue_id or f"queued-{self.seq}",
-            text=payload.preview_text(),
-            sender=(sender.github_login or sender.display_name) if sender else None,
+            text=context_message(payload.preview_text()),
+            sender=await sender.login() if sender else None,
             platform=sender.platform if sender else None,
             queued_at=self.queued_at,
         )
@@ -123,9 +125,18 @@ class QueuedMessage(Base):
 class _QueuedSender(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    id: str | None = None
     github_login: str | None = None
-    display_name: str | None = None
     platform: str | None = None
+
+    async def login(self) -> str | None:
+        """The sender's GitHub login; a Slack member nobody linked stays anonymous."""
+        from openswe.users import User
+
+        if self.github_login:
+            return self.github_login
+        platform, _, slack_user_id = (self.id or "").partition(":")
+        return await User.login_for_slack(slack_user_id) if platform == "slack" else None
 
 
 class _QueuedBlock(BaseModel):

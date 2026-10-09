@@ -191,7 +191,7 @@ async def get_dashboard_thread_queued_messages(
 ) -> list[QueuedPreview]:
     """Messages waiting in the thread's queue for its agent's next model call."""
     await _authorized_thread(thread_id, login, email=email)
-    return [message.preview() for message in await QueuedMessage.for_thread(thread_id)]
+    return [await message.preview() for message in await QueuedMessage.for_thread(thread_id)]
 
 
 async def _cancel_active_thread_runs(
