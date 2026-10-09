@@ -11,14 +11,14 @@ from typing import Any
 
 import pytest
 
-from openswe.dashboard.workspace_settings import (
+from openswe.run_config import Repo
+from openswe.slack import webhook as slack_webhooks
+from openswe.slack.request import SlackRequest
+from openswe.web.workspace_settings import (
     WorkspaceSettingsUpdate,
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from openswe.run_config import Repo
-from openswe.slack import webhook as slack_webhooks
-from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore

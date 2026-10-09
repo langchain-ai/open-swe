@@ -85,7 +85,7 @@ async def test_only_admins_change_or_discard_a_mode(fake_store: FakeStore) -> No
     await REVIEW_STYLES.create("o/r", "reader")
     reader = (
         patch("openswe.review.routes.require_repo_access_for_user", AsyncMock(return_value="t")),
-        patch("openswe.dashboard.deps.session_is_admin", return_value=False),
+        patch("openswe.web.deps.session_is_admin", return_value=False),
     )
     with reader[0], reader[1], pytest.raises(HTTPException) as error:
         await api_update_review_style_prompt(

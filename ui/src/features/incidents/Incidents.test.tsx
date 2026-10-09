@@ -86,7 +86,7 @@ function stubFetch(
   vi.stubGlobal("fetch", (input: string, init: RequestInit) => {
     const path = new URL(input, "http://localhost").pathname
     if (
-      path.startsWith("/dashboard/api/incidents/documents/") &&
+      path.startsWith("/api/incidents/documents/") &&
       !path.endsWith("/history")
     )
       return Promise.resolve(
@@ -375,7 +375,7 @@ it("searches durable incident history and links records after operational cleanu
       "href"
     )
   ).toBe("/incidents/old-1")
-  expect(paths[0]).toContain("/dashboard/api/incidents/documents/history?")
+  expect(paths[0]).toContain("/api/incidents/documents/history?")
   fireEvent.change(screen.getByRole("searchbox"), {
     target: { value: "outage" },
   })

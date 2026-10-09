@@ -6,7 +6,7 @@ from typing import cast
 
 from openswe.run_config import RunConfig
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_base_url, dashboard_review_url
+from openswe.utils.web_links import web_base_url, web_review_url
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def _text(text: str) -> str:
 
 def _links(text: str) -> str:
     return _PR_LINK.sub(
-        lambda match: dashboard_review_url(match[1], match[2], int(match[3])) or match.group(),
+        lambda match: web_review_url(match[1], match[2], int(match[3])) or match.group(),
         text,
     )
 
@@ -53,7 +53,7 @@ async def pr_review_links(
     login: str | None = None,
 ) -> tuple[str, list[dict[str, object]] | None]:
     """Rewrite displayed PR links without changing stored URLs or button values."""
-    if not dashboard_base_url() or "github.com/" not in (text + str(blocks)).lower():
+    if not web_base_url() or "github.com/" not in (text + str(blocks)).lower():
         return text, blocks
     if login is None:
         try:

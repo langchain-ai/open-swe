@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.utils.repo import extract_repo_from_text
+from openswe.web.workspace_settings import WorkspaceSettings
 
 
 class TestExtractRepoFromText:

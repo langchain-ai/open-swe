@@ -43,7 +43,7 @@ async def configured(fake_store, monkeypatch):
     monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(
         channels,
-        "dashboard_incident_url",
+        "web_incident_url",
         lambda incident_id: f"https://dash/incidents/{incident_id}",
     )
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))

@@ -1,5 +1,5 @@
 /**
- * Request-level timing for the handful of dashboard calls that gate a thread:
+ * Request-level timing for the handful of web calls that gate a thread:
  * time to response headers plus the backend's `Server-Timing` phase breakdown.
  * Only header metadata is recorded; never bodies, cookies, or tokens.
  */
@@ -36,7 +36,7 @@ type RequestTimingListener = (timing: RequestTiming) => void
 const listeners = new Set<RequestTimingListener>()
 
 const THREAD_REQUEST_RE =
-  /\/dashboard\/api\/threads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\/[^?#]*)?$/i
+  /\/api\/threads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\/[^?#]*)?$/i
 
 const KINDS_BY_SUFFIX: Record<string, TimedRequestKind> = {
   "": "thread_detail",
@@ -46,9 +46,7 @@ const KINDS_BY_SUFFIX: Record<string, TimedRequestKind> = {
   "/commands": "command",
 }
 
-export function classifyDashboardRequest(
-  url: string
-): ClassifiedRequest | null {
+export function classifyWebRequest(url: string): ClassifiedRequest | null {
   const pathname = url.split(/[?#]/, 1)[0] ?? ""
   const match = THREAD_REQUEST_RE.exec(pathname)
   if (!match?.[1]) return null
@@ -100,7 +98,7 @@ function requestUrl(input: RequestInfo | URL): string {
 }
 
 /**
- * Wrap a `fetch` so the dashboard's thread requests report their timing. The
+ * Wrap a `fetch` so the web app's thread requests report their timing. The
  * wrapped function looks `fetch` up at call time, which keeps the head warmup
  * script's hand-off patch (`apiWarmup.ts`) working underneath it.
  */
@@ -109,7 +107,7 @@ export function withRequestTiming(fetchImpl: typeof fetch): typeof fetch {
     const classified =
       typeof window === "undefined"
         ? null
-        : classifyDashboardRequest(requestUrl(input))
+        : classifyWebRequest(requestUrl(input))
     if (!classified) return fetchImpl(input, init)
     const started = performance.now()
     const response = await fetchImpl(input, init)

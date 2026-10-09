@@ -7,11 +7,11 @@ from typing import TypedDict
 from fastapi import HTTPException
 
 from openswe.threads import pr_fixes
-from openswe.threads.handlers import get_dashboard_thread_state
+from openswe.threads.handlers import get_web_thread_state
 from openswe.threads.proxy import (
-    proxy_dashboard_thread_commands,
-    proxy_dashboard_thread_history,
-    proxy_dashboard_thread_stream_events,
+    proxy_web_thread_commands,
+    proxy_web_thread_history,
+    proxy_web_thread_stream_events,
     require_json_content_type,
 )
 
@@ -64,7 +64,7 @@ async def proxy_review_chat_commands(
         raise HTTPException(400, "command body must be a JSON object") from exc
     if not isinstance(command, dict):
         raise HTTPException(400, "command body must be a JSON object")
-    return await proxy_dashboard_thread_commands(
+    return await proxy_web_thread_commands(
         thread_id, login, json.dumps(command).encode(), content_type=content_type
     )
 
@@ -80,16 +80,14 @@ async def proxy_review_chat_stream_events(
     content_type: str = "application/json",
 ) -> AsyncIterator[bytes]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    return await proxy_dashboard_thread_stream_events(
-        thread_id, login, body, content_type=content_type
-    )
+    return await proxy_web_thread_stream_events(thread_id, login, body, content_type=content_type)
 
 
 async def proxy_review_chat_state(
     owner: str, repo: str, pr_number: int, login: str, thread_id: str
 ) -> tuple[int, bytes, str | None]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    state = await get_dashboard_thread_state(thread_id, login)
+    state = await get_web_thread_state(thread_id, login)
     return 200, json.dumps(state).encode(), "application/json"
 
 
@@ -104,4 +102,4 @@ async def proxy_review_chat_history(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    return await proxy_dashboard_thread_history(thread_id, login, body, content_type=content_type)
+    return await proxy_web_thread_history(thread_id, login, body, content_type=content_type)

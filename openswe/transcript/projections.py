@@ -257,7 +257,7 @@ async def _turn_queued(conn: AsyncConnection, thread_id: str, event: TurnQueued)
 async def _turn_started(
     conn: AsyncConnection, thread_id: str, event: TurnStarted, occurred_at: datetime
 ) -> None:
-    # Upserted rather than updated: a run triggered outside the dashboard has no
+    # Upserted rather than updated: a run triggered outside the web app has no
     # ``turn.requested`` ahead of it, and its turn still has to exist. Only an
     # open turn is started, though: a ``turn.started`` that lands after the turn
     # was cancelled must not reopen it, nor mark the thread busy again.
@@ -417,7 +417,7 @@ async def _ensure_turn(
     """The turn a message or tool call belongs to, materialised if it is missing.
 
     The turn row is what a windowed read pages over, so a message whose turn
-    was never announced — a run started outside the dashboard, a replay that
+    was never announced — a run started outside the web app, a replay that
     begins mid-turn — would otherwise be invisible rather than merely
     unlabelled. ``requested_at`` falls back to the event's own time, which is
     the same anchor the client's reducer invents for an unseen turn.

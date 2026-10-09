@@ -10,10 +10,10 @@ from langchain_typesafe import Choice
 from langsmith import get_current_run_tree, trace, tracing_context
 from langsmith.run_trees import RunTree
 
-from openswe.dashboard.options import ModelOption
 from openswe.input_messages import input_message_text, input_message_timestamps, message_sender_id
 from openswe.prompts import prompt
 from openswe.utils.jev import JevDecision, select_jev_choices
+from openswe.web.options import ModelOption
 
 MAX_MODEL_REQUEST_CHARS = 8_000
 

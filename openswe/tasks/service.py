@@ -12,10 +12,6 @@ from langgraph_sdk.schema import RunStatus
 from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import text, update
 
-from openswe.dashboard.oauth import enforce_github_login_gate
-from openswe.dashboard.options import available_requested_models, normalize_model_choice
-from openswe.dashboard.profiles import get_profile
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.database import postgres
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
@@ -34,10 +30,14 @@ from openswe.threads.summary import assert_thread_postable, assert_thread_readab
 from openswe.tools.schedule_thread_wakeup import cancel_thread_wakeups
 from openswe.tools.threads import resolve_thread_actor
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import PARTICIPANT_EMAILS_KEY, PARTICIPANT_LOGINS_KEY
 from openswe.utils.thread_settings import thread_model_choice
+from openswe.utils.web_links import web_thread_url
+from openswe.web.oauth import enforce_github_login_gate
+from openswe.web.options import available_requested_models, normalize_model_choice
+from openswe.web.profiles import get_profile
+from openswe.web.workspace_settings import get_workspace_settings
 from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.routing import resolve_workspace
 
@@ -370,7 +370,7 @@ async def dispatch_reserved_worker(
         "success": True,
         "worker_thread_id": delegation.worker_thread_id,
         "task_id": str(task.id),
-        "thread_url": dashboard_thread_url(delegation.worker_thread_id),
+        "thread_url": web_thread_url(delegation.worker_thread_id),
     }
 
 
@@ -435,7 +435,7 @@ async def worker_status(delegation: store.TaskDelegation) -> dict[str, object]:
         status, latest_run = "not_created", None
     return {
         "worker_thread_id": delegation.worker_thread_id,
-        "thread_url": dashboard_thread_url(delegation.worker_thread_id),
+        "thread_url": web_thread_url(delegation.worker_thread_id),
         "instructions": delegation.instructions,
         "model": delegation.model,
         "effort": delegation.effort,

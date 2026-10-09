@@ -4,7 +4,7 @@ The agent offers a card in a private thread when the owner has not connected eve
 service in the workspace's LMT gateway. Each button opens Open SWE, which mints LMT's
 single-use consent link only for the card's owner, waits for that consent to finish,
 and queues one follow-up run once the whole gateway is usable. Waiting happens in
-the dashboard process that minted the link; if it restarts, the person says "continue".
+the web app process that minted the link; if it restarts, the person says "continue".
 """
 
 import asyncio
@@ -28,9 +28,9 @@ from openswe.mcp.managed import (
 )
 from openswe.prompts import prompt
 from openswe.source_context import SourceContext
-from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_api_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +73,9 @@ class ConnectCard(BaseModel):
 
     def button_url(self, slug: str) -> str:
         """Where a Slack button sends the person: Open SWE, never LMT's link itself."""
-        path = f"/dashboard/api/my-managed-tools/{self.gateway}/connect/{quote(slug, safe='')}"
+        path = f"/api/my-managed-tools/{self.gateway}/connect/{quote(slug, safe='')}"
         query = urlencode({"thread_id": self.thread_id, "card": self.card_id})
-        return f"{dashboard_api_base_url()}{path}?{query}"
+        return f"{web_api_base_url()}{path}?{query}"
 
     async def connect(self, slug: str) -> ConsentLink | None:
         """Mint a consent link for ``slug`` and resume the thread once it is used."""

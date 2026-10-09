@@ -103,7 +103,7 @@ def slack_cache_key(client: AsyncWebClient) -> str:
 
 @asynccontextmanager
 async def slack_http_errors() -> AsyncIterator[None]:
-    """Translate SDK failures for dashboard routes, without exposing response bodies."""
+    """Translate SDK failures for web routes, without exposing response bodies."""
     try:
         yield
     except SLACK_REQUEST_ERRORS as exc:

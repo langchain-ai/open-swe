@@ -45,9 +45,9 @@ vi.mock("@langchain/react", () => ({
 }))
 
 vi.mock("@/lib/langgraph-client", () => ({
-  createDashboardClient: () => ({}),
+  createWebClient: () => ({}),
   createLocalGraphClient: () => ({}),
-  dashboardFetch: fetch,
+  webFetch: fetch,
 }))
 
 function wrapper({ children }: { children: ReactNode }) {

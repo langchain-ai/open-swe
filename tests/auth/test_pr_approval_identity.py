@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 
 import langgraph_sdk
 
-from openswe.dashboard import profiles
 from openswe.run_config import RunConfig
 from openswe.threads import plan_api, workflow_approval_api
+from openswe.web import profiles
 
 
 async def test_approval_run_uses_authenticated_actor(monkeypatch, fake_store):

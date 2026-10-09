@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
-from openswe.dashboard import profiles
 from openswe.github import http as github_http
 from openswe.github.http import (
     GitHubClient,
@@ -14,6 +13,7 @@ from openswe.github.http import (
     _compute_backoff,
     github_request,
 )
+from openswe.web import profiles
 
 
 def _make_response(status_code: int, headers: dict[str, str] | None = None) -> httpx2.Response:

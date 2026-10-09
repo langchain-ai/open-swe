@@ -20,7 +20,7 @@ code runs for real.
 | Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
 | Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
-| `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
+| `api.github.com` REST (PR create) + web GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
 | Workspace tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
@@ -52,17 +52,17 @@ so what Playwright asserts on is exactly what the real agent produced.
   see what GitHub would return.
 - `langgraph.e2e.json` — dev-server config pointing at the two entrypoints above.
 - `static/{slack,github}.html` — the mock Slack/GitHub UIs (external SaaS we can't
-  run locally). The dashboard is **not** mocked — it's the real `ui/` app.
+  run locally). The web app is **not** mocked — it's the real `ui/` app.
 - `global-setup.ts` — builds the real `ui/` SPA (once) so the harness can serve it.
 - `playwright.desktop.config.ts` + `tests/desktop.spec.ts` — launch Electron and drive
   the real pinned dcode ACP flow against the same fake model and GitHub state.
 
-## The dashboard — the real `ui/` app
+## The web app — the real `ui/` app
 
-The dashboard is **not** mocked. The bot's "Open in Web" link
-(`DASHBOARD_BASE_URL/agents/{thread_id}`) loads the **actual built `ui/` React
+The web app is **not** mocked. The bot's "Open in Web" link
+(`WEB_BASE_URL/agents/{thread_id}`) loads the **actual built `ui/` React
 app** — served same-origin from the harness so the session cookie and
-`/dashboard/api/*` calls work without CORS. The signed session cookie is real
+`/api/*` calls work without CORS. The signed session cookie is real
 (minted via `/control/login`), so per-user authorization is genuine; the only
 extra fake is the OAuth-token store (an external credential).
 

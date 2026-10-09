@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk.schema import Run
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.dispatch import dispatch_agent_run
 from openswe.source_context import SourceContext
 from openswe.threads.plan_api import fetch_thread_metadata
@@ -21,9 +20,10 @@ from openswe.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from openswe.web.oauth import require_same_origin_for_mutations, require_session
 
 workflow_approval_router = APIRouter(
-    prefix="/dashboard/api/workflow-approval",
+    prefix="/api/workflow-approval",
     tags=["workflow-approval"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )

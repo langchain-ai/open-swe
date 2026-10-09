@@ -22,8 +22,8 @@ from openswe.slack.responses import WebhookResponse, accepted, ignored
 from openswe.threads.plan_api import fetch_thread_metadata
 from openswe.threads.workflow_approval_api import dispatch_followup
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ async def handle_button(
         prompt(
             "slack/concierge-act-as-decided",
             decision=_LABELS[action],
-            thread_url=dashboard_thread_url(button.thread_id) or button.thread_id,
+            thread_url=web_thread_url(button.thread_id) or button.thread_id,
         ),
     )
     source = await get_active_slack_thread(langgraph_client(), button.thread_id)

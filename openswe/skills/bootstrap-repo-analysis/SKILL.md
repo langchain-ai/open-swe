@@ -53,7 +53,7 @@ diff-anchored defects — not nits).
 
 Only after real research, call `save_review_style_prompt` once with:
 - `custom_prompt`: 400–1200 words teaching the reviewer this repo's norms.
-- `analysis_summary`: 2–4 sentences for the dashboard.
+- `analysis_summary`: 2–4 sentences for the web app.
 - `top_reviewers` (comma-separated logins), `prs_sampled`, `reviews_sampled`.
 
 Do **not** save a generic guide after one or two commands. Only after ~25+ merged PRs

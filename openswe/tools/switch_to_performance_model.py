@@ -7,13 +7,13 @@ from langchain_core.tools import InjectedToolCallId
 from langgraph.config import get_config
 from langgraph.types import Command
 
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_ephemeral_message
 from openswe.slack.dm import is_concierge_thread
 from openswe.utils.langsmith import create_langsmith_feedback
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_settings import load_thread_settings, store_thread_settings
+from openswe.web.workspace_settings_cache import cached_workspace_settings
 
 
 async def switch_to_performance_model(

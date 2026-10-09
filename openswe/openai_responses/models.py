@@ -5,8 +5,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from openswe.dashboard.options import DEFAULT_MODEL_EFFORT, normalize_model_choice
 from openswe.openai_responses.client_tools import CUSTOM_TOOL_PARAMETERS, ClientToolSpec
+from openswe.web.options import DEFAULT_MODEL_EFFORT, normalize_model_choice
 
 DEFAULT_MODEL = "open-swe"
 SERVER_LABEL = "open-swe"

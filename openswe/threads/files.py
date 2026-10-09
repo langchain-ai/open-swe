@@ -106,7 +106,7 @@ async def _run_workspace_script(
     return payload
 
 
-async def get_dashboard_thread_path(
+async def get_web_thread_path(
     thread_id: str, login: str, path: str, *, email: str | None = None
 ) -> WorkspaceDirectory | WorkspaceFile:
     """List a directory or read a file relative to the thread's repository."""
@@ -114,7 +114,7 @@ async def get_dashboard_thread_path(
     return _WORKSPACE_PATH_ADAPTER.validate_python(payload)
 
 
-async def get_dashboard_thread_file_index(
+async def get_web_thread_file_index(
     thread_id: str, login: str, *, email: str | None = None
 ) -> WorkspaceFileIndex:
     """List every non-ignored file in the thread's repository."""

@@ -15,7 +15,6 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
     ChannelIdentity,
@@ -61,6 +60,7 @@ from openswe.utils.thread_ops import (
 from openswe.utils.thread_ops import queue_message_for_thread
 from openswe.utils.thread_participants import slack_participant_ids
 from openswe.utils.thread_settings import load_thread_settings
+from openswe.web.workspace_settings_cache import cached_workspace_settings
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace, workspace_for_repo
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
@@ -160,9 +160,9 @@ async def _slack_channel_identity(
         channel["description"] = channel_context.description.strip()
     if repo is not None:
         channel["default_repo"] = repo.full_name
-    dashboard_url = common.dashboard_thread_url(thread_id)
-    if dashboard_url:
-        channel["web_url"] = dashboard_url
+    web_url = common.web_thread_url(thread_id)
+    if web_url:
+        channel["web_url"] = web_url
     trace_url = await get_langsmith_trace_url(thread_id)
     if trace_url:
         channel["trace_url"] = trace_url
@@ -1105,7 +1105,7 @@ async def _process_slack_mention_impl(
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with
     # GitHub, and users whose stored authorization is no longer usable, are
-    # blocked and prompted to set up via the dashboard. Bot-token-only
+    # blocked and prompted to set up via the web app. Bot-token-only
     # deployments are exempt — they run on the installation token.
     user_token: str | None = None
     if mapped_login:
@@ -1122,7 +1122,7 @@ async def _process_slack_mention_impl(
 
     if allowed_bot is None and not has_valid_user_token:
         # A stored-but-unusable token means "sign in again"; no record at all
-        # means the user has never connected GitHub + Slack via the dashboard.
+        # means the user has never connected GitHub + Slack via the web app.
         # Guard the store read like token resolution above so a transient
         # failure still yields an actionable prompt and clears the status.
         has_token_record = False
@@ -1278,7 +1278,7 @@ async def _process_slack_mention_impl(
     )
     langgraph_client = get_langgraph_client()
     # Pass the login resolved above (from the stable Slack user id) so the thread is
-    # always tagged with github_login — the key the dashboard searches by. Without
+    # always tagged with github_login — the key the web app searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
     visibility = "private" if request.web_only else _slack_thread_visibility(channel_context)
     if request.web_only:
@@ -1405,7 +1405,7 @@ async def _process_slack_mention_impl(
             await common.set_context_bar(
                 channel_id,
                 common.repo_context_bar_items(
-                    repo_dict, dashboard_url=common.dashboard_thread_url(thread_id) or ""
+                    repo_dict, web_url=common.web_thread_url(thread_id) or ""
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)

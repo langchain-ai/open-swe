@@ -12,15 +12,15 @@ busy-check and the custom store-queue) with one function that uses:
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
 - ``stream_resumable=True`` — the run's event stream is retained so a client that
-  attaches later can replay it. Without this the dashboard cannot observe a run
+  attaches later can replay it. Without this the web app cannot observe a run
   it did not start: the v3 protocol only synthesizes the ``lifecycle: running``
   event that drives ``stream.isLoading`` when it can replay the run's events, so
   a Slack/Linear/GitHub-triggered run looked idle in the web UI (no stop button)
   until it happened to emit its next event.
 - the v3 run shape — the same ``stream_mode`` set, ``stream_subgraphs`` and
   compatibility marker that ``langgraph_api``'s ``run.start`` command applies
-  when the dashboard submits a run. The server fixes a run's streaming protocol
-  at creation: without the marker a run streams ``values`` only, so the dashboard
+  when the web app submits a run. The server fixes a run's streaming protocol
+  at creation: without the marker a run streams ``values`` only, so the web app
   sees no ``tools`` events or subagent namespaces for externally triggered runs.
 """
 
@@ -87,7 +87,7 @@ class RunMetadata(BaseModel):
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
 # Run metadata ``kind`` of a run started only to deliver store leftovers.
 FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
-# The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
+# The web app's ``run.start`` defaults, minus protocol-only channels rejected by
 # the REST ``POST /runs`` schema.
 V3_RUN_STREAM_MODES: tuple[str, ...] = (
     "values",
@@ -402,7 +402,7 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     if remote_client is not None:
-        # The thread here stays the index the webhooks and dashboard read; the run and
+        # The thread here stays the index the webhooks and web read; the run and
         # its checkpoints live on the remote deployment, which reaches back through
         # the tool server with the token in its context.
         create_kwargs["context"] = await remote_run_context(
@@ -453,7 +453,7 @@ async def dispatch_agent_run(
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
-    Routes every Slack / Linear / GitHub / dashboard trigger through one
+    Routes every Slack / Linear / GitHub / web trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
     the graph (``"agent"`` or ``"reviewer"``).
     """

@@ -821,7 +821,7 @@ export function useAgentThread(threadId: string) {
       return { ...thread, pendingMessages }
     },
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
-    // not reconnect once a custom `fetch` is supplied (it needs the dashboard
+    // not reconnect once a custom `fetch` is supplied (it needs the web app
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
     refetchInterval: (query) =>

@@ -4,7 +4,7 @@
  *
  *   navigate ─▶ detail | local ─▶ hydrate ─▶ paint
  *
- * `detail` is the dashboard's thread summary (`GET /threads/:id`); for a
+ * `detail` is the web app's thread summary (`GET /threads/:id`); for a
  * desktop thread under `/agents/local/:id` the equivalent step is `local`, the
  * desktop's `getLocalThread` IPC. `hydrate` is the SDK's state fetch
  * (`GET /threads/:id/state`) that seeds the transcript, and `paint` the first

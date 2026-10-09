@@ -20,8 +20,8 @@ from openswe.slack.code_channels import is_code_channel_session
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thinking import release_slack_location_status, sync_slack_background_status
 from openswe.source_context import SlackThreadRef, SourceContext
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import JsonObject, thread_metadata
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ async def move_slack_thread(
     message: str,
 ) -> dict[str, Any]:
     """Post `message` as a new root in `target_channel` and move the thread's Slack binding there."""
-    root_text = append_slack_web_link_footer(message, dashboard_thread_url(thread_id))
+    root_text = append_slack_web_link_footer(message, web_thread_url(thread_id))
     try:
         new_ts = await post_slack_top_level_message_with_ts(
             target_channel,
@@ -224,5 +224,5 @@ async def move_slack_thread(
         "thread_id": thread_id,
         "channel_id": target_channel,
         "thread_ts": new_ts,
-        "dashboard_url": dashboard_thread_url(thread_id),
+        "web_url": web_thread_url(thread_id),
     }

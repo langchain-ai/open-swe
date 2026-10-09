@@ -11,7 +11,6 @@ from langsmith import trace, tracing_context
 from langsmith.run_trees import RunTree
 
 import openswe.server as server
-from openswe.dashboard.options import available_requested_models
 from openswe.middleware.model_selection import (
     ModelSelectionMiddleware,
     ModelSelectionState,
@@ -21,6 +20,7 @@ from openswe.middleware.prepare_run import PrepareRunState
 from openswe.model_request import ModelRequestIntent
 from openswe.utils.jev import JevDecision
 from openswe.utils.thread_settings import ThreadSettings
+from openswe.web.options import available_requested_models
 
 
 @dataclass

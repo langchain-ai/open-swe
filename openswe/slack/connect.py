@@ -7,8 +7,19 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.oauth import (
+from openswe.slack.oauth import (
+    SLACK_STATE_COOKIE_NAME,
+    SlackIdentity,
+    build_authorize_url,
+    exchange_slack_code,
+    fetch_slack_identity,
+    slack_base_url,
+    slack_oauth_configured,
+    verify_team,
+)
+from openswe.users import User
+from openswe.web.deps import SESSION_DEP
+from openswe.web.oauth import (
     STATE_TTL_SECONDS,
     DesktopConnectExchange,
     cookie_security,
@@ -26,17 +37,6 @@ from openswe.dashboard.oauth import (
     session_user_id,
     valid_handoff_challenge,
 )
-from openswe.slack.oauth import (
-    SLACK_STATE_COOKIE_NAME,
-    SlackIdentity,
-    build_authorize_url,
-    exchange_slack_code,
-    fetch_slack_identity,
-    slack_base_url,
-    slack_oauth_configured,
-    verify_team,
-)
-from openswe.users import User
 
 logger = logging.getLogger(__name__)
 

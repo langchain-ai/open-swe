@@ -80,7 +80,7 @@ export function normalizeBackend(backend: string): string {
   return `${url.protocol}//${url.host}`
 }
 
-/** Client for `<backend>/dashboard/api`, authenticated by whichever credential it holds. */
+/** Client for `<backend>/api`, authenticated by whichever credential it holds. */
 export class ApiClient {
   readonly backend: string
 
@@ -91,12 +91,12 @@ export class ApiClient {
     this.backend = backend.replace(/\/+$/, "")
   }
 
-  dashboardUrl(path: string): string {
+  webUrl(path: string): string {
     return `${this.backend}${path}`
   }
 
   private url(path: string): string {
-    return `${this.backend}/dashboard/api${path}`
+    return `${this.backend}/api${path}`
   }
 
   private async headers(accept: string): Promise<Record<string, string>> {
@@ -310,18 +310,15 @@ export async function exchangeDesktopHandoff(
   code: string,
   verifier: string
 ): Promise<string> {
-  const response = await fetch(
-    `${backend}/dashboard/api/auth/desktop/exchange`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Origin: backend,
-      },
-      body: JSON.stringify({ code, verifier }),
-    }
-  )
+  const response = await fetch(`${backend}/api/auth/desktop/exchange`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Origin: backend,
+    },
+    body: JSON.stringify({ code, verifier }),
+  })
   const text = await response.text()
   if (!response.ok) {
     throw new ApiError(response.status, detailFrom(response.statusText, text))

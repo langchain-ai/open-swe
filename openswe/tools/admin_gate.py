@@ -1,10 +1,10 @@
 """Admin identity checks shared by tool access policies."""
 
-from openswe.dashboard.admin import is_admin
 from openswe.run_config import RunConfig
 from openswe.schedules.store import authorized_admin_schedule
 from openswe.slack.dm import is_dm_channel
 from openswe.users import User
+from openswe.web.admin import is_admin
 
 
 def configurable() -> RunConfig:
@@ -36,13 +36,13 @@ async def participant_is_admin(login: str) -> bool:
 
 def is_private_admin_surface(cfg: RunConfig) -> bool:
     """Whether this run comes from a private surface stamped for admin use."""
-    dashboard = cfg.source in {None, "dashboard", "mcp"}
+    web = cfg.source in {None, "dashboard", "mcp"}
     slack_dm = (
         cfg.source == "slack"
         and cfg.slack_thread is not None
         and is_dm_channel(cfg.slack_thread.channel_context)
     )
-    return cfg.admin_thread is True and (dashboard or slack_dm)
+    return cfg.admin_thread is True and (web or slack_dm)
 
 
 async def actor_has_admin_context(cfg: RunConfig, *, login: str | None = None) -> bool:

@@ -2,7 +2,7 @@
 
 The PR chat agent runs on its own thread; the findings live on the canonical
 reviewer thread for the PR. The reviewer thread id is seeded into the run config
-by the dashboard chat proxy.
+by the web app chat proxy.
 """
 
 from collections.abc import Mapping

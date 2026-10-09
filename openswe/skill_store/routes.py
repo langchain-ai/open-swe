@@ -1,4 +1,4 @@
-"""Dashboard API for per-user and organization-wide Agent Skills."""
+"""Web API for per-user and organization-wide Agent Skills."""
 
 from typing import Any
 
@@ -6,7 +6,6 @@ from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.skill_store.store import (
     DEFAULT_SKILLS_PAGE_SIZE,
     MAX_SKILLS_PAGE_SIZE,
@@ -21,6 +20,7 @@ from openswe.skill_store.store import (
     update_organization_skill,
     update_skill,
 )
+from openswe.web.deps import ADMIN_DEP, SESSION_DEP
 
 router = APIRouter()
 

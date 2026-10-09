@@ -7,7 +7,7 @@ import {
   type Route,
 } from "@playwright/test";
 
-import { loginAs, SAME_ORIGIN_HEADERS, SAME_USER } from "./helpers/dashboard";
+import { loginAs, SAME_ORIGIN_HEADERS, SAME_USER } from "./helpers/web";
 
 const QUICK = { timeout: 3_000 };
 const PAGE_LOAD = { timeout: 10_000 };
@@ -36,7 +36,7 @@ async function failWith500(route: Route) {
 function watchErrorReport(page: Page) {
   return page.waitForResponse(
     (res) =>
-      res.url().endsWith("/dashboard/api/client-errors") &&
+      res.url().endsWith("/api/client-errors") &&
       res.request().method() === "POST",
     QUICK,
   );
@@ -66,7 +66,7 @@ async function expectReportedFailure(
 async function readInstanceSettings(
   request: APIRequestContext,
 ): Promise<InstanceSettings> {
-  const res = await request.get("/dashboard/api/settings");
+  const res = await request.get("/api/settings");
   expect(res.ok(), await res.text()).toBeTruthy();
   return (await res.json()) as InstanceSettings;
 }
@@ -75,7 +75,7 @@ async function writeInstanceSettings(
   request: APIRequestContext,
   body: InstanceSettings,
 ) {
-  const res = await request.put("/dashboard/api/settings", {
+  const res = await request.put("/api/settings", {
     data: body,
     headers: SAME_ORIGIN_HEADERS,
   });
@@ -110,7 +110,7 @@ test.describe("optimistic settings saves", () => {
   test("two settings saved back to back both land", async ({ page }) => {
     const firstPutGate = deferred();
     const puts: Array<InstanceSettings> = [];
-    await page.route("**/dashboard/api/settings", async (route) => {
+    await page.route("**/api/settings", async (route) => {
       if (route.request().method() !== "PUT") return route.continue();
       puts.push(route.request().postDataJSON() as InstanceSettings);
       if (puts.length === 1) await firstPutGate.promise;
@@ -157,7 +157,7 @@ test.describe("optimistic settings saves", () => {
   test("a failed save reverts only its own switch", async ({ page }) => {
     const firstPutGate = deferred();
     const puts: Array<InstanceSettings> = [];
-    await page.route("**/dashboard/api/settings", async (route) => {
+    await page.route("**/api/settings", async (route) => {
       if (route.request().method() !== "PUT") return route.continue();
       puts.push(route.request().postDataJSON() as InstanceSettings);
       if (puts.length === 1) {
@@ -262,7 +262,7 @@ async function holdOnce(
   const gate = deferred();
   const seen = { count: 0 };
   const settled = deferred();
-  await page.route("**/dashboard/api/threads/**", async (route) => {
+  await page.route("**/api/threads/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (!matches(request.method(), path) || seen.count > 0) {
@@ -287,9 +287,9 @@ test.describe("optimistic thread edits", () => {
   });
 
   const isPin = (method: string, path: string) =>
-    method === "POST" && path === `/dashboard/api/threads/${THREAD_ID}/pin`;
+    method === "POST" && path === `/api/threads/${THREAD_ID}/pin`;
   const isRename = (method: string, path: string) =>
-    method === "PATCH" && path === `/dashboard/api/threads/${THREAD_ID}`;
+    method === "PATCH" && path === `/api/threads/${THREAD_ID}`;
 
   async function pinFromSidebar(page: Page) {
     const row = page

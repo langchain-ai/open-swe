@@ -1,4 +1,4 @@
-"""Correlate each dashboard request with the ID the browser shows when it fails."""
+"""Correlate each web request with the ID the browser shows when it fails."""
 
 import logging
 import re
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = b"x-request-id"
 _REQUEST_ID_RE = re.compile(r"^req_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-_DASHBOARD_API_PREFIX = "/dashboard/api/"
+_WEB_API_PREFIX = "/api/"
 _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
@@ -43,10 +43,10 @@ def _request_id(scope: Scope) -> str:
 
 
 class RequestIdMiddleware:
-    """Tag the trace with the browser's request ID and log dashboard failures under it.
+    """Tag the trace with the browser's request ID and log web failures under it.
 
     Failed writes and every 5xx are logged with ``error_id`` so the ID in the
-    dashboard's error toast finds the server side of the failure.
+    web's error toast finds the server side of the failure.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -80,18 +80,18 @@ class RequestIdMiddleware:
                 ]
                 if status_code >= 400:
                     _safe_tag({"error_id": request_id})
-                if path.startswith(_DASHBOARD_API_PREFIX) and (
+                if path.startswith(_WEB_API_PREFIX) and (
                     status_code >= 500 or (status_code >= 400 and method not in _READ_METHODS)
                 ):
-                    logger.warning("Dashboard request failed", extra=failure_extra(status_code))
+                    logger.warning("Web request failed", extra=failure_extra(status_code))
             await send(message)
 
         try:
             await self.app(scope, receive, send_with_id)
         except BaseException:
             _safe_tag({"error_id": request_id})
-            if path.startswith(_DASHBOARD_API_PREFIX):
-                logger.exception("Dashboard request raised", extra=failure_extra(500))
+            if path.startswith(_WEB_API_PREFIX):
+                logger.exception("Web request raised", extra=failure_extra(500))
             raise
 
 

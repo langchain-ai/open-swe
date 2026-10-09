@@ -228,7 +228,7 @@ async function runCommand(options: RunOptions): Promise<number> {
     bridgeId: bridge.session.bridgeId,
     root,
   })
-  note(`Thread ${api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)}`)
+  note(`Thread ${api.webUrl(`/agents/${encodeURIComponent(threadId)}`)}`)
 
   let exitCode = 0
   let closing = false

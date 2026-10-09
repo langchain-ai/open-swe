@@ -69,7 +69,7 @@ async function connect(respond: (url: URL) => Response): Promise<{
 describe("create_session", () => {
   test("starts by default and supports creating an idle session", async () => {
     const { client, bodies } = await connect((url) =>
-      url.pathname === "/dashboard/api/threads"
+      url.pathname === "/api/threads"
         ? Response.json({ thread_id: "new-thread" }, { status: 201 })
         : new Response("not found", { status: 404 })
     )
@@ -344,9 +344,7 @@ describe("human review", () => {
     })
 
     expect(result.isError).toBeFalsy()
-    expect(paths).toEqual([
-      "/dashboard/api/repos/acme/web/pulls/7/human-review",
-    ])
+    expect(paths).toEqual(["/api/repos/acme/web/pulls/7/human-review"])
     expect(JSON.parse(bodies[0] ?? "")).toEqual({
       inline_summary: "Keeps the login form's error visible after a retry.",
     })
@@ -374,9 +372,7 @@ describe("human review", () => {
     })
 
     expect(result.isError).toBeFalsy()
-    expect(paths).toEqual([
-      "/dashboard/api/repos/acme/web/pulls/7/human-review/dismiss",
-    ])
+    expect(paths).toEqual(["/api/repos/acme/web/pulls/7/human-review/dismiss"])
     expect(JSON.parse(bodies[0] ?? "")).toEqual({ reason: "wrong summary" })
     expect(result.structuredContent).toEqual({ request_id: "r-1" })
   })

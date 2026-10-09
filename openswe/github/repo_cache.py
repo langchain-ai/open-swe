@@ -1,4 +1,4 @@
-"""Per-user cache of the GitHub repo list behind the dashboard repo picker.
+"""Per-user cache of the GitHub repo list behind the web app repo picker.
 
 Building the picker payload fans out to ``/user/installations`` plus a
 paginated ``/user/installations/{id}/repositories`` sweep per installation,

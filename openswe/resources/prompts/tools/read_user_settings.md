@@ -1,6 +1,6 @@
 Read server-backed settings for the authenticated owner of a private thread, or redacted settings for verified participants in a collaborative thread.
 
-In a private thread this includes all ordinary profile and dashboard preferences,
+In a private thread this includes all ordinary profile and web preferences,
 including repository/branch defaults, model routing, server-backed personal flags,
 visibility, workspace, local tracing, and follow-up behavior. Only the authenticated owner is read;
 other participant identities cannot broaden private settings access. Use

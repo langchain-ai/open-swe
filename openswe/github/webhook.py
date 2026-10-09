@@ -490,7 +490,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         repo=repo_config.get("name", ""),
         head_sha=head_sha,
         token=app_token,
-        details_url=common.dashboard_thread_url(thread_id),
+        details_url=common.web_thread_url(thread_id),
     )
     if check_run_id is not None:
         await common.track_review_check_run(
@@ -781,7 +781,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             repo=repo_config["name"],
             head_sha=head_sha,
             token=app_token,
-            details_url=common.dashboard_thread_url(thread_id),
+            details_url=common.web_thread_url(thread_id),
         )
         if unchanged_check_id is not None:
             await common.complete_review_check_run(
@@ -846,7 +846,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         repo=repo_config["name"],
         head_sha=head_sha,
         token=app_token,
-        details_url=common.dashboard_thread_url(thread_id),
+        details_url=common.web_thread_url(thread_id),
     )
     if check_run_id is not None:
         await common.track_review_check_run(

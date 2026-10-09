@@ -146,7 +146,7 @@ LLM_REASONING_EFFORT="high"
 
 When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`. All other deployments default to `openai:gpt-6.1-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
 
-Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
+Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `openswe/web/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
 These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
@@ -206,7 +206,7 @@ Jev receives the latest human task text (up to 8,000 characters). Missing API cr
 
 ### Choosing a model in the opening request
 
-New Slack threads and Auto/routed dashboard threads also use Jev to recognize explicit runtime model requests such as "use Opus" or `/model Oppus`. This classification uses the first human request (the triggering message in Slack), up to 8,000 characters, and the available model catalog. It shares Auto routing's credentials, three-second deadline, and confidence cutoff. Title generation runs independently in the background.
+New Slack threads and Auto/routed web threads also use Jev to recognize explicit runtime model requests such as "use Opus" or `/model Oppus`. This classification uses the first human request (the triggering message in Slack), up to 8,000 characters, and the available model catalog. It shares Auto routing's credentials, three-second deadline, and confidence cutoff. Title generation runs independently in the background.
 
 A recognized model is checked for availability and image support, assigned a compatible default effort, and persisted before work begins. It remains selected on follow-ups; explicit UI/API model choices take precedence. A clearly unavailable model or failure to persist the selection stops the run. No clear request, low confidence, or a classifier failure keeps the usual default/routing behavior.
 
@@ -262,7 +262,7 @@ connections or reveal saved credentials.
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
 2. Choose **Headers / API key** or **OAuth client credentials** for authentication.
    For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY`
-   in the LangGraph Store; normal dashboard responses only return header names.
+   in the LangGraph Store; normal web responses only return header names.
    Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
    then the crossed-out eye to clear them from the editor. Entered or imported
    values also have an eye icon to show or hide them. Use headers
@@ -318,7 +318,7 @@ run independently of the agent and honor the connection's enabled state and tool
 selection. Delivery failures are logged without marking the run as notified.
 
 Use the endpoint for your Datadog site (this example uses US5). Replace the key
-placeholders directly in the dashboard. Import supports multiple named servers,
+placeholders directly in the web app. Import supports multiple named servers,
 optional `type` (`http` by default, or `sse`), and string authentication headers.
 It opens each connection for review without saving automatically. Existing
 connections keep their enabled state and selected tools. Local `command` servers
@@ -393,7 +393,7 @@ and interactive OAuth login are not supported by this connection manager.
 
 The backend implementation lives in `openswe/mcp`: connection models and credential
 preparation, OAuth, HTTPS transport, and tool discovery/execution. Workspace storage
-and dashboard authorization remain in the workspace adapters. Existing stored
+and web authorization remain in the workspace adapters. Existing stored
 connections and imported JSON need no migration.
 
 For another scope, provide an `MCPSource` with an owner-specific `namespace` plus
@@ -421,13 +421,13 @@ Any signed-in user can connect remote MCP servers with their own credentials und
 **Settings → Connections → MCP servers**. The form, JSON import, OAuth, header handling, and
 tool discovery work exactly like workspace connections. Records live in the Store
 under `["user_mcps", <trimmed lowercase github login>]`, so one user's connections and credentials are
-never visible to, reused by, or revealed to another user. The dashboard API is
-`/dashboard/api/my-mcps` and requires only a signed-in session.
+never visible to, reused by, or revealed to another user. The web app API is
+`/api/my-mcps` and requires only a signed-in session.
 
 Personal connections load only inside a **private thread owned by the triggering
 user**. Collaborative (workspace or Slack channel) threads can be prompted by anyone, so
 they run without personal credentials; to use yours, continue the thread privately from
-the dashboard.
+the web app.
 Both scopes share the **MCPs** tool group. A personal connection with the same name as a
 workspace connection replaces it entirely for that user's runs, and a disabled personal
 connection hides the workspace one rather than falling back to it.
@@ -540,7 +540,7 @@ Both Slack and Linear support specifying a target repo directly in the message o
 
 ### Customizing Linear routing
 
-Linear comments use the triggering user's dashboard default repository, then the workspace default repository. Users can override either on a per-comment basis by including `repo:owner/name` in their `@openswe` comment.
+Linear comments use the triggering user's web default repository, then the workspace default repository. Users can override either on a per-comment basis by including `repo:owner/name` in their `@openswe` comment.
 
 ### Customizing Slack routing
 
@@ -548,7 +548,7 @@ Slack repo resolution (`get_slack_repo_config` in `openswe/webapp.py`) checks, i
 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
-3. The triggering user's dashboard `default_repo`.
+3. The triggering user's web `default_repo`.
 4. The workspace's default repository (its own override, else the instance's).
 5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
 

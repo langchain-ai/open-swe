@@ -1,4 +1,4 @@
-"""The dashboard's one invalidation stream: which subscribed topics went stale, as they do.
+"""The web app's one invalidation stream: which subscribed topics went stale, as they do.
 
 A browser opens it with every topic its mounted queries read, each paired with
 how many seconds ago that query's data was last known current. The stream
@@ -16,11 +16,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from openswe.dashboard.deps import SESSION_DEP
 from openswe.ui_invalidations import outbox
 from openswe.ui_invalidations.hub import HUB, REPLAY_MARGIN_SECONDS
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.build_info import backend_build_info
+from openswe.web.deps import SESSION_DEP
 
 logger = logging.getLogger(__name__)
 

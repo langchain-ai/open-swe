@@ -8,10 +8,10 @@ import {
   SAME_ORIGIN_HEADERS,
   loginAs,
   seedOpenPullRequest,
-} from "./helpers/dashboard";
+} from "./helpers/web";
 
 // Human review requests in Slack, end to end, with only the LLM and the
-// external SaaS boundaries faked. The agent's tool, the dashboard button, the
+// external SaaS boundaries faked. The agent's tool, the web app button, the
 // card's buttons, the GitHub webhooks and the scheduler deadlines all run the
 // real code; only the deadlines are fired early.
 
@@ -499,11 +499,11 @@ test.describe("Human review in Slack", () => {
         },
       ],
     });
-    const url = `/dashboard/api/repos/${REPO.owner}/${REPO.repo}/pulls/${seeded.number}/human-review`;
+    const url = `/api/repos/${REPO.owner}/${REPO.repo}/pulls/${seeded.number}/human-review`;
     const ask = () =>
       page.request.post(url, { headers: SAME_ORIGIN_HEADERS, data: {} });
 
-    // 1. The dashboard refuses a failing required check, a conflict, and a
+    // 1. The web app refuses a failing required check, a conflict, and a
     //    repository with no review channel, each with the reason.
     let refused = await ask();
     expect(refused.status()).toBe(409);
@@ -617,7 +617,7 @@ test.describe("Human review in Slack", () => {
     ).toHaveCount(0);
   });
 
-  test("requested from the dashboard; nobody signs up, so the agent picks a reviewer, DMs them without posting in the channel, and it merges on their approval", async ({
+  test("requested from the web app; nobody signs up, so the agent picks a reviewer, DMs them without posting in the channel, and it merges on their approval", async ({
     page,
     request,
   }) => {
@@ -652,7 +652,7 @@ test.describe("Human review in Slack", () => {
       )
       .toBe(true);
 
-    // 1. Alice asks from the dashboard.
+    // 1. Alice asks from the web app.
     await loginAs(page, ALICE);
     const seeded = await seedOpenPullRequest(page, {
       repo: `${REPO.owner}/${REPO.repo}`,
@@ -809,7 +809,7 @@ test.describe("Human review in Slack", () => {
       files: { ".github/CODEOWNERS": "* @alice\n/greeting/ @bob\n" },
     });
 
-    // 1. Alice asks from the dashboard.
+    // 1. Alice asks from the web app.
     await loginAs(page, ALICE);
     const seeded = await seedOpenPullRequest(page, {
       repo: `${REPO.owner}/${REPO.repo}`,
@@ -906,7 +906,7 @@ test.describe("Human review in Slack", () => {
       files: { ".github/CODEOWNERS": "* @alice\n/greeting/ @bob @dana\n" },
     });
 
-    // 1. Alice asks from the dashboard; nobody signs up, so the card thread's agent
+    // 1. Alice asks from the web app; nobody signs up, so the card thread's agent
     //    picks one of the two code owners.
     await loginAs(page, ALICE);
     const seeded = await seedOpenPullRequest(page, {
@@ -1123,7 +1123,7 @@ test.describe("Human review in Slack", () => {
       body: "Ends every greeting with one exclamation mark.",
       check_runs: GREEN,
     });
-    const url = `/dashboard/api/repos/${REPO.owner}/${REPO.repo}/pulls/${seeded.number}/human-review`;
+    const url = `/api/repos/${REPO.owner}/${REPO.repo}/pulls/${seeded.number}/human-review`;
 
     const asked = await page.request.post(url, {
       headers: SAME_ORIGIN_HEADERS,

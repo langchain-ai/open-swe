@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter
 
-from openswe.dashboard.deps import SESSION_DEP, session_is_admin
+from openswe.web.deps import SESSION_DEP, session_is_admin
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool

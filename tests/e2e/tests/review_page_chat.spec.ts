@@ -6,7 +6,7 @@ import {
   seedOpenPullRequest,
   typeIntoComposer,
   type SeededPullRequest,
-} from "./helpers/dashboard";
+} from "./helpers/web";
 
 const OWNER = "fakeorg";
 const REPO = "demo";
@@ -59,7 +59,7 @@ interface FakePull {
 }
 
 function reviewApi(pr: SeededPullRequest, suffix = ""): string {
-  return `/dashboard/api/reviews/${OWNER}/${REPO}/${pr.number}${suffix}`;
+  return `/api/reviews/${OWNER}/${REPO}/${pr.number}${suffix}`;
 }
 
 async function fakePull(page: Page, pr: SeededPullRequest): Promise<FakePull> {

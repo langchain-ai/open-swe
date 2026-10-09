@@ -242,7 +242,7 @@ function toolOutputText(
 }
 
 /**
- * Convert the SDK's live projections into the dashboard chunk model so the
+ * Convert the SDK's live projections into the web app chunk model so the
  * transcript streams (and hydrates) directly from the SDK instead of a
  * hand-rolled, server-mirrored adapter.
  *

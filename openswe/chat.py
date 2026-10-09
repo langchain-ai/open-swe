@@ -6,7 +6,7 @@ request using the diff, the published review findings, and read-only access to
 the repository over the GitHub API.
 
 PR context (diff, findings, overview) is seeded as virtual files under ``/pr/``
-into the ``files`` state channel by the dashboard chat proxy
+into the ``files`` state channel by the web app chat proxy
 (``openswe/review/chat.py``); the built-in ``read_file``/``grep``
 tools operate over those. Repo coordinates and the reviewer thread id arrive in
 ``configurable``; a repo-scoped GitHub App token is resolved here so the
@@ -32,12 +32,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from openswe.dashboard.options import (
-    SUPPORTED_MODEL_IDS,
-    gate_fable_model,
-    model_supports_effort,
-)
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token
 from openswe.middleware import (
     BasePrepareRunMiddleware,
@@ -68,6 +62,12 @@ from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from openswe.web.options import (
+    SUPPORTED_MODEL_IDS,
+    gate_fable_model,
+    model_supports_effort,
+)
+from openswe.web.workspace_settings_cache import cached_workspace_settings
 
 logger = logging.getLogger(__name__)
 

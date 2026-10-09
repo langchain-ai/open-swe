@@ -149,7 +149,7 @@ async def get_github_app_installation_token(
 
 async def _local_dev_token() -> str | None:
     """Under `langgraph dev`, the `gh` CLI stands in for an unconfigured App."""
-    from openswe.dashboard.dev_login import gh_token
+    from openswe.web.dev_login import gh_token
 
     return await gh_token()
 

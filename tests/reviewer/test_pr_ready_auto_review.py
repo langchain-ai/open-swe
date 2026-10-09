@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from openswe.github import webhook as github_webhooks
+from openswe.web.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore

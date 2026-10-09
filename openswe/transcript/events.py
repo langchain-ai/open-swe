@@ -60,7 +60,7 @@ class MessageAttachment(BaseModel):
     ``attachment_id`` addresses the bytes, which are stored in
     ``thread_attachment`` by the same transaction that appended the event and
     are served by
-    ``GET /dashboard/api/threads/{thread_id}/transcript/attachments/{attachment_id}``.
+    ``GET /api/threads/{thread_id}/transcript/attachments/{attachment_id}``.
     It is unset only for an attachment whose bytes were not captured.
     """
 

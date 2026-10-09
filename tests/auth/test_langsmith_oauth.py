@@ -3,10 +3,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from cryptography.fernet import Fernet
 
-from openswe.dashboard import langsmith_oauth
-from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users.models import User
+from openswe.web import langsmith_oauth
+from openswe.web.oauth_credentials import load_credential, save_credential
 
 TOKEN_ENDPOINT = "https://api.smith.langchain.com/oauth/token"
 

@@ -15,7 +15,7 @@ Custom Instructions (user-level)"; preserve those lines and add the new rule
 unless the user asked you to change or remove something. Pass an empty string
 only when the user asks to clear their instructions.
 
-The user can also edit them in the dashboard Profile tab.
+The user can also edit them in the web app Profile tab.
 
 A thread's system prompt is fixed when the thread opens, so it keeps showing
 the old text after this call. The ``reminder`` in the result is the current

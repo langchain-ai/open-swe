@@ -30,7 +30,7 @@ from openswe.tools.background_execute import (
 )
 from openswe.utils.background_task_state import update_background_task_state
 
-TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
+TOOLS_URL = "https://agent.example.test/api/sandbox-tools"
 FAKE_CURL = """#!/usr/bin/env python3
 import pathlib, sys
 root = pathlib.Path(__file__).parent
@@ -179,8 +179,8 @@ def test_background_command_timeout_and_stop(fake_curl: Path) -> None:
 
 
 async def _callback_client(monkeypatch: pytest.MonkeyPatch) -> tuple[httpx.AsyncClient, str]:
-    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-tools-signing-key")
-    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://agent.example.test")
+    monkeypatch.setenv("WEB_JWT_SECRET", "test-tools-signing-key")
+    monkeypatch.setenv("WEB_API_BASE_URL", "https://agent.example.test")
     client = MagicMock()
     client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
     monkeypatch.setattr(tool_access, "get_client", lambda: client)
@@ -220,7 +220,7 @@ async def test_completion_callback_asks_runner_to_retry_until_delivered(
     http, token = await _callback_client(monkeypatch)
     async with http:
         response = await http.post(
-            "/dashboard/api/sandbox-tools/background-tasks/cmd-1/complete",
+            "/api/sandbox-tools/background-tasks/cmd-1/complete",
             headers={tool_access.TOOLS_HEADER: token},
         )
     assert response.status_code == (503 if dispatch_fails else 204)
@@ -252,7 +252,7 @@ async def test_completion_callback_cannot_route_outside_its_shared_sandbox(
     http, token = await _callback_client(monkeypatch)
     async with http:
         response = await http.post(
-            "/dashboard/api/sandbox-tools/background-tasks/cmd-1/complete",
+            "/api/sandbox-tools/background-tasks/cmd-1/complete",
             headers={tool_access.TOOLS_HEADER: token},
         )
     assert response.status_code == 403
@@ -275,11 +275,9 @@ async def test_heartbeat_keeps_the_sandbox_alive_only_for_a_running_task(
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
     http, token = await _callback_client(monkeypatch)
     async with http:
-        unauthenticated = await http.post(
-            "/dashboard/api/sandbox-tools/background-tasks/cmd-1/heartbeat"
-        )
+        unauthenticated = await http.post("/api/sandbox-tools/background-tasks/cmd-1/heartbeat")
         response = await http.post(
-            "/dashboard/api/sandbox-tools/background-tasks/cmd-1/heartbeat",
+            "/api/sandbox-tools/background-tasks/cmd-1/heartbeat",
             headers={tool_access.TOOLS_HEADER: token},
         )
     assert unauthenticated.status_code == 401

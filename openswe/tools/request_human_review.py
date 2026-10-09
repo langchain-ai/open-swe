@@ -8,7 +8,6 @@ from fastapi import HTTPException
 from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard import repo_access
 from openswe.github.token import resolve_github_token
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
@@ -30,6 +29,7 @@ from openswe.slack.client import (
 from openswe.slack.payloads import SlackMessage
 from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.users import User
+from openswe.web import repo_access
 
 
 def _failure(error: str) -> dict[str, Any]:

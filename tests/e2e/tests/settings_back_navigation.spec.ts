@@ -5,7 +5,7 @@ import {
   loginAs,
   openThreadViaSlackLink,
   SAME_USER,
-} from "./helpers/dashboard";
+} from "./helpers/web";
 
 test("Back to app returns to the thread that opened settings", async ({
   page,

@@ -1,4 +1,4 @@
-"""Pass-through endpoints between the dashboard and the LangGraph HTTP API."""
+"""Pass-through endpoints between the web app and the LangGraph HTTP API."""
 
 import asyncio
 import copy
@@ -13,7 +13,6 @@ from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
 from openswe.config import ENV
-from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -41,6 +40,7 @@ from openswe.transcript.turns import fail_unstarted_turn, steer_target
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from openswe.utils.thread_ops import langgraph_client, langgraph_url
+from openswe.web.ttft import AssistantTextEventDetector, record_web_thread_ttft
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def langgraph_proxy_headers(
     return headers
 
 
-async def proxy_dashboard_thread_stream_events(
+async def proxy_web_thread_stream_events(
     thread_id: str,
     login: str,
     body: bytes,
@@ -115,7 +115,7 @@ async def stream_thread_events(
         logger.warning("LangGraph stream/events proxy closed for %s", thread_id, exc_info=True)
 
 
-async def _observe_dashboard_run_ttft(
+async def _observe_web_run_ttft(
     thread_id: str,
     run_id: str,
     started_at_ms: int,
@@ -138,7 +138,7 @@ async def _observe_dashboard_run_ttft(
                 observation = detector.observe(event)
                 if observation is None:
                     continue
-                await record_dashboard_thread_ttft(
+                await record_web_thread_ttft(
                     observation,
                     thread_id=thread_id,
                     started_at_ms=started_at_ms,
@@ -146,14 +146,14 @@ async def _observe_dashboard_run_ttft(
                 return
     except Exception:
         logger.warning(
-            "Dashboard TTFT observer closed for run %s on thread %s",
+            "Web TTFT observer closed for run %s on thread %s",
             run_id,
             thread_id,
             exc_info=True,
         )
 
 
-async def proxy_dashboard_thread_commands(
+async def proxy_web_thread_commands(
     thread_id: str,
     login: str,
     body: bytes,
@@ -165,7 +165,7 @@ async def proxy_dashboard_thread_commands(
     """Forward one command, enriched for whoever sent it.
 
     ``principal`` is how a machine gets in. Without one the sender is the person
-    named by ``login``, which is what the dashboard and the agent's own tools pass.
+    named by ``login``, which is what the web app and the agent's own tools pass.
     """
     received_at_ms = _now_ms()
     principal = principal or Principal.of_login(login, email)
@@ -177,7 +177,7 @@ async def proxy_dashboard_thread_commands(
     if not isinstance(parsed, dict):
         raise HTTPException(400, "command body must be a JSON object")
 
-    # The dashboard mints the thread id client-side and submits straight away,
+    # The web app mints the thread id client-side and submits straight away,
     # so the very first ``run.start`` may target a thread that doesn't exist
     # yet. That command lazily creates + stamps + owns the thread (in
     # ``_enrich_run_start_command``); any other command against a missing thread
@@ -302,13 +302,11 @@ async def proxy_dashboard_thread_commands(
         try:
             await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
         except Exception:
-            logger.exception(
-                "Failed to update Slack message for dashboard handoff on %s", thread_id
-            )
+            logger.exception("Failed to update Slack message for web handoff on %s", thread_id)
 
     if run_start_succeeded and run_id is not None:
         task = asyncio.create_task(
-            _observe_dashboard_run_ttft(
+            _observe_web_run_ttft(
                 thread_id,
                 run_id,
                 received_at_ms,
@@ -327,7 +325,7 @@ async def proxy_dashboard_thread_commands(
             )
         except Exception:
             logger.warning(
-                "Failed to persist started dashboard run %s on thread %s",
+                "Failed to persist started web run %s on thread %s",
                 run_id,
                 thread_id,
                 exc_info=True,
@@ -377,7 +375,7 @@ async def _fail_requested_turn(thread_id: str, enriched: dict[str, Any]) -> None
         )
 
 
-async def proxy_dashboard_thread_history(
+async def proxy_web_thread_history(
     thread_id: str,
     login: str,
     body: bytes,
@@ -406,7 +404,7 @@ async def proxy_dashboard_thread_history(
     return response.status_code, response.content, media_type
 
 
-async def proxy_dashboard_thread_runs_list(
+async def proxy_web_thread_runs_list(
     thread_id: str,
     login: str,
     *,
@@ -465,7 +463,7 @@ async def _get_thread_tolerating_create_race(client: Any, thread_id: str) -> dic
     return None
 
 
-async def proxy_dashboard_thread_run_enqueue(
+async def proxy_web_thread_run_enqueue(
     thread_id: str,
     login: str,
     body: bytes,
@@ -519,7 +517,7 @@ async def proxy_dashboard_thread_run_enqueue(
     return await client.runs.get(thread_id, run_id)
 
 
-async def proxy_dashboard_thread_run_cancel(
+async def proxy_web_thread_run_cancel(
     thread_id: str,
     run_id: str,
     login: str,

@@ -148,11 +148,11 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
                 await User.login_for_email(comment_user_email)
             )
         except Exception:  # noqa: BLE001
-            common.logger.exception("Failed to apply dashboard default_repo for Linear user")
+            common.logger.exception("Failed to apply web default_repo for Linear user")
             profile_repo = None
         if profile_repo:
             common.logger.info(
-                "Applying dashboard default_repo for Linear user %s: %s/%s",
+                "Applying web default_repo for Linear user %s: %s/%s",
                 comment_user_email,
                 profile_repo["owner"],
                 profile_repo["name"],

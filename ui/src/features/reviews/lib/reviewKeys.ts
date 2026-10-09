@@ -1,7 +1,7 @@
 import { queryOptions, useQuery } from "@tanstack/react-query"
 
 import { api } from "@/lib/api"
-import { DashboardRequestError } from "@/lib/dashboard-fetch"
+import { WebRequestError } from "@/lib/web-fetch"
 import { BROWSER_CACHE_MAX_AGE_MS } from "@/lib/query"
 import type { ReviewPageRef } from "@/features/agents/lib/types"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
@@ -32,7 +32,7 @@ export function sharedReviewOptions(pr: PullRequestRef) {
     gcTime: BROWSER_CACHE_MAX_AGE_MS,
     staleTime: 60_000,
     retry: (failures: number, error: Error) => {
-      const status = error instanceof DashboardRequestError ? error.status : 0
+      const status = error instanceof WebRequestError ? error.status : 0
       return failures < 1 && !(status >= 400 && status < 500)
     },
     meta: { invalidatedBy: [pullRequestTopic(statusRef(pr))] },

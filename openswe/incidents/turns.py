@@ -6,7 +6,6 @@ from typing import Any, Literal
 
 import httpx
 
-from openswe.dashboard.options import normalize_model_choice
 from openswe.dispatch import create_durable_run
 from openswe.incidents import service
 from openswe.incidents.evidence_tools import redact
@@ -29,6 +28,7 @@ from openswe.slack.client import (
 from openswe.store import store_client
 from openswe.ui_invalidations import Topic
 from openswe.utils.thread_ops import queue_message_for_thread
+from openswe.web.options import normalize_model_choice
 
 logger = logging.getLogger(__name__)
 

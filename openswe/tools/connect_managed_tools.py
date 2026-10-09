@@ -6,7 +6,6 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from openswe.credential_scope import private_credential_login
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.mcp.cards import ConnectCard
 from openswe.mcp.managed import (
     GatewayStatus,
@@ -19,16 +18,15 @@ from openswe.middleware.require_user_reply import current_reply_surface
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, actions, block_payload, button, context, section
 from openswe.slack.tools.reply import slack_reply
-from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
+from openswe.utils.web_links import web_api_base_url, web_thread_url
+from openswe.web.workspace_settings_cache import cached_workspace_settings
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 
 def _slack_blocks(card: ConnectCard, status: GatewayStatus | None) -> list[Block]:
     if status is None:
-        target = dashboard_thread_url(card.thread_id) or ""
-        url = f"{dashboard_api_base_url()}/dashboard/api/langsmith/login?" + urlencode(
-            {"redirect_to": target}
-        )
+        target = web_thread_url(card.thread_id) or ""
+        url = f"{web_api_base_url()}/api/langsmith/login?" + urlencode({"redirect_to": target})
         return [
             section(
                 "Managed tools run with your own LangSmith account. Connect LangSmith, "

@@ -1,7 +1,7 @@
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
-import { DashboardRequestError } from "@/lib/dashboard-fetch"
+import { WebRequestError } from "@/lib/web-fetch"
 import { getDatadogRum } from "@/lib/datadog"
 
 export interface ErrorReport {
@@ -12,7 +12,7 @@ export interface ErrorReport {
   showToast?: boolean
 }
 
-/** Field caps enforced by `ClientErrorReport` in openswe/dashboard/client_errors.py. */
+/** Field caps enforced by `ClientErrorReport` in openswe/web/client_errors.py. */
 const REPORT_LIMITS = {
   title: 200,
   error_message: 2000,
@@ -21,7 +21,7 @@ const REPORT_LIMITS = {
 } as const
 
 function errorId(error: unknown): string {
-  if (error instanceof DashboardRequestError && error.requestId)
+  if (error instanceof WebRequestError && error.requestId)
     return error.requestId
   return `err_${crypto.randomUUID()}`
 }
@@ -73,7 +73,7 @@ export function reportError({
 }: ErrorReport): string {
   const id = errorId(error)
   const message = errorMessage(error)
-  const status = error instanceof DashboardRequestError ? error.status : null
+  const status = error instanceof WebRequestError ? error.status : null
 
   if (showToast)
     toast.error(title, {

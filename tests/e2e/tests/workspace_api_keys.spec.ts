@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAs, SAME_USER } from "./helpers/dashboard";
+import { loginAs, SAME_USER } from "./helpers/web";
 
 test("workspace admins create and revoke a key without retaining its secret", async ({
   page,

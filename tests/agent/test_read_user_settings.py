@@ -127,7 +127,7 @@ async def test_slack_participants_include_broadcasts_and_exclude_system_messages
 
 
 @pytest.mark.asyncio
-async def test_dashboard_participants_are_read_from_trusted_metadata() -> None:
+async def test_web_participants_are_read_from_trusted_metadata() -> None:
     class Threads:
         async def get(self, thread_id: str) -> dict[str, object]:
             assert thread_id == "thread-1"

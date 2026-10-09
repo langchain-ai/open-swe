@@ -9,7 +9,7 @@ from pydantic import AwareDatetime, ValidationError
 
 from openswe.audit_logs.models import AuditLogsCursor, AuditLogsPage
 from openswe.audit_logs.store import list_logs
-from openswe.dashboard.deps import admin_session
+from openswe.web.deps import admin_session
 
 router = APIRouter(tags=["audit-logs"], dependencies=[Depends(admin_session)])
 

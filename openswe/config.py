@@ -247,10 +247,10 @@ ENV.var(
 )
 # --- GitHub ------------------------------------------------------------------------------
 ENV.var("GITHUB_APP_ID", "Numeric GitHub App id used as the JWT issuer.")
-ENV.var("GITHUB_APP_CLIENT_ID", "GitHub App client id for the dashboard OAuth flow.")
+ENV.var("GITHUB_APP_CLIENT_ID", "GitHub App client id for the web app OAuth flow.")
 ENV.var(
     "GITHUB_APP_CLIENT_SECRET",
-    "GitHub App client secret for the dashboard OAuth flow.",
+    "GitHub App client secret for the web app OAuth flow.",
     secret=True,
 )
 ENV.var(
@@ -260,7 +260,7 @@ ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run n
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "GITHUB_OIDC_AUDIENCE",
-    "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
+    "Audience a federated GitHub Actions token must carry; defaults to the web app URL.",
 )
 ENV.var(
     "X_SERVICE_AUTH_JWT_SECRET",
@@ -272,10 +272,8 @@ ENV.var(
 )
 ENV.var("OPEN_SWE_MENTION_TAGS", "Comma-separated handles this deployment answers to.")
 ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as internal commenters.")
-ENV.var(
-    "ALLOWED_GITHUB_ORGS", "Comma-separated GitHub orgs allowed for webhooks and dashboard login."
-)
-ENV.var("ALLOWED_GITHUB_USERS", "Comma-separated GitHub users allowed to log in to the dashboard.")
+ENV.var("ALLOWED_GITHUB_ORGS", "Comma-separated GitHub orgs allowed for webhooks and web login.")
+ENV.var("ALLOWED_GITHUB_USERS", "Comma-separated GitHub users allowed to log in to the web app.")
 ENV.var("ALLOWED_GITHUB_REPOS", "Comma-separated owner/repo pairs allowed for webhooks.")
 ENV.var("PUBLIC_REPO_ORG_GATE", "Single org whose members may trigger runs on public repos.")
 ENV.var(
@@ -298,36 +296,45 @@ ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
 ENV.var(
     "SLACK_PUBLIC_BASE_URL",
     "Public URL for Slack webhooks and the Sign in with Slack callback; defaults to "
-    "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
+    "WEB_API_BASE_URL. Use the ngrok URL when the web app runs on localhost.",
 )
 ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
-# --- Dashboard ------------------------------------------------------------------------------
+# --- Web ------------------------------------------------------------------------------
 ENV.var(
-    "DASHBOARD_BASE_URL",
-    "Public URL of the dashboard frontend; defaults to LANGGRAPH_URL when the backend serves "
-    "the dashboard (bundled build or DASHBOARD_DEV_SERVER_URL).",
+    "WEB_BASE_URL",
+    "Public URL of the web app frontend; defaults to LANGGRAPH_URL when the backend serves "
+    "the web app (bundled build or WEB_DEV_SERVER_URL).",
+    aliases=("DASHBOARD_BASE_URL",),
 )
 ENV.var(
-    "DASHBOARD_API_BASE_URL",
-    "Public URL browsers use for /dashboard/api/* and OAuth callbacks; defaults to LANGGRAPH_URL.",
+    "WEB_API_BASE_URL",
+    "Public URL browsers use for /api/* and OAuth callbacks; defaults to LANGGRAPH_URL.",
+    aliases=("DASHBOARD_API_BASE_URL",),
 )
 ENV.var(
-    "DASHBOARD_STATIC_DIR",
-    "Directory holding the dashboard build (ui/.output/public) served at /; defaults to the "
+    "WEB_STATIC_DIR",
+    "Directory holding the web app build (ui/.output/public) served at /; defaults to the "
     "in-repo build when present.",
+    aliases=("DASHBOARD_STATIC_DIR",),
 )
 ENV.var(
-    "DASHBOARD_DEV_SERVER_URL",
+    "WEB_DEV_SERVER_URL",
     "Local development only: Vite dev server the backend forwards UI requests to instead of "
-    "serving a build, so the dashboard hot-reloads on the backend's origin.",
+    "serving a build, so the web app hot-reloads on the backend's origin.",
+    aliases=("DASHBOARD_DEV_SERVER_URL",),
 )
-ENV.var("DASHBOARD_ALLOWED_ORIGINS", "Comma-separated extra origins allowed for credentialed CORS.")
 ENV.var(
-    "DASHBOARD_JWT_SECRET",
-    "HMAC secret for dashboard session cookies and OAuth state.",
+    "WEB_ALLOWED_ORIGINS",
+    "Comma-separated extra origins allowed for credentialed CORS.",
+    aliases=("DASHBOARD_ALLOWED_ORIGINS",),
+)
+ENV.var(
+    "WEB_JWT_SECRET",
+    "HMAC secret for web session cookies and OAuth state.",
     secret=True,
+    aliases=("DASHBOARD_JWT_SECRET",),
 )
 ENV.var(
     "TOKEN_ENCRYPTION_KEY",

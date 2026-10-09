@@ -3,8 +3,11 @@
 from typing import Literal
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.feature_flags import feature_flag_names
-from openswe.dashboard.workspace_settings import (
+from openswe.store import get_value
+from openswe.tools.access import Policy, access, ack
+from openswe.tools.mcp_exposure import expose_mcp
+from openswe.web.feature_flags import feature_flag_names
+from openswe.web.workspace_settings import (
     INSTANCE_SETTINGS_KEY,
     INSTANCE_SETTINGS_NAMESPACE,
     WORKSPACE_SETTINGS_NAMESPACE,
@@ -14,9 +17,6 @@ from openswe.dashboard.workspace_settings import (
     upsert_workspace_overrides,
     workspace_settings_view,
 )
-from openswe.store import get_value
-from openswe.tools.access import Policy, access, ack
-from openswe.tools.mcp_exposure import expose_mcp
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 FEATURE_FLAGS = feature_flag_names(WorkspaceSettingsUpdate)

@@ -13,7 +13,7 @@ hourly, and only while the workspace is actually in use.
 sandbox and captures the result, nightly on a cron and on demand. Because the
 scripts are the definition, the snapshot can always be rebuilt, and the refresh
 outcome — status, timestamps, and a capped log — rides on the record for the
-dashboard to show.
+web to show.
 
 Snapshots are Docker-style: a workspace owns a name (its own, or
 ``<prefix>-environment-<slug>`` from ``WORKSPACE_SNAPSHOT_PREFIX`` — the
@@ -156,7 +156,7 @@ SNAPSHOT_TAG = "latest"
 
 # Scripts and their logs live under a fixed root that is captured with the
 # snapshot, so any sandbox booted from an image carries the log of the run that
-# produced it — readable in place, without the dashboard.
+# produced it — readable in place, without the web app.
 DEFAULT_SCRIPT_ROOT = "/open-swe/environment"
 WORKSPACE_REPOS_ENV_VAR = "OPENSWE_WORKSPACE_REPOS"
 

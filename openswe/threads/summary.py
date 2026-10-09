@@ -1,4 +1,4 @@
-"""Thread metadata readers and the summary shape the dashboard renders."""
+"""Thread metadata readers and the summary shape the web app renders."""
 
 import logging
 from collections.abc import Mapping
@@ -10,7 +10,6 @@ from fastapi import HTTPException
 
 from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore
-from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
@@ -31,10 +30,11 @@ from openswe.utils.json_types import (
 )
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.timing import phase
+from openswe.web.admin import is_admin
 
 logger = logging.getLogger(__name__)
 
-DASHBOARD_SOURCE = "dashboard"
+WEB_APP_SOURCE = "dashboard"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
@@ -90,7 +90,7 @@ def _thread_metadata(thread: ThreadLike) -> JsonObject:
 
 def thread_source(metadata: Mapping[str, Any]) -> str:
     source = metadata.get("source")
-    return source if isinstance(source, str) and source else DASHBOARD_SOURCE
+    return source if isinstance(source, str) and source else WEB_APP_SOURCE
 
 
 def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:
@@ -148,10 +148,10 @@ def assert_thread_readable(
 
 
 def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
-    """Dashboard actions on a thread: prompting, approvals, plan edits, shell and files.
+    """Web actions on a thread: prompting, approvals, plan edits, shell and files.
 
     A thread a Slack bot started is steered from its Slack thread only, so the
-    dashboard keeps it read-only for everyone, admins included.
+    web keeps it read-only for everyone, admins included.
     """
     if not thread_is_promptable(metadata, login):
         raise HTTPException(404, "thread not found")

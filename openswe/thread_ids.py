@@ -1,6 +1,6 @@
 """Deterministic thread-id derivations.
 
-Every id here is a cross-process routing contract: webhooks, the dashboard and
+Every id here is a cross-process routing contract: webhooks, the web app and
 the reviewer each re-derive the same id from the same external identifiers to
 find an existing thread. Changing a formula orphans live threads, so the exact
 input strings and namespaces are part of the persisted data model.

@@ -19,7 +19,7 @@ const metadata: AnalyticsMetadata = {
       built_at: "2026-09-10T10:00:00Z",
       package_version: "0.1.0",
     },
-    dashboard: {
+    web: {
       commit: "def456",
       built_at: "2026-09-10T11:00:00Z",
       served: true,

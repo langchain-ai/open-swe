@@ -11,7 +11,6 @@ import time
 from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, Field
 
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.dispatch import create_durable_run
 from openswe.expedited_review.reviews import github_token_hint
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
@@ -39,9 +38,10 @@ from openswe.slack.code_channels import (
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_thread_url
+from openswe.web.profiles import get_valid_access_token
 from openswe.webhooks.common import upsert_agent_thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             repo_context_bar_items(
                 {"owner": start.owner, "name": start.repo},
                 pr_url=pull_request.url,
-                dashboard_url=dashboard_thread_url(thread_id) or "",
+                web_url=web_thread_url(thread_id) or "",
             ),
         )
     except SlackRequestError:

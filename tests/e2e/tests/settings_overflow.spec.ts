@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { loginAs, SAME_USER } from "./helpers/dashboard";
+import { loginAs, SAME_USER } from "./helpers/web";
 
 for (const viewport of [
   { width: 1512, height: 850 },

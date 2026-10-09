@@ -78,10 +78,7 @@ it("reads the workspace's settings and writes only its own override", async () =
     expect(
       reads.map((url) => new URL(url, "http://localhost").pathname)
     ).toEqual(
-      expect.arrayContaining([
-        "/dashboard/api/settings",
-        "/dashboard/api/workspaces/oss/settings",
-      ])
+      expect.arrayContaining(["/api/settings", "/api/workspaces/oss/settings"])
     )
   )
   await waitFor(() =>

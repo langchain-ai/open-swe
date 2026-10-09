@@ -5,7 +5,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
 from openswe.run_config import Repo, RunConfig
@@ -28,11 +27,12 @@ from openswe.slack.http import SlackRequestError
 from openswe.slack.request import SlackRequest
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_metadata
+from openswe.utils.web_links import web_thread_url
+from openswe.web.repo_access import require_repo_access_for_user
 from openswe.webhooks.common import SlackRepoResolution, is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
@@ -115,11 +115,11 @@ def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
 
 
 async def _run_links_section(thread_id: str) -> str:
-    dashboard_url = dashboard_thread_url(thread_id)
+    web_url = web_thread_url(thread_id)
     trace_url = await get_langsmith_trace_url(thread_id)
     lines = ["## Open SWE Links"]
-    if dashboard_url:
-        lines.append(f"- Web: {dashboard_url}")
+    if web_url:
+        lines.append(f"- Web: {web_url}")
     if trace_url:
         lines.append(f"- Trace: {trace_url}")
     lines.append(
@@ -306,8 +306,8 @@ async def slack_breakout_thread(
         return {
             "success": True,
             "thread_id": thread_id,
-            "dashboard_url": dashboard_thread_url(thread_id),
-            "next_step": "Share the dashboard_url with the requester; the thread is web-only.",
+            "web_url": web_thread_url(thread_id),
+            "next_step": "Share the web app_url with the requester; the thread is web-only.",
         }
 
     destination = await resolve_breakout_destination(
@@ -339,7 +339,7 @@ async def slack_breakout_thread(
         message_ts = await post_slack_top_level_message_with_ts(
             clean_channel_id,
             append_slack_web_link_footer(
-                " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
+                " · ".join(part for part in root_parts if part), web_thread_url(thread_id)
             ),
             blocks=block_payload(
                 [
@@ -462,7 +462,7 @@ async def slack_breakout_thread(
         "success": True,
         "thread_id": thread_id,
         "thread_ts": message_ts,
-        "dashboard_url": dashboard_thread_url(thread_id),
+        "web_url": web_thread_url(thread_id),
         "slack_url": slack_url
         or f"https://slack.com/archives/{clean_channel_id}/p{message_ts.replace('.', '')}",
     }

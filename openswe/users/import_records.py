@@ -6,10 +6,10 @@ this module. Pending OAuth flows are
 not moved: they expire within minutes and a retry starts a new one.
 """
 
-from openswe.dashboard.profiles import GITHUB_OAUTH_TOKENS, PROFILES
-from openswe.dashboard.user_instructions import USER_INSTRUCTIONS
-from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.database.store_imports import StoreImport
+from openswe.web.profiles import GITHUB_OAUTH_TOKENS, PROFILES
+from openswe.web.user_instructions import USER_INSTRUCTIONS
+from openswe.web.user_preferences import USER_PREFERENCES
 
 
 async def import_user_records() -> StoreImport:

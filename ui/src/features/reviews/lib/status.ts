@@ -102,7 +102,7 @@ export function canUpdateBranch(pr: OpenPullRequest) {
 }
 
 // Offer the merge unless GitHub has already refused it. It enforces rules the
-// dashboard cannot see — an unresolved conversation, say — so an attempt that
+// web cannot see — an unresolved conversation, say — so an attempt that
 // only might fail is still worth offering, and its refusal is the answer. A
 // conflict, a draft, a missing required approval, or a required check that
 // never reported is not a guess: those merges are certain to be rejected.

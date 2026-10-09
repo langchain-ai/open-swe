@@ -40,8 +40,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMidd
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from openswe.dashboard.options import gate_fable_model
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -114,6 +112,8 @@ from openswe.utils.model import (
     provider_model_kwargs,
 )
 from openswe.walkthrough.record import WalkthroughView
+from openswe.web.options import gate_fable_model
+from openswe.web.workspace_settings_cache import cached_workspace_settings
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 

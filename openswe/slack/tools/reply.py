@@ -35,9 +35,9 @@ from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from openswe.slack.orphan import (
-    dashboard_handoff_message,
-    move_thread_to_dashboard,
+    move_thread_to_web,
     slack_thread_detached,
+    web_handoff_message,
 )
 from openswe.slack.run_feedback import feedback_block
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 _NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
 _BY_THE_WAY_ANSWER_TTL_MINUTES = 7 * 24 * 60
-# The posting helpers append a dashboard-link context block.
+# The posting helpers append a web-link context block.
 _WEB_LINK_BLOCKS = 1
 
 
@@ -107,8 +107,8 @@ async def slack_reply(
     channel_id = active.get("channel_id")
     thread_ts = active.get("thread_ts")
     if not channel_id or not thread_ts:
-        if await _already_moved_to_dashboard(client, thread_id):
-            return _dashboard_handoff(thread_id)
+        if await _already_moved_to_web(client, thread_id):
+            return _web_handoff(thread_id)
         return {
             "success": False,
             "error": "Missing slack_thread.channel_id or slack_thread.thread_ts in config",
@@ -168,10 +168,10 @@ async def slack_reply(
             )
         except SlackRequestError as exc:
             if exc.code == "thread_not_found":
-                moved = bool(thread_id) and await move_thread_to_dashboard(
+                moved = bool(thread_id) and await move_thread_to_web(
                     client, str(thread_id), str(channel_id), str(thread_ts)
                 )
-                return _dashboard_handoff(thread_id) if moved else _dashboard_handoff_failed()
+                return _web_handoff(thread_id) if moved else _web_handoff_failed()
             return {
                 "success": False,
                 "error": exc.code,
@@ -430,7 +430,7 @@ async def _ephemeral_reply(
     return {"success": True}
 
 
-async def _already_moved_to_dashboard(client: LangGraphClient, thread_id: str | None) -> bool:
+async def _already_moved_to_web(client: LangGraphClient, thread_id: str | None) -> bool:
     if not thread_id:
         return False
     try:
@@ -443,27 +443,27 @@ async def _already_moved_to_dashboard(client: LangGraphClient, thread_id: str | 
     return slack_thread_detached(thread_metadata(thread))
 
 
-def _dashboard_handoff_failed() -> dict[str, Any]:
+def _web_handoff_failed() -> dict[str, Any]:
     return {
         "success": False,
-        "error": "Slack thread no longer exists and it could not be moved to the dashboard",
-        "moved_to_dashboard": False,
+        "error": "Slack thread no longer exists and it could not be moved to the web app",
+        "moved_to_web": False,
         "retry": True,
         "hint": (
             "The Slack thread you were replying in is gone, so posting there cannot work, and "
-            "moving this thread to the dashboard failed. Retry once; if it fails again, give "
+            "moving this thread to the web app failed. Retry once; if it fails again, give "
             "your answer as your final response."
         ),
     }
 
 
-def _dashboard_handoff(thread_id: str | None) -> dict[str, Any]:
+def _web_handoff(thread_id: str | None) -> dict[str, Any]:
     return {
         "success": False,
         "error": "Slack thread no longer exists",
-        "moved_to_dashboard": True,
+        "moved_to_web": True,
         "retry": False,
-        "hint": dashboard_handoff_message(str(thread_id or "")),
+        "hint": web_handoff_message(str(thread_id or "")),
     }
 
 

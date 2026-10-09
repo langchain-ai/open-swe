@@ -90,22 +90,22 @@ new_prs: as drafts
 </dynamic-context>
 ```
 
-## Turn 4: Alice switches to the web dashboard
+## Turn 4: Alice switches to the web app
 Given: the thread has Alice and Bob
-When: Alice types in the dashboard: ship it
+When: Alice types in the web app: ship it
 Then: the same user: id on a web envelope, and nothing else — what she is does not depend on where she typed
 
 ### dispatch appends
 ```xml
 <dynamic-context kind="system" id="system:dashboard-handoff">
-display_name: Dashboard handoff
+display_name: Web handoff
 platform: open-swe
 </dynamic-context>
 ```
 
 ```xml
 <input-message sender="system:dashboard-handoff" surface="automation" kind="system">
-This follow-up was sent from Web. The conversation has moved to Web, so answer in the dashboard stream with a normal assistant message. Do not call slack_reply unless a later Slack message explicitly moves the conversation back to Slack.
+This follow-up was sent from Web. The conversation has moved to Web, so answer in the web app stream with a normal assistant message. Do not call slack_reply unless a later Slack message explicitly moves the conversation back to Slack.
 </input-message>
 ```
 

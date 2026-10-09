@@ -1,10 +1,10 @@
-"""Track the reviewer eval for the admin dashboard.
+"""Track the reviewer eval for the admin web.
 
 ``start_reviewer_eval`` launches the eval detached in a LangSmith sandbox,
 isolated from the serving deployment. The harness reports progress
 into a LangGraph store record (namespace ``["evals"]``, key ``"reviewer"``) via
 ``evals.reviewer.store_reporter``; this module reads that record for the
-dashboard and reconciles a run whose heartbeat has gone stale (e.g. the sandbox
+web and reconciles a run whose heartbeat has gone stale (e.g. the sandbox
 stopped) to ``failed``.
 """
 

@@ -10,9 +10,6 @@ from langgraph_sdk.errors import ConflictError
 from pydantic import ValidationError
 
 from openswe import store as agent_store
-from openswe.dashboard import repo_access
-from openswe.dashboard.options import fable_disabled_fallback
-from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.schedules import store as schedules
 from openswe.schedules.store import (
@@ -24,6 +21,9 @@ from openswe.schedules.store import (
     SlackTrigger,
 )
 from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
+from openswe.web import repo_access
+from openswe.web.options import fable_disabled_fallback
+from openswe.web.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"

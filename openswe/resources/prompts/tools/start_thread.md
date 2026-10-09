@@ -7,4 +7,4 @@ For PR implementation or fixes, first follow the Task Execution existing-thread 
 - `repos`: `owner/name` repositories the task touches. The first is the one its sandbox opens in; the others are listed for it to clone.
 - `visibility`: `workspace` (default) is visible to the workspace; `private` only to the person.
 
-Returns `thread_id` and `dashboard_url`. Share the link. Check progress later with `get_thread`, and send follow-ups with `manage_thread`.
+Returns `thread_id` and `web_url`. Share the link. Check progress later with `get_thread`, and send follow-ups with `manage_thread`.

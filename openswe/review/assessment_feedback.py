@@ -6,10 +6,10 @@ from typing import Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.review.publish import ReviewAssessment
 from openswe.store import TypedStore, now_iso
 from openswe.utils.langsmith import create_langsmith_feedback
+from openswe.web.repo_access import require_repo_access_for_user
 
 logger = logging.getLogger(__name__)
 

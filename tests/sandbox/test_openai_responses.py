@@ -9,7 +9,6 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from openswe.openai_responses import conversations, routes
 from openswe.openai_responses.conversations import SandboxCaller
 from openswe.openai_responses.ids import OpenSweId
@@ -34,6 +33,7 @@ from openswe.transcript.events import (
     TurnCompleted,
     TurnStarted,
 )
+from openswe.web.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from tests.conftest import FakeStore
 
 THREAD = str(uuid.uuid4())

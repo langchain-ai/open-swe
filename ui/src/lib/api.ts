@@ -1,19 +1,19 @@
 /**
- * Typed client for the open-swe dashboard backend.
+ * Typed client for the open-swe web backend.
  *
  * All requests are sent with credentials so the httpOnly `osw_session`
  * cookie set by the OAuth callback rides along on cross-origin calls.
  */
 
-import { dashboardApiBase } from "./api-base"
+import { webApiBase } from "./api-base"
 import {
-  DashboardRequestError,
+  WebRequestError,
   REQUEST_ID_HEADER,
-  dashboardApiUrl,
-  dashboardForwardedHeaders,
+  webApiUrl,
+  webForwardedHeaders,
   networkError,
   newRequestId,
-} from "./dashboard-fetch"
+} from "./web-fetch"
 
 export interface AuditLogFilters {
   start_time: string
@@ -97,7 +97,7 @@ export interface WorkspaceApiKey {
   status: "active" | "expired" | "revoked"
 }
 
-const API_BASE = dashboardApiBase()
+const API_BASE = webApiBase()
 
 const GITHUB_IMAGE_HOST_RE =
   /^(?:www\.)?github\.com$|\.githubusercontent\.com$/i
@@ -105,7 +105,7 @@ const GITHUB_IMAGE_HOST_RE =
 /**
  * Build an authenticated proxy URL for GitHub-hosted PR images. Private-repo
  * attachments can't be loaded directly by the browser, so they're routed
- * through the dashboard backend which holds the App token. Non-GitHub image
+ * through the web app backend which holds the App token. Non-GitHub image
  * URLs are returned unchanged.
  */
 export function reviewImageProxyUrl(
@@ -133,7 +133,7 @@ export function reviewImageProxyUrl(
     return src
   }
   const path = `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/image`
-  return `${API_BASE}/dashboard/api${path}?url=${encodeURIComponent(src)}`
+  return `${API_BASE}/api${path}?url=${encodeURIComponent(src)}`
 }
 
 export interface ClientErrorReport {
@@ -145,7 +145,7 @@ export interface ClientErrorReport {
   path: string
 }
 
-export class ApiError extends DashboardRequestError {
+export class ApiError extends WebRequestError {
   constructor(status: number, message: string, requestId?: string) {
     super(status, message, requestId)
     this.name = "ApiError"
@@ -160,13 +160,13 @@ export function isGithubReauthError(error: unknown): boolean {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const requestId = newRequestId()
-  const res = await fetch(dashboardApiUrl(path), {
+  const res = await fetch(webApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
+      ...webForwardedHeaders(),
       ...init.headers,
     },
   }).catch((cause: unknown) => {
@@ -242,7 +242,7 @@ export interface BuildInfo {
     built_at: string | null
     package_version: string | null
   }
-  dashboard: {
+  web: {
     commit: string | null
     built_at: string | null
     served: boolean
@@ -255,10 +255,11 @@ export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
   const backend = (raw as { backend?: unknown }).backend
   if (typeof backend !== "object" || backend === null) return null
   const b = backend as Partial<BuildInfo["backend"]>
-  const dashboard = (raw as { dashboard?: unknown }).dashboard
+  const web =
+    (raw as { web?: unknown }).web ?? (raw as { dashboard?: unknown }).dashboard
   const d =
-    typeof dashboard === "object" && dashboard !== null
-      ? (dashboard as Partial<BuildInfo["dashboard"]>)
+    typeof web === "object" && web !== null
+      ? (web as Partial<BuildInfo["web"]>)
       : undefined
   return {
     backend: {
@@ -269,7 +270,7 @@ export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
       package_version:
         typeof b.package_version === "string" ? b.package_version : null,
     },
-    dashboard: {
+    web: {
       commit: d && typeof d.commit === "string" ? d.commit : null,
       built_at: d && typeof d.built_at === "string" ? d.built_at : null,
       served: typeof d?.served === "boolean" ? d.served : false,
@@ -518,7 +519,7 @@ export function describeApiBase(apiBaseUrl: string | undefined): {
   origin: string | null
   path: string
 } {
-  const path = `${dashboardApiBase()}/dashboard/api`
+  const path = `${webApiBase()}/api`
   if (!apiBaseUrl) return { origin: null, path }
   try {
     return { origin: new URL(apiBaseUrl).origin, path }
@@ -1355,7 +1356,7 @@ export function reviewChatApiBase(
   repo: string,
   number: number
 ): string {
-  const path = `${API_BASE}/dashboard/api/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
+  const path = `${API_BASE}/api/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
   if (/^https?:\/\//.test(path)) return path
   if (typeof window !== "undefined") {
     return `${window.location.origin}${path.startsWith("/") ? "" : "/"}${path}`
@@ -2088,7 +2089,7 @@ export function loginUrl(redirectTo?: string): string {
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  return `${API_BASE}/dashboard/api/auth/login${qs}`
+  return `${API_BASE}/api/auth/login${qs}`
 }
 
 /**
@@ -2108,9 +2109,7 @@ export function connectService(
     const query = redirectTo
       ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
       : ""
-    window.location.assign(
-      `${API_BASE}/dashboard/api/${provider}/login${query}`
-    )
+    window.location.assign(`${API_BASE}/api/${provider}/login${query}`)
   }
   return pending
 }

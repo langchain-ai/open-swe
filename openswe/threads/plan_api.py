@@ -7,10 +7,9 @@ from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, model_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
-from openswe.threads.access import _ensure_dashboard_github_token
+from openswe.threads.access import _ensure_web_github_token
 from openswe.threads.plan_store import (
     PLAN_STATUS_SHARED,
     add_plan_comment,
@@ -24,16 +23,17 @@ from openswe.threads.plan_store import (
     save_plan_content,
     write_plan_to_sandbox,
 )
-from openswe.threads.runs import _build_dashboard_configurable
+from openswe.threads.runs import _build_web_configurable
 from openswe.threads.summary import (
     _assert_thread_postable,
     _assert_thread_promptable,
     thread_is_readable,
 )
 from openswe.utils.thread_ops import langgraph_client
+from openswe.web.oauth import require_same_origin_for_mutations, require_session
 
 plan_router = APIRouter(
-    prefix="/dashboard/api/plan",
+    prefix="/api/plan",
     tags=["plan"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
@@ -199,8 +199,8 @@ async def submit_plan_comments(
     comments = await list_plan_comments(thread_id, raise_on_error=True)
     if not any(comment.get("author_login") == login for comment in comments):
         raise HTTPException(422, "no comments to submit")
-    await _ensure_dashboard_github_token(login)
-    configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+    await _ensure_web_github_token(login)
+    configurable = await _build_web_configurable(thread_id, login, metadata)
     await dispatch_agent_run(
         thread_id,
         prompt("threads/submit-artifact-comments"),

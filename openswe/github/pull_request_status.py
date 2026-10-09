@@ -1,4 +1,4 @@
-"""Live GitHub pull-request health for dashboard threads."""
+"""Live GitHub pull-request health for web threads."""
 
 import asyncio
 import logging
@@ -728,7 +728,7 @@ class PullRequestClient:
             return ReviewState(None, review_required)
 
     async def thread_status(self) -> dict[str, Any]:
-        """The PR health a dashboard thread shows: state, checks and unresolved threads."""
+        """The PR health a web thread shows: state, checks and unresolved threads."""
         result = _unavailable_pull_request(
             {"repo_full_name": self.repo.full_name, "number": self.number}
         )

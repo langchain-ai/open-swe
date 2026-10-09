@@ -1,15 +1,15 @@
-"""Fetching a dashboard thread and asserting the caller may read or act on it."""
+"""Fetching a web thread and asserting the caller may read or act on it."""
 
 from typing import Any
 
 from fastapi import HTTPException
 
 from openswe.config import ENV
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.threads.summary import assert_thread_readable
 from openswe.users import User
 from openswe.utils.json_types import ThreadLike, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.web.profiles import get_valid_access_token
 
 
 def agent_version_metadata() -> dict[str, str]:
@@ -28,7 +28,7 @@ async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
     return mapped or profile.get("email")
 
 
-async def _ensure_dashboard_github_token(login: str) -> None:
+async def _ensure_web_github_token(login: str) -> None:
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")

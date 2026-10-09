@@ -64,7 +64,7 @@ async def test_output_iframe_snapshots_html_and_returns_signed_urls(
 
     content, artifact = await iframe_tool._output_iframe("chart.html", "Quarterly chart")
 
-    assert content == "Displayed the HTML output in the dashboard."
+    assert content == "Displayed the HTML output in the web app."
     assert artifact == {
         "type": "output_iframe",
         "preview_url": "https://downloads.example/inline?token=secret",
@@ -158,6 +158,6 @@ async def test_output_iframe_tool_keeps_urls_out_of_model_content(
     )
 
     assert isinstance(result, ToolMessage)
-    assert result.content == "Displayed the HTML output in the dashboard."
+    assert result.content == "Displayed the HTML output in the web app."
     assert result.artifact["preview_url"] == ("https://downloads.example/inline?token=secret")
     assert result.artifact["title"] == "HTML Output"

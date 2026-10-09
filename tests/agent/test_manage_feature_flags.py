@@ -7,13 +7,13 @@ import pytest
 from openswe.audit_logs import tools as audit_tools
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.models import AuditLog
-from openswe.dashboard.workspace_settings import (
+from openswe.tools import access as tool_access
+from openswe.tools.manage_feature_flags import manage_feature_flags
+from openswe.web.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_workspace_settings,
     upsert_instance_settings,
 )
-from openswe.tools import access as tool_access
-from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.workspaces.store import WORKSPACES, Workspace
 from tests.conftest import FakeStore
 

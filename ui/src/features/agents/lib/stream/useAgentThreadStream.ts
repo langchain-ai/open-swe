@@ -9,9 +9,9 @@ import {
   invalidateAgentThreadLists,
 } from "@/features/agents/lib/queries"
 import {
-  createDashboardClient,
+  createWebClient,
   createLocalGraphClient,
-  dashboardFetch,
+  webFetch,
 } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
 import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from "./connection"
@@ -46,13 +46,11 @@ export function useAgentThreadStream({
 }): AgentThreadStream {
   const queryClient = useQueryClient()
   const cloud = transport === "cloud"
-  const [runAcceptance] = useState(() =>
-    createRunAcceptanceTracker(dashboardFetch)
-  )
+  const [runAcceptance] = useState(() => createRunAcceptanceTracker(webFetch))
   const client = useMemo(
     () =>
       cloud
-        ? createDashboardClient(
+        ? createWebClient(
             agentsApi.langGraphApiUrl,
             orderRunStarts(runAcceptance.fetch)
           )
@@ -69,7 +67,7 @@ export function useAgentThreadStream({
     client,
     assistantId: AGENT_ASSISTANT_ID,
     threadId,
-    fetch: cloud ? runAcceptance.fetch : dashboardFetch,
+    fetch: cloud ? runAcceptance.fetch : webFetch,
     // Only affects "stream"-kind threads; transcript threads never call
     // useStream() at all.
     queue: "server",

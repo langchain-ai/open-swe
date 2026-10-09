@@ -1,11 +1,11 @@
 import { ApiError } from "@/lib/api"
 import {
   REQUEST_ID_HEADER,
-  dashboardApiUrl,
-  dashboardForwardedHeaders,
+  webApiUrl,
+  webForwardedHeaders,
   networkError,
   newRequestId,
-} from "@/lib/dashboard-fetch"
+} from "@/lib/web-fetch"
 
 export type IncidentView = "active" | "inactive" | "all" | "history"
 export type IncidentAction =
@@ -98,13 +98,13 @@ export interface IncidentSettingsPayload {
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const requestId = newRequestId()
-  const response = await fetch(dashboardApiUrl(`/incidents${path}`), {
+  const response = await fetch(webApiUrl(`/incidents${path}`), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
+      ...webForwardedHeaders(),
     },
   }).catch((cause: unknown) => {
     throw networkError(cause, requestId)

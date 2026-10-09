@@ -428,7 +428,7 @@ async function threadRunning(threadId) {
   if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
   const response = await backendFetch(
     new URL(
-      `/dashboard/api/threads/${encodeURIComponent(threadId)}?mark_viewed=false`,
+      `/api/threads/${encodeURIComponent(threadId)}?mark_viewed=false`,
       backendUrl,
     ).toString(),
     { signal: AbortSignal.timeout(10_000) },
@@ -447,7 +447,7 @@ async function threadRunning(threadId) {
 async function sendBridgeRequest(method, apiPath, { body, signal }) {
   if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
   const response = await backendFetch(
-    new URL(`/dashboard/api${apiPath}`, backendUrl).toString(),
+    new URL(`/api${apiPath}`, backendUrl).toString(),
     {
       method,
       headers: body ? { "content-type": "application/json" } : {},
@@ -637,7 +637,7 @@ function configureLegacyLocalThreadIpc() {
         throw new Error("The local trace is unavailable.");
       const response = await backendFetch(
         new URL(
-          `/dashboard/api/me/local-trace-url/${encodeURIComponent(threadId)}`,
+          `/api/me/local-trace-url/${encodeURIComponent(threadId)}`,
           backendUrl,
         ).toString(),
       );
@@ -1341,7 +1341,7 @@ async function serveBundledUi(request) {
   if (!backendUrl)
     return new Response("Backend is not configured", { status: 503 });
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/dashboard/api"))
+  if (/^\/(?:dashboard\/)?api(?:\/|$)/.test(url.pathname))
     return proxyBackendRequest(request);
   if (
     url.pathname === "/local-graph" ||
@@ -1963,7 +1963,7 @@ if (!hasSingleInstanceLock) {
         if (!backendUrl) return {};
         try {
           const response = await backendFetch(
-            new URL("/dashboard/api/me/preferences", backendUrl).toString(),
+            new URL("/api/me/preferences", backendUrl).toString(),
             { signal: AbortSignal.timeout(2_000) },
           );
           if (!response.ok) return {};

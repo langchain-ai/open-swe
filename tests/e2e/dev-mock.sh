@@ -18,7 +18,7 @@ UI="http://127.0.0.1:${UI_PORT}"
 # gateway key (lsv2_*) stray in the shell won't authenticate — prefer .env's
 # OPENAI_API_KEY unless the shell already holds an OpenAI-looking key (sk-…).
 # Pulled line-by-line, not by sourcing .env, which would clobber the harness's
-# test env (SANDBOX_TYPE, DASHBOARD_*, …).
+# test env (SANDBOX_TYPE, WEB_*, …).
 case "${OPENAI_API_KEY:-}" in
   sk-*) : ;;
   *)
@@ -35,8 +35,8 @@ esac
 # Single origin = the Vite HMR server ($UI). Agent links, the sign-in redirect,
 # and the same-origin/WS allowlist all point there; the UI calls the API on its
 # own origin and Vite proxies it (and the WS) to the harness.
-export DASHBOARD_BASE_URL="$UI"
-export DASHBOARD_ALLOWED_ORIGINS="$UI"
+export WEB_BASE_URL="$UI"
+export WEB_ALLOWED_ORIGINS="$UI"
 
 [ -d ui/node_modules ] || pnpm install --filter open-swe-dashboard...
 
@@ -59,5 +59,5 @@ trap 'kill "${HARNESS}" 2>/dev/null || true' EXIT INT TERM
 # E2E_HARNESS activates the dev-only proxy plugin in ui/vite.config.ts; an empty
 # API base means the UI calls its own origin (proxied), keeping it same-origin.
 cd ui
-exec env E2E_HARNESS="${API}" VITE_DASHBOARD_API_BASE_URL="" \
+exec env E2E_HARNESS="${API}" VITE_WEB_API_BASE_URL="" \
   ./node_modules/.bin/vite dev --host 127.0.0.1 --port "${UI_PORT}"

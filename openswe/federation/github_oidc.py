@@ -16,7 +16,7 @@ from jwt import PyJWKClient
 from pydantic import BaseModel, ConfigDict
 
 from openswe.config import ENV
-from openswe.utils.dashboard_links import dashboard_base_url
+from openswe.utils.web_links import web_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class GitHubActionsClaims(BaseModel):
 def audience() -> str:
     """The ``aud`` a workflow must request, so a token minted for somebody else is refused."""
     configured = ENV.GITHUB_OIDC_AUDIENCE.get("").strip()
-    return configured or dashboard_base_url()
+    return configured or web_base_url()
 
 
 def _keys() -> PyJWKClient:
@@ -70,7 +70,7 @@ def _keys() -> PyJWKClient:
 def looks_federated(token: str) -> bool:
     """Whether ``token`` claims to be one of GitHub's, before anything is verified.
 
-    Only routing: a request carrying a dashboard session JWT must not be checked
+    Only routing: a request carrying a web session JWT must not be checked
     against GitHub's keys, and one carrying GitHub's must not be decoded as a
     session. The answer is never trusted beyond choosing which verifier runs.
     """
@@ -98,13 +98,13 @@ async def verify(token: str, expected_audience: str | None = None) -> GitHubActi
     """The workflow behind ``token``, or raise.
 
     Pass ``expected_audience`` when the token was minted for a listener other
-    than the dashboard. Runs in a thread because fetching and caching GitHub's
+    than the web app. Runs in a thread because fetching and caching GitHub's
     keys is synchronous I/O inside PyJWT.
     """
     expected = audience() if expected_audience is None else expected_audience.strip()
     if not expected:
         raise InvalidFederatedToken(
-            "federated tokens need an audience: set GITHUB_OIDC_AUDIENCE or DASHBOARD_BASE_URL"
+            "federated tokens need an audience: set GITHUB_OIDC_AUDIENCE or WEB_BASE_URL"
         )
     try:
         claims = await asyncio.to_thread(_verify, token, expected)

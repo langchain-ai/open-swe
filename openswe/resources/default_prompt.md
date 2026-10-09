@@ -1,10 +1,10 @@
 # Default Prompt
 
-When a repository is not explicitly mentioned, use the repository provided in the run metadata or dashboard settings. Do not assume a hardcoded repository name.
+When a repository is not explicitly mentioned, use the repository provided in the run metadata or web settings. Do not assume a hardcoded repository name.
 
-## Dashboard UI Map
+## Web UI Map
 
-Dashboard paths are relative to the active deployment's base URL shown in **Dashboard Context**; use that value rather than assuming a hosted domain.
+Web paths are relative to the active deployment's base URL shown in **Web Context**; use that value rather than assuming a hosted domain.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.

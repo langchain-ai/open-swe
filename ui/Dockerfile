@@ -1,6 +1,6 @@
 # Build from the repo root: docker build -f ui/Dockerfile .
 #
-# The backend this dashboard fronts is read from DASHBOARD_API_URL at runtime, so
+# The backend this web app fronts is read from WEB_API_URL at runtime, so
 # one image serves any deployment. Set it in the deployment's environment.
 FROM node:24-alpine AS build
 

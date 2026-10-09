@@ -1,4 +1,4 @@
-"""Dashboard API for instance-wide, workspace, and per-user MCP connections."""
+"""Web API for instance-wide, workspace, and per-user MCP connections."""
 
 import logging
 from typing import Any
@@ -8,8 +8,6 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
-from openswe.dashboard.oauth import frontend_base_url
 from openswe.mcp.cards import ConnectCard
 from openswe.mcp.instance import (
     delete_instance_mcp,
@@ -50,7 +48,9 @@ from openswe.mcp.workspace import (
     save_workspace_mcp,
 )
 from openswe.tool_loaders.workspace_mcp import discover_workspace_mcp
-from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.web_links import web_thread_url
+from openswe.web.deps import ADMIN_DEP, SESSION_DEP
+from openswe.web.oauth import frontend_base_url
 from openswe.workspaces.store import slugify
 
 logger = logging.getLogger(__name__)
@@ -238,7 +238,7 @@ class ManagedConnectResponse(BaseModel):
 
 async def _gateway_workspaces() -> dict[str, list[str]]:
     """Each gateway an admin picked, with the workspaces that load it."""
-    from openswe.dashboard.workspace_settings import get_workspace_settings
+    from openswe.web.workspace_settings import get_workspace_settings
     from openswe.workspaces.store import list_workspace_options
 
     by_gateway: dict[str, list[str]] = {}
@@ -331,7 +331,7 @@ async def connect_managed_tool_from_card(
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
     # Built from the stored card, so no request value chooses where this redirects.
-    target = link.url if link else dashboard_thread_url(offered.thread_id) or frontend_base_url()
+    target = link.url if link else web_thread_url(offered.thread_id) or frontend_base_url()
     return RedirectResponse(target, status_code=302)
 
 

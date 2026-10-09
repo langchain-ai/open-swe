@@ -1,7 +1,7 @@
 """What a machine principal may read back about the threads it started.
 
 A key and a workflow are not people: they have no viewed state, no pinned list
-and no participants, and the dashboard's per-user reads are all built around
+and no participants, and the web app's per-user reads are all built around
 those. So they get one flat view of a thread and one flat list, scoped by the
 principal id stamped on the threads they started.
 """
@@ -13,9 +13,9 @@ from fastapi import HTTPException
 
 from openswe.threads.principals import STARTED_BY_ID, Principal
 from openswe.threads.summary import run_status_to_agent_status
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import JsonObject, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def _view(thread: Any, thread_id: str, metadata: JsonObject) -> JsonObject:
         ),
         "title": title if isinstance(title, str) else None,
         "workspace": metadata.get("workspace"),
-        "url": dashboard_thread_url(thread_id),
+        "url": web_thread_url(thread_id),
     }
 
 

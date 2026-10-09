@@ -1,4 +1,4 @@
-"""Reusable MCP connections, authentication, and tools independent of dashboard scope."""
+"""Reusable MCP connections, authentication, and tools independent of web scope."""
 
 from openswe.mcp.models import (
     MCPConnection,

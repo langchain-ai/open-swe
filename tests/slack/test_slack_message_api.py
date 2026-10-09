@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
-from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
 from openswe.run_config import RunConfig
 from openswe.slack import client as slack_utils
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
 from openswe.users import User, UserPreferences
 from openswe.utils import url_safety
+from openswe.web.profiles import ProfileUpdate, put_my_profile
 from tests.conftest import FakeStore
 from tests.support.slack_api import SlackAPI
 
@@ -170,7 +170,7 @@ async def test_review_link_flag_changes_displayed_links_not_code_or_button_value
     monkeypatch: pytest.MonkeyPatch,
     delivery: str,
 ) -> None:
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example/prefix/")
+    monkeypatch.setenv("WEB_BASE_URL", "https://openswe.example/prefix/")
     monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(github_login="alice"))
     monkeypatch.setattr(
         User, "preferences_for_login", AsyncMock(return_value=UserPreferences(pr_review_links=True))
@@ -228,7 +228,7 @@ async def test_review_links_are_opt_in_per_user_even_in_the_same_channel(
     slack_api: SlackAPI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
+    monkeypatch.setenv("WEB_BASE_URL", "https://openswe.example")
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     await User.sign_in("github", "1", login="alice")
@@ -253,6 +253,6 @@ async def test_review_links_are_opt_in_per_user_even_in_the_same_channel(
     await slack_utils.update_slack_message("C1", "1.0", url, login="alice")
     assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
     cfg.github_login = "alice"
-    monkeypatch.delenv("DASHBOARD_BASE_URL")
+    monkeypatch.delenv("WEB_BASE_URL")
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
     assert slack_api.calls[-1][1]["text"] == url

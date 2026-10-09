@@ -9,7 +9,6 @@ from langgraph.prebuilt import InjectedState
 
 from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
 from openswe.github.pull_requests import PullRequest
 from openswe.github.thread_token import (
@@ -67,8 +66,9 @@ from openswe.review.publish import (
 from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
-from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.web_links import web_review_url
+from openswe.web.workspace_settings import get_workspace_settings
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +319,7 @@ async def _publish_review_async(
             "error": "Assessment commit differs from the current review head. Review it again.",
         }
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
-    review_ui_url = dashboard_review_url(owner, repo, pr_number)
+    review_ui_url = web_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
         thread_id=thread_id,
         owner=owner,

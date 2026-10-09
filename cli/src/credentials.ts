@@ -1,6 +1,6 @@
 import { isRecord, numberAt, parseJson, stringAt } from "./json.ts"
 
-/** The cookie the dashboard's login mints, which the desktop app also stores. */
+/** The cookie the web app's login mints, which the desktop app also stores. */
 const SESSION_COOKIE = "osw_session"
 /** Fetch a fresh workflow token this long before the current one expires. */
 const REFRESH_MARGIN_MS = 60_000
@@ -34,7 +34,7 @@ export interface StoredSession {
 }
 
 /**
- * A person's dashboard session, sent as the dashboard's own cookie the way the
+ * A person's web session, sent as the web app's own cookie the way the
  * desktop app sends it. `Origin` is the backend's own, which its CSRF check
  * allows: the cookie here is held deliberately, not ambient in a browser.
  */

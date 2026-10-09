@@ -40,9 +40,9 @@ from openswe.slack.move import SlackRebindError, rebind_slack_thread
 from openswe.source_context import SlackThreadRef
 from openswe.threads.summary import thread_is_private
 from openswe.tools.create_sandbox_file_download_url import resolve_sandbox_file
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -355,9 +355,7 @@ async def _create(
         await set_session_status_result(channel_id, "processing")
     except SlackRequestError as exc:
         warnings.append(f"Could not set processing status: {exc.code}")
-    context_items = repo_context_bar_items(
-        repo, dashboard_url=dashboard_thread_url(thread_id) or ""
-    )
+    context_items = repo_context_bar_items(repo, web_url=web_thread_url(thread_id) or "")
     if context_items:
         try:
             await set_context_bar(channel_id, context_items)
@@ -372,7 +370,7 @@ async def _create(
         "success": True,
         "action": "create",
         "channel_id": channel_id,
-        "dashboard_url": dashboard_thread_url(thread_id),
+        "web_url": web_thread_url(thread_id),
         "invited": invited,
     }
     if warnings:

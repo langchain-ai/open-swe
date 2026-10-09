@@ -1,1 +1,1 @@
-"""Dashboard-managed recurring agent schedules."""
+"""Web-managed recurring agent schedules."""

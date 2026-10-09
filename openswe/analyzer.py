@@ -27,7 +27,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
@@ -52,6 +51,7 @@ from openswe.tools.save_review_style import save_review_style_prompt
 from openswe.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from openswe.web.workspace_settings_cache import cached_workspace_settings
 
 logger = logging.getLogger(__name__)
 

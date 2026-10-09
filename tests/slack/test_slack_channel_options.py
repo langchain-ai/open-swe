@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
-from openswe.slack import channel_options, dashboard_routes
+from openswe.slack import channel_options, web_routes
 from openswe.utils import ttl_cache
 
 
@@ -192,10 +192,10 @@ async def test_private_channels_are_listed_for_admins_only(
     directory = channel_options.SlackChannelDirectory(
         channels=[option("C0PUBLIC", private=False), option("G0PRIVATE", private=True)]
     )
-    monkeypatch.setattr(dashboard_routes, "list_slack_channels", AsyncMock(return_value=directory))
-    monkeypatch.setattr(dashboard_routes, "session_is_admin", lambda _session: admin)
+    monkeypatch.setattr(web_routes, "list_slack_channels", AsyncMock(return_value=directory))
+    monkeypatch.setattr(web_routes, "session_is_admin", lambda _session: admin)
 
-    listed = await dashboard_routes.api_list_slack_channels({"sub": "someone"})
+    listed = await web_routes.api_list_slack_channels({"sub": "someone"})
 
     assert [channel.id for channel in listed.channels] == (
         ["C0PUBLIC", "G0PRIVATE"] if admin else ["C0PUBLIC"]

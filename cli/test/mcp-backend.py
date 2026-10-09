@@ -5,12 +5,12 @@ import os
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 
-from openswe.dashboard.oauth import require_session
 from openswe.mcp.cli_tools import router
 from openswe.tools.manage_feature_flags import manage_feature_flags
+from openswe.web.oauth import require_session
 
 app = FastAPI()
-app.include_router(router, prefix="/dashboard/api")
+app.include_router(router, prefix="/api")
 
 
 async def settings() -> dict[str, bool]:

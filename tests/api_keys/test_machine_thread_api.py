@@ -1,4 +1,4 @@
-"""Machine principals on the one command endpoint the dashboard also uses."""
+"""Machine principals on the one command endpoint the web app also uses."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any

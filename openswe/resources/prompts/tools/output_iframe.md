@@ -1,4 +1,4 @@
-Display a self-contained HTML file from the sandbox in an isolated dashboard
+Display a self-contained HTML file from the sandbox in an isolated web
 iframe. Use this for visualizations, diagrams, interactive demos, SVG graphics, and small HTML
 apps. Read the `html-artifacts` skill for the authoring rules: inline scripts, styles, Canvas,
 WebGL, and data-URI assets all run, and omitting `<html>`/`<head>`/`<body>` wraps the content

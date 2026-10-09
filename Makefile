@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui postgres migration tunnel web build-web desktop install-desktop install-checkout swagger cli
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -29,7 +29,7 @@ migration:
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
 # run side by side under -j2; Ctrl-C stops both. Command-line variables reach both recipes.
 dev-ui:
-	$(MAKE) --no-print-directory -j2 web dev DASHBOARD_DEV_SERVER_URL=http://localhost:3000 TURBO_UI=stream
+	$(MAKE) --no-print-directory -j2 web dev WEB_DEV_SERVER_URL=http://localhost:3000 TURBO_UI=stream
 
 web:
 	pnpm run dev
@@ -44,10 +44,10 @@ tunnel:
 	$(eval DOMAIN := $(shell DOMAIN="$(NGROK_DOMAIN)"; DOMAIN="$${DOMAIN#https://}"; DOMAIN="$${DOMAIN#http://}"; echo "$${DOMAIN%/}"))
 	ngrok http 2024 --url https://$(DOMAIN) --traffic-policy-file examples/ngrok/webhooks-only.yml
 
-# Build the dashboard into ui/.output/public; `make dev` then serves it at /.
-# With a LangGraph http.mount_prefix, pass DASHBOARD_BASE_PATH=<prefix>/ so the
+# Build the web app into ui/.output/public; `make dev` then serves it at /.
+# With a LangGraph http.mount_prefix, pass WEB_BASE_PATH=<prefix>/ so the
 # build's asset URLs and router match where the server mounts it.
-build-dashboard:
+build-web:
 	pnpm install --frozen-lockfile --filter open-swe-dashboard...
 	pnpm --filter open-swe-dashboard run build
 
@@ -137,7 +137,7 @@ help:
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'migration m="..."            - create the next database migration'
-	@echo 'web                          - run the dashboard web server'
+	@echo 'web                          - run the web app's Vite dev server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
 	@echo 'run                          - run webhook server'
 	@echo 'swagger                      - regenerate swagger.json from the backend routes'

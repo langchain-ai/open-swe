@@ -34,12 +34,12 @@ from openswe.slack.review_links import pr_review_links
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
 from openswe.threads.creation import create_lock_thread
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.url_safety import UnsafeUrlError, request_with_safe_redirects
 from openswe.utils.user_messages import WARNING_ICON
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -572,10 +572,10 @@ async def _post_slack_message_with_ts(
         raise SlackRequestError(error) from exc
 
 
-def _slack_thread_dashboard_url(
+def _slack_thread_web_url(
     channel_id: str, thread_ts: str, agent_thread_id: str | None = None
 ) -> str | None:
-    return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+    return web_thread_url(agent_thread_id) if agent_thread_id else None
 
 
 def _safe_model_label(model: str) -> str:
@@ -744,13 +744,13 @@ def with_slack_pending_session_cost(
 
 
 def format_slack_web_link_footer(
-    dashboard_url: str | None,
+    web_url: str | None,
     usage: RunUsageSummary | None = None,
 ) -> str:
     """Format the compact Slack footer links."""
-    if not dashboard_url:
+    if not web_url:
         return ""
-    links = [f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"]
+    links = [f"<{web_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"]
     usage_text = format_slack_run_usage(usage)
     if usage_text:
         links.append(usage_text)
@@ -759,11 +759,11 @@ def format_slack_web_link_footer(
 
 def append_slack_web_link_footer(
     text: str,
-    dashboard_url: str | None,
+    web_url: str | None,
     usage: RunUsageSummary | None = None,
 ) -> str:
     """Append the compact Slack footer links to fallback text."""
-    footer = format_slack_web_link_footer(dashboard_url, usage)
+    footer = format_slack_web_link_footer(web_url, usage)
     if not footer or footer in text:
         return text
     stripped = text.rstrip()
@@ -773,10 +773,10 @@ def append_slack_web_link_footer(
 
 
 def _slack_web_link_context_block(
-    dashboard_url: str | None,
+    web_url: str | None,
     usage: RunUsageSummary | None = None,
 ) -> dict[str, Any] | None:
-    footer = format_slack_web_link_footer(dashboard_url, usage)
+    footer = format_slack_web_link_footer(web_url, usage)
     if not footer:
         return None
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
@@ -797,10 +797,10 @@ def _block_contains_text(block: dict[str, Any], needle: str) -> bool:
 def _with_slack_web_link_context_block(
     text: str,
     blocks: list[dict[str, Any]] | None,
-    dashboard_url: str | None,
+    web_url: str | None,
     usage: RunUsageSummary | None = None,
 ) -> list[dict[str, Any]] | None:
-    context_block = _slack_web_link_context_block(dashboard_url, usage)
+    context_block = _slack_web_link_context_block(web_url, usage)
     if context_block is None:
         return blocks
     if not blocks:
@@ -811,9 +811,7 @@ def _with_slack_web_link_context_block(
             context_block,
         ]
     updated_blocks = copy.deepcopy(blocks)
-    if dashboard_url and any(
-        _block_contains_text(block, dashboard_url) for block in updated_blocks
-    ):
+    if web_url and any(_block_contains_text(block, web_url) for block in updated_blocks):
         usage_text = format_slack_run_usage(usage)
         if not usage_text or any(
             _block_contains_text(block, usage_text) for block in updated_blocks
@@ -843,9 +841,9 @@ async def post_slack_thread_reply_with_ts(
 
     if is_code_channel_session(thread_ts):
         agent_thread_id = None
-    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
-    text = append_slack_web_link_footer(text, dashboard_url, usage)
+    web_url = _slack_thread_web_url(channel_id, thread_ts, agent_thread_id)
+    blocks = _with_slack_web_link_context_block(text, blocks, web_url, usage)
+    text = append_slack_web_link_footer(text, web_url, usage)
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -868,12 +866,12 @@ async def post_slack_ephemeral_reply(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Answer one person in a channel, carrying the same web link a thread reply would."""
-    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    web_url = web_thread_url(agent_thread_id) if agent_thread_id else None
+    blocks = _with_slack_web_link_context_block(text, blocks, web_url, usage)
     return await post_slack_ephemeral_message(
         channel_id,
         user_id,
-        append_slack_web_link_footer(text, dashboard_url, usage),
+        append_slack_web_link_footer(text, web_url, usage),
         blocks=blocks,
     )
 
@@ -1383,13 +1381,13 @@ async def replace_slack_command_message(
 ) -> bool:
     """Overwrite a slash command's acknowledgement with the reply it stood in for."""
     text, blocks = await pr_review_links(text, blocks)
-    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+    web_url = web_thread_url(agent_thread_id) if agent_thread_id else None
     payload: dict[str, Any] = {
         "response_type": "ephemeral",
         "replace_original": True,
-        "text": append_slack_web_link_footer(text, dashboard_url, usage),
+        "text": append_slack_web_link_footer(text, web_url, usage),
     }
-    updated_blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    updated_blocks = _with_slack_web_link_context_block(text, blocks, web_url, usage)
     if updated_blocks:
         payload["blocks"] = updated_blocks
     return await _post_slack_callback(response_url, payload, "/commands/")
@@ -1798,14 +1796,14 @@ TRACE_REPLY_WEB_HANDOFF_NOTICE = (
 
 
 def _format_trace_reply(
-    trace_url: str | None, dashboard_url: str | None, *, moved_to_web: bool = False
+    trace_url: str | None, web_url: str | None, *, moved_to_web: bool = False
 ) -> str:
     """Format the trace reply with status text."""
     links = []
     if trace_url:
         links.append(f"<{trace_url}|View trace>")
-    if dashboard_url:
-        links.append(f"<{dashboard_url}|Open in Web>")
+    if web_url:
+        links.append(f"<{web_url}|Open in Web>")
     head = f"{' • '.join(links)}\n" if links else ""
     if moved_to_web:
         return f"{head}_{TRACE_REPLY_WEB_HANDOFF_NOTICE}_"
@@ -1813,15 +1811,15 @@ def _format_trace_reply(
 
 
 async def post_slack_trace_reply(
-    channel_id: str, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
+    channel_id: str, thread_ts: str, thread_id: str, *, include_web_link: bool = True
 ) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = await get_langsmith_trace_url(thread_id)
-    dashboard_url = dashboard_thread_url(thread_id) if include_dashboard_link else None
+    web_url = web_thread_url(thread_id) if include_web_link else None
     message_ts = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
-        _format_trace_reply(trace_url, dashboard_url),
+        _format_trace_reply(trace_url, web_url),
         unfurl_links=False,
         unfurl_media=False,
         agent_thread_id=thread_id,
@@ -1832,14 +1830,14 @@ async def post_slack_trace_reply(
 async def update_slack_trace_reply_for_web_handoff(
     channel_id: str, message_ts: str, thread_id: str
 ) -> bool:
-    """Update the initial Slack trace reply after a dashboard handoff."""
+    """Update the initial Slack trace reply after a web handoff."""
     trace_url = await get_langsmith_trace_url(thread_id)
-    dashboard_url = dashboard_thread_url(thread_id)
+    web_url = web_thread_url(thread_id)
     try:
         await update_slack_message(
             channel_id,
             message_ts,
-            _format_trace_reply(trace_url, dashboard_url, moved_to_web=True),
+            _format_trace_reply(trace_url, web_url, moved_to_web=True),
             unfurl_links=False,
             unfurl_media=False,
         )

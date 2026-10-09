@@ -44,7 +44,7 @@ class _FakeLangGraphClient:
 
 
 @pytest.fixture
-def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClient:
+def web_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClient:
     client = _FakeLangGraphClient()
 
     async def fake_get_profile(login: str) -> dict[str, Any]:
@@ -58,7 +58,7 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
-    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "_ensure_web_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     return client
 

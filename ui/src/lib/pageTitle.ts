@@ -1,5 +1,5 @@
 /**
- * Document title for a dashboard page: the page name, a middle dot, the app.
+ * Document title for a web page: the page name, a middle dot, the app.
  * The root page passes no name and gets the bare app name.
  */
 export function pageTitle(page?: string | null): string {

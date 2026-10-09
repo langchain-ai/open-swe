@@ -1,4 +1,4 @@
-"""Incident policy, records, dashboard projections, and responder commands."""
+"""Incident policy, records, web projections, and responder commands."""
 
 import hashlib
 import json
@@ -252,7 +252,7 @@ async def update_settings(
     candidate.workspace_id = current.workspace_id
     candidate.slack_app_id = current.slack_app_id
     if candidate.model:
-        from openswe.dashboard.options import SUPPORTED_MODEL_IDS
+        from openswe.web.options import SUPPORTED_MODEL_IDS
 
         if candidate.model not in SUPPORTED_MODEL_IDS:
             raise HTTPException(422, "Unsupported incident model")

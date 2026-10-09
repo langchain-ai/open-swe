@@ -3,8 +3,8 @@ import asyncio
 import pytest
 
 from openswe import server
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.run_config import RunConfig
+from openswe.web.workspace_settings import WorkspaceSettings
 
 
 @pytest.mark.parametrize(

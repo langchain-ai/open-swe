@@ -221,7 +221,7 @@ describe("streamMessagesToUi", () => {
       }),
       new ToolMessage({
         tool_call_id: "call-1",
-        content: "Displayed the HTML output in the dashboard.",
+        content: "Displayed the HTML output in the web app.",
         artifact: {
           type: "output_iframe",
           preview_url: "https://downloads.example/preview?token=secret",
@@ -259,7 +259,7 @@ describe("streamMessagesToUi", () => {
       }),
       new ToolMessage({
         tool_call_id: "call-1",
-        content: "Displayed the HTML output in the dashboard.",
+        content: "Displayed the HTML output in the web app.",
         artifact: {
           type: "output_iframe",
           html: "<h1>Historical chart</h1>",
@@ -295,7 +295,7 @@ describe("streamMessagesToUi", () => {
       }),
       new ToolMessage({
         tool_call_id: "call-1",
-        content: "Displayed the HTML output in the dashboard.",
+        content: "Displayed the HTML output in the web app.",
         artifact: {
           type: "output_iframe",
           preview_url: "javascript:alert(1)",

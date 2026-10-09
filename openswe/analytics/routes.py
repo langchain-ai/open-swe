@@ -1,4 +1,4 @@
-"""Dashboard API for usage, PR and pipeline analytics."""
+"""Web API for usage, PR and pipeline analytics."""
 
 import logging
 from typing import Any, Literal
@@ -13,7 +13,7 @@ from openswe.analytics.queries import (
     usage_leaderboard,
 )
 from openswe.config import ENV
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.web.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 
 logger = logging.getLogger(__name__)
 

@@ -111,7 +111,7 @@ def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool
 
 
 def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> PrState:
-    """Map GitHub PR fields to the dashboard's pr_state vocabulary."""
+    """Map GitHub PR fields to the web app's pr_state vocabulary."""
     if merged:
         return "merged"
     if state == "closed":

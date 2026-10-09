@@ -6,8 +6,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from openswe.dashboard import deps, oauth, routes
 from openswe.slack.channels import SlackChannel
+from openswe.web import deps, oauth, routes
 from openswe.workspaces import routes as workspace_routes
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -18,14 +18,14 @@ _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 async def admin_client(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> AsyncIterator[httpx.AsyncClient]:
-    """A client hitting the real dashboard app, signed in as an admin.
+    """A client hitting the real web app, signed in as an admin.
 
-    Uses the aggregate dashboard router (mounted at ``/dashboard/api``, same as
-    ``tests/dashboard/test_workspace_mcps.py``) rather than the workspaces
+    Uses the aggregate web router (mounted at ``/api``, same as
+    ``tests/web/test_workspace_mcps.py``) rather than the workspaces
     router alone, so origin-checked mutations behave as they do in production.
     Carries ``registry_db`` because every workspace this writes is a row.
     """
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
+    monkeypatch.setenv("WEB_BASE_URL", "http://test")
     app = FastAPI()
     app.include_router(routes.router)
     app.dependency_overrides[deps.admin_session] = lambda: _ADMIN_SESSION
@@ -53,7 +53,7 @@ async def test_create_starts_initial_build_when_setup_is_provided(
         ) as start,
     ):
         response = await admin_client.post(
-            "/dashboard/api/workspaces",
+            "/api/workspaces",
             json={
                 "name": "OSS",
                 "repos": ["acme/oss"],
@@ -101,7 +101,7 @@ async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClie
         ) as start,
     ):
         response = await admin_client.put(
-            "/dashboard/api/workspaces/oss", json={"repos": ["acme/oss", "acme/api"]}
+            "/api/workspaces/oss", json={"repos": ["acme/oss", "acme/api"]}
         )
 
     assert response.status_code == 200
@@ -116,8 +116,8 @@ async def test_two_creates_of_one_name_at_once_are_a_200_and_a_409(
     """The loser of the race lands on the unique constraint, not on a 500."""
     payload = {"name": "Core", "repos": ["acme/api"]}
     first, second = await asyncio.gather(
-        admin_client.post("/dashboard/api/workspaces", json=payload),
-        admin_client.post("/dashboard/api/workspaces", json=payload),
+        admin_client.post("/api/workspaces", json=payload),
+        admin_client.post("/api/workspaces", json=payload),
     )
 
     assert sorted([first.status_code, second.status_code]) == [200, 409]
@@ -146,7 +146,7 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
         AsyncMock(return_value=SlackChannel(id="C0API", payload=_ELIGIBLE)),
     ):
         created = await admin_client.post(
-            "/dashboard/api/workspaces",
+            "/api/workspaces",
             json={
                 "name": "OSS",
                 "repos": ["acme/oss"],
@@ -159,11 +159,11 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
     load = AsyncMock(return_value=SlackChannel(id="C0NEW", payload=payload))
     with patch.object(workspace_routes.SlackChannel, "load", load):
         response = await admin_client.put(
-            "/dashboard/api/workspaces/oss", json={"kitchen_channel_ids": ["C0API", "C0NEW"]}
+            "/api/workspaces/oss", json={"kitchen_channel_ids": ["C0API", "C0NEW"]}
         )
 
     load.assert_awaited_once_with("C0NEW", use_cache=False)
-    stored = (await admin_client.get("/dashboard/api/workspaces/oss")).json()
+    stored = (await admin_client.get("/api/workspaces/oss")).json()
     if allowed:
         assert response.status_code == 200
         assert stored["kitchen_channel_ids"] == ["C0API", "C0NEW"]
@@ -180,20 +180,20 @@ async def test_a_prompt_edit_during_a_refresh_outlives_it(
         WorkspaceCreate(name="Core", repos=["acme/api"], setup_script="echo tools"), "admin"
     )
     await WORKSPACES.mark_refreshing("core")
-    response = await admin_client.put("/dashboard/api/workspaces/core", json={"prompt": "new"})
+    response = await admin_client.put("/api/workspaces/core", json={"prompt": "new"})
     assert response.status_code == 200
     assert response.json()["refresh_status"] == "refreshing"
 
     await WORKSPACES.start_refresh_step("core", "capture")
     await WORKSPACES.mark_refresh_settled("core", "success")
 
-    stored = (await admin_client.get("/dashboard/api/workspaces/core")).json()
+    stored = (await admin_client.get("/api/workspaces/core")).json()
     assert stored["prompt"] == "new"
     assert stored["refresh_status"] == "success"
 
 
 async def test_deleting_the_default_workspace_is_a_409(admin_client: httpx.AsyncClient) -> None:
-    response = await admin_client.delete("/dashboard/api/workspaces/default")
+    response = await admin_client.delete("/api/workspaces/default")
 
     assert response.status_code == 409
-    assert (await admin_client.get("/dashboard/api/workspaces/default")).status_code == 200
+    assert (await admin_client.get("/api/workspaces/default")).status_code == 200

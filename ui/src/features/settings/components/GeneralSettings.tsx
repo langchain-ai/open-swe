@@ -133,7 +133,7 @@ export function GeneralSettings() {
       <SettingsSection title="Appearance">
         <SettingsRow
           label="Theme"
-          description="Color theme for the dashboard on this device."
+          description="Color theme for the web app on this device."
           control={
             <Select
               aria-label="Theme"

@@ -28,7 +28,7 @@ from openswe.slack.client import (
 from openswe.slack.dm import note_for_concierge, open_dm
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ async def require_consent(
 
 
 async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) -> bool:
-    thread_url = dashboard_thread_url(thread_id)
+    thread_url = web_thread_url(thread_id)
     slack_thread = await get_active_slack_thread(get_client(), thread_id)
     if slack_thread:
         permalink = slack_thread.get("permalink")

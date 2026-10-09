@@ -24,7 +24,7 @@ def _actor(*, login: str = "octocat", admin: bool = False) -> object:
     return actor
 
 
-async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_actor_uses_latest_verified_web_sender(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         threads_tool,
         "get_config",
@@ -66,7 +66,7 @@ async def test_list_threads_denies_actor_outside_allowed_org(
         AsyncMock(side_effect=HTTPException(403, "not an org member")),
     )
     page = AsyncMock()
-    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    monkeypatch.setattr(threads_tool, "list_web_threads_page", page)
 
     result = await threads_tool.list_threads()
 
@@ -79,7 +79,7 @@ async def test_list_threads_intersects_participant_and_admin_filters(
 ) -> None:
     page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
-    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    monkeypatch.setattr(threads_tool, "list_web_threads_page", page)
 
     result = await threads_tool.list_threads(participant="other-user", admin_threads=True)
 
@@ -140,7 +140,7 @@ class _DetailClient:
 async def test_get_thread_counts_pending_run_outside_history_window(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("WEB_BASE_URL", "https://web.example")
     await QueuedMessage.put("thread-1", "queued")
     client = _DetailClient()
 
@@ -162,7 +162,7 @@ async def test_get_thread_counts_pending_run_outside_history_window(
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool,
-        "get_dashboard_thread",
+        "get_web_thread",
         AsyncMock(
             return_value={
                 "id": "thread-1",
@@ -194,8 +194,8 @@ async def test_list_threads_resolves_slack_reply_link(
     lookup = AsyncMock(return_value="thread-1")
     monkeypatch.setattr(threads_tool, "lookup_slack_thread_id", lookup)
     monkeypatch.setattr(threads_tool, "langgraph_client", lambda: object())
-    get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "messages": []})
-    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+    get_web_thread = AsyncMock(return_value={"id": "thread-1", "messages": []})
+    monkeypatch.setattr(threads_tool, "get_web_thread", get_web_thread)
     locator = (
         "<https://workspace.slack.com/archives/C123/p1788431248678809"
         "?thread_ts=1788425314.774339&cid=C123|message>"
@@ -212,28 +212,28 @@ async def test_list_threads_resolves_slack_reply_link(
     awaited = lookup.await_args
     assert awaited is not None
     lookup.assert_awaited_once_with(awaited.args[0], "C123", "1788425314.774339")
-    get_dashboard_thread.assert_awaited_once_with(
+    get_web_thread.assert_awaited_once_with(
         "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )
 
 
-async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
+async def test_get_thread_rejects_untrusted_web_url_before_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    get_dashboard_thread = AsyncMock()
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
+    get_web_thread = AsyncMock()
+    monkeypatch.setenv("WEB_BASE_URL", "https://dev.open-swe.langchain.dev")
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
-    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+    monkeypatch.setattr(threads_tool, "get_web_thread", get_web_thread)
 
     result = await threads_tool.get_thread("https://evil.example/agents/thread-1")
 
     assert result == {
         "success": False,
         "error": (
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, or LangSmith trace URL"
+            "thread_id must be an exact thread ID, Open SWE web URL, Slack link, or LangSmith trace URL"
         ),
     }
-    get_dashboard_thread.assert_not_awaited()
+    get_web_thread.assert_not_awaited()
 
 
 def test_transcript_filters_private_and_tool_content() -> None:
@@ -298,10 +298,8 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
         },
     )
     cancel = AsyncMock(side_effect=HTTPException(404, "thread not found"))
-    monkeypatch.setattr(threads_tool, "cancel_dashboard_thread", cancel)
-    monkeypatch.setattr(
-        threads_tool, "get_dashboard_thread", AsyncMock(return_value={"id": "thread-1"})
-    )
+    monkeypatch.setattr(threads_tool, "cancel_web_thread", cancel)
+    monkeypatch.setattr(threads_tool, "get_web_thread", AsyncMock(return_value={"id": "thread-1"}))
     state = {
         "messages": [
             {
@@ -323,7 +321,7 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
 async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     cancel = AsyncMock()
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
-    monkeypatch.setattr(threads_tool, "admin_cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(threads_tool, "admin_cancel_web_thread", cancel)
 
     result = await threads_tool.manage_thread("thread-1", "admin_cancel")
 
@@ -341,7 +339,7 @@ async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPat
         ({"run_id": "run-1", "message_id": "m-1", "steered": True}, "steered"),
     ],
 )
-async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
+async def test_manage_thread_sends_to_busy_thread_like_the_web(
     monkeypatch: pytest.MonkeyPatch, result: dict[str, object], mode: str
 ) -> None:
     reply = json.dumps({"id": 1, "type": "success", "result": result}).encode()
@@ -349,10 +347,10 @@ async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool,
-        "get_dashboard_thread",
+        "get_web_thread",
         AsyncMock(return_value={"id": "thread-1", "planMode": False}),
     )
-    monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    monkeypatch.setattr(threads_tool, "proxy_web_thread_commands", proxy)
 
     sent = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
@@ -372,10 +370,10 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool,
-        "get_dashboard_thread",
+        "get_web_thread",
         AsyncMock(return_value={"id": "thread-1", "planMode": True}),
     )
-    monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    monkeypatch.setattr(threads_tool, "proxy_web_thread_commands", proxy)
 
     result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
@@ -397,7 +395,7 @@ async def test_manage_thread_rejects_plan_format_conversion(
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool,
-        "get_dashboard_thread",
+        "get_web_thread",
         AsyncMock(return_value={"id": "thread-1", "isOwner": True}),
     )
     monkeypatch.setattr(

@@ -15,8 +15,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.utils.model import make_model
+from openswe.web.workspace_settings import WorkspaceSettings
 from tests.agent.test_agent_assembly_context import (
     _MODEL_DEFAULTS,
     _base_config,

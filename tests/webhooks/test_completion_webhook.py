@@ -152,7 +152,7 @@ async def test_leftover_follow_ups_get_one_pickup_run(
         store.TaskDelegation, "get", AsyncMock(return_value=SimpleNamespace(cancelled=cancelled))
     )
     monkeypatch.setattr(
-        runs, "_build_dashboard_configurable", AsyncMock(return_value={"github_login": "owner"})
+        runs, "_build_web_configurable", AsyncMock(return_value={"github_login": "owner"})
     )
     monkeypatch.setattr(runs, "dispatch_agent_run", dispatch)
 

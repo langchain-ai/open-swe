@@ -1,4 +1,4 @@
-"""The agent's read-only view of skills, kept out of the dashboard's import graph."""
+"""The agent's read-only view of skills, kept out of the web app's import graph."""
 
 from collections.abc import Iterable
 

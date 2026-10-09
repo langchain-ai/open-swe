@@ -25,7 +25,6 @@ import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
@@ -71,6 +70,7 @@ from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
 from openswe.utils.thread_ops import langgraph_client
+from openswe.web.workspace_settings import get_workspace_settings
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)

@@ -6,7 +6,7 @@ import {
   waitForStateToContain,
   waitForThreadIdle,
   waitForThreadNotBusy,
-} from "./helpers/dashboard";
+} from "./helpers/web";
 
 const conversation = (page: Page) =>
   page.getByTestId("assistant-ui-conversation");
@@ -14,13 +14,13 @@ const composer = (page: Page) =>
   page.getByRole("textbox", { name: "Message input" });
 
 async function setExperimentalMode(page: Page, enabled: boolean) {
-  const profileResponse = await page.request.get("/dashboard/api/profile");
+  const profileResponse = await page.request.get("/api/profile");
   expect(profileResponse.ok()).toBeTruthy();
   const profile = await profileResponse.json();
-  const optionsResponse = await page.request.get("/dashboard/api/options");
+  const optionsResponse = await page.request.get("/api/options");
   expect(optionsResponse.ok()).toBeTruthy();
   const options = await optionsResponse.json();
-  const response = await page.request.put("/dashboard/api/profile", {
+  const response = await page.request.put("/api/profile", {
     headers: { origin: new URL(profileResponse.url()).origin },
     data: {
       ...profile,
@@ -87,7 +87,7 @@ test("groups file reads and edits with expandable original calls", async ({
       },
     })),
   ];
-  await page.route(`**/dashboard/api/threads/${id}/state`, async (route) => {
+  await page.route(`**/api/threads/${id}/state`, async (route) => {
     const response = await route.fetch();
     const state: { values: Record<string, unknown> } = await response.json();
     await route.fulfill({
@@ -214,12 +214,12 @@ test("waits for the profile and hydrates the transcript only once", async ({
   await waitForThreadNotBusy(page, id);
   const profileRequested = Promise.withResolvers<void>();
   const releaseProfile = Promise.withResolvers<void>();
-  await page.route("**/dashboard/api/profile", async (route) => {
+  await page.route("**/api/profile", async (route) => {
     profileRequested.resolve();
     await releaseProfile.promise;
     await route.continue();
   });
-  const statePath = `/dashboard/api/threads/${id}/state`;
+  const statePath = `/api/threads/${id}/state`;
   const stateRequests: string[] = [];
   page.on("request", (request) => {
     if (new URL(request.url()).pathname === statePath) {
@@ -288,7 +288,7 @@ test("creates a thread, sends a follow-up, and hydrates the experimental transcr
 test("preserves no-project selection despite a default repository", async ({
   page,
 }) => {
-  await page.route("**/dashboard/api/profile", async (route) => {
+  await page.route("**/api/profile", async (route) => {
     const response = await route.fetch();
     const profile = await response.json();
     await route.fulfill({
@@ -303,7 +303,7 @@ test("preserves no-project selection despite a default repository", async ({
   );
   const submitted = page.waitForRequest(
     (request) =>
-      /\/dashboard\/api\/threads\/[^/]+\/commands$/.test(
+      /\/api\/threads\/[^/]+\/commands$/.test(
         new URL(request.url()).pathname,
       ) && request.method() === "POST",
   );
@@ -371,9 +371,7 @@ test("keeps a draft while running and sends it after native cancellation", async
   await expect(composer(page)).toBeEnabled();
   await expect
     .poll(async () => {
-      const response = await page.request.get(
-        `/dashboard/api/threads/${id}/state`,
-      );
+      const response = await page.request.get(`/api/threads/${id}/state`);
       expect(response.ok()).toBeTruthy();
       const state = (await response.json()) as {
         values: { messages?: { type: string; name?: string }[] };

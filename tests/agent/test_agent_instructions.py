@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from openswe.dashboard import agent_instructions as instructions_api
-from openswe.dashboard import deps
-from openswe.dashboard.agent_instructions import (
+from openswe.web import agent_instructions as instructions_api
+from openswe.web import deps
+from openswe.web.agent_instructions import (
     AGENT_INSTRUCTIONS,
     AgentInstructions,
 )

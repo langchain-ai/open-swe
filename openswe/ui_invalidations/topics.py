@@ -1,4 +1,4 @@
-"""What the dashboard can be told went stale, and which session may hear each.
+"""What the web app can be told went stale, and which session may hear each.
 
 A ``Topic`` is invalidated as a whole; a ``KeyedTopic`` also has one topic per
 record, ``<topic>/<key>``. An invalidation carries nothing but the topic, so
@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from openswe.dashboard.admin import is_admin
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.ui_invalidations import outbox
+from openswe.web.admin import is_admin
 
 if TYPE_CHECKING:
     from openswe.incidents.models import IncidentId

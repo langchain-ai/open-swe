@@ -7,10 +7,10 @@ import {
   SAME_USER,
   loginAs,
   typeIntoComposer,
-} from "./helpers/dashboard";
+} from "./helpers/web";
 
 // What the model receives as people come and go in a thread, recorded off the
-// real server: Slack webhooks, the dashboard composer and the settings API
+// real server: Slack webhooks, the web app composer and the settings API
 // drive every turn, and the dump below is every message the run was handed.
 // `thread_context.md` next to this file is that record, reviewable line by
 // line; regenerate it with UPDATE_THREAD_CONTEXT_FIXTURE=1.
@@ -204,7 +204,7 @@ async function sendSlack(
 }
 
 async function clearInstructions(page: Page) {
-  const res = await page.request.delete("/dashboard/api/me/instructions", {
+  const res = await page.request.delete("/api/me/instructions", {
     headers: SAME_ORIGIN_HEADERS,
   });
   expect(res.ok(), await res.text()).toBeTruthy();
@@ -317,9 +317,9 @@ test("records every message the model is handed as people come and go", async ({
   await typeIntoComposer(page, "ship it");
   await thread.settle(4);
   const fourth = await thread.record({
-    title: "Turn 4: Alice switches to the web dashboard",
+    title: "Turn 4: Alice switches to the web app",
     given: "the thread has Alice and Bob",
-    when: "Alice types in the dashboard: ship it",
+    when: "Alice types in the web app: ship it",
     outcome:
       "the same user: id on a web envelope, and nothing else — what she is does not depend on where she typed",
     ran: true,
@@ -328,7 +328,7 @@ test("records every message the model is handed as people come and go", async ({
   expect(fourth.dispatch.join("\n")).toContain('surface="web"');
 
   await loginAs(page, OTHER_USER);
-  const saved = await page.request.put("/dashboard/api/me/instructions", {
+  const saved = await page.request.put("/api/me/instructions", {
     headers: SAME_ORIGIN_HEADERS,
     data: { instructions: BOB_INSTRUCTIONS },
   });

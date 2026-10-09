@@ -1,4 +1,4 @@
-"""Dashboard API for named workspaces."""
+"""Web API for named workspaces."""
 
 import asyncio
 import logging
@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.context import bind_workspace
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
-from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
 from openswe.slack.channels import SlackChannel
+from openswe.web.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.web.workspace_settings import delete_workspace_settings, get_workspace_settings
 from openswe.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
@@ -240,7 +240,7 @@ async def api_refresh_workspace(
     """Start a snapshot rebuild from the workspace's scripts.
 
     Started in the background rather than awaited: a rebuild takes minutes, and
-    the outcome lands on the record for the dashboard to poll.
+    the outcome lands on the record for the web app to poll.
     """
     normalized = _normalized_slug(slug)
     record = await WORKSPACES.get(normalized)

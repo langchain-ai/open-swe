@@ -8,7 +8,7 @@ export const Route = createFileRoute("/my-settings")({
   component: () => (
     <SettingsPage
       title="General"
-      description="How the dashboard looks and behaves for you."
+      description="How the web app looks and behaves for you."
     >
       <GeneralSettings />
     </SettingsPage>

@@ -22,9 +22,9 @@ from openswe.slack.http import SlackRequestError
 from openswe.slack.move import move_slack_thread
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
 from openswe.slack.request import SlackRequest
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_thread_url
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
@@ -197,7 +197,7 @@ async def _start(
         return
     await _mark_done(request, target, new_ts)
     thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
-    web_url = dashboard_thread_url(thread_id)
+    web_url = web_thread_url(thread_id)
     if web_url:
         try:
             await update_slack_message(
@@ -279,7 +279,7 @@ async def process_slack_web(
             ),
         )
         if started:
-            await _tell_sender(request, f"Continue on the web: {dashboard_thread_url(thread_id)}")
+            await _tell_sender(request, f"Continue on the web: {web_thread_url(thread_id)}")
     except Exception:
         logger.exception("Slack web question failed", extra={"agent_thread_id": thread_id})
         await _tell_sender(request, "Could not start a web conversation; try again.")

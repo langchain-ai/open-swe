@@ -21,9 +21,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import RunnableConfig
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.server import _registered_tool_name, get_agent
+from openswe.web.workspace_settings import WorkspaceSettings
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -796,11 +796,11 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
 
 
 @pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
-async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
+async def test_slack_question_allows_auto_routing_after_web_handoff(
     monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
 ) -> None:
     from openswe.middleware.model_selection import ModelSelectionMiddleware
-    from openswe.threads.runs import _build_dashboard_configurable
+    from openswe.threads.runs import _build_web_configurable
 
     monkeypatch.setattr("openswe.threads.runs.resolve_run_email", AsyncMock(return_value=None))
     monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "fast")
@@ -812,7 +812,7 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
     for source in ("slack", "dashboard"):
         config = _base_config()
         config["configurable"].update(
-            await _build_dashboard_configurable(
+            await _build_web_configurable(
                 "thread-ctx",
                 "octocat",
                 {"source": source, "source_context": source_context, "model_selection": "auto"},

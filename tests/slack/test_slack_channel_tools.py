@@ -134,7 +134,7 @@ async def test_post_channel_message_finds_membership_after_empty_page(
 ) -> None:
     from openswe.slack.tools import channels
 
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    monkeypatch.setenv("WEB_BASE_URL", "https://openswe.example.com")
     monkeypatch.setattr(
         RunConfig, "from_runtime", lambda: RunConfig.parse({"thread_id": "agent-thread"})
     )
@@ -181,7 +181,7 @@ async def test_post_channel_message_reports_slack_failure_without_retry(
 ) -> None:
     from openswe.slack.tools import channels
 
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    monkeypatch.setenv("WEB_BASE_URL", "https://openswe.example.com")
     monkeypatch.setattr(
         RunConfig, "from_runtime", lambda: RunConfig.parse({"thread_id": "agent-thread"})
     )

@@ -6,9 +6,9 @@ import langgraph_sdk
 import pytest
 
 from openswe import credential_scope
-from openswe.dashboard import profiles
 from openswe.github import thread_token
 from openswe.github import token as auth
+from openswe.web import profiles
 
 
 @pytest.fixture

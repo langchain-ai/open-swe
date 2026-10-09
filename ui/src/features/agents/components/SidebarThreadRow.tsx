@@ -91,7 +91,7 @@ const ICON_SIZE = 14
 
 const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
   {
-    dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
+    dashboard: { icon: ChatCircleIcon, label: "Started from the web app" },
     github: { icon: GithubLogoIcon, label: "Triggered from GitHub" },
     slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
     linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },

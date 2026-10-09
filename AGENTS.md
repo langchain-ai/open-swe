@@ -17,7 +17,7 @@ Before making any change, first till the soil: refactor the surrounding code so 
 - Put behavior on the object it acts on. If functions keep passing the same value around (a request, a client, a `(backend, repo_dir)` pair), that value is a missing class. Free functions are for framework entrypoints (routes, graph nodes, tools) and helpers spanning unrelated types. A new class must own real state, never be a bag of arguments.
 - Call GitHub through named `RepoClient`/`PullRequestClient` methods (e.g. `pull.comment(body)`); outside `openswe/github/http.py` and `openswe/github/pull_request_status.py`, never pass a REST path or GraphQL query to the transport (`get`, `post`, `patch`, `delete`, `pages`, `graphql`, `request`). Open the client as who it acts for, `GitHubClient.as_user(login)` or `GitHubClient.as_app(owner, repo)`; `GitHubClient.connect(token=...)` is only for a token a run was handed.
 - Absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
-- New dashboard endpoints go in the `router` of the package that owns the feature, never in `openswe/dashboard/routes.py`.
+- New web endpoints go in the `router` of the package that owns the feature, never in `openswe/web/routes.py`.
 - Model-facing prompts live in `openswe/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`. Never inline prompt text in Python. User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
 - Keep comments minimal and only explain non-obvious reasons.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions. Typed and slash commands are optional shortcuts, never the only way.

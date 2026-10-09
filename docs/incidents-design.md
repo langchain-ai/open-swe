@@ -27,7 +27,7 @@ One LangGraph run per turn. Nothing waits on another process.
 
 ## Identity and mapping
 
-An enrolled channel maps to one agent thread at the Slack location `(channel_id, "0")`, the session timestamp code channels use. Thread metadata carries `source: incidents_agent`, `owner_type: system`, `visibility: public`, `incident_id`, and the Slack location. Runs on the thread carry `configurable.source = "incidents_agent"` and no personal identity; `openswe.incidents.runtime.load_incident_session` re-verifies the saved binding before assembling the agent and refuses forged sources. Background-task completions and scheduled wakeups return to the thread as normal turns. Generic dashboard thread routes hide these threads; the Incidents dashboard is the review surface.
+An enrolled channel maps to one agent thread at the Slack location `(channel_id, "0")`, the session timestamp code channels use. Thread metadata carries `source: incidents_agent`, `owner_type: system`, `visibility: public`, `incident_id`, and the Slack location. Runs on the thread carry `configurable.source = "incidents_agent"` and no personal identity; `openswe.incidents.runtime.load_incident_session` re-verifies the saved binding before assembling the agent and refuses forged sources. Background-task completions and scheduled wakeups return to the thread as normal turns. Generic web thread routes hide these threads; the Incidents web is the review surface.
 
 ## Context and debounce
 
@@ -42,7 +42,7 @@ Every channel message, including bot alerts, is queued for the thread as a conte
 | `incidents/reports` | `record_incident_report` | latest report, digest, run id, last posted digest/run/time, findings activity |
 | `incidents/summaries`, `incidents/history` | the report tool and the handler through `documents.py` | postmortem Markdown and curated metadata |
 
-Each record has one writer class so concurrent turns and controls cannot lose updates. The dashboard merges the two activity lists and reports `investigating` while the thread has a pending or running run.
+Each record has one writer class so concurrent turns and controls cannot lose updates. The web app merges the two activity lists and reports `investigating` while the thread has a pending or running run.
 
 ## Reports and Slack updates
 
@@ -50,7 +50,7 @@ The agent finishes each turn by calling `record_incident_report`. Claims without
 
 The channel receives one automatic message per incident: the first investigation that reaches a supported conclusion (`outcome == "findings"`), tracked in `investigation_posted`. An inconclusive first turn does not spend it, so the real investigation still lands. Afterwards automatic turns keep the stored report and the postmortem current without posting, and the channel belongs to the responders; only a question posts again, answered once per run. Automatic turns are driven by `FIRST_INVESTIGATION_REQUEST` until the investigation is published and by `AUTOMATIC_REQUEST` after that, so the flow instruction and the post gate agree on one condition.
 
-The investigation is published in a fixed order — problem, previous occurrence, impact, cause, steps to solve — each a named section with its own character budget, and empty sections are skipped. A report with no filled sections falls back to its summary. The summary is the one-line headline the dashboard, the activity list, and the completion notice show, and it is the body of an answer to a question; it is deliberately left out of the investigation message, where it only repeated what responders had already written above. A missing recurrence check is published as missing, because an empty section would otherwise read as "this has never happened before".
+The investigation is published in a fixed order — problem, previous occurrence, impact, cause, steps to solve — each a named section with its own character budget, and empty sections are skipped. A report with no filled sections falls back to its summary. The summary is the one-line headline the web app, the activity list, and the completion notice show, and it is the body of an answer to a question; it is deliberately left out of the investigation message, where it only repeated what responders had already written above. A missing recurrence check is published as missing, because an empty section would otherwise read as "this has never happened before".
 
 The digest covers the conclusion — summary, problem, previous occurrence, impact, cause, outcome, next steps, hypotheses, questions, with citations stripped — and not the retrieved evidence, because every turn cites the newest channel message and would otherwise always look new. It keeps an answer from repeating itself inside one run. Pause and complete cancel the thread's pending and running runs and post a notice; complete includes the latest summary.
 

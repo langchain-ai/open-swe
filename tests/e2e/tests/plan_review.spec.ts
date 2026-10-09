@@ -222,8 +222,8 @@ test.describe("HTML artifacts", () => {
       const path = new URL(response.url()).pathname;
       return (
         response.request().method() === "GET" &&
-        (path === `/dashboard/api/threads/${threadId}/state` ||
-          path === `/dashboard/api/threads/${threadId}/transcript`)
+        (path === `/api/threads/${threadId}/state` ||
+          path === `/api/threads/${threadId}/transcript`)
       );
     });
     await collab.getByRole("link", { name: "Back to conversation" }).click();

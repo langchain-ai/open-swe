@@ -19,7 +19,7 @@ async def _output_iframe(
     path: str,
     title: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Display a sandbox HTML file in an isolated iframe in the dashboard."""
+    """Display a sandbox HTML file in an isolated iframe in the web app."""
     backend, source_path, work_dir = await resolve_sandbox_file(path)
     quoted_source = shlex.quote(source_path)
     # `wc -c` rather than `stat`, whose size flag differs between GNU and BSD.
@@ -78,7 +78,7 @@ async def _output_iframe(
     )
     display_title = title.strip() if isinstance(title, str) and title.strip() else "HTML Output"
     return (
-        "Displayed the HTML output in the dashboard.",
+        "Displayed the HTML output in the web app.",
         {
             "type": "output_iframe",
             "preview_url": preview["url"],

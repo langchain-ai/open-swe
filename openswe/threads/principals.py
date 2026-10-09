@@ -4,7 +4,7 @@ Three kinds of principal reach the thread API. A person signs in and gets their
 own threads. A workspace API key and a federated GitHub Actions workflow are
 machines: they start threads that belong to a workspace rather than to anyone,
 and they may read back only what they themselves started, because none of the
-dashboard's ownership rules describe them.
+web's ownership rules describe them.
 
 Which kind of thread a request creates is never inferred from who asked. The
 request names it, and the principal is checked against it:
@@ -26,8 +26,6 @@ from openswe.api_keys.deps import api_key_from_token, bind_audit_key
 from openswe.api_keys.models import ApiKey
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
-from openswe.dashboard.admin import is_admin
-from openswe.dashboard.oauth import bind_audit_session, optional_session
 from openswe.federation.github_oidc import (
     GitHubActionsClaims,
     InvalidFederatedToken,
@@ -36,6 +34,8 @@ from openswe.federation.github_oidc import (
 )
 from openswe.threads.summary import _assert_thread_postable, assert_thread_readable
 from openswe.utils.json_types import JsonObject
+from openswe.web.admin import is_admin
+from openswe.web.oauth import bind_audit_session, optional_session
 from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)

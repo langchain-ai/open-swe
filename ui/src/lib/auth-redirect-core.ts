@@ -21,7 +21,7 @@ function storage(): Storage | null {
 }
 
 function isBlockedRedirectPath(path: string): boolean {
-  return /^(?:\/login|\/dashboard\/api|\/_serverFn)(?:[/?#]|$)/.test(path)
+  return /^(?:\/login|\/(?:dashboard\/)?api|\/_serverFn)(?:[/?#]|$)/.test(path)
 }
 
 export function sanitizeAuthRedirect(

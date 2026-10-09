@@ -16,7 +16,7 @@ export const THREAD_SOURCES = [
   "schedule",
 ] as const
 
-/** `list_threads` arguments: the dashboard sidebar's filters, plus the page's own. */
+/** `list_threads` arguments: the web app sidebar's filters, plus the page's own. */
 export const listThreadsArgs = {
   repo: z
     .string()

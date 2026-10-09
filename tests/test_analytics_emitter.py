@@ -56,4 +56,4 @@ async def test_feedback_submission_uses_stable_feedback_identity(monkeypatch) ->
     assert event.payload.rating == 5
     assert event.payload.sentiment == "positive"
     assert event.user_id == person_id
-    assert event.entry_point == emitter.EntryPoint.DASHBOARD
+    assert event.entry_point == emitter.EntryPoint.WEB

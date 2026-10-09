@@ -32,7 +32,7 @@ Always require human review when a pull request touches:
   functionality is being removed or restricted; a rationale does not waive human
   review;
 - authentication, sessions, permissions, credentials, or tokens (for example
-  `openswe/dashboard/oauth.py`, `openswe/dashboard/repo_access.py`, `openswe/api_keys/`,
+  `openswe/web/oauth.py`, `openswe/web/repo_access.py`, `openswe/api_keys/`,
   `openswe/github/`);
 - sandboxes, webhooks and their signature checks, or database migrations
   (`openswe/sandboxes/`, `openswe/webhooks/`, `openswe/database/migrations/`);

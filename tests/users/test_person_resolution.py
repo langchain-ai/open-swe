@@ -17,9 +17,9 @@ async def test_canonical_person_keys_every_surface_on_one_person() -> None:
     await user.link("slack", "U1", team_id="T1")
 
     from_slack = await User.canonical_person({"id": "slack:U1"})
-    from_dashboard = await User.canonical_person({"id": "github:octocat"})
+    from_web = await User.canonical_person({"id": "github:octocat"})
 
-    assert from_slack["id"] == from_dashboard["id"] == f"user:{user.id}"
+    assert from_slack["id"] == from_web["id"] == f"user:{user.id}"
 
 
 async def test_canonical_person_survives_a_database_that_cannot_answer(

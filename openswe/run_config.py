@@ -1,7 +1,7 @@
 """The shape of ``configurable`` — the per-run contract every graph reads.
 
 ``configurable`` rides in the ``RunnableConfig`` of every agent, reviewer, and
-analyzer run. It is assembled by webhooks, the dashboard, and cron launchers,
+analyzer run. It is assembled by webhooks, the web app, and cron launchers,
 merged and re-written at several hops, and then read in ~40 modules.
 
 The same three rules that govern :mod:`openswe.source_context` apply here, for the
@@ -169,7 +169,7 @@ class RunConfig(BaseModel):
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 
-    # Dashboard review chat
+    # Web review chat
     chat_repo_owner: str | None = None
     chat_repo_name: str | None = None
     chat_pr_number: Int | None = None

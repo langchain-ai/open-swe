@@ -10,7 +10,6 @@ from langgraph.config import get_config
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.models import ExpeditedExclusions
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
     ChangedFile,
@@ -36,6 +35,7 @@ from openswe.slack.client import GitHubPrRef, parse_github_pr_url
 from openswe.slack.http import SlackRequestError
 from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.users import User
+from openswe.web.workspace_settings import get_workspace_settings
 
 
 def _failure(error: str) -> dict[str, Any]:

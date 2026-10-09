@@ -30,7 +30,7 @@ from openswe.threads.workflow_approval import (
     mark_workflow_push_notified,
     workflow_push_approved,
 )
-from openswe.utils.dashboard_links import dashboard_workflow_approval_url
+from openswe.utils.web_links import web_workflow_approval_url
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +328,7 @@ async def _inherited_workflow_source(backend: Any, root: str, head: str) -> str 
 def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
     if not thread_id:
         return None
-    return dashboard_workflow_approval_url(thread_id, fingerprint)
+    return web_workflow_approval_url(thread_id, fingerprint)
 
 
 async def _workflow_change_for_push(

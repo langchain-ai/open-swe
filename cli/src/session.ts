@@ -14,11 +14,11 @@ export const createSessionArgs = {
   workspace: z
     .string()
     .optional()
-    .describe("Workspace slug; defaults to dashboard workspace routing."),
+    .describe("Workspace slug; defaults to web workspace routing."),
   visibility: z
     .enum(["public", "private"])
     .optional()
-    .describe("Defaults to your saved dashboard visibility."),
+    .describe("Defaults to your saved web visibility."),
   start: z
     .boolean()
     .default(true)

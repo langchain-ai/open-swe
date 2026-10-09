@@ -53,9 +53,7 @@ it("scopes workspace MCP requests to the selected workspace", async () => {
   // The workspace's own connections, plus the instance list it inherits.
   expect(
     requestedUrls.every(
-      (url) =>
-        url.includes("/workspaces/oss/mcps") ||
-        url.endsWith("/dashboard/api/mcps")
+      (url) => url.includes("/workspaces/oss/mcps") || url.endsWith("/api/mcps")
     )
   ).toBe(true)
   expect(

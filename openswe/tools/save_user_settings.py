@@ -3,10 +3,10 @@
 from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.agent_overrides import resolve_github_login
-from openswe.dashboard.personal_settings import SettingValue, patch_personal_settings
 from openswe.tools.access import Policy, access, ack
 from openswe.utils.json_types import as_json_object
+from openswe.web.agent_overrides import resolve_github_login
+from openswe.web.personal_settings import SettingValue, patch_personal_settings
 
 
 @audit_tool()
@@ -17,7 +17,7 @@ async def save_user_settings(settings: dict[str, SettingValue]) -> dict[str, obj
     if not login:
         return {"ok": False, "error": "Could not resolve the requester's GitHub login"}
     if "concierge_mode" in settings:
-        return {"ok": False, "error": "Change concierge_mode in the dashboard settings instead"}
+        return {"ok": False, "error": "Change concierge_mode in the web app settings instead"}
     try:
         updated = await patch_personal_settings(login, settings)
     except ValueError as exc:

@@ -5,6 +5,8 @@
       "cache": false,
       "persistent": true,
       "env": [
+        "WEB_API_URL",
+        "WEB_BASE_PATH",
         "DASHBOARD_API_URL",
         "DASHBOARD_BASE_PATH",
         "OPEN_SWE_DEV_SESSION",
@@ -21,6 +23,7 @@
         "build/**"
       ],
       "env": [
+        "WEB_API_URL",
         "DASHBOARD_API_URL",
         "SOURCE_COMMIT",
         "VERCEL",

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from openswe.config import ENV
-from openswe.dashboard.user_preferences import get_user_preferences
+from openswe.web.user_preferences import get_user_preferences
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)

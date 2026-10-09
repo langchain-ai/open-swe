@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, model_validator
 
 from openswe.analytics.feedback import record_feedback_submission
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.source_context import SourceContext
 from openswe.thread_feedback import PromptStatus, Rating, feedback_prompt_status, feedback_store
 from openswe.threads.plan_api import fetch_thread_metadata
@@ -15,6 +14,7 @@ from openswe.threads.summary import thread_is_readable
 from openswe.users import User
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.web.oauth import require_same_origin_for_mutations, require_session
 
 feedback_router = APIRouter(
     prefix="/threads",

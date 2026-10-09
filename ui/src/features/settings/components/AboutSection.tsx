@@ -91,14 +91,14 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
             <IdentityValue value={buildInfo.backend.package_version} />
           </p>
           <p>
-            Dashboard bundle:{" "}
-            {buildInfo.dashboard.served ? (
+            Web bundle:{" "}
+            {buildInfo.web.served ? (
               <>
-                commit <CommitValue value={buildInfo.dashboard.commit} />
+                commit <CommitValue value={buildInfo.web.commit} />
                 {" · "}built{" "}
-                {buildInfo.dashboard.built_at ? (
-                  <time dateTime={buildInfo.dashboard.built_at}>
-                    {new Date(buildInfo.dashboard.built_at).toLocaleString()}
+                {buildInfo.web.built_at ? (
+                  <time dateTime={buildInfo.web.built_at}>
+                    {new Date(buildInfo.web.built_at).toLocaleString()}
                   </time>
                 ) : (
                   "Unavailable"
@@ -119,11 +119,10 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
         const bundle = hydrated ? window.__OPEN_SWE_BUNDLE__ : undefined
         if (!bundle) return null
         const comparable =
-          buildInfo?.dashboard.served &&
+          buildInfo?.web.served &&
           bundle.commit != null &&
-          buildInfo?.dashboard.commit != null
-        const differs =
-          comparable && bundle.commit !== buildInfo?.dashboard.commit
+          buildInfo?.web.commit != null
+        const differs = comparable && bundle.commit !== buildInfo?.web.commit
         return (
           <p>
             This browser is running: commit{" "}
@@ -137,7 +136,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
                 {" "}
                 — different from the bundle the backend reports serving.
               </span>
-            ) : buildInfo?.dashboard.served && !comparable ? (
+            ) : buildInfo?.web.served && !comparable ? (
               <span className="text-secondary">
                 {" "}
                 — comparison with the backend-served bundle unavailable.

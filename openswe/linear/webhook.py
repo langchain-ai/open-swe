@@ -183,7 +183,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     image_blocks_by_url: dict[str, dict[str, Any]] = {}
 
     # Resolve the GitHub login from the Linear email the same way Slack does, so
-    # PRs open *as the triggering user* and the thread is tagged for the dashboard.
+    # PRs open *as the triggering user* and the thread is tagged for the web app.
     mapped_login = await User.login_for_email(user_email) if user_email else None
     # A follow-up stays in its thread's workspace; a new issue lands in the
     # repository's preferred one. Either way its default model and Fable flag
