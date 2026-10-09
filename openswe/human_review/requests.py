@@ -32,6 +32,7 @@ from openswe.expedited_review.eligibility import ExcludedHunk
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.pick_message import PickMessage
+from openswe.run_config import RunConfig
 from openswe.slack.client import lookup_slack_thread_id
 from openswe.slack.dm import DmOrigin
 from openswe.users import User
@@ -179,6 +180,12 @@ class HumanReviewRequest(Base):
     def picks(self) -> list[HumanReviewParticipant]:
         """People Open SWE asked to review who have not accepted yet."""
         return [p for p in self.participants if p.decision == "picked"]
+
+    @property
+    def requester_login(self) -> str:
+        if self.requested_by is not None:
+            return self.requested_by.github_login
+        return RunConfig.parse(self.run_config).github_login or ""
 
     async def author_mention(self) -> str:
         pr = self.pull_request
@@ -450,3 +457,15 @@ class HumanReviewRequest(Base):
             participant.dm_channel_id = message.channel_id
             participant.dm_ts = message.ts
             participant.dm_text = message.text
+
+    @classmethod
+    async def transition(
+        cls, request_id: UUID, *, expected: tuple[RequestState, ...], **changes: object
+    ) -> Self | None:
+        """Apply ``changes`` if the row is still in one of ``expected``; else ``None``."""
+        async with cls.locked(request_id) as (_, row):
+            if row is None or row.state not in expected:
+                return None
+            for name, value in changes.items():
+                setattr(row, name, value)
+            return row
