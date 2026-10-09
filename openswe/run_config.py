@@ -197,6 +197,7 @@ class RunConfig(BaseModel):
     # Background jobs
     watch_key: str | None = None
     schedule_id: str | None = None
+    slack_trigger: SlackThreadRef | None = None
     background_task_completion: bool | None = None
 
     @classmethod

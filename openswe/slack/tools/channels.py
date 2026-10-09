@@ -11,6 +11,7 @@ from openswe.slack.client import (
     SLACK_USER_ID_RE,
     convert_mentions_to_slack_format,
     get_slack_user_names,
+    post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
 )
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
@@ -168,9 +169,9 @@ async def slack_list_channel_members(
 
 
 async def slack_post_message(
-    channel_id: str, message: str
+    channel_id: str, message: str, reply_in_trigger_thread: bool = False
 ) -> SlackMessageReceipt | SlackChannelError:
-    """Post a standalone message to a channel the Open SWE bot belongs to."""
+    """Post to a bot channel; reply_in_trigger_thread targets only a Slack automation's trigger."""
     channel_id = channel_id.strip()
     if not _CHANNEL_ID_RE.fullmatch(channel_id):
         return {"success": False, "error": "channel_id must be a Slack channel ID"}
@@ -195,20 +196,37 @@ async def slack_post_message(
             return {"success": False, "error": "invalid_slack_response"}
         seen_cursors.add(cursor)
 
-    blocks = markdown_blocks(message) or []
     cfg = RunConfig.from_runtime()
-    if cfg.thread_id:
+    trigger = cfg.slack_trigger if cfg.source == "schedule" else None
+    if reply_in_trigger_thread:
+        if trigger is None or trigger.location is None:
+            return {"success": False, "error": "No Slack message trigger is available"}
+        if channel_id != trigger.channel_id:
+            return {"success": False, "error": "channel_id must match the Slack trigger channel"}
+    blocks = markdown_blocks(message) or []
+    if cfg.thread_id and not reply_in_trigger_thread:
         location = await run_slack_location(cfg, cfg.thread_id)
         if location[0] and location[1] and location[0] != channel_id:
             blocks.extend(await origin_footer(cfg.thread_id, location))
     try:
-        message_ts = await post_slack_top_level_message_with_ts(
-            channel_id,
-            markdown_to_mrkdwn(message),
-            unfurl_links=False,
-            unfurl_media=False,
-            blocks=block_payload(blocks) if blocks else None,
-        )
+        if reply_in_trigger_thread and trigger is not None:
+            message_ts = await post_slack_thread_reply_with_ts(
+                trigger.channel_id,
+                trigger.thread_ts,
+                markdown_to_mrkdwn(message),
+                unfurl_links=False,
+                unfurl_media=False,
+                blocks=block_payload(blocks) if blocks else None,
+                agent_thread_id=cfg.thread_id,
+            )
+        else:
+            message_ts = await post_slack_top_level_message_with_ts(
+                channel_id,
+                markdown_to_mrkdwn(message),
+                unfurl_links=False,
+                unfurl_media=False,
+                blocks=block_payload(blocks) if blocks else None,
+            )
     except SlackRequestError as exc:
         return {"success": False, "error": exc.code or "post_failed"}
     return {"success": True, "channel_id": channel_id, "message_ts": message_ts}
