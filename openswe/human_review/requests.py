@@ -31,6 +31,7 @@ from openswe.database.orm import NOW, Base
 from openswe.expedited_review.eligibility import ExcludedHunk
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.human_review.pick_message import PickMessage
 from openswe.slack.client import lookup_slack_thread_id
 from openswe.slack.dm import DmOrigin
 from openswe.users import User
@@ -72,7 +73,17 @@ class HumanReviewParticipant(Base):
     github_review_sha: Mapped[str] = mapped_column(server_default="", default="")
     assigned_by_agent: Mapped[bool] = mapped_column(server_default="false", default=False)
     joined_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    dm_channel_id: Mapped[str] = mapped_column(server_default="", default="")
+    dm_ts: Mapped[str] = mapped_column(server_default="", default="")
+    dm_text: Mapped[str] = mapped_column(server_default="", default="")
     user: Mapped[User] = relationship(init=False)
+
+    @property
+    def pick_message(self) -> PickMessage | None:
+        """The DM that asked them to take the pick; ``None`` when it was never recorded."""
+        if not self.dm_channel_id or not self.dm_ts:
+            return None
+        return PickMessage(channel_id=self.dm_channel_id, ts=self.dm_ts, text=self.dm_text)
 
     @property
     def github_login(self) -> str:
@@ -429,3 +440,13 @@ class HumanReviewRequest(Base):
                 .execution_options(populate_existing=True)
             )
             yield session, row
+
+    async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
+        """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""
+        async with self.locked(self.id) as (_, row):
+            participant = row.participant(user_id) if row is not None else None
+            if participant is None:
+                return
+            participant.dm_channel_id = message.channel_id
+            participant.dm_ts = message.ts
+            participant.dm_text = message.text
