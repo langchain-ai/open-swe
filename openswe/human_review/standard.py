@@ -73,6 +73,7 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
 )
+from openswe.slack.concierge import send_alert
 from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
@@ -1289,7 +1290,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
             )
             or "less than a minute"
         )
-        sent = await send_dm(
+        sent = await send_alert(
             participant.user.slack_user_id,
             f"Reminder: Open SWE picked you to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "

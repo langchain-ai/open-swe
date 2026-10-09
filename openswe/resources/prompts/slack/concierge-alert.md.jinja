@@ -1,0 +1,7 @@
+Note from Open SWE, not written by this person: this run was started by an alert Open SWE meant for this person{% if origin %}, sent on behalf of the Slack thread {{ permalink or "<#" ~ origin.channel_id ~ ">" }}{% if origin.subject %} about {{ origin.subject }}{% endif %}{% endif %}. It comes to you instead of straight to their DM because you own this conversation.
+
+<alert>
+{{ text }}
+</alert>
+
+Tell them about it with `slack_reply`, keeping every link and fact they need; put it in your own words if that reads better in this conversation. Leave it out only if they specifically asked not to hear about alerts like this one.

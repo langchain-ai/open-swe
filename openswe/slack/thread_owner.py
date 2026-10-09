@@ -20,6 +20,15 @@ class ThreadOwnerWakeError(Exception):
 
 async def wake_thread_owner(channel_id: str, thread_ts: str, slack_user_id: str, event: str) -> str:
     """Start a run for the thread's owning agent, acting for ``slack_user_id``, about ``event``."""
+    return await start_thread_owner_run(
+        channel_id, thread_ts, slack_user_id, prompt("slack/thread-owner-event", event=event)
+    )
+
+
+async def start_thread_owner_run(
+    channel_id: str, thread_ts: str, slack_user_id: str, text: str
+) -> str:
+    """Start a run for the thread's owning agent with ``text`` as its triggering message."""
     thread_id = await resolve_slack_thread_id(langgraph_client(), channel_id, thread_ts)
     channel_context = await SlackChannel.context_for(channel_id)
     repo = await common.get_slack_repo_config(
@@ -45,7 +54,7 @@ async def wake_thread_owner(channel_id: str, thread_ts: str, slack_user_id: str,
             # After every message in the thread, so the agent reads all of them first.
             event_ts=f"{time.time():.6f}",
             user_id=slack_user_id,
-            text=prompt("slack/thread-owner-event", event=event),
+            text=text,
             bot_user_id=common.SLACK_BOT_USER_ID,
             thread_id=thread_id,
         ),
