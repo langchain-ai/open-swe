@@ -1,27 +1,27 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "@playwright/test"
 
 test.describe("Slack run usage footer", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/mock/slack");
-    await page.locator("#reset").click();
-    await expect(page.locator("#thread")).toContainText("No messages yet");
-  });
+    await page.goto("/mock/slack")
+    await page.locator("#reset").click()
+    await expect(page.locator("#thread")).toContainText("No messages yet")
+  })
 
   test("shows the pending cost on the final reply", async ({ page }) => {
     await page
       .locator("#text")
-      .fill("<@U0BOT> please add a greet() helper and open a PR");
-    await page.locator("#send").click();
+      .fill("<@U0BOT> please add a greet() helper and open a PR")
+    await page.locator("#send").click()
 
     const reply = page
       .locator(".msg.bot")
-      .filter({ hasText: "Add greet() helper" });
-    await expect(reply).toBeVisible();
-    await expect(reply).toContainText("fake-scripted-model");
-    await expect(reply).toContainText("calculating cost", { timeout: 60_000 });
-    await expect(reply).not.toContainText("$");
+      .filter({ hasText: "Add greet() helper" })
+    await expect(reply).toBeVisible()
+    await expect(reply).toContainText("fake-scripted-model")
+    await expect(reply).toContainText("calculating cost", { timeout: 60_000 })
+    await expect(reply).not.toContainText("$")
     await expect(reply.getByRole("link", { name: "Open in Web" })).toHaveCount(
-      1,
-    );
-  });
-});
+      1
+    )
+  })
+})

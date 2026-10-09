@@ -346,6 +346,7 @@ function OpenConversations({
             disabled={resolveThreads.isPending}
             onClick={() => resolveThreads.mutate(answered)}
             title="Outdated conversations where the author replied last"
+            aria-label={`Resolve ${answered.length} answered`}
           >
             Resolve {answered.length} answered
           </Button>

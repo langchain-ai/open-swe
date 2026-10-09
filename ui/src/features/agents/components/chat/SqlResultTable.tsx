@@ -61,7 +61,7 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
       </div>
       <div className="max-h-[28rem] overflow-auto">
         <table className="min-w-max border-collapse text-left">
-          <thead className="sticky top-0 z-table-sticky-header bg-surface-level-3">
+          <thead className="sticky top-0 z-sticky-header bg-surface-level-3">
             <tr>
               {result.columns.map((column, index) => (
                 <th

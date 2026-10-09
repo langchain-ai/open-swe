@@ -32,17 +32,24 @@ const macawSyntaxTheme = createCssVariablesTheme({
 
 const DIFF_THEME = { light: "macaw-light", dark: "macaw-dark" } as const
 
+// Line highlight colors from pierre-light/pierre-dark.
+const PIERRE_GIT_COLORS = {
+  light: { added: "#18a46c", deleted: "#d52c36", modified: "#009fff" },
+  dark: { added: "#07c480", deleted: "#ff2e3f", modified: "#009fff" },
+}
+
 for (const type of ["light", "dark"] as const) {
   const name = DIFF_THEME[type]
+  const git = PIERRE_GIT_COLORS[type]
   registerCustomTheme(name, async () => ({
     ...macawSyntaxTheme,
     name,
     type,
     colors: {
       ...macawSyntaxTheme.colors,
-      "gitDecoration.addedResourceForeground": "var(--icon-success)",
-      "gitDecoration.deletedResourceForeground": "var(--icon-error)",
-      "gitDecoration.modifiedResourceForeground": "var(--icon-brand)",
+      "gitDecoration.addedResourceForeground": git.added,
+      "gitDecoration.deletedResourceForeground": git.deleted,
+      "gitDecoration.modifiedResourceForeground": git.modified,
     },
   }))
 }
@@ -119,15 +126,15 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-bg-separator-override: var(--bg-surface-level-1-hover);
   --diffs-bg-buffer-override: var(--diffs-surface);
 
-  --diffs-bg-addition-override: color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-success-strong));
-  --diffs-bg-addition-number-override: color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-success-strong));
-  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, var(--bg-success-strong));
-  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, var(--bg-success-strong));
+  --diffs-bg-addition-override: color-mix(in srgb, var(--diffs-surface) 80%, #22c55e);
+  --diffs-bg-addition-number-override: color-mix(in srgb, var(--diffs-surface) 75%, #22c55e);
+  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, #22c55e);
+  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, #22c55e);
 
-  --diffs-bg-deletion-override: color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-error-strong));
-  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-error-strong));
-  --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, var(--bg-error-strong));
-  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, var(--bg-error-strong));
+  --diffs-bg-deletion-override: color-mix(in srgb, var(--diffs-surface) 80%, #ef4444);
+  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--diffs-surface) 75%, #ef4444);
+  --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, #ef4444);
+  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, #ef4444);
 
   --diffs-fg-number-override: var(--text-secondary);
   --diffs-font-size: 12px;
