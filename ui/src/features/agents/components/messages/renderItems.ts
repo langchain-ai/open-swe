@@ -1,4 +1,3 @@
-import { parseSqlResult } from "../chat/SqlResultTable"
 import {
   parseManagedToolsCard,
   type ManagedToolsCardOffer,
@@ -34,7 +33,6 @@ export type RenderItem =
       offer: ManagedToolsCardOffer
     }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
-  | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
@@ -131,7 +129,6 @@ export function countWorkActions(items: Array<RenderItem>): number {
     if (
       item.type === "edit-item" ||
       item.type === "shell-item" ||
-      item.type === "sql-item" ||
       item.type === "tool-item"
     ) {
       return count + 1
@@ -178,14 +175,6 @@ function isExplorationTool(chunk: ToolExecutionChunk): boolean {
 
 function isShellTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "execute"
-}
-
-function isSqlResult(chunk: ToolExecutionChunk): boolean {
-  return (
-    chunk.toolKind === "sql" &&
-    chunk.status === "completed" &&
-    parseSqlResult(chunk.output) !== null
-  )
 }
 
 function isReplyTool(chunk: ToolExecutionChunk): boolean {
@@ -289,12 +278,6 @@ export function buildRenderItems(
       } else if (isShellTool(chunk)) {
         items.push({
           type: "shell-item",
-          key: `tool-${chunk.toolCallId}`,
-          chunk,
-        })
-      } else if (isSqlResult(chunk)) {
-        items.push({
-          type: "sql-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })

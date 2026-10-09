@@ -25,7 +25,6 @@ import {
   replyBody,
 } from "@/features/agents/components/chat/ReplyCard"
 import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
-import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
 
@@ -266,9 +265,6 @@ export function AgentTurn({
           <OutputIframe key={item.key} display={item.chunk.display} />
         ) : null
 
-      case "sql-item":
-        return <SqlResultItem key={item.key} chunk={item.chunk} />
-
       case "tool-item":
         return (
           <WorkEntryRow
@@ -359,40 +355,5 @@ export function AgentTurn({
         )}
       </div>
     </div>
-  )
-}
-
-/**
- * A SQL result table parses the whole output, so a chunk that carries only the
- * transcript's preview has to fetch the rest before it can show anything
- * faithful.
- */
-function SqlResultItem({ chunk }: { chunk: ToolExecutionChunk }) {
-  const { loadOutput, output } = chunk
-  const [loaded, setLoaded] = useState<{
-    load: typeof loadOutput
-    text: string
-  } | null>(null)
-
-  useEffect(() => {
-    if (!loadOutput) return
-    let active = true
-    void loadOutput().then(
-      (text) => {
-        if (active) setLoaded({ load: loadOutput, text })
-      },
-      () => {
-        // The preview stays up; the row's expand path reports load failures.
-      }
-    )
-    return () => {
-      active = false
-    }
-  }, [loadOutput])
-
-  return (
-    <SqlResultTable
-      output={loaded && loaded.load === loadOutput ? loaded.text : output}
-    />
   )
 }

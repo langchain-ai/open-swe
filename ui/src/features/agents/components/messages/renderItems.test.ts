@@ -63,7 +63,7 @@ describe("buildRenderItems", () => {
     ])
   })
 
-  it("folds SQL results into work and counts the query as an action", () => {
+  it("renders completed SQL results as ordinary work entries", () => {
     const chunk: ToolExecutionChunk = {
       kind: "tool-execution",
       toolCallId: "call-sql",
@@ -75,7 +75,7 @@ describe("buildRenderItems", () => {
     }
 
     expect(buildRenderItems([chunk])).toEqual([
-      { type: "sql-item", key: "tool-call-sql", chunk },
+      { type: "tool-item", key: "tool-call-sql", chunk },
     ])
     const items = buildRenderItems([chunk])
     expect(selectCollapsedTurnItems(items)).toEqual([])

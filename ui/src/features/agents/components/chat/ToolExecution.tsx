@@ -8,7 +8,6 @@ import {
   useState,
 } from "react"
 import { DiffView } from "./DiffView"
-import { SqlResultTable, parseSqlResult } from "./SqlResultTable"
 import { formatToolDisplay } from "./toolExecutionDisplay"
 import { ScopedFileDiff } from "@/features/agents/components/ScopedFileDiff"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
@@ -225,10 +224,6 @@ export const ToolExecution = memo(function ToolExecution({
         </span>
       </div>
     )
-  }
-
-  if (toolKind === "sql" && status === "completed" && parseSqlResult(output)) {
-    return <SqlResultTable output={output} />
   }
 
   const displayName = formatToolDisplay(title, toolKind, input, repoPath)
