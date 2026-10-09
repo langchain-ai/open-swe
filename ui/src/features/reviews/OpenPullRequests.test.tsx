@@ -177,7 +177,8 @@ const openMergeMethods = async (number: number) => {
     name: `Merge method for PR #${number}`,
   })) as HTMLButtonElement
   await waitFor(() => expect(trigger.disabled).toBe(false))
-  fireEvent.click(trigger)
+  // Radix opens its menus on pointer-down or a key, never on a bare click.
+  fireEvent.keyDown(trigger, { key: "Enter" })
   return screen.findAllByRole("menuitemradio")
 }
 const mergeOptions = async (number: number) => {
@@ -244,7 +245,7 @@ describe("My PRs", () => {
     vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
     mount()
     const button = await screen.findByRole("button", {
-      name: "Fixing checks",
+      name: "Fixing conflicts",
     })
     expect((button as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByRole("button", { name: "Fix checks" })).toBeNull()
@@ -983,7 +984,11 @@ describe("My PRs", () => {
         })
     )
     mount()
-    fireEvent.click(await screen.findByRole("button", { name: "Fix checks" }))
+    fireEvent.keyDown(
+      await screen.findByRole("button", { name: "More fixes for PR #2" }),
+      { key: "Enter" }
+    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Fix checks" }))
     expect(
       (
         (await screen.findByRole("button", {

@@ -105,12 +105,8 @@ function chatPanel(page: Page): Locator {
     .filter({ has: page.getByTestId("composer-editor") });
 }
 
-// The app shell's <main> wraps the side panel too; the diff column is the inner one.
 function diffColumn(page: Page): Locator {
-  return page
-    .locator("main")
-    .filter({ has: page.getByRole("heading", { name: "Changes" }) })
-    .filter({ hasNot: page.getByTestId("composer-editor") });
+  return page.getByRole("region", { name: "Changes" });
 }
 
 async function openChatTab(page: Page) {
@@ -182,7 +178,7 @@ test.describe("review page", () => {
     await expect(link.locator('svg[aria-label="GitHub"]')).toBeVisible();
 
     const pill = title.locator("xpath=preceding-sibling::span[1]");
-    await expect(pill).toHaveText("open");
+    await expect(pill).toHaveText("Reviewable");
     const pillBox = await pill.boundingBox();
     const titleBox = await title.boundingBox();
     expect(pillBox).not.toBeNull();

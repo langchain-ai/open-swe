@@ -94,6 +94,7 @@ export function WalkthroughCallout({
         variant="outlined"
         leftDecorator={ListNumbersIcon}
         loading={running}
+        disabled={running}
         onClick={() => scout.mutate()}
       >
         {running ? "Building…" : "Build walkthrough"}

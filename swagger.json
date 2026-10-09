@@ -1129,7 +1129,7 @@
               "discriminator": {
                 "mapping": {
                   "line": "#/components/schemas/LineComment",
-                  "thread": "#/components/schemas/ThreadComment"
+                  "thread": "#/components/schemas/ThreadComment-Input"
                 },
                 "propertyName": "kind"
               },
@@ -1138,7 +1138,7 @@
                   "$ref": "#/components/schemas/LineComment"
                 },
                 {
-                  "$ref": "#/components/schemas/ThreadComment"
+                  "$ref": "#/components/schemas/ThreadComment-Input"
                 }
               ]
             },
@@ -1192,6 +1192,7 @@
               "discriminator": {
                 "mapping": {
                   "comment": "#/components/schemas/ConversationComment",
+                  "commit": "#/components/schemas/ConversationCommit",
                   "review": "#/components/schemas/ConversationReview"
                 },
                 "propertyName": "kind"
@@ -1202,15 +1203,26 @@
                 },
                 {
                   "$ref": "#/components/schemas/ConversationReview"
+                },
+                {
+                  "$ref": "#/components/schemas/ConversationCommit"
                 }
               ]
             },
             "title": "Items",
             "type": "array"
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewThread"
+            },
+            "title": "Threads",
+            "type": "array"
           }
         },
         "required": [
-          "items"
+          "items",
+          "threads"
         ],
         "title": "Conversation",
         "type": "object"
@@ -1221,14 +1233,30 @@
             "title": "Avatar Url",
             "type": "string"
           },
+          "bot": {
+            "title": "Bot",
+            "type": "boolean"
+          },
           "login": {
             "title": "Login",
             "type": "string"
+          },
+          "posted_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted By"
           }
         },
         "required": [
           "login",
-          "avatar_url"
+          "avatar_url",
+          "bot"
         ],
         "title": "ConversationAuthor",
         "type": "object"
@@ -1293,6 +1321,52 @@
         "title": "ConversationCommentCreate",
         "type": "object"
       },
+      "ConversationCommit": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "kind": {
+            "const": "commit",
+            "default": "commit",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "author",
+          "created_at",
+          "message",
+          "html_url"
+        ],
+        "title": "ConversationCommit",
+        "type": "object"
+      },
       "ConversationRef": {
         "properties": {
           "id": {
@@ -1335,10 +1409,6 @@
             "title": "Id",
             "type": "integer"
           },
-          "inline_comment_count": {
-            "title": "Inline Comment Count",
-            "type": "integer"
-          },
           "kind": {
             "const": "review",
             "default": "review",
@@ -1362,8 +1432,7 @@
           "created_at",
           "body",
           "html_url",
-          "state",
-          "inline_comment_count"
+          "state"
         ],
         "title": "ConversationReview",
         "type": "object"
@@ -5121,19 +5190,6 @@
         "title": "ReviewChat",
         "type": "object"
       },
-      "ReviewCommentUpdate": {
-        "properties": {
-          "body": {
-            "title": "Body",
-            "type": "string"
-          }
-        },
-        "required": [
-          "body"
-        ],
-        "title": "ReviewCommentUpdate",
-        "type": "object"
-      },
       "ReviewCounts": {
         "properties": {
           "bugs": {
@@ -5515,6 +5571,105 @@
           "number"
         ],
         "title": "ReviewSummaryRef",
+        "type": "object"
+      },
+      "ReviewThread": {
+        "description": "An inline thread: its first comment's anchor, then every reply in order.",
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadComment-Output"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "diff_hunk": {
+            "title": "Diff Hunk",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "original_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Line"
+          },
+          "outdated": {
+            "title": "Outdated",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          },
+          "side": {
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Line"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "path",
+          "line",
+          "start_line",
+          "side",
+          "original_line",
+          "diff_hunk",
+          "outdated",
+          "resolved",
+          "comments"
+        ],
+        "title": "ReviewThread",
         "type": "object"
       },
       "ReviewerEvalStart": {
@@ -6187,7 +6342,7 @@
         "title": "TextAnchor",
         "type": "object"
       },
-      "ThreadComment": {
+      "ThreadComment-Input": {
         "properties": {
           "comment_url": {
             "maxLength": 1000,
@@ -6210,6 +6365,58 @@
         "required": [
           "kind",
           "comment_url"
+        ],
+        "title": "ThreadComment",
+        "type": "object"
+      },
+      "ThreadComment-Output": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "review_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Id"
+          }
+        },
+        "required": [
+          "id",
+          "review_id",
+          "author",
+          "created_at",
+          "body",
+          "html_url"
         ],
         "title": "ThreadComment",
         "type": "object"
@@ -6267,6 +6474,19 @@
           "title"
         ],
         "title": "ThreadRenameBody",
+        "type": "object"
+      },
+      "ThreadResolution": {
+        "properties": {
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "resolved"
+        ],
+        "title": "ThreadResolution",
         "type": "object"
       },
       "ThreadResolveBody": {
@@ -14064,72 +14284,6 @@
       }
     },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments": {
-      "get": {
-        "operationId": "api_list_review_comments_dashboard_api_reviews__owner___repo___pr_number__comments_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api List Review Comments Dashboard Api Reviews  Owner   Repo   Pr Number  Comments Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Review Comments",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      },
       "post": {
         "operationId": "api_post_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments_post",
         "parameters": [
@@ -14199,91 +14353,6 @@
           }
         ],
         "summary": "Api Post Review Comment",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}": {
-      "patch": {
-        "operationId": "api_update_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments__comment_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "comment_id",
-            "required": true,
-            "schema": {
-              "title": "Comment Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewCommentUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PostedReviewComment"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Update Review Comment",
         "tags": [
           "dashboard",
           "review"
@@ -15636,6 +15705,169 @@
           }
         ],
         "summary": "Api Submit Pull Request Review",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/threads/{comment_id}/replies": {
+      "post": {
+        "operationId": "api_reply_to_review_thread_dashboard_api_reviews__owner___repo___pr_number__threads__comment_id__replies_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "title": "Comment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationCommentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadComment-Output"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reply To Review Thread",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/threads/{thread_node_id}/resolution": {
+      "put": {
+        "operationId": "api_set_review_thread_resolution_dashboard_api_reviews__owner___repo___pr_number__threads__thread_node_id__resolution_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "thread_node_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadResolution"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Review Thread Resolution",
         "tags": [
           "dashboard",
           "review"
