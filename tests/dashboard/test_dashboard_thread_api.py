@@ -9,7 +9,7 @@ from uuid import UUID, uuid7
 import pytest
 from fastapi import HTTPException
 
-from openswe.dashboard import deps
+from openswe.dashboard import deps, profiles
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
     WorkspaceSettingsUpdate,
@@ -22,6 +22,7 @@ from openswe.threads import diffs as thread_diffs
 from openswe.threads import handlers
 from openswe.threads import listing as thread_listing
 from openswe.threads import proxy as thread_proxy
+from openswe.threads import routes as thread_routes
 from openswe.threads import runs as thread_runs
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
@@ -47,6 +48,48 @@ def _empty_thread_pins(monkeypatch) -> None:
         return []
 
     patch_thread_module(monkeypatch, "list_thread_pin_ids", empty_pins)
+
+
+@pytest.mark.parametrize("start", [True, False])
+async def test_create_session_starts_only_when_requested(monkeypatch, start: bool) -> None:
+    create = AsyncMock(return_value="new-thread")
+    dispatch = AsyncMock(
+        return_value=(200, b'{"type":"success","result":{"run_id":"run-1"}}', "application/json")
+    )
+    monkeypatch.setattr(thread_routes, "create_dashboard_session", create)
+    monkeypatch.setattr(thread_routes, "proxy_dashboard_thread_commands", dispatch)
+    result = await thread_routes.api_create_session(
+        thread_runs.SessionCreateBody(prompt="Fix login", start=start),
+        {"sub": "octocat", "email": "octocat@example.com"},
+    )
+    assert result == {"thread_id": "new-thread"}
+    if start:
+        command = json.loads(dispatch.call_args.args[2])
+        assert command["params"]["input"]["messages"] == [{"type": "human", "content": "Fix login"}]
+    else:
+        dispatch.assert_not_awaited()
+
+
+async def test_create_session_uses_saved_defaults(
+    monkeypatch, fake_store: FakeStore, registry_db
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/oss"})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    access = AsyncMock()
+    monkeypatch.setattr(thread_runs, "require_repo_access_for_user", access)
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
+    thread_id = await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="Fix login", start=False), "octocat"
+    )
+    assert thread_id == created["thread_id"]
+    metadata = created["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["owner_login"] == "octocat"
+    assert metadata["repo_owner"] == "acme"
+    assert metadata["repo_name"] == "oss"
+    assert metadata["workspace"] == "oss"
+    access.assert_awaited_once_with("octocat", "acme/oss")
 
 
 def _image() -> thread_runs.DashboardImageBody:
@@ -1251,7 +1294,7 @@ async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
         "branch_name": "../../etc/passwd",
     }
     patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    patch_thread_module(monkeypatch, "_github_token_for_login", AsyncMock(return_value="token"))
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="token"))
     build_compare = AsyncMock()
     patch_thread_module(monkeypatch, "build_compare_diff_files", build_compare)
 

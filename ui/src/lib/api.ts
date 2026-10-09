@@ -51,7 +51,30 @@ export interface AuditLog {
         after: boolean | number | "[REDACTED]" | null
       }
     > | null
+    expedited_exclusions: ExpeditedExclusions | null
   }
+}
+
+export interface ExpeditedExclusions {
+  pull_request_id: string | null
+  base_sha: string
+  head_sha: string
+  approvals_md_sha256: string
+  requested: {
+    path: string
+    hunks: number[]
+    guideline: string
+    reason: string
+  }[]
+  hunks: {
+    path: string
+    digest: string
+    header: string
+    additions: number
+    deletions: number
+    guideline: string
+    reason: string
+  }[]
 }
 
 export interface AuditLogsPage {
@@ -1894,10 +1917,10 @@ export const api = {
     request<{ available: boolean }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
-  requestHumanReview: (pr: OpenPullRequest) =>
+  requestHumanReview: (pr: OpenPullRequest, channel = "") =>
     request<HumanReviewRequestResult>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
-      { method: "POST" }
+      { method: "POST", body: JSON.stringify({ channel }) }
     ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(

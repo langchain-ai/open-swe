@@ -21,7 +21,7 @@ import {
   type UsageLeaderboardPayload,
   type UsageLeaderboardRow,
 } from "@/lib/api"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { makeQueryClient } from "@/lib/query"
 
 import { UsageAnalytics, UsageDateRange } from "./usage"
@@ -392,8 +392,7 @@ it.each([
 
     const openCount = within(row).getByRole("button", { name: "3 (43%)" })
     if (interaction === "hover") {
-      fireEvent.mouseEnter(openCount)
-      fireEvent.mouseMove(openCount)
+      fireEvent.pointerMove(openCount, { pointerType: "mouse" })
     } else if (interaction === "focus") {
       act(() => openCount.focus())
     } else {
@@ -1201,11 +1200,15 @@ it("links the user name and avatar to their GitHub profile only when a login exi
   expect(linked.getAttribute("target")).toBe("_blank")
   expect(linked.getAttribute("rel")).toBe("noreferrer")
   expect(screen.queryByRole("link", { name: "Anonymous Reader" })).toBeNull()
-  const avatarLink = screen.getByText("CR").closest("a")
+  const avatarLink = linked
+    .closest("td")!
+    .querySelector('a[aria-hidden="true"]')
   expect(avatarLink?.getAttribute("href")).toBe("https://github.com/reader")
   expect(avatarLink?.getAttribute("target")).toBe("_blank")
   expect(avatarLink?.getAttribute("rel")).toBe("noreferrer")
-  expect(screen.getByText("AR").closest("a")).toBeNull()
+  expect(
+    screen.getByText("Anonymous Reader").closest("td")!.querySelector("a")
+  ).toBeNull()
   client.clear()
 })
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Literal, Self
 
-from openswe.review_guide.buttons import APPROVE, LOOKS_GOOD, MARK_READY
+from openswe.review_guide.buttons import APPROVE, MARK_READY, NEXT
 from openswe.review_guide.context import GuideContext, GuideUnavailableError
 from openswe.review_guide.diff import ChangedLine, FileChange
 from openswe.review_guide.github import fetch_head
@@ -117,7 +117,7 @@ async def _prepare(
 
 
 async def _post(state: _State, chunk: Group, replaced: Group | None) -> dict[str, Any]:
-    posted = await slack_reply(chunk.message_text, "progress", options=[LOOKS_GOOD])
+    posted = await slack_reply(chunk.message_text, "progress", options=[NEXT])
     if posted["success"] is not True:
         return posted
     chunk.status = "shown"
@@ -255,7 +255,7 @@ async def show_other(description: str) -> dict[str, Any]:
         await state.save()
         return state.report(note="Other is empty; call `end_walkthrough`")
     text = f"*Other · {len(state.walk.other)} lines*\n{prose}\n\n{fenced(other_stat(state.walk))}"
-    posted = await slack_reply(text, "progress", options=[LOOKS_GOOD])
+    posted = await slack_reply(text, "progress", options=[NEXT])
     if posted["success"] is not True:
         return posted
     state.walk.other_status = "shown"

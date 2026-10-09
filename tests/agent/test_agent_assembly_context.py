@@ -836,7 +836,6 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     registry_db: None,
 ) -> None:
     from langchain_core.messages import convert_to_messages
-    from langgraph.store.memory import InMemoryStore
 
     from openswe.message_queue import QueuedMessage
     from openswe.middleware.check_message_queue import (
@@ -851,13 +850,11 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
         thread_settings={"model_id": "fireworks:accounts/fireworks/models/kimi-k3"},
         make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
-    store = InMemoryStore()
     url = "https://example.com/image.png"
     image = {"type": "image_url", "image_url": {"url": url}}
     await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
     with (
         patch("openswe.middleware.check_message_queue.get_config", return_value=config),
-        patch("openswe.middleware.check_message_queue.get_store", return_value=store),
         patch("openswe.middleware.check_message_queue.fetch_image_block", return_value=image),
     ):
         update = await check_message_queue_before_model.abefore_model(

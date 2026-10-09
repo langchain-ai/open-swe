@@ -26,13 +26,11 @@ export function AboutSection({ user }: { user: SessionUser }) {
         <SettingsRow
           label="Open SWE Desktop"
           control={
-            <span className="text-xs text-muted-foreground">
-              Version {version}
-            </span>
+            <span className="text-xs text-secondary">Version {version}</span>
           }
         />
       ) : null}
-      <div className="space-y-2 p-4 text-xs break-words text-muted-foreground">
+      <div className="space-y-2 p-4 text-xs break-words text-secondary">
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
         </p>
@@ -63,7 +61,7 @@ function CommitValue({ value }: { value: string | null }) {
       href={`https://github.com/langchain-ai/open-swe/commit/${encodeURIComponent(value)}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="underline underline-offset-2 hover:text-foreground"
+      className="underline underline-offset-2 hover:text-primary"
     >
       <IdentityValue value={value} />
     </a>
@@ -135,12 +133,12 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
               {new Date(bundle.built_at).toLocaleString()}
             </time>
             {differs ? (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-warning-secondary">
                 {" "}
                 — different from the bundle the backend reports serving.
               </span>
             ) : buildInfo?.dashboard.served && !comparable ? (
-              <span className="text-muted-foreground">
+              <span className="text-secondary">
                 {" "}
                 — comparison with the backend-served bundle unavailable.
               </span>

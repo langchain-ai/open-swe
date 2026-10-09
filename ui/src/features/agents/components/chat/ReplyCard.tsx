@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { MessageCircle } from "lucide-react"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { SlackMrkdwn } from "../messages/SlackMrkdwn"
 import { Markdown } from "./Markdown"
 import type { ReactNode } from "react"
@@ -64,7 +64,7 @@ function blocksFromOptions(
 
 function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-space-2">
       {blocks.map((block, index) => {
         if (
           (block.type === "section" || block.type === "context") &&
@@ -85,7 +85,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
         }
         if (block.type === "actions" && Array.isArray(block.elements)) {
           return (
-            <div key={index} className="flex flex-wrap gap-2">
+            <div key={index} className="flex flex-wrap gap-space-2">
               {block.elements.map((element, elementIndex) => {
                 const label = isSlackTextObject(element.text)
                   ? element.text.text
@@ -93,7 +93,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
                 return (
                   <span
                     key={elementIndex}
-                    className="rounded-md border border-border bg-card px-2 py-1 text-[12px] text-foreground"
+                    className="rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xxs text-primary"
                   >
                     {label}
                   </span>
@@ -103,7 +103,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
           )
         }
         if (block.type === "divider") {
-          return <div key={index} className="border-t border-border/60" />
+          return <div key={index} className="border-t border-subtle" />
         }
         return null
       })}
@@ -124,13 +124,18 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
 
   return (
     <div className="my-1">
-      <div className="flex items-center gap-1.5 py-1 text-[12px] text-muted-foreground">
-        <MessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <div className="flex items-center gap-1.5 py-space-1 text-xxs text-secondary">
+        <ChatCircleIcon
+          size={14}
+          weight="regular"
+          className="shrink-0 text-icon-tertiary"
+          aria-hidden
+        />
         <span>{headerLabel(isLinear, chunk.status)}</span>
       </div>
       {body && (
-        <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/40">
-          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[14px] text-foreground">
+        <div className="overflow-hidden rounded-xl border border-subtle bg-surface-level-2">
+          <div className="max-h-[250px] overflow-auto px-space-3 py-space-2 text-sm text-primary">
             {isLinear ? (
               <Markdown content={body} />
             ) : blocks ? (

@@ -1,4 +1,4 @@
-"""The reader's "Looks good", and keeping the review guide ahead of them.
+"""The reader's "Next", and keeping the review guide ahead of them.
 
 Only the button approves. A click approves what it was clicked on right away,
 then shows the next prepared chunk itself, with no model turn in between, and
@@ -16,7 +16,7 @@ from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, ValidationError
 
 from openswe.prompts import prompt
-from openswe.review_guide.buttons import LOOKS_GOOD
+from openswe.review_guide.buttons import NEXT
 from openswe.review_guide.diff import line_key
 from openswe.review_guide.github import fetch_head
 from openswe.review_guide.launch import PREFETCH_KIND, dispatch_guide_run
@@ -62,7 +62,7 @@ async def cancel_prefetch(client: LangGraphClient, thread_id: str) -> None:
 
 
 async def approve_click(session: ReviewGuideSession, walk: Walk, message_ts: str) -> Group | None:
-    """Record "Looks good" on ``message_ts`` if it is still on screen; returns what it approved."""
+    """Record "Next" on ``message_ts`` if it is still on screen; returns what it approved."""
     approved = walk.approve(message_ts)
     if approved is None:
         return None
@@ -70,23 +70,19 @@ async def approve_click(session: ReviewGuideSession, walk: Walk, message_ts: str
         Counter(line_key(ref.path, ref.sign, ref.text) for ref in approved.lines)
     )
     await session.save_walk(walk)
-    await retire(
-        session.slack_channel_id, approved.message_ts, approved.message_text, "✓ Looks good"
-    )
+    await retire(session.slack_channel_id, approved.message_ts, approved.message_text, "✓ Seen")
     return approved
 
 
 async def _guide_turn(session: ReviewGuideSession, approve_ts: str = "") -> None:
-    await dispatch_guide_run(session, prompt("review-guide/looks-good"), approve_ts=approve_ts)
+    await dispatch_guide_run(session, prompt("review-guide/next"), approve_ts=approve_ts)
 
 
 async def advance(channel_id: str, message_ts: str) -> None:
-    """Handle a click on "Looks good" on the message at ``message_ts``."""
+    """Handle a click on "Next" on the message at ``message_ts``."""
     session = await ReviewGuideSession.for_channel(channel_id)
     if session is None or session.closed:
-        logger.info(
-            "Ignoring Looks good in a closed review guide", extra={"slack_channel": channel_id}
-        )
+        logger.info("Ignoring Next in a closed review guide", extra={"slack_channel": channel_id})
         return
     client = langgraph_client()
     runs = await _active_runs(client, session.thread_id)
@@ -102,7 +98,7 @@ async def advance(channel_id: str, message_ts: str) -> None:
     approved = await approve_click(session, walk, message_ts)
     if approved is None:
         logger.info(
-            "Ignoring Looks good on a message no longer on screen",
+            "Ignoring Next on a message no longer on screen",
             extra={"agent_thread_id": session.thread_id},
         )
         return
@@ -113,7 +109,7 @@ async def advance(channel_id: str, message_ts: str) -> None:
         await refresh_progress(session, walk)
         await _guide_turn(session)
         return
-    posted_ts = await post_with_buttons(session, upcoming.message_text, [LOOKS_GOOD])
+    posted_ts = await post_with_buttons(session, upcoming.message_text, [NEXT])
     if not posted_ts:
         await _guide_turn(session)
         return

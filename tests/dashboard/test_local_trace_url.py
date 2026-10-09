@@ -9,6 +9,7 @@ from openswe.dashboard import user_preferences
 from openswe.dashboard.oauth import require_session
 from openswe.dashboard.routes import router
 from openswe.utils import langsmith
+from tests.conftest import FakeUserRecords
 
 THREAD_ID = "a743f4f9-7a4b-4f02-aef8-55297febfc30"
 URL = f"/dashboard/api/me/local-trace-url/{THREAD_ID}"
@@ -40,12 +41,14 @@ async def authenticated(app: FastAPI) -> None:
 @pytest.mark.parametrize("preference", ["alice-local", None, "", "   "])
 @pytest.mark.usefixtures("authenticated")
 async def test_local_trace_url_resolves_callers_project(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, preference: str | None
+    client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    user_records: FakeUserRecords,
+    preference: str | None,
 ) -> None:
-    async def get(login: str) -> dict[str, object]:
-        return {"local_tracing_project": preference if login == "alice" else "other-user"}
-
-    monkeypatch.setattr(user_preferences.USER_PREFERENCES, "get", get)
+    kind = user_preferences.USER_PREFERENCES.kind
+    user_records.seed(kind, "alice", {"local_tracing_project": preference})
+    user_records.seed(kind, "bob", {"local_tracing_project": "other-user"})
     monkeypatch.setenv("LANGSMITH_PROJECT", "deployment-local")
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
     monkeypatch.setattr(langsmith, "resolve_tenant_id", AsyncMock(return_value="tenant-id"))

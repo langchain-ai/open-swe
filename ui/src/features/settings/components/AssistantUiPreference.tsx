@@ -1,5 +1,6 @@
+import { Switch } from "@langchain/macaw-components/Switch"
+
 import { SettingsRow } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
 import {
   useExperimentalAssistantUi,
   usePatchProfile,
@@ -27,8 +28,9 @@ export function AssistantUiPreference() {
         control={
           <Switch
             id="sdk-use-stream"
+            aria-label="SDK useStream (experimental)"
             checked={preferStream}
-            onCheckedChange={setUseStreamPreference}
+            onChange={setUseStreamPreference}
           />
         }
       />
@@ -39,16 +41,17 @@ export function AssistantUiPreference() {
         control={
           <Switch
             id="experimental-assistant-ui"
+            aria-label="Assistant UI (experimental)"
             checked={enabled}
             disabled={disabled}
-            onCheckedChange={(value) => {
+            onChange={(value) => {
               save.patch({ experimental_assistant_ui: value })
             }}
           />
         }
       />
       {profile.error && (
-        <p role="alert" className="px-4 py-2 text-xs text-destructive">
+        <p role="alert" className="px-4 py-2 text-xs text-error-secondary">
           Could not load the conversation preference. Please try again.
         </p>
       )}

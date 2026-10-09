@@ -15,16 +15,15 @@ from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.ci import (
     FAILING_CONCLUSIONS,
+    CommitChecks,
+    RequiredCheck,
     branch_from_check_payload,
-    fetch_pr,
-    fetch_required_checks,
     head_sha_from_check_payload,
     is_completed_ci_payload,
-    list_check_runs,
-    list_commit_statuses,
-    unreported_required_checks,
 )
 from openswe.github.comments import post_github_comment
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.prompts import prompt
@@ -254,12 +253,6 @@ async def stop_watch(key: str) -> bool:
     return True
 
 
-async def _watch_token(watch: BabySitWatch) -> str | None:
-    if watch.installation_id is None:
-        return None
-    return await get_github_app_installation_token(installation_id=watch.installation_id)
-
-
 async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
     """Post ``message`` where the watch was started, unless an expedited card owns that thread.
 
@@ -433,30 +426,34 @@ async def _record_evaluation_error(watch: BabySitWatch, detail: str) -> str:
     )
 
 
-async def evaluate_watch(key: str, *, token: str | None = None) -> str:
+async def evaluate_watch(key: str) -> str:
     async with _watch_lock(key) as acquired:
         if not acquired:
             return "busy"
-        return await _evaluate_watch(key, token=token)
+        return await _evaluate_watch(key)
 
 
-async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
+async def _evaluate_watch(key: str) -> str:
     watch = await WATCHES.get(key)
     if not watch:
         return "missing"
     if not watch.active:
         await stop_watch(key)
         return "stopped"
-    token = token or await _watch_token(watch)
-    if not token:
+    if watch.installation_id is None:
+        return await _record_evaluation_error(watch, "GitHub token unavailable")
+    try:
+        async with GitHubClient.as_app(installation_id=watch.installation_id) as github:
+            return await _evaluate_pull(
+                watch, github.repo(watch.owner, watch.repo).pull_request(watch.pr_number)
+            )
+    except GitHubAppUnavailable:
         return await _record_evaluation_error(watch, "GitHub token unavailable")
 
-    pr = await fetch_pr(
-        owner=watch.owner,
-        repo=watch.repo,
-        pr_number=watch.pr_number,
-        token=token,
-    )
+
+async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
+    key = watch.key
+    pr = await or_none(pull.pull())
     if not pr:
         return await _record_evaluation_error(watch, "pull request unavailable")
     # A merged or closed PR already says so where people look; the watch just ends.
@@ -477,17 +474,12 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         watch.dispatch_keys = []
         watch.alert_keys = []
 
-    check_runs = await list_check_runs(
-        owner=watch.owner, repo=watch.repo, ref=head_sha, token=token
-    )
-    statuses = await list_commit_statuses(
-        owner=watch.owner, repo=watch.repo, ref=head_sha, token=token
-    )
-    if check_runs is None or statuses is None:
+    checks = await CommitChecks.read(pull.repo, head_sha)
+    if checks is None:
         return await _record_evaluation_error(watch, "CI status unavailable")
 
     watch.evaluation_errors = 0
-    state, failures = aggregate_check_state(check_runs, statuses)
+    state, failures = aggregate_check_state(checks.runs, checks.statuses)
     if state == "pending":
         await WATCHES.save(watch)
         return state
@@ -495,12 +487,10 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         base_ref = PullRequestPayload.model_validate(pr).base_ref
         if not base_ref:
             return await _record_evaluation_error(watch, "base branch unavailable")
-        required = await fetch_required_checks(
-            owner=watch.owner, repo=watch.repo, branch=base_ref, token=token
-        )
+        required = await RequiredCheck.for_branch(pull.repo, base_ref)
         if required is None:
             return await _record_evaluation_error(watch, "required checks unavailable")
-        if unreported_required_checks(required, check_runs, statuses):
+        if checks.unreported(required):
             await WATCHES.save(watch)
             return "pending"
         return await _finish_ready(watch)
@@ -590,8 +580,7 @@ async def handle_ci_webhook(
                     continue
                 current.delivery_ids = [*delivery_ids, delivery_id][-MAX_DELIVERY_IDS:]
             await WATCHES.save(current)
-            token = await _watch_token(current)
-            if await _evaluate_watch(current.key, token=token) == "dispatched":
+            if await _evaluate_watch(current.key) == "dispatched":
                 dispatched += 1
     return {"matched": len(watches), "dispatched": dispatched}
 

@@ -47,6 +47,11 @@ from openswe.input_messages import (
     build_run_input,
 )
 from openswe.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
+from openswe.remote_runtime.client import (
+    RemoteRuntimeConfigurationError,
+    remote_run_context,
+    remote_runtime_client,
+)
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
@@ -350,13 +355,20 @@ async def create_durable_run(
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
+    use_mda: bool = False,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread.
+    means the caller already created and titled the thread. ``use_mda`` runs the
+    graph on its Managed Deep Agents deployment instead of this one.
     """
     client = client or dispatch_client()
+    remote_client = remote_runtime_client(assistant_id) if use_mda else None
+    if use_mda and remote_client is None:
+        raise RemoteRuntimeConfigurationError(
+            f"No Managed Deep Agents runtime serves {assistant_id}"
+        )
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
     recorded = RunMetadata.of_run(assistant_id, config)
@@ -389,7 +401,19 @@ async def create_durable_run(
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
-    run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    if remote_client is not None:
+        # The thread here stays the index the webhooks and dashboard read; the run and
+        # its checkpoints live on the remote deployment, which reaches back through
+        # the tool server with the token in its context.
+        create_kwargs["context"] = await remote_run_context(
+            run_config["configurable"], thread_id=thread_id, assistant_id=assistant_id
+        )
+        create_kwargs["config"] = {
+            key: value for key, value in run_config.items() if key != "configurable"
+        }
+        run = await remote_client.runs.create(thread_id, assistant_id, **create_kwargs)
+    else:
+        run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
     if recorded.pull_request is not None:
         await Topic.PULL_REQUESTS.invalidate(key=recorded.pull_request)
     cfg = RunConfig.from_config(run_config)
@@ -425,6 +449,7 @@ async def dispatch_agent_run(
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
     source_context: SourceContext | None = None,
+    use_mda: bool = False,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
@@ -465,4 +490,5 @@ async def dispatch_agent_run(
         client=client,
         multitask_strategy=multitask_strategy,
         source_context=source_context,
+        use_mda=use_mda,
     )
