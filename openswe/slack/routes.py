@@ -11,6 +11,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
+from openswe.human_review import offer as review_offer
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
 from openswe.review_guide.advance import advance
@@ -345,7 +346,7 @@ async def slack_webhook(
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
 
-    await SlackPullRequestLink.record(envelope)
+    new_pr_links = await SlackPullRequestLink.record(envelope)
 
     from openswe.incidents import channels as incidents
 
@@ -536,21 +537,39 @@ async def slack_webhook(
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
 
-    # Watching a review channel post never takes over the message's own routing, and a post
-    # that mentions Open SWE is the agent's to handle, or both would open a review request.
-    if (
+    # Watching a person's pull request post or offering to get it reviewed never takes over
+    # the message's own routing, and a post that mentions Open SWE is the agent's to handle,
+    # or both would open a review request.
+    person_post = (
         not is_message_update
         and allowed_bot is None
         and not in_code_channel
         and not in_dm_channel
         and event.type == "message"
+        and bool(user_id)
+        and not (bot_user_id and f"<@{bot_user_id}>" in text)
+    )
+    if (
+        person_post
         and event.subtype in {"", "file_share"}
         and not reply_thread_ts
-        and user_id
         and "/pull/" in text
-        and not (bot_user_id and f"<@{bot_user_id}>" in text)
     ):
         background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
+    # Queued after the watch, which may already count the post as the review request.
+    if (
+        person_post
+        and event.subtype in {"", "file_share", "thread_broadcast"}
+        and len(new_pr_links) == 1
+    ):
+        background_tasks.add_task(
+            review_offer.offer_review,
+            channel_id,
+            thread_ts,
+            reply_thread_ts,
+            user_id,
+            new_pr_links[0],
+        )
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     explicit_mention = bool(
@@ -979,6 +998,8 @@ async def slack_interactivity(
             return await expedited_review.handle_button(interaction, button, background_tasks)
         if button.type == human_review.BUTTON_TYPE:
             return await human_review.handle_button(interaction, button, background_tasks)
+        if button.type == review_offer.BUTTON_TYPE:
+            return await review_offer.handle_button(interaction, button, background_tasks)
 
         if button.type == act_as.BUTTON_TYPE:
             return await act_as.handle_button(interaction, button, background_tasks)

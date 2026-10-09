@@ -1213,6 +1213,7 @@ async def _process_slack_mention_impl(
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
+            request.turn_context,
             prompt("runs/slack-review-request")
             if event_ts != thread_ts
             and context_thread_ts == thread_ts

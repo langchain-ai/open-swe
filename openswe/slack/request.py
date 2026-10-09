@@ -29,6 +29,8 @@ class SlackRequest(BaseModel):
     context_channel_id: str = ""
     breakout_root_suffix: str | None = None
     prior_message_text: str = ""
+    # Guidance for this turn alone, from whatever stood in for a typed message.
+    turn_context: str = ""
     treat_all_messages_as_mentions: bool = False
     kitchen_channel: bool = False
     message_update: bool = False
