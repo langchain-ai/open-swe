@@ -1,0 +1,28 @@
+{% if moved %}
+The pull request changed since your last turn, and the walkthrough was paused until the reader's message above. It is now at head `{{ head_sha }}`. Everything was carried over by content: lines the reader approved stay approved, and lines on screen, in Other or skipped keep their place if they are unchanged. Tell the reader in one or two sentences what changed, then do what their message asks.
+
+{% endif %}
+{% if clicked %}
+{% if approved %}
+The reader clicked "Next" on “{{ approved }}”, and it is approved.
+{% else %}
+The reader clicked "Next" on a message that is no longer on screen, so nothing was approved.
+{% endif %}
+
+{% endif %}
+Where the walkthrough stands:
+
+- On screen: {{ ("“" ~ status.on_screen ~ "”") if status.on_screen else "nothing" }}
+- Queued: {{ "" if status.queue else "nothing" }}
+{% for chunk in status.queue %}
+  {{ chunk.position }}. “{{ chunk.title }}”: {{ chunk.lines | join("; ") }}
+{% endfor %}
+- Other: {{ status.other_lines }} lines, {{ status.other_status }}
+- Left: {{ status.left }}
+
+```
+{{ (status.left_lines | join("\n")) or "nothing" }}
+{% if status.more_files_left %}
+… and {{ status.more_files_left }} more files
+{% endif %}
+```

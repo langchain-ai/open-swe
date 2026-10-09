@@ -25,6 +25,30 @@ falling back to the default branch when the head has no settings file. The
 `request_human_review` tool accepts a `channel` that overrides it or stands in when
 the repository sets none.
 
+For monorepos, add ordered path rules:
+
+```json
+{
+  "reviewChannel": "#eng-reviews",
+  "reviewChannelRules": [
+    { "paths": ["ui/*", "desktop/*"], "channel": "#frontend-reviews" },
+    { "paths": ["agent/*"], "channel": "#backend-reviews" }
+  ]
+}
+```
+
+Patterns match case-sensitive repository-relative paths; `*` includes nested
+paths. The first matching rule assigns each changed file to a channel, and
+unmatched files do not count toward any channel when rules are configured. If no
+rule matches, no review channel is available and the PR page hides the Slack
+review request button. Without rules, `reviewChannel` remains the repo-wide
+destination. The channel with
+the most changed files wins; ties are broken uniformly at random among the tied
+channels. Files count equally, including tests. The selected
+channel gets one canonical request, which stays there once posted. Explicit
+channel overrides still take precedence. Expedited cards use the same routing
+for their broadcast destination.
+
 Workspace admins can override the two-hour auto-assignment wait through
 `PUT /dashboard/api/workspaces/{workspace}/settings` with
 `human_review_auto_assign_minutes` (a positive integer; `null` inherits the instance

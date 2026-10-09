@@ -9,7 +9,7 @@ from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from agent.database import postgres
+from openswe.database import postgres
 
 TEST_SCHEMA = "open_swe_test"
 
@@ -62,7 +62,7 @@ class MigratedTemplate:
 
 @asynccontextmanager
 async def isolated_database(uri: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
-    """Point ``agent.database`` at a fresh, fully migrated database, then drop it.
+    """Point ``openswe.database`` at a fresh, fully migrated database, then drop it.
 
     The real engine, connection, transaction and session code runs; only the
     engine and the schema name are swapped, so it does not matter which module a

@@ -1,26 +1,25 @@
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { ArticleIcon } from "@phosphor-icons/react/dist/ssr/Article"
+import { ChartBarIcon } from "@phosphor-icons/react/dist/ssr/ChartBar"
+import { ChartBarHorizontalIcon } from "@phosphor-icons/react/dist/ssr/ChartBarHorizontal"
+import { CubeIcon } from "@phosphor-icons/react/dist/ssr/Cube"
+import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
+import { FlaskIcon } from "@phosphor-icons/react/dist/ssr/Flask"
+import { GearIcon } from "@phosphor-icons/react/dist/ssr/Gear"
+import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
+import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
+import { PaintBrushIcon } from "@phosphor-icons/react/dist/ssr/PaintBrush"
+import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
+import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
+import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/ssr/SlidersHorizontal"
+import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
+import { UsersIcon } from "@phosphor-icons/react/dist/ssr/Users"
+import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
 import { Link, useRouterState } from "@tanstack/react-router"
-import {
-  IoArrowBackOutline,
-  IoBarChartOutline,
-  IoBrushOutline,
-  IoCubeOutline,
-  IoDocumentTextOutline,
-  IoExtensionPuzzleOutline,
-  IoFlaskOutline,
-  IoGitBranchOutline,
-  IoGitPullRequestOutline,
-  IoInformationCircleOutline,
-  IoLinkOutline,
-  IoOptionsOutline,
-  IoPeopleOutline,
-  IoPulseOutline,
-  IoReaderOutline,
-  IoSettingsOutline,
-  IoSparklesOutline,
-  IoStatsChartOutline,
-  IoWarningOutline,
-} from "react-icons/io5"
-import { Fragment, type ComponentType, type SVGProps } from "react"
+import { Fragment } from "react"
 
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import type { SessionUser } from "@/lib/api"
@@ -33,12 +32,10 @@ import {
 import { cn } from "@/lib/utils"
 import { getLastAppLocation, useHrefLinkOptions } from "@/lib/appLocation"
 
-type IconType = ComponentType<SVGProps<SVGSVGElement>>
-
 interface NavItem {
   to: string
   label: string
-  icon: IconType
+  icon: IconComponent
   /** Child pages that also highlight this item. */
   childPrefix?: string
 }
@@ -53,23 +50,23 @@ const NAV: Array<NavGroup> = [
   {
     heading: "Personal",
     items: [
-      { to: "/my-settings", label: "General", icon: IoSettingsOutline },
-      { to: "/my-settings/agent", label: "Agent", icon: IoSparklesOutline },
-      { to: "/my-settings/git", label: "Git", icon: IoGitBranchOutline },
+      { to: "/my-settings", label: "General", icon: GearIcon },
+      { to: "/my-settings/agent", label: "Agent", icon: SparkleIcon },
+      { to: "/my-settings/git", label: "Git", icon: GitBranchIcon },
       {
         to: "/my-settings/instructions",
         label: "Instructions",
-        icon: IoReaderOutline,
+        icon: ArticleIcon,
       },
       {
         to: "/my-settings/connections",
         label: "Connections",
-        icon: IoLinkOutline,
+        icon: LinkIcon,
       },
       {
         to: "/my-settings/experiments",
         label: "Experiments",
-        icon: IoFlaskOutline,
+        icon: FlaskIcon,
       },
     ],
   },
@@ -79,33 +76,34 @@ const NAV: Array<NavGroup> = [
       {
         to: "/review",
         label: "Code review",
-        icon: IoGitPullRequestOutline,
+        icon: GitPullRequestIcon,
         childPrefix: "/review/repositories/",
       },
-      { to: "/review/styles", label: "Review styles", icon: IoBrushOutline },
+      { to: "/review/styles", label: "Review styles", icon: PaintBrushIcon },
       {
         to: "/agents/instructions",
         label: "Repository instructions",
-        icon: IoDocumentTextOutline,
+        icon: FileTextIcon,
       },
-      { to: "/workspaces", label: "Workspaces", icon: IoCubeOutline },
-      { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
+      { to: "/workspaces", label: "Workspaces", icon: CubeIcon },
+      { to: "/usage", label: "Usage", icon: ChartBarIcon },
     ],
   },
   {
     heading: "Administration",
     adminOnly: true,
     items: [
-      { to: "/admin", label: "Defaults", icon: IoOptionsOutline },
+      { to: "/admin", label: "Defaults", icon: SlidersHorizontalIcon },
       {
         to: "/admin/integrations",
         label: "Integrations",
-        icon: IoExtensionPuzzleOutline,
+        icon: PuzzlePieceIcon,
       },
-      { to: "/admin/incidents", label: "Incidents", icon: IoWarningOutline },
-      { to: "/admin/operations", label: "Operations", icon: IoPulseOutline },
-      { to: "/admin/users", label: "Users", icon: IoPeopleOutline },
-      { to: "/admin/evals", label: "Evals", icon: IoBarChartOutline },
+      { to: "/admin/incidents", label: "Incidents", icon: WarningIcon },
+      { to: "/admin/operations", label: "Operations", icon: PulseIcon },
+      { to: "/admin/audit-logs", label: "Audit logs", icon: ArticleIcon },
+      { to: "/admin/users", label: "Users", icon: UsersIcon },
+      { to: "/admin/evals", label: "Evals", icon: ChartBarHorizontalIcon },
     ],
   },
   {
@@ -114,7 +112,7 @@ const NAV: Array<NavGroup> = [
       {
         to: "/my-settings/about",
         label: "About",
-        icon: IoInformationCircleOutline,
+        icon: InfoIcon,
       },
     ],
   },
@@ -126,10 +124,10 @@ function isActive(item: NavItem, pathname: string): boolean {
 }
 
 const LINK_CLASS =
-  "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+  "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-secondary transition-colors hover:bg-surface-level-2-hover hover:text-primary"
 
 const ACTIVE_LINK_PROPS = {
-  className: "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+  className: "bg-surface-level-2-hover text-primary font-medium",
 }
 
 function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
@@ -137,7 +135,7 @@ function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
   const workspaces = options.data?.workspaces ?? []
   if (workspaces.length === 0) return null
   return (
-    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-border pl-2">
+    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-default pl-2">
       {workspaces.map((workspace) => (
         <Link
           key={workspace.slug}
@@ -164,7 +162,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
   return (
     <SidebarFrame
       {...layout}
-      className="border-r border-border bg-sidebar text-sidebar-foreground"
+      className="border-r border-default bg-surface-level-2 text-primary"
     >
       <div
         className={cn(
@@ -177,7 +175,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
           className={cn(LINK_CLASS, "-mx-2.5 font-medium")}
           onClick={layout.closeOnMobile}
         >
-          <IoArrowBackOutline className="size-4" />
+          <ArrowLeftIcon size={16} weight="regular" />
           <span>Back to app</span>
         </Link>
         <SidebarCollapseButton onToggle={layout.toggle} />
@@ -187,7 +185,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         {NAV.filter((group) => !group.adminOnly || user.is_admin).map(
           (group) => (
             <div key={group.heading} className="flex flex-col gap-0.5">
-              <span className="px-2.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+              <span className="px-2.5 pb-1 text-xxs font-medium tracking-wide text-tertiary uppercase">
                 {group.heading}
               </span>
               {group.items.map((item) => {
@@ -202,7 +200,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
                         isActive(item, pathname) && ACTIVE_LINK_PROPS.className
                       )}
                     >
-                      <Icon className="size-4" />
+                      <Icon size={16} weight="regular" />
                       <span>{item.label}</span>
                     </Link>
                     {item.to === "/workspaces" && user.is_admin && (

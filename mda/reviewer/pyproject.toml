@@ -1,0 +1,20 @@
+[project]
+name = "open-swe-reviewer-runtime"
+version = "0.0.0"
+description = "Open SWE's pull request reviewer as a Managed Deep Agent; the Open SWE backend serves its tools."
+requires-python = ">=3.12"
+dependencies = [
+    "managed-deepagents==0.9.1.dev2",
+    "deepagents==0.7.21",
+    "langchain[mcp]>=1.4.3",
+    "langchain-anthropic>=1.7.4",
+    "langchain-openai>=1.6.5,<2.0.0",
+    "langchain-quickjs>=0.3.8,<0.4.0",
+    "langsmith>=0.14.0",
+    "httpx2>=2.12.0,<3.0.0",
+    "mcp>=2.2.0,<3",
+    "pydantic>=2.11",
+]
+
+[tool.mda]
+python-version = "3.14"

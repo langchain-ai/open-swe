@@ -1,13 +1,13 @@
-import { GitPullRequestIcon } from "@phosphor-icons/react"
-import { IoLogoGithub } from "react-icons/io5"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
-import { cn } from "@/lib/utils"
+import { cn, formatRelativeTime } from "@/lib/utils"
 
 const STATE_STYLES: Record<string, string> = {
-  open: "border-emerald-600/40 text-emerald-500",
-  draft: "border-border text-muted-foreground",
-  merged: "border-purple-600/40 text-purple-500",
-  closed: "border-red-600/40 text-red-500",
+  open: "border-status-green text-status-green",
+  draft: "border-default text-secondary",
+  merged: "border-purple text-purple",
+  closed: "border-status-red text-status-red",
 }
 
 export interface PrHeaderProps {
@@ -18,6 +18,8 @@ export interface PrHeaderProps {
   baseRef: string
   number?: number | null
   author?: string | null
+  createdAt?: string | null
+  mergedAt?: string | null
   stats?: {
     changedFiles: number
     additions: number
@@ -36,6 +38,8 @@ export function PrHeader({
   baseRef,
   number,
   author,
+  createdAt,
+  mergedAt,
   stats,
   className,
   titleClassName,
@@ -46,11 +50,11 @@ export function PrHeader({
       <div className="flex min-w-0 items-center gap-2">
         <span
           className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
+            "inline-flex shrink-0 items-center gap-space-1 rounded-full border px-space-2 py-0.5 text-xxs capitalize",
             STATE_STYLES[state] ?? STATE_STYLES.open
           )}
         >
-          <GitPullRequestIcon className="size-3" />
+          <GitPullRequestIcon weight="regular" className="size-3" />
           {state}
         </span>
         <h1
@@ -67,25 +71,26 @@ export function PrHeader({
             rel="noreferrer"
             className={cn("hover:underline", compact && "block truncate")}
           >
-            <IoLogoGithub
+            <GithubLogoIcon
               aria-label="GitHub"
-              className="mr-1.5 inline size-4 align-[-2px] text-muted-foreground"
+              weight="regular"
+              className="mr-1.5 inline size-4 align-[-2px] text-icon-secondary"
             />
             {title}
             {number != null && (
-              <span className="text-muted-foreground"> #{number}</span>
+              <span className="text-secondary"> #{number}</span>
             )}
           </a>
         </h1>
       </div>
       <div
         className={cn(
-          "flex items-center gap-2 text-xs text-muted-foreground",
+          "flex items-center gap-2 text-xs text-secondary",
           compact ? "mt-1.5 min-w-0 overflow-hidden" : "mt-2 flex-wrap"
         )}
       >
         {author && (
-          <span className="shrink-0 font-medium text-foreground">{author}</span>
+          <span className="shrink-0 font-medium text-primary">{author}</span>
         )}
         {compact ? (
           <>
@@ -99,11 +104,11 @@ export function PrHeader({
           </>
         ) : (
           <>
-            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="rounded border border-default px-1.5 py-0.5 font-mono text-xxs">
               {baseRef}
             </span>
             <span>←</span>
-            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="rounded border border-default px-1.5 py-0.5 font-mono text-xxs">
               {headRef}
             </span>
           </>
@@ -113,13 +118,39 @@ export function PrHeader({
             <span className="shrink-0">
               {stats.changedFiles} file{stats.changedFiles === 1 ? "" : "s"}
             </span>
-            <span className="shrink-0 text-emerald-500">
+            <span className="shrink-0 text-success-secondary">
               +{stats.additions}
             </span>
-            <span className="shrink-0 text-red-500">-{stats.deletions}</span>
+            <span className="shrink-0 text-error-secondary">
+              -{stats.deletions}
+            </span>
           </>
         )}
       </div>
+      {(createdAt || mergedAt) && (
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-secondary">
+          {(
+            [
+              ["Opened", createdAt],
+              ["Merged", mergedAt],
+            ] as const
+          ).map(
+            ([label, value]) =>
+              value && (
+                <span key={label}>
+                  {label}{" "}
+                  <time
+                    dateTime={value}
+                    title={new Date(value).toLocaleString()}
+                    suppressHydrationWarning
+                  >
+                    {formatRelativeTime(new Date(value).getTime())}
+                  </time>
+                </span>
+              )
+          )}
+        </div>
+      )}
     </div>
   )
 }

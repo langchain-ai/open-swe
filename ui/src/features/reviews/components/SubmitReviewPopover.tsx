@@ -1,19 +1,32 @@
+import { Button } from "@langchain/macaw-components/Button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/macaw-components/Popover"
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@langchain/macaw-components/RadioGroup"
+import { Text } from "@langchain/macaw-components/Text"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { CaretDownIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import type { PullRequestReviewEvent } from "@/lib/api"
-import { Button } from "@/components/ui/button"
-import {
-  Popover,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Textarea } from "@/components/ui/textarea"
+import type { OpenPullRequest, PullRequestReviewEvent } from "@/lib/api"
 import { api } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
+import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
+import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
+import {
+  standingReview,
+  withSubmittedReview,
+} from "@/features/reviews/lib/reviewers"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { usePullRequestStatus } from "@/features/reviews/lib/usePullRequestStatus"
 import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
 
 const VERDICTS: ReadonlyArray<{
@@ -49,12 +62,20 @@ export function SubmitReviewPopover({
   number: number
 }) {
   const queryClient = useQueryClient()
+  const session = useSession()
+  const login = session.data?.login
   const pending = usePendingReview(owner, repo, number)
   const pendingCount = pending.comments.length
+  const status = usePullRequestStatus(`${owner}/${repo}`, number)
+  const approved = standingReview(status.data, login) === "approved"
   const [open, setOpen] = useState(false)
   const [event, setEvent] = useState<PullRequestReviewEvent>("COMMENT")
   const [body, setBody] = useState("")
   const needsBody = event !== "APPROVE" && pendingCount === 0
+  const statusKey = pullRequestStatusQuery(login ?? "", {
+    repo: `${owner}/${repo}`,
+    number,
+  }).queryKey
   const submit = useMutation({
     mutationFn: () =>
       api.submitPullRequestReview(owner, repo, number, {
@@ -62,6 +83,23 @@ export function SubmitReviewPopover({
         body: body.trim(),
       }),
     meta: { errorTitle: "Couldn't submit the review", silent: true },
+    onMutate: async () => {
+      if (!login) return {}
+      const undo = await optimisticUpdate<OpenPullRequest | null>(
+        queryClient,
+        statusKey,
+        (current) =>
+          withSubmittedReview(
+            current,
+            { login, avatarUrl: session.data?.avatar_url ?? null },
+            event
+          )
+      )
+      return { undo }
+    },
+    onError: (_error, _variables, context) => context?.undo?.(),
+    onSettled: () =>
+      void queryClient.invalidateQueries({ queryKey: statusKey, exact: true }),
     onSuccess: (result) => {
       setOpen(false)
       setBody("")
@@ -91,40 +129,45 @@ export function SubmitReviewPopover({
         if (!submit.isPending) setOpen(value)
       }}
     >
-      <PopoverTrigger
-        render={
-          <Button size="sm">
-            Review changes
-            {pendingCount > 0 && (
-              <span
-                aria-label={`${pendingCount} pending comments`}
-                className="rounded-full bg-primary-foreground/20 px-1.5 text-[10px] tabular-nums"
-              >
-                {pendingCount}
-              </span>
-            )}
-            <CaretDownIcon />
-          </Button>
-        }
-      />
-      <PopoverPopup align="end" className="w-96 max-w-[calc(100vw-2rem)]">
+      <PopoverTrigger asChild>
+        <Button
+          size="xs"
+          rightDecorator={CaretDownIcon}
+          tagText={pendingCount > 0 ? String(pendingCount) : undefined}
+          aria-label={
+            pendingCount > 0
+              ? `Review changes, ${pendingCount} pending comments`
+              : "Review changes"
+          }
+        >
+          Review changes
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        aria-label="Finish your review"
+        className="w-96 max-w-[calc(100vw-2rem)]"
+      >
         <form
           onSubmit={(e) => {
             e.preventDefault()
             if (canSubmit) submit.mutate()
           }}
         >
-          <PopoverTitle className="text-xs">Finish your review</PopoverTitle>
+          <Text as="h2" variant="sm" weight="semibold">
+            Finish your review
+          </Text>
           {pendingCount > 0 && (
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-secondary">
               {pendingCount} pending comment{pendingCount === 1 ? "" : "s"} will
               be submitted with this review.
             </p>
           )}
           <Textarea
+            size="md"
             aria-label="Review summary"
             value={body}
-            onChange={(e) => setBody(e.target.value)}
+            onChange={setBody}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                 e.preventDefault()
@@ -133,49 +176,63 @@ export function SubmitReviewPopover({
             }}
             placeholder="Leave a comment"
             rows={5}
-            className="mt-2 resize-y text-xs"
+            className="mt-space-2"
             disabled={submit.isPending}
             autoFocus
           />
-          <fieldset className="mt-3 flex flex-col gap-2">
-            <legend className="sr-only">Review verdict</legend>
-            {VERDICTS.map((verdict) => (
-              <label
-                key={verdict.event}
-                className="flex cursor-pointer items-start gap-2 text-xs"
-              >
-                <input
-                  type="radio"
-                  name="review-verdict"
-                  value={verdict.event}
-                  checked={event === verdict.event}
-                  onChange={() => setEvent(verdict.event)}
-                  disabled={submit.isPending}
-                  className="mt-0.5 accent-primary"
-                />
-                <span>
-                  <span className="font-medium text-foreground">
-                    {verdict.label}
+          <RadioGroup
+            aria-label="Review verdict"
+            className="mt-space-3 gap-space-2"
+            value={event}
+            disabled={submit.isPending}
+            onValueChange={(value) => {
+              const verdict = VERDICTS.find((item) => item.event === value)
+              if (verdict) setEvent(verdict.event)
+            }}
+          >
+            {VERDICTS.map((verdict) => {
+              const alreadyGiven = approved && verdict.event === "APPROVE"
+              return (
+                <label
+                  key={verdict.event}
+                  className={cn(
+                    "flex items-start gap-space-2 text-xs",
+                    alreadyGiven
+                      ? "cursor-not-allowed opacity-60"
+                      : "cursor-pointer"
+                  )}
+                >
+                  <RadioGroupItem
+                    value={verdict.event}
+                    disabled={alreadyGiven}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium text-primary">
+                      {verdict.label}
+                    </span>
+                    <span className="block text-secondary">
+                      {alreadyGiven
+                        ? "You approved these changes."
+                        : verdict.description}
+                    </span>
                   </span>
-                  <span className="block text-muted-foreground">
-                    {verdict.description}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </fieldset>
+                </label>
+              )
+            })}
+          </RadioGroup>
           {submit.error && (
-            <p className="mt-2 text-xs break-words text-destructive">
+            <p className="mt-2 text-xs break-words text-error-secondary">
               {submit.error.message}
             </p>
           )}
           <div className="mt-3 flex items-center justify-end gap-2">
             {pending.review && (
               <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="mr-auto text-destructive"
+                size="xs"
+                color="error"
+                variant="plain"
+                className="mr-auto"
                 disabled={submit.isPending || pending.discard.isPending}
                 onClick={() => pending.discard.mutate()}
               >
@@ -183,20 +240,20 @@ export function SubmitReviewPopover({
               </Button>
             )}
             <Button
-              type="button"
-              size="sm"
-              variant="outline"
+              size="xs"
+              color="secondary"
+              variant="outlined"
               disabled={submit.isPending}
               onClick={() => setOpen(false)}
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={!canSubmit}>
+            <Button type="submit" size="xs" disabled={!canSubmit}>
               {submit.isPending ? "Submitting…" : "Submit review"}
             </Button>
           </div>
         </form>
-      </PopoverPopup>
+      </PopoverContent>
     </Popover>
   )
 }

@@ -6,12 +6,15 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 
-from agent.expedited_review import merge, reviews
-from agent.expedited_review.eligibility import ChangedFile, diff_fingerprint
-from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
-from agent.human_review import lifecycle, merging
-from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
-from agent.users import User
+from openswe.expedited_review import merge
+from openswe.expedited_review.eligibility import ChangedFile, diff_fingerprint
+from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
+from openswe.github import http as github_http
+from openswe.github import squash_message
+from openswe.github.pull_request_status import PullRequestClient
+from openswe.human_review import lifecycle
+from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
+from openswe.users import User
 from tests.expedited_review.conftest import OpenApproval
 
 _SOURCE = ChangedFile(filename="src/app.py", additions=1, patch="+fixed")
@@ -48,49 +51,36 @@ class _GitHub:
         self.merge_status = 200
         self.files = [_SOURCE, _TEST]
         self.readiness = _readiness()
-        monkeypatch.setattr(merge, "repo_token", AsyncMock(return_value="app-token"))
-        monkeypatch.setattr(merging, "merge_token", AsyncMock(return_value="merge-token"))
-        monkeypatch.setattr(merge, "assess_readiness", self._assess)
-        monkeypatch.setattr(merge, "fetch_changed_files", self._files)
-        monkeypatch.setattr(merge, "fetch_pr", self._pr)
+        monkeypatch.setattr(Readiness, "assess", self._assess)
+        monkeypatch.setattr(ChangedFile, "of_pull", self._files)
         self.current_head: str | None = None
+        monkeypatch.setattr(PullRequestClient, "pull", self._pull)
         monkeypatch.setattr(merge, "submit_approval", self._review)
-        monkeypatch.setattr(merging, "github_request", self._request)
-        monkeypatch.setattr(reviews, "github_request", self._request)
-        monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="app-token"))
-        monkeypatch.setattr(lifecycle, "fetch_pr", self._pull)
+        monkeypatch.setattr(github_http, "github_request", self._request)
+        monkeypatch.setattr(squash_message, "github_request", self._request)
         monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
         monkeypatch.setattr(lifecycle, "add_slack_reaction", AsyncMock(return_value=True))
         self.comments: list[str] = []
-        self.comment_status = True
-        monkeypatch.setattr(merge, "post_github_comment", self._comment)
+        self.comment_status = 201
         self.threads: list[dict[str, Any]] = []
-        monkeypatch.setattr(merge, "fetch_unresolved_review_threads", self._threads)
+        monkeypatch.setattr(PullRequestClient, "unresolved_threads", self._threads)
 
     async def _threads(self, *_: object) -> list[dict[str, Any]]:
         return self.threads
 
-    async def _comment(
-        self, repo_config: dict[str, str], issue_number: int, body: str, *, token: str
-    ) -> bool:
-        self.comments.append(body)
-        return self.comment_status
-
     def dismiss_as_stale(self) -> None:
         self.approved.clear()
 
-    async def _assess(self, **_: object) -> Readiness:
+    async def _assess(self, *_: object) -> Readiness:
         self.readiness.snapshot.approved_review_ids = frozenset(self.approved)
         return self.readiness
 
-    async def _files(self, **_: object) -> list[ChangedFile]:
+    async def _files(self, *_: object) -> list[ChangedFile]:
         return self.files
 
-    async def _pr(self, **_: object) -> dict[str, Any]:
-        return {"head": {"sha": self.current_head or self.readiness.snapshot.head_sha}}
-
-    async def _pull(self, **_: object) -> dict[str, Any]:
-        return self.pull
+    async def _pull(self, *_: object) -> dict[str, Any]:
+        head = self.current_head or self.readiness.snapshot.head_sha
+        return {**self.pull, "head": {"sha": head}}
 
     async def _review(
         self, approval: HumanReviewRequest, vote: HumanReviewParticipant, head_sha: str
@@ -106,6 +96,11 @@ class _GitHub:
     ) -> httpx2.Response:
         if method == "GET":
             return httpx2.Response(404, json={}, request=httpx2.Request(method, url))
+        if url.endswith("/comments"):
+            self.comments.append(kwargs["json"]["body"])
+            return httpx2.Response(
+                self.comment_status, json={"id": 1}, request=httpx2.Request(method, url)
+            )
         if url.endswith("/dismissals"):
             self.dismissed.append(url.rsplit("/", 2)[-2])
             return httpx2.Response(
@@ -120,7 +115,7 @@ class _GitHub:
 
 
 @pytest.fixture
-def github(monkeypatch: pytest.MonkeyPatch) -> _GitHub:
+def github(monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock) -> _GitHub:
     return _GitHub(monkeypatch)
 
 
@@ -306,7 +301,7 @@ async def test_an_unposted_explanation_keeps_the_approval_on_the_old_diff(
     approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
     github.files = [ChangedFile(filename="src/app.py", additions=1, patch="+renamed"), _TEST]
     github.readiness = _readiness("def456")
-    github.comment_status = False
+    github.comment_status = 403
 
     result = await merge.merge_approved(approval, "renamed a local variable for lint")
 
