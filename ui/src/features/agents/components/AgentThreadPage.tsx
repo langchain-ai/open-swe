@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react"
 import { CatchBoundary } from "@tanstack/react-router"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
 import { SubagentThreadView } from "@/features/agents/components/subagents/SubagentThreadView"
-import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useAgentThread } from "@/features/agents/lib/queries"

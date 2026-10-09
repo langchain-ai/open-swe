@@ -8,7 +8,11 @@ from openswe.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
 )
-from openswe.dashboard.profiles import _token_expired, get_valid_access_token
+from openswe.dashboard.profiles import (
+    GITHUB_OAUTH_TOKENS,
+    _token_expired,
+    get_valid_access_token,
+)
 
 
 def test_expires_at_from_github_response() -> None:
@@ -37,8 +41,9 @@ async def test_get_valid_access_token_refreshes_when_near_expiry() -> None:
         "token_expires_at": soon,
     }
     with (
-        patch(
-            "openswe.dashboard.profiles.get_value",
+        patch.object(
+            GITHUB_OAUTH_TOKENS,
+            "get",
             new_callable=AsyncMock,
             return_value=record,
         ),
@@ -86,8 +91,9 @@ async def test_get_valid_access_token_drops_record_on_dead_refresh_token() -> No
         "token_expires_at": soon,
     }
     with (
-        patch(
-            "openswe.dashboard.profiles.get_value",
+        patch.object(
+            GITHUB_OAUTH_TOKENS,
+            "get",
             new_callable=AsyncMock,
             return_value=record,
         ),
@@ -126,8 +132,9 @@ async def test_get_valid_access_token_keeps_fresh_reauth_on_dead_refresh_token()
         "token_expires_at": (datetime.now(UTC) + timedelta(hours=8)).isoformat(),
     }
     with (
-        patch(
-            "openswe.dashboard.profiles.get_value",
+        patch.object(
+            GITHUB_OAUTH_TOKENS,
+            "get",
             new_callable=AsyncMock,
             side_effect=[stale, stale, reauthed],
         ),
@@ -163,8 +170,9 @@ async def test_get_valid_access_token_keeps_record_on_transient_refresh_failure(
         "token_expires_at": soon,
     }
     with (
-        patch(
-            "openswe.dashboard.profiles.get_value",
+        patch.object(
+            GITHUB_OAUTH_TOKENS,
+            "get",
             new_callable=AsyncMock,
             return_value=record,
         ),
@@ -194,8 +202,9 @@ async def test_get_valid_access_token_returns_stored_when_not_expiring() -> None
         "token_expires_at": future,
     }
     with (
-        patch(
-            "openswe.dashboard.profiles.get_value",
+        patch.object(
+            GITHUB_OAUTH_TOKENS,
+            "get",
             new_callable=AsyncMock,
             return_value=record,
         ),

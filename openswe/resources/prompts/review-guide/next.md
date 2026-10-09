@@ -1,0 +1,1 @@
+The reader clicked "Next". Show what comes next: `show_queued` when the first queued chunk still fits, otherwise `show_chunk`; `show_other` once nothing is left; `end_walkthrough` once Other is approved.

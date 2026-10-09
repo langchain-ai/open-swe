@@ -1,16 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  Bot,
-  FileDiff,
-  FileIcon,
-  Files,
-  Globe2,
-  Plus,
-  TerminalSquare,
-  X,
-} from "lucide-react"
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@langchain/macaw-components/ContextMenu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Kbd } from "@langchain/macaw-components/Kbd"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
+import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
+import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
+import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
+import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import type {
-  ReactElement,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
@@ -18,17 +30,6 @@ import type {
 
 import type { RightPanelSurface } from "@/features/agents/lib/rightPanelStore"
 import type { RightPanelMode } from "@/features/agents/components/panel/RightPanelShell"
-import { Button } from "@/components/ui/button"
-import { Kbd } from "@/components/ui/kbd"
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuShortcut,
-  MenuTrigger,
-} from "@/components/ui/menu"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { cn } from "@/lib/utils"
 
@@ -64,15 +65,22 @@ const SURFACE_DISABLED_REASONS = {
   files: "Files are only available from a running workspace.",
 } as const
 
-/** Overlays that must win over the launcher's letter shortcuts. */
+/**
+ * Overlays that must win over the launcher's letter shortcuts. One that
+ * contains the launcher (the narrow-window sheet) does not count.
+ */
 const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
-  '[data-slot="dialog-popup"]',
-  '[data-slot="alert-dialog-popup"]',
-  '[data-slot="menu-popup"]',
-  '[data-slot="select-popup"]',
-  '[data-slot="popover-popup"]',
-  '[data-slot="combobox-popup"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
 ].join(",")
+
+function hasLayerAbove(launcher: HTMLElement | null): boolean {
+  return Array.from(
+    document.querySelectorAll(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)
+  ).some((layer) => !launcher || !layer.contains(launcher))
+}
 
 /** One-line unavailability hints for the empty-state cards. */
 const SURFACE_UNAVAILABLE_HINTS = {
@@ -103,40 +111,31 @@ export function surfaceShortcutActionForKey<
   )
 }
 
-function DisabledReasonTooltip(props: {
-  reason: string
-  trigger: ReactElement
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={props.trigger} />
-      <TooltipPopup side="top">{props.reason}</TooltipPopup>
-    </Tooltip>
-  )
-}
-
 function SurfaceMenuItem(props: {
   available: boolean
   disabledReason?: string
   shortcut: string
-  onClick: () => void
+  onSelect: () => void
   children: ReactNode
 }) {
-  const item = (
-    <MenuItem
-      className={
-        !props.available ? "data-disabled:pointer-events-auto" : undefined
-      }
-      onClick={props.onClick}
-      disabled={!props.available}
-      aria-keyshortcuts={props.shortcut}
+  return (
+    <Tooltip
+      disabled={props.available || !props.disabledReason}
+      side="top"
+      title={props.disabledReason}
     >
-      {props.children}
-      <MenuShortcut>{props.shortcut}</MenuShortcut>
-    </MenuItem>
+      <DropdownMenuItem
+        className="gap-space-2 text-xs data-[disabled]:pointer-events-auto"
+        onSelect={props.onSelect}
+        disabled={!props.available}
+        aria-keyshortcuts={props.shortcut}
+        size="sm"
+      >
+        {props.children}
+        <Kbd className="ml-auto">{props.shortcut}</Kbd>
+      </DropdownMenuItem>
+    </Tooltip>
   )
-  if (props.available || !props.disabledReason) return item
-  return <DisabledReasonTooltip reason={props.disabledReason} trigger={item} />
 }
 
 /**
@@ -160,7 +159,7 @@ function RightPanelEmptyState(props: {
     {
       label: "Terminal",
       description: "Start a shell in this workspace.",
-      icon: TerminalSquare,
+      icon: TerminalWindowIcon,
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
@@ -169,7 +168,7 @@ function RightPanelEmptyState(props: {
     {
       label: "Changes",
       description: "Review changes in this thread.",
-      icon: FileDiff,
+      icon: GitDiffIcon,
       shortcut: "D",
       available: props.diffAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
@@ -178,7 +177,7 @@ function RightPanelEmptyState(props: {
     {
       label: "Files",
       description: "Browse files in this workspace.",
-      icon: Files,
+      icon: FilesIcon,
       shortcut: "F",
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
@@ -199,6 +198,7 @@ function RightPanelEmptyState(props: {
   // Capture phase so app-level key handlers cannot swallow the event first;
   // typing contexts and already-handled events are left alone.
   const shortcutActionsRef = useRef(availableActions)
+  const launcherRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     shortcutActionsRef.current = availableActions
   })
@@ -209,7 +209,7 @@ function RightPanelEmptyState(props: {
         event
       )
       if (!action) return
-      if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return
+      if (hasLayerAbove(launcherRef.current)) return
       const target = event.target
       if (target instanceof HTMLElement) {
         if (target.closest("input, textarea, select")) return
@@ -266,6 +266,7 @@ function RightPanelEmptyState(props: {
   // Stable identity so React only runs this callback ref on mount/unmount; an
   // inline arrow would re-attach and re-focus on every render.
   const focusOnMount = useCallback((node: HTMLDivElement | null) => {
+    launcherRef.current = node
     node?.focus()
   }, [])
 
@@ -274,12 +275,11 @@ function RightPanelEmptyState(props: {
 
   const actionIcon = (action: SurfaceAction, iconClassName = "size-4") => {
     const Icon = action.icon
-    return <Icon className={cn("shrink-0", iconClassName)} />
+    return <Icon className={cn("shrink-0", iconClassName)} weight="regular" />
   }
 
-  const cardShellClass =
-    "rounded-lg border border-border/80 bg-card dark:border-transparent dark:shadow-none dark:inset-ring-1 dark:inset-ring-white/5"
-  const highlightedCardClass = "bg-accent/60 dark:inset-ring-white/20"
+  const cardShellClass = "rounded-lg border border-default bg-surface-level-2"
+  const highlightedCardClass = "bg-surface-level-2-hover"
 
   return (
     <div
@@ -299,14 +299,12 @@ function RightPanelEmptyState(props: {
     >
       <div className="relative w-full max-w-lg">
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
-          <h3 className="text-sm font-medium text-foreground">
-            Open a surface
-          </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <h3 className="text-sm font-medium text-primary">Open a surface</h3>
+          <p className="mt-1 text-xs text-secondary">
             Choose what to show in the right panel.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-space-2">
           {actions.map((action) =>
             action.available ? (
               <button
@@ -322,7 +320,7 @@ function RightPanelEmptyState(props: {
                   )
                 }
                 className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-border hover:bg-accent/60",
+                  "relative flex w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:bg-surface-level-2-hover",
                   cardShellClass,
                   isHighlighted(action) && highlightedCardClass
                 )}
@@ -332,7 +330,7 @@ function RightPanelEmptyState(props: {
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                <span className="mt-1.5 text-xs leading-relaxed text-secondary">
                   {action.description}
                 </span>
               </button>
@@ -340,7 +338,7 @@ function RightPanelEmptyState(props: {
               <div
                 key={action.label}
                 className={cn(
-                  "relative flex w-full flex-col items-start p-4 opacity-40",
+                  "relative flex w-full flex-col items-start p-space-4 opacity-40",
                   cardShellClass
                 )}
               >
@@ -349,7 +347,7 @@ function RightPanelEmptyState(props: {
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                <span className="mt-1.5 text-xs leading-relaxed text-secondary">
                   {action.disabledReason}
                 </span>
               </div>
@@ -383,38 +381,28 @@ export function surfaceTitle(
   }
 }
 
-function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
-  switch (surface.kind) {
-    case "preview":
-      return <Globe2 className="size-3 shrink-0" />
-    case "diff":
-      return <FileDiff className="size-3 shrink-0" />
-    case "files":
-      return <Files className="size-3 shrink-0" />
-    case "file":
-      return <FileIcon className="size-3 shrink-0" />
-    case "terminal":
-      return <TerminalSquare className="size-3 shrink-0" />
-    case "agents":
-      return <Bot className="size-3 shrink-0" />
-  }
-}
+const SURFACE_ICONS = {
+  preview: GlobeIcon,
+  diff: GitDiffIcon,
+  files: FilesIcon,
+  file: FileIcon,
+  terminal: TerminalWindowIcon,
+  agents: RobotIcon,
+} as const satisfies Record<RightPanelSurface["kind"], unknown>
 
-type TabContextMenuState = {
-  surface: RightPanelSurface
-  x: number
-  y: number
+function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
+  const Icon = SURFACE_ICONS[surface.kind]
+  return <Icon className="size-3 shrink-0" weight="regular" />
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const tabListRef = useRef<HTMLDivElement>(null)
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false)
-  const [tabMenu, setTabMenu] = useState<TabContextMenuState | null>(null)
 
   const addSurfaceActions = [
     {
       label: "Terminal",
-      icon: TerminalSquare,
+      icon: TerminalWindowIcon,
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.terminal,
@@ -422,7 +410,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     {
       label: "Changes",
-      icon: FileDiff,
+      icon: GitDiffIcon,
       shortcut: "D",
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
@@ -430,7 +418,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     {
       label: "Files",
-      icon: Files,
+      icon: FilesIcon,
       shortcut: "F",
       available: props.terminalAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.files,
@@ -452,14 +440,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     action.onClick()
   }
 
-  const handleTabContextMenu = useCallback(
-    (event: ReactMouseEvent, surface: RightPanelSurface) => {
-      event.preventDefault()
-      event.stopPropagation()
-      setTabMenu({ surface, x: event.clientX, y: event.clientY })
-    },
-    []
-  )
   const handleTabMouseDown = useCallback((event: ReactMouseEvent) => {
     if (event.button !== 1) return
     event.preventDefault()
@@ -481,10 +461,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" })
   }, [props.activeSurfaceId])
 
-  const menuSurfaceIndex = tabMenu
-    ? props.surfaces.findIndex((entry) => entry.id === tabMenu.surface.id)
-    : -1
-
   return (
     <RightPanelShell
       mode={props.mode}
@@ -503,85 +479,127 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         )}
         data-right-panel-tabbar
       >
-        <ScrollArea
+        <div
           ref={tabListRef}
-          hideScrollbars
-          scrollFade
-          className="min-w-0 flex-1 rounded-none"
+          aria-label="Panel surfaces"
+          className="min-w-0 flex-1 [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden"
           data-right-panel-tab-list
+          role="tablist"
         >
           <div className="flex h-full w-max min-w-full items-center gap-1">
-            {props.surfaces.map((surface) => {
+            {props.surfaces.map((surface, index) => {
               const active = surface.id === props.activeSurfaceId
               const pending = props.pendingSurfaceIds.has(surface.id)
               const title = surfaceTitle(surface, props.terminalLabelsById)
               return (
-                <div
-                  key={surface.id}
-                  data-active-tab={active}
-                  onMouseDown={handleTabMouseDown}
-                  onAuxClick={(event) => handleTabAuxClick(event, surface)}
-                  onContextMenu={(event) =>
-                    handleTabContextMenu(event, surface)
-                  }
-                  className={cn(
-                    "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
-                    active
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                  )}
-                >
-                  <button
-                    type="button"
-                    className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted"
-                    aria-label={`Close ${title}`}
-                    onClick={() => props.onCloseSurface(surface)}
-                  >
-                    <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
-                      <SurfaceIcon surface={surface} />
-                      {pending ? (
-                        <span
-                          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                          aria-hidden
+                <ContextMenu key={surface.id}>
+                  <ContextMenuTrigger asChild>
+                    <div
+                      data-active-tab={active}
+                      role="presentation"
+                      onMouseDown={handleTabMouseDown}
+                      onAuxClick={(event) => handleTabAuxClick(event, surface)}
+                      onContextMenu={(event) => event.stopPropagation()}
+                      className={cn(
+                        "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
+                        active
+                          ? "bg-selected text-primary"
+                          : "text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+                      )}
+                    >
+                      <button
+                        type="button"
+                        className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-surface-level-2"
+                        aria-label={`Close ${title}`}
+                        onClick={() => props.onCloseSurface(surface)}
+                      >
+                        <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
+                          <SurfaceIcon surface={surface} />
+                          {pending ? (
+                            <span
+                              className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
+                              aria-hidden
+                            />
+                          ) : null}
+                        </span>
+                        <XIcon
+                          className="hidden size-3 group-hover/tab:block group-focus-visible/close:block"
+                          weight="bold"
                         />
-                      ) : null}
-                    </span>
-                    <X className="hidden size-3 group-hover/tab:block group-focus-visible/close:block" />
-                  </button>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
+                      </button>
+                      <Tooltip title={title}>
                         <button
                           type="button"
+                          role="tab"
+                          aria-selected={active}
                           className="flex min-w-0 cursor-pointer items-center"
                           onClick={() => props.onActivate(surface)}
                         >
                           <span className="truncate">{title}</span>
                         </button>
-                      }
-                    />
-                    <TooltipPopup>{title}</TooltipPopup>
-                  </Tooltip>
-                </div>
+                      </Tooltip>
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="min-w-40">
+                    {surface.kind === "file" ? (
+                      <ContextMenuItem
+                        size="sm"
+                        onSelect={() =>
+                          props.onCopyFilePath(surface.relativePath)
+                        }
+                      >
+                        Copy path
+                      </ContextMenuItem>
+                    ) : null}
+                    <ContextMenuItem
+                      size="sm"
+                      onSelect={() => props.onCloseSurface(surface)}
+                    >
+                      Close
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      size="sm"
+                      disabled={props.surfaces.length <= 1}
+                      onSelect={() => props.onCloseOtherSurfaces(surface)}
+                    >
+                      Close others
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      size="sm"
+                      disabled={index >= props.surfaces.length - 1}
+                      onSelect={() => props.onCloseSurfacesToRight(surface)}
+                    >
+                      Close to the right
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      size="sm"
+                      onSelect={() => props.onCloseAllSurfaces()}
+                    >
+                      Close all
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               )
             })}
           </div>
-        </ScrollArea>
+        </div>
         {props.surfaces.length > 0 ? (
-          <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
-            <MenuTrigger
-              render={
-                <Button
-                  aria-label="Add panel surface"
-                  className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                  size="icon-xs"
-                  variant="ghost"
-                />
-              }
-            >
-              <Plus className="size-3.5" />
-            </MenuTrigger>
-            <MenuPopup
+          <DropdownMenu
+            open={addSurfaceMenuOpen}
+            onOpenChange={setAddSurfaceMenuOpen}
+          >
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                className="shrink-0"
+                color="secondary"
+                icon={PlusIcon}
+                iconClassName="size-3.5"
+                label="Add panel surface"
+                size="sm"
+                variant="plain"
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
               align="start"
               side="bottom"
               sideOffset={6}
@@ -596,70 +614,21 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     available={action.available}
                     disabledReason={action.disabledReason}
                     shortcut={action.shortcut}
-                    onClick={action.onClick}
+                    onSelect={action.onClick}
                   >
-                    <Icon />
+                    <Icon
+                      className="size-3.5 shrink-0 text-icon-secondary"
+                      weight="regular"
+                    />
                     {action.label}
                   </SurfaceMenuItem>
                 )
               })}
-            </MenuPopup>
-          </Menu>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
         {props.layoutControls}
       </div>
-      {tabMenu ? (
-        <Menu
-          open
-          onOpenChange={(open) => {
-            if (!open) setTabMenu(null)
-          }}
-        >
-          <MenuPopup
-            align="start"
-            side="bottom"
-            sideOffset={0}
-            className="min-w-40"
-            anchor={{
-              getBoundingClientRect: () =>
-                new DOMRect(tabMenu.x, tabMenu.y, 0, 0),
-            }}
-          >
-            {tabMenu.surface.kind === "file" ? (
-              <MenuItem
-                onClick={() => {
-                  if (tabMenu.surface.kind === "file") {
-                    props.onCopyFilePath(tabMenu.surface.relativePath)
-                  }
-                }}
-              >
-                Copy path
-              </MenuItem>
-            ) : null}
-            <MenuItem onClick={() => props.onCloseSurface(tabMenu.surface)}>
-              Close
-            </MenuItem>
-            <MenuItem
-              disabled={props.surfaces.length <= 1}
-              onClick={() => props.onCloseOtherSurfaces(tabMenu.surface)}
-            >
-              Close others
-            </MenuItem>
-            <MenuItem
-              disabled={menuSurfaceIndex >= props.surfaces.length - 1}
-              onClick={() => props.onCloseSurfacesToRight(tabMenu.surface)}
-            >
-              Close to the right
-            </MenuItem>
-            <MenuItem
-              disabled={props.surfaces.length === 0}
-              onClick={() => props.onCloseAllSurfaces()}
-            >
-              Close all
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
-      ) : null}
       <div
         className="flex min-h-0 flex-1 flex-col"
         data-right-panel-surface-content

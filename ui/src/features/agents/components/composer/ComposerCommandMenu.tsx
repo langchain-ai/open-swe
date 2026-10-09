@@ -1,5 +1,7 @@
 import { memo, useLayoutEffect, useRef } from "react"
-import { Bot, File as FileIcon, Hash } from "lucide-react"
+import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
+import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 
 import type { ComposerTriggerKind } from "./composerTrigger"
 import { cn } from "@/lib/utils"
@@ -70,7 +72,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
 
   return (
     <div
-      className="dropdown-glass absolute bottom-full left-0 z-50 mb-2 w-full max-w-md overflow-hidden rounded-xl"
+      className="absolute bottom-full left-0 z-50 mb-2 w-full max-w-md overflow-hidden rounded-lg border border-subtle bg-elevated shadow-md"
       role="listbox"
       aria-label={
         triggerKind === "path"
@@ -88,10 +90,8 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
             <button
               aria-selected={activeItemId === item.id}
               className={cn(
-                "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs/relaxed select-none",
-                activeItemId === item.id
-                  ? "bg-accent text-accent-foreground"
-                  : "text-foreground"
+                "flex w-full cursor-pointer items-center gap-space-2 px-space-3 py-1.5 text-left text-xs/relaxed text-primary select-none",
+                activeItemId === item.id && "bg-elevated-hover"
               )}
               data-composer-item-id={item.id}
               key={item.id}
@@ -106,21 +106,30 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
               type="button"
             >
               {item.type === "path" ? (
-                <FileIcon className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <FileIcon
+                  className="size-3.5 shrink-0 text-icon-tertiary"
+                  weight="regular"
+                />
               ) : item.type === "slack-channel" ? (
-                <Hash className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <HashIcon
+                  className="size-3.5 shrink-0 text-icon-tertiary"
+                  weight="regular"
+                />
               ) : (
-                <Bot className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <RobotIcon
+                  className="size-3.5 shrink-0 text-icon-tertiary"
+                  weight="regular"
+                />
               )}
               <span className="shrink-0 font-medium">{item.label}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+              <span className="min-w-0 flex-1 truncate text-tertiary">
                 {item.description}
               </span>
             </button>
           ))}
         </div>
       ) : (
-        <p className="px-4 py-3 text-xs text-muted-foreground/70">
+        <p className="px-4 py-3 text-xs text-tertiary">
           {emptyStateText ??
             (triggerKind === "path"
               ? "No matching files."

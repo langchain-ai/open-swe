@@ -64,7 +64,7 @@ export function MessageImage({
       <div
         className={cn(
           className,
-          "h-32 w-48 max-w-full bg-muted",
+          "h-32 w-48 max-w-full bg-surface-level-2",
           !failed && "animate-pulse"
         )}
         data-testid={failed ? "message-image-error" : "message-image-loading"}
@@ -78,7 +78,7 @@ export function MessageImage({
     <img
       src={src}
       alt={label}
-      className={cn(className, "animate-in duration-300 fade-in")}
+      className={cn(className, "duration-300 animate-in fade-in")}
     />
   )
 }

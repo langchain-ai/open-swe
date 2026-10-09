@@ -507,6 +507,16 @@
             ],
             "title": "Delegated From Sandbox Id"
           },
+          "expedited_exclusions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExpeditedExclusions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "request_method": {
             "anyOf": [
               {
@@ -1566,6 +1576,135 @@
           "enabled"
         ],
         "title": "EnabledReviewRepoUpdate",
+        "type": "object"
+      },
+      "ExcludedHunk": {
+        "additionalProperties": false,
+        "description": "A hunk left off the card.",
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "guideline": {
+            "title": "Guideline",
+            "type": "string"
+          },
+          "header": {
+            "title": "Header",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "digest",
+          "header",
+          "additions",
+          "deletions",
+          "guideline",
+          "reason"
+        ],
+        "title": "ExcludedHunk",
+        "type": "object"
+      },
+      "Exclusion": {
+        "description": "Changes the agent judged to qualify under the target repository's APPROVALS.md.",
+        "properties": {
+          "guideline": {
+            "title": "Guideline",
+            "type": "string"
+          },
+          "hunks": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Hunks",
+            "type": "array"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "guideline",
+          "reason"
+        ],
+        "title": "Exclusion",
+        "type": "object"
+      },
+      "ExpeditedExclusions": {
+        "additionalProperties": false,
+        "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
+        "properties": {
+          "approvals_md_sha256": {
+            "title": "Approvals Md Sha256",
+            "type": "string"
+          },
+          "base_sha": {
+            "title": "Base Sha",
+            "type": "string"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "hunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedHunk"
+            },
+            "title": "Hunks",
+            "type": "array"
+          },
+          "pull_request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request Id"
+          },
+          "requested": {
+            "items": {
+              "$ref": "#/components/schemas/Exclusion"
+            },
+            "title": "Requested",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_sha",
+          "head_sha",
+          "approvals_md_sha256",
+          "requested"
+        ],
+        "title": "ExpeditedExclusions",
         "type": "object"
       },
       "FeedbackResponse": {
@@ -3110,6 +3249,30 @@
             "title": "Reviewrequired",
             "type": "boolean"
           },
+          "reviewers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PullRequestReviewer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewers"
+          },
+          "state": {
+            "default": "open",
+            "enum": [
+              "open",
+              "closed",
+              "merged"
+            ],
+            "title": "State",
+            "type": "string"
+          },
           "statusAvailable": {
             "default": false,
             "title": "Statusavailable",
@@ -4321,6 +4484,47 @@
         "title": "PullRequestReviewSubmit",
         "type": "object"
       },
+      "PullRequestReviewer": {
+        "description": "Someone who reviewed the pull request, and where their review stands.\n\nA comment never overrides an earlier approval or change request, as on GitHub.",
+        "properties": {
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatarurl"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "approved",
+              "changes_requested",
+              "dismissed",
+              "commented"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "login",
+          "state"
+        ],
+        "title": "PullRequestReviewer",
+        "type": "object"
+      },
       "PullRequestSearchResult": {
         "properties": {
           "body": {
@@ -5392,6 +5596,30 @@
           "developer"
         ],
         "type": "string"
+      },
+      "RolloutAccepted": {
+        "properties": {
+          "commits": {
+            "title": "Commits",
+            "type": "integer"
+          },
+          "status": {
+            "const": "accepted",
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "target",
+          "commits"
+        ],
+        "title": "RolloutAccepted",
+        "type": "object"
       },
       "ScheduleCreateBody": {
         "properties": {
@@ -14033,9 +14261,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Update Review Comment Dashboard Api Reviews  Owner   Repo   Pr Number  Comments  Comment Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/PostedReviewComment"
                 }
               }
             },
@@ -20567,6 +20793,25 @@
           }
         },
         "summary": "Linear Webhook"
+      }
+    },
+    "/webhooks/rollout": {
+      "post": {
+        "description": "Verify a deployment event, record it, and acknowledge it.",
+        "operationId": "rollout_webhook_webhooks_rollout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolloutAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rollout Webhook"
       }
     },
     "/webhooks/run-complete": {

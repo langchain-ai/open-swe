@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { DiffView } from "./DiffView"
 import { SqlResultTable, parseSqlResult } from "./SqlResultTable"
 import { formatToolDisplay } from "./toolExecutionDisplay"
@@ -13,6 +14,7 @@ import { ScopedFileDiff } from "@/features/agents/components/ScopedFileDiff"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
+import { cn } from "@/lib/utils"
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk
@@ -74,8 +76,10 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   }, [expanded, updateScrollIndicators])
 
   const edgeShadows = [
-    scrolledFromTop ? "inset 0 12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-    scrolledFromBottom ? "inset 0 -12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
+    scrolledFromTop ? "inset 0 12px 10px -10px var(--shadow-color-subtle)" : "",
+    scrolledFromBottom
+      ? "inset 0 -12px 10px -10px var(--shadow-color-subtle)"
+      : "",
   ]
     .filter(Boolean)
     .join(", ")
@@ -85,14 +89,14 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 
   if (!expanded) {
     return (
-      <div className="my-0.5 text-[12px] leading-5">
+      <div className="my-0.5 text-xxs leading-5">
         <button
           type="button"
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
         >
-          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
-            Edited <span className="text-primary">{fileName}</span>
+          <span className={isError ? "text-error-secondary" : "text-secondary"}>
+            Edited <span className="text-brand-primary">{fileName}</span>
           </span>
         </button>
       </div>
@@ -101,36 +105,44 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 
   return (
     <div className="my-1">
-      <div className="my-0.5 mb-1.5 text-[12px] leading-5">
+      <div className="my-0.5 mb-1.5 text-xxs leading-5">
         <button
           type="button"
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
         >
-          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
+          <span className={isError ? "text-error-secondary" : "text-secondary"}>
             Edited file
           </span>
-          <span className="text-[10px] text-muted-foreground/70">▾</span>
+          <CaretDownIcon
+            size={10}
+            weight="fill"
+            className="text-icon-tertiary"
+            aria-hidden
+          />
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border/60 bg-muted">
-        <div className="flex items-center gap-2 px-3 py-2">
+      <div className="overflow-hidden rounded-lg border border-subtle bg-surface-level-2">
+        <div className="flex items-center gap-space-2 px-space-3 py-space-2">
           <span
-            className={`min-w-0 flex-1 truncate text-[13px] ${isError ? "text-red-400" : "text-primary"}`}
+            className={cn(
+              "min-w-0 flex-1 truncate text-xs",
+              isError ? "text-error-secondary" : "text-brand-primary"
+            )}
           >
             {filePath}
           </span>
-          <span className="flex shrink-0 items-center gap-2 text-xs">
-            <span className="text-green-400">+{additions}</span>
-            <span className="text-red-400">-{deletions}</span>
+          <span className="flex shrink-0 items-center gap-space-2 text-xxs">
+            <span className="text-success-secondary">+{additions}</span>
+            <span className="text-error-secondary">-{deletions}</span>
           </span>
         </div>
 
         <div
           ref={scrollRef}
           onScroll={updateScrollIndicators}
-          className="max-h-[250px] overflow-auto border-t border-border"
+          className="max-h-[250px] overflow-auto border-t border-default"
           style={{ boxShadow: edgeShadows || "none" }}
         >
           <ScopedFileDiff
@@ -191,11 +203,9 @@ export const ToolExecution = memo(function ToolExecution({
 
   if (isEditOp && status === "pending" && diffData) {
     return (
-      <div className="my-1 text-[12px] leading-5">
+      <div className="my-1 text-xxs leading-5">
         <DiffView diffData={diffData} />
-        <span className="text-muted-foreground/70">
-          Waiting for approval...
-        </span>
+        <span className="text-tertiary">Waiting for approval...</span>
       </div>
     )
   }
@@ -209,8 +219,10 @@ export const ToolExecution = memo(function ToolExecution({
       repoPath
     )
     return (
-      <div className="my-0.5 text-[12px] leading-5">
-        <span className="text-yellow-400">Editing {getFileName(path)}...</span>
+      <div className="my-0.5 text-xxs leading-5">
+        <span className="text-status-yellow">
+          Editing {getFileName(path)}...
+        </span>
       </div>
     )
   }
@@ -222,17 +234,17 @@ export const ToolExecution = memo(function ToolExecution({
   const displayName = formatToolDisplay(title, toolKind, input, repoPath)
   const statusTextClass =
     status === "error"
-      ? "text-red-400"
+      ? "text-status-red"
       : status === "in_progress" || status === "pending"
-        ? "text-yellow-400"
-        : "text-muted-foreground"
+        ? "text-status-yellow"
+        : "text-secondary"
 
   return (
-    <div className="my-0.5 text-[12px] leading-5">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className={`${statusTextClass} truncate`}>{displayName}</span>
+    <div className="my-0.5 text-xxs leading-5">
+      <div className="flex min-w-0 items-center gap-space-2">
+        <span className={cn(statusTextClass, "truncate")}>{displayName}</span>
         {status === "error" && output && (
-          <span className="truncate text-red-400/80">
+          <span className="truncate text-error-tertiary">
             {output.slice(0, 80)}
           </span>
         )}
