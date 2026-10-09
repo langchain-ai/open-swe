@@ -1002,6 +1002,26 @@ def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
     assert "/breakout" not in inputs[1][0]["text"]
 
 
+def test_background_event_is_not_attributed_to_the_person_it_acts_for() -> None:
+    run_input = slack_webhooks._slack_context_input(
+        [],
+        {"U123": "Mukil"},
+        {},
+        channel={"id": "slack:C123", "platform": "slack"},
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        trigger_user_id="U123",
+        request_text="Pick a reviewer",
+        request_blocks=[{"type": "text", "text": "Pick a reviewer"}],
+        trigger_system={"id": "system:background-event", "display_name": "Open SWE"},
+    )
+    request = str(run_input["messages"][-1]["content"])
+
+    assert 'kind="system"' in request
+    assert "system:background-event" in request
+    assert "slack:U123" not in request
+
+
 def test_slack_context_never_replays_open_swes_own_replies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

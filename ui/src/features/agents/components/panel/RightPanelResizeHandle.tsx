@@ -20,14 +20,14 @@ export function RightPanelResizeHandle({ handlers, className }: Props) {
       role="separator"
       aria-orientation="vertical"
       className={cn(
-        "group absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize select-none",
+        "group absolute inset-y-0 -left-1 z-resize-handle w-2 cursor-col-resize select-none",
         className
       )}
       {...handlers}
     >
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-150 group-hover:bg-[color:var(--border-default)] group-active:bg-brand/60"
+        className="pointer-events-none absolute inset-y-0 left-1/2 w-0 -translate-x-1/2 border-l border-transparent transition-colors duration-normal group-hover:border-default group-active:border-brand"
       />
     </div>
   )

@@ -3,11 +3,13 @@ from typing import Any
 import httpx2
 from markdownify import markdownify
 
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.url_safety import UnsafeUrlError, request_with_safe_redirects
 
 FETCH_URL_MAX_CHARS = 100_000
 
 
+@expose_mcp()
 async def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     """Implement the `fetch_url` tool."""
     try:

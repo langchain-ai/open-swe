@@ -362,6 +362,19 @@ def _slack_person(
     return person
 
 
+def _slack_bot_system_identity(bot_id: str, name: str) -> SystemIdentity:
+    return {
+        "id": f"system:slack-bot-{bot_id}",
+        "display_name": name,
+        "platform": "slack",
+        "sender_type": "bot",
+    }
+
+
+def _slack_bot_identity(bot: AllowedSlackBot) -> SystemIdentity:
+    return _slack_bot_system_identity(bot.bot_id, bot.name.strip() or "Bot")
+
+
 def _slack_sender(
     message: dict[str, Any],
     user_names_by_id: dict[str, str],
@@ -375,12 +388,7 @@ def _slack_sender(
     """
     bot_id = slack_utils.slack_message_bot_id(message)
     if bot_id:
-        bot: SystemIdentity = {
-            "id": f"system:slack-bot-{bot_id}",
-            "display_name": slack_utils.slack_message_bot_name(message),
-            "platform": "slack",
-            "sender_type": "bot",
-        }
+        bot = _slack_bot_system_identity(bot_id, slack_utils.slack_message_bot_name(message))
         return bot["id"], bot, "system"
     user_id = str(message.get("user"))
     person = _slack_person(
@@ -454,7 +462,7 @@ def _slack_context_input(
     dispatched_timestamps: set[str] | None = None,
     run_described_person_ids: set[str] | None = None,
     visible_context_hashes: set[str] | None = None,
-    trigger_bot: AllowedSlackBot | None = None,
+    trigger_system: SystemIdentity | None = None,
     explicit_mention: bool = False,
     web_only: bool = False,
 ) -> RunInput:
@@ -574,13 +582,11 @@ def _slack_context_input(
         )
     trigger_sender_id = trigger_person["id"]
     trigger_kind: MessageKind = "human"
-    if trigger_bot is not None:
-        trigger_sender_id, bot_identity, trigger_kind = _slack_sender(
-            {"bot_id": trigger_bot.bot_id, "bot_profile": {"name": trigger_bot.name}}, {}, {}
-        )
+    if trigger_system is not None:
+        trigger_sender_id, trigger_kind = trigger_system["id"], "system"
         if trigger_sender_id not in described:
             described.add(trigger_sender_id)
-            add_context(system_introduction(cast(SystemIdentity, bot_identity)))
+            add_context(system_introduction(trigger_system))
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
@@ -599,7 +605,7 @@ def _slack_context_input(
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
     run_messages.append(
-        (system_input if trigger_bot is not None else human_input)(
+        (system_input if trigger_system is not None else human_input)(
             request_blocks,
             {
                 "sender_id": trigger_sender_id,
@@ -1232,6 +1238,7 @@ async def _process_slack_mention_impl(
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
+            request.turn_context,
             resolved_links_section,
         )
         if section
@@ -1395,7 +1402,9 @@ async def _process_slack_mention_impl(
             if (person_id := person_ids_by_user_id.get(slack_id))
         },
         visible_context_hashes=visible_context_hashes,
-        trigger_bot=allowed_bot,
+        trigger_system=_slack_bot_identity(allowed_bot)
+        if allowed_bot is not None
+        else request.trigger_system,
         explicit_mention=request.explicit_mention or _mentions_open_swe(text, bot_user_id),
     )
     if code_channel:

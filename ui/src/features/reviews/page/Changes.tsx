@@ -208,7 +208,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     return {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
-      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}${
+      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-bg-context);border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
         overflow === "scroll"
           ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
           : ""
@@ -220,6 +220,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       itemMetrics: {
         lineHeight: DIFF_ROW_HEIGHT,
         spacing: DIFF_VIRTUAL_METRICS.spacing,
+        paddingTop: DIFF_VIRTUAL_METRICS.spacing,
         diffHeaderHeight: FILE_HEADER_HEIGHT,
       },
       layout: { paddingTop: 0, paddingBottom: 160, gap: 10 },
@@ -424,7 +425,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
               options={options}
               // Each file is a card on the page's gutter, as on GitHub. The
               // outline is a shadow, so it adds nothing CodeView must measure.
-              className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip [&_diffs-container]:shadow-[0_0_0_1px_var(--border-default)] sm:[&_diffs-container]:mx-4 sm:[&_diffs-container]:rounded-lg"
+              className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip [&_diffs-container]:shadow-[0_0_0_1px_var(--border-default)] sm:[&_diffs-container]:mx-space-4 sm:[&_diffs-container]:rounded-lg"
               renderCodeViewHeader={renderHeader}
               renderCustomHeader={renderCustomHeader}
               renderAnnotation={renderAnnotation}
@@ -433,7 +434,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
             {diff.isError && (
               <p
                 role="alert"
-                className="absolute inset-x-0 bottom-6 mx-auto w-fit rounded-lg bg-error-subtle px-3 py-2 text-xs text-error-secondary"
+                className="absolute inset-x-0 bottom-6 mx-auto w-fit rounded-lg bg-error-subtle px-space-3 py-space-2 text-xs text-error-secondary"
               >
                 Couldn&apos;t load the changes: {diff.error.message}
               </p>
@@ -514,7 +515,7 @@ function PendingNote({ pr, id }: { pr: PullRequestRef; id: number }) {
     (candidate) => candidate.id === id
   )
   return comment ? (
-    <NoteFrame className="px-1 py-0">
+    <NoteFrame className="px-space-1 py-0">
       <PendingReviewCommentCard
         owner={pr.owner}
         repo={pr.repo}
@@ -536,16 +537,16 @@ function StepIntro({ entryId }: { entryId: string }) {
   const step = useEntry(entryId)?.step
   if (!step) return null
   return (
-    <NoteFrame className="py-3">
-      <p className="flex items-center gap-1.5 text-[11px] font-medium text-brand-primary">
+    <NoteFrame className="py-space-3">
+      <p className="flex items-center gap-space-2 text-xxs font-medium text-brand-primary">
         <AgentMark className="size-3" />
         Step {step.index} of {step.count}
       </p>
-      <p className="mt-0.5 text-[13px] leading-5 font-semibold text-primary">
+      <p className="mt-0.5 text-xs leading-5 font-semibold text-primary">
         <InlineCode text={step.title} />
       </p>
       {step.summary && (
-        <div className="mt-1 max-w-[72ch] text-secondary [&_li]:text-[12.5px] [&_li]:leading-5 [&_p]:text-[12.5px] [&_p]:leading-5">
+        <div className="mt-space-1 max-w-[72ch] text-secondary [&_li]:text-xxs [&_li]:leading-5 [&_p]:text-xxs [&_p]:leading-5">
           <Markdown content={step.summary} />
         </div>
       )}

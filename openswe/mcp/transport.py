@@ -3,7 +3,7 @@
 import asyncio
 from urllib.parse import urlsplit
 
-import httpx
+import httpx2
 
 from openswe.utils.url_safety import UnsafeUrlError, pinned_url, resolve_and_validate
 
@@ -12,13 +12,13 @@ class MCPDiscoveryError(ValueError):
     """A failure whose message we wrote, so it is safe to show the person configuring the MCP."""
 
 
-class MCPTransport(httpx.AsyncBaseTransport):
+class MCPTransport(httpx2.AsyncBaseTransport):
     def __init__(self, url: str) -> None:
         parsed = urlsplit(url)
         self._origin = (parsed.scheme, parsed.hostname, parsed.port or 443)
-        self._transport = httpx.AsyncHTTPTransport(trust_env=False)
+        self._transport = httpx2.AsyncHTTPTransport(trust_env=False)
 
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         parsed = urlsplit(url)
         if (
@@ -35,7 +35,7 @@ class MCPTransport(httpx.AsyncBaseTransport):
         headers = request.headers.copy()
         headers["Host"] = parsed.netloc
         for index, address in enumerate(public_ips):
-            pinned = httpx.Request(
+            pinned = httpx2.Request(
                 request.method,
                 pinned_url(url, address),
                 headers=headers,
@@ -44,10 +44,10 @@ class MCPTransport(httpx.AsyncBaseTransport):
             )
             try:
                 return await self._transport.handle_async_request(pinned)
-            except httpx.ConnectError, httpx.ConnectTimeout:
+            except httpx2.ConnectError, httpx2.ConnectTimeout:
                 if index == len(public_ips) - 1:
                     raise
-        raise httpx.ConnectError("MCP server has no public addresses")
+        raise httpx2.ConnectError("MCP server has no public addresses")
 
     async def aclose(self) -> None:
         await self._transport.aclose()
@@ -56,13 +56,17 @@ class MCPTransport(httpx.AsyncBaseTransport):
 def mcp_http_client(
     url: str,
     headers: dict[str, str] | None = None,
-    timeout: httpx.Timeout | None = None,
-    auth: httpx.Auth | None = None,
-) -> httpx.AsyncClient:
-    """Synchronous factory required by the MCP adapter; all network I/O is async."""
-    return httpx.AsyncClient(
+    timeout: httpx2.Timeout | None = None,
+    auth: httpx2.Auth | None = None,
+    follow_redirects: bool = False,  # noqa: ARG001
+) -> httpx2.AsyncClient:
+    """Synchronous factory required by the MCP client; all network I/O is async.
+
+    FastMCP asks for redirects, but they stay off so every request is origin-checked.
+    """
+    return httpx2.AsyncClient(
         headers=headers,
-        timeout=timeout or httpx.Timeout(30),
+        timeout=timeout or httpx2.Timeout(30),
         auth=auth,
         transport=MCPTransport(url),
         follow_redirects=False,

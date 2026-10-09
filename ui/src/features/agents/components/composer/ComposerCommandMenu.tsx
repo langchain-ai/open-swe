@@ -72,7 +72,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
 
   return (
     <div
-      className="absolute bottom-full left-0 z-50 mb-2 w-full max-w-md overflow-hidden rounded-lg border border-subtle bg-elevated shadow-md"
+      className="absolute bottom-full left-0 z-popover mb-space-2 w-full max-w-md overflow-hidden rounded-lg border border-subtle bg-elevated shadow-md"
       role="listbox"
       aria-label={
         triggerKind === "path"
@@ -85,12 +85,12 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
       }
     >
       {items.length > 0 ? (
-        <div ref={listRef} className="max-h-64 overflow-y-auto py-1">
+        <div ref={listRef} className="max-h-64 overflow-y-auto py-space-1">
           {items.map((item) => (
             <button
               aria-selected={activeItemId === item.id}
               className={cn(
-                "flex w-full cursor-pointer items-center gap-space-2 px-space-3 py-1.5 text-left text-xs/relaxed text-primary select-none",
+                "flex w-full cursor-pointer items-center gap-space-2 px-space-3 py-space-1 text-left text-xs/relaxed text-primary select-none",
                 activeItemId === item.id && "bg-elevated-hover"
               )}
               data-composer-item-id={item.id}
@@ -129,7 +129,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
           ))}
         </div>
       ) : (
-        <p className="px-4 py-3 text-xs text-tertiary">
+        <p className="px-space-4 py-space-3 text-xs text-tertiary">
           {emptyStateText ??
             (triggerKind === "path"
               ? "No matching files."

@@ -39,8 +39,8 @@ export const SubagentCard = memo(function SubagentCard({
     ) : null
 
   return (
-    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-default bg-surface-level-2 p-2.5">
-      <div className="flex min-w-0 items-center gap-1.5">
+    <div className="flex min-w-0 flex-col gap-space-2 overflow-hidden rounded-lg border border-default bg-surface-level-2 p-space-2">
+      <div className="flex min-w-0 items-center gap-space-2">
         {isRunning ? (
           <Spinner size="xxs" className="shrink-0 text-icon-brand" />
         ) : (

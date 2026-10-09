@@ -26,6 +26,8 @@ interface Stop {
 
 const GROUP = "Pull request"
 
+export const ASK_SELECTION_SHORTCUT = "a"
+
 const stopKey = ({ target }: Stop) =>
   `${target.path}:${target.side}:${target.line}`
 
@@ -195,7 +197,7 @@ export function useDiffKeys(askAboutSelection: () => void) {
         id: "review-ask-selection",
         label: "Ask Open SWE about the selected code",
         group: GROUP,
-        shortcuts: ["mod+l"],
+        shortcuts: [ASK_SELECTION_SHORTCUT],
         run: askAboutSelection,
       },
     ],

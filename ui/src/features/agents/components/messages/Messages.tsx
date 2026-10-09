@@ -1,9 +1,11 @@
+import {
+  ArrowUpIcon,
+  CaretDownIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
 import { memo, useEffect, useMemo } from "react"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
@@ -31,7 +33,7 @@ function QueuedMessages({
   if (queuedMessages.length === 0) return null
 
   return (
-    <div className="mb-3 space-y-2" data-testid="queued-messages">
+    <div className="mb-space-3 space-y-space-2" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
         const imageCount = message.images?.length ?? 0
         const statusLabel = message.waitsForAgent
@@ -133,7 +135,7 @@ export const Messages = memo(function MessagesComponent({
   reconnectLabel = null,
   localRepo,
   contentWidthClass = "max-w-[42rem]",
-  contentPaddingClass = "px-6",
+  contentPaddingClass = "px-space-5",
   bottomInset = 0,
   loadEarlier = null,
   scrollButtonSlot = "internal",
@@ -211,7 +213,7 @@ export const Messages = memo(function MessagesComponent({
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-space-3 w-full rounded-sm py-1.5 text-center text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
+                className="mb-space-3 w-full rounded-sm py-space-1 text-center text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
@@ -294,7 +296,7 @@ export const Messages = memo(function MessagesComponent({
             color="secondary"
             variant="outlined"
             onClick={scrollToBottom}
-            className="absolute left-1/2 z-30 -translate-x-1/2 shadow-md"
+            className="absolute left-1/2 z-floating-bar -translate-x-1/2 shadow-md"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
           />
         )}

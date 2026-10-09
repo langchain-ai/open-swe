@@ -20,6 +20,10 @@
     {
       "name": "invalidations",
       "specifier": "./ui/lint/no-polling-plugin.mjs"
+    },
+    {
+      "name": "macaw",
+      "specifier": "./ui/lint/macaw-tokens-plugin.mjs"
     }
   ],
   "categories": {
@@ -64,7 +68,8 @@
         "ui/src/**/*.tsx"
       ],
       "rules": {
-        "invalidations/no-polling": "error"
+        "invalidations/no-polling": "error",
+        "macaw/no-raw-tokens": "error"
       }
     },
     {

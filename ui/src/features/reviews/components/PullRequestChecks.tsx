@@ -7,7 +7,7 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
     return null
   const overflow = pr.failingChecks.slice(inlineLimit)
   return (
-    <div className="space-y-1 text-xs">
+    <div className="space-y-space-1 text-xs">
       {pr.failingChecks.length > 0 && (
         <p className="text-error-secondary">
           {pr.failingChecks.slice(0, inlineLimit).map((name, index) => (
@@ -21,7 +21,7 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
       {overflow.length > 0 && (
         <details className="text-error-secondary">
           <summary className="cursor-pointer">+{overflow.length} more</summary>
-          <ul className="mt-1 space-y-1">
+          <ul className="mt-space-1 space-y-space-1">
             {overflow.map((name, index) => (
               <li key={`${name}-${index}`}>{name}</li>
             ))}
@@ -33,7 +33,7 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
           <summary className="cursor-pointer">
             {pr.pendingChecks.length} pending
           </summary>
-          <ul className="mt-1">
+          <ul className="mt-space-1">
             {pr.pendingChecks.map((name, index) => (
               <li key={`${name}-${index}`}>{name}</li>
             ))}

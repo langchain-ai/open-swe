@@ -26,16 +26,8 @@ vi.mock("@/lib/profile", () => ({
 const style = (full_name: string, fields: Partial<ReviewStyle> = {}) =>
   ({
     full_name,
-    status: "completed",
     custom_prompt: `${full_name} prompt`,
     approval_mode: null,
-    analysis_summary: null,
-    top_reviewers: [],
-    prs_sampled: 0,
-    reviews_sampled: 0,
-    analysis_thread_id: null,
-    analysis_run_id: null,
-    error: null,
     ...fields,
   }) satisfies ReviewStyle
 
@@ -78,9 +70,6 @@ afterEach(() => {
 const repoChip = (repo: string) =>
   screen.queryByRole("button", { name: new RegExp(`^${repo}`) })
 
-const chipStatus = (repo: string) =>
-  repoChip(repo)?.textContent?.slice(repo.length)
-
 async function renderAndSelect(repo: string) {
   render(
     <QueryClientProvider client={client}>
@@ -92,53 +81,6 @@ async function renderAndSelect(repo: string) {
   )
   await screen.findByDisplayValue(`${repo} prompt`)
 }
-
-it("shows analysis as running before the request returns and reverts on failure", async () => {
-  const request = deferred<ReviewStyle>()
-  vi.spyOn(api, "analyzeReviewStyle").mockReturnValue(request.promise)
-  await renderAndSelect("acme/api")
-
-  fireEvent.click(screen.getByRole("button", { name: "Run analysis" }))
-  await screen.findByRole("button", { name: "Analyzing…" })
-  expect(chipStatus("acme/api")).toBe("running")
-
-  const failure = new Error("analysis unavailable")
-  request.reject(failure)
-  await screen.findByRole("button", { name: "Run analysis" })
-  expect(reportError).toHaveBeenCalledWith(
-    expect.objectContaining({
-      title: "Couldn't start analysis",
-      error: failure,
-    })
-  )
-  expect(chipStatus("acme/api")).toBe("completed")
-})
-
-it("caches an analysis under the repo it started for after the selection moves", async () => {
-  const request = deferred<ReviewStyle>()
-  vi.spyOn(api, "analyzeReviewStyle").mockReturnValue(request.promise)
-  await renderAndSelect("acme/api")
-  fireEvent.click(screen.getByRole("button", { name: "Run analysis" }))
-  await screen.findByRole("button", { name: "Analyzing…" })
-
-  const web = repoChip("acme/web")
-  if (!web) throw new Error("acme/web chip missing")
-  fireEvent.click(web)
-  await screen.findByDisplayValue("acme/web prompt")
-  request.resolve(
-    style("acme/api", { status: "running", analysis_run_id: "run-1" })
-  )
-
-  await waitFor(() =>
-    expect(
-      client.getQueryData<ReviewStyle>(["reviewStyle", "acme/api"])
-        ?.analysis_run_id
-    ).toBe("run-1")
-  )
-  expect(
-    client.getQueryData<ReviewStyle>(["reviewStyle", "acme/web"])?.status
-  ).toBe("completed")
-})
 
 it("removes a repo from the list immediately and restores it when deletion fails", async () => {
   vi.spyOn(window, "confirm").mockReturnValue(true)

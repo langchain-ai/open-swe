@@ -3,6 +3,7 @@ from langgraph_sdk import get_client
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.dashboard_links import dashboard_review_url
 
 
@@ -29,6 +30,7 @@ async def trigger_pr_review_from_ref(
     )
 
 
+@expose_mcp()
 @audit_tool()
 async def request_pr_review(pr_url: str, use_mda: bool = False) -> dict[str, object]:
     """Implement the `request_pr_review` tool."""

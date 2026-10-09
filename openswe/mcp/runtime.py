@@ -12,19 +12,14 @@ from datetime import timedelta
 from functools import partial
 from typing import Any, Literal, get_args
 
-import httpx
+import httpx2
+from fastmcp import Client
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
-from langchain_mcp_adapters.interceptors import MCPToolCallRequest, MCPToolCallResult
-from langchain_mcp_adapters.sessions import (
-    Connection,
-    SSEConnection,
-    StreamableHttpConnection,
-    create_session,
-)
-from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 
-from mcp.shared.exceptions import McpError
-from mcp.types import PaginatedRequestParams, Tool
+from mcp.shared.exceptions import MCPError
+from mcp.types import Tool
 from openswe.analytics.segment import record_mcp_tool
 from openswe.mcp.models import MCPConnection
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
@@ -75,36 +70,34 @@ class _MCPTool(StructuredTool):
         return await self.coroutine(*args, **kwargs)
 
 
-def _connection(record: MCPConnection, namespace: tuple[str, ...]) -> Connection:
-    connection: SSEConnection | StreamableHttpConnection
+def _client(
+    record: MCPConnection, namespace: tuple[str, ...]
+) -> Client[SSETransport | StreamableHttpTransport]:
+    headers = record.connection_headers()
+    auth = connection_auth(record, namespace)
+    factory = partial(mcp_http_client, record.url)
+    transport: SSETransport | StreamableHttpTransport
     if record.transport == "sse":
-        connection = {"transport": "sse", "url": record.url}
+        transport = SSETransport(
+            record.url,
+            headers=headers,
+            auth=auth,
+            sse_read_timeout=_TIMEOUT_SECONDS,
+            httpx_client_factory=factory,
+        )
     else:
-        connection = {"transport": "streamable_http", "url": record.url}
-    connection["headers"] = record.connection_headers()
-    connection["timeout"] = _TIMEOUT_SECONDS
-    connection["sse_read_timeout"] = _TIMEOUT_SECONDS
-    connection["httpx_client_factory"] = partial(mcp_http_client, record.url)
-    if auth := connection_auth(record, namespace):
-        connection["auth"] = auth
-    return connection
+        transport = StreamableHttpTransport(
+            record.url, headers=headers, auth=auth, httpx_client_factory=factory
+        )
+    return Client(transport, timeout=_TIMEOUT_SECONDS)
 
 
 async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
-    async with create_session(_connection(record, namespace)) as session:
-        await session.initialize()
-        page = await session.list_tools()
-        tools = list(page.tools)
-        cursors: set[str] = set()
-        while page.nextCursor:
-            if page.nextCursor in cursors:
-                raise MCPDiscoveryError("MCP server repeated a catalog cursor")
-            cursors.add(page.nextCursor)
-            page = await session.list_tools(params=PaginatedRequestParams(cursor=page.nextCursor))
-            tools.extend(page.tools)
-        if len({tool.name for tool in tools}) != len(tools):
-            raise MCPDiscoveryError("MCP server returned duplicate tool names")
-        return tools
+    async with _client(record, namespace) as client:
+        tools = await client.list_tools(cache_mode="bypass")
+    if len({tool.name for tool in tools}) != len(tools):
+        raise MCPDiscoveryError("MCP server returned duplicate tool names")
+    return tools
 
 
 def _discovery_error(error: Exception) -> str:
@@ -117,9 +110,9 @@ def _discovery_error(error: Exception) -> str:
             pending.extend(reversed(current.exceptions))
         elif isinstance(current, (MCPOAuthError, MCPDiscoveryError)):
             return str(current)
-        elif isinstance(current, McpError):
-            return f"MCP server returned error {current.error.code} while listing tools"
-        elif isinstance(current, httpx.HTTPStatusError):
+        elif isinstance(current, MCPError):
+            return f"MCP server returned error {current.code} while listing tools"
+        elif isinstance(current, httpx2.HTTPStatusError):
             status = current.response.status_code
             hint = {
                 401: "Check the authentication headers",
@@ -128,12 +121,12 @@ def _discovery_error(error: Exception) -> str:
                 429: "Wait before retrying; the MCP server is rate limiting requests",
             }.get(status, "Check the MCP server availability")
             return f"MCP tool discovery failed (HTTP {status}). {hint}"
-        elif isinstance(current, (TimeoutError, httpx.TimeoutException)):
+        elif isinstance(current, (TimeoutError, httpx2.TimeoutException)):
             return "MCP tool discovery timed out; check the server and try again"
         # OS and TLS errors name the host at most, never the path, query, or headers.
-        elif isinstance(current, httpx.NetworkError):
+        elif isinstance(current, httpx2.NetworkError):
             return f"Could not reach the MCP server: {current}"
-        elif isinstance(current, httpx.RemoteProtocolError):
+        elif isinstance(current, httpx2.RemoteProtocolError):
             return "The MCP server sent an invalid HTTP response; check the URL"
         else:
             unknown.append(type(current).__name__)
@@ -181,28 +174,12 @@ def _wrap_tool(
                 raise ToolException("MCP connection changed; start a new run")
             if not record.allows_tool(definition.name):
                 raise ToolException("This tool is no longer allowed by the MCP connection settings")
-
-            async def forward_arguments(
-                request: MCPToolCallRequest,
-                handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
-            ) -> MCPToolCallResult:
-                # Preserve remote arguments named `runtime`, reserved by the adapter.
-                nonlocal is_error
-                response = await handler(request.override(args=arguments))
-                is_error = bool(getattr(response, "isError", False)) or (
-                    getattr(response, "status", None) == "error"
-                )
-                return response
-
-            fresh = convert_mcp_tool_to_langchain_tool(
-                None,
-                definition,
-                connection=_connection(record, namespace),
-                tool_interceptors=[forward_arguments],
-            )
+            fresh = await as_langchain_tool(definition, _client(record, namespace))
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
-            result = await asyncio.wait_for(fresh.coroutine(), timeout=_TIMEOUT_SECONDS)
+            # Call the coroutine directly so remote arguments LangChain reserves pass through.
+            result = await asyncio.wait_for(fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS)
+            is_error = False
             return result
         except ToolException:
             is_error = True
@@ -218,7 +195,7 @@ def _wrap_tool(
         coroutine=invoke,
         name=_tool_name(name, definition.name),
         description=definition.description or definition.name,
-        args_schema=definition.inputSchema,
+        args_schema=definition.input_schema,
         response_format="content_and_artifact",
         handle_tool_error=True,
         metadata={"mcp_tool_name": definition.name},

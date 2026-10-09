@@ -1,3 +1,4 @@
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,7 +9,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
@@ -35,7 +35,7 @@ const NAV = [
 ] as const
 
 const ROW =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
+  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
 const SELECTED_ROW = "bg-selected font-medium hover:bg-selected-hover"
 
 export function SidebarNav({

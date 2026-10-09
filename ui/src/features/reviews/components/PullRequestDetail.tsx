@@ -1,8 +1,9 @@
+import { XIcon } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
@@ -67,9 +68,11 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="border-t border-default px-5 py-4 first:border-t-0">
-      <div className="mb-2.5 flex items-baseline gap-2">
-        <h3 className="text-xs font-medium text-primary">{heading}</h3>
+    <section className="border-t border-default px-space-4 py-space-4 first:border-t-0">
+      <div className="mb-space-2 flex items-baseline gap-space-2">
+        <Text as="h3" variant="sm" weight="medium" color="primary">
+          {heading}
+        </Text>
         {count && (
           <span className="text-xs text-secondary tabular-nums">{count}</span>
         )}
@@ -82,7 +85,7 @@ function Section({
 
 function CheckRow({ check }: { check: PreviewCheck }) {
   return (
-    <li className="flex items-baseline gap-2.5 py-0.5 text-xs">
+    <li className="flex items-baseline gap-space-3 py-0.5 text-xs">
       <span className={cn("shrink-0 tabular-nums", checkTone(check))}>
         {checkMarks[checkRank(check)]}
       </span>
@@ -142,7 +145,7 @@ function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
     )
   }
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-space-2">
       {checkGroups.map(([label, rank]) => {
         const group = sorted.filter((check) => checkRank(check) === rank)
         if (!group.length) return null
@@ -153,9 +156,9 @@ function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
                 {"›"}
               </span>
               {label}
-              <span className="ml-1.5 tabular-nums">{group.length}</span>
+              <span className="ml-space-1 tabular-nums">{group.length}</span>
             </summary>
-            <ul className="mt-1 space-y-0.5 pl-3">
+            <ul className="mt-space-1 space-y-0.5 pl-space-3">
               {group.map((check) => (
                 <CheckRow
                   key={`${check.name}:${check.url ?? ""}`}
@@ -275,7 +278,7 @@ function AgentBatchBar({ target }: { target: PullRequestRef }) {
   const submit = useSubmitAgentBatch(target)
   if (!queued.length) return null
   return (
-    <div className="flex items-center gap-2 border-t border-default bg-surface-level-1 px-5 py-3">
+    <div className="flex items-center gap-space-2 border-t border-default bg-surface-level-1 px-space-4 py-space-3">
       <span className="text-xs text-primary">
         {queued.length} comment{queued.length === 1 ? "" : "s"} queued for the
         agent
@@ -316,8 +319,8 @@ function Conversation({
   }, [])
 
   return (
-    <li className="border-l-2 border-warning pl-3">
-      <div className="flex items-center gap-2 text-xs text-secondary">
+    <li className="border-l-2 border-warning pl-space-3">
+      <div className="flex items-center gap-space-2 text-xs text-secondary">
         <span className="font-medium text-primary">
           {thread.author ?? "Someone"}
         </span>
@@ -325,7 +328,7 @@ function Conversation({
           {thread.path}
           {thread.line !== null && `:${thread.line}`}
         </span>
-        <div className="ml-auto flex shrink-0 items-center gap-2 text-primary">
+        <div className="ml-auto flex shrink-0 items-center gap-space-2 text-primary">
           {thread.url && (
             <AddToAgentBatch target={target} commentUrl={thread.url} />
           )}
@@ -353,10 +356,10 @@ function Conversation({
         </div>
       </div>
       {open ? (
-        <div className="mt-1 max-w-[72ch]">
+        <div className="mt-space-1 max-w-[72ch]">
           <Markdown content={thread.body} />
           {thread.replies.length > 0 && (
-            <ul className="mt-2 space-y-2 border-t border-default pt-2">
+            <ul className="mt-space-2 space-y-space-2 border-t border-default pt-space-2">
               {thread.replies.map((reply, index) => (
                 <li key={reply.url ?? index}>
                   <span className="text-xs font-medium text-primary">
@@ -371,7 +374,7 @@ function Conversation({
       ) : (
         <p
           ref={measure}
-          className="mt-1 line-clamp-3 text-xs whitespace-pre-wrap text-primary"
+          className="mt-space-1 line-clamp-3 text-xs whitespace-pre-wrap text-primary"
         >
           {thread.body}
         </p>
@@ -380,7 +383,7 @@ function Conversation({
         <button
           type="button"
           onClick={() => setOpen(!open)}
-          className="mt-1 text-xs text-secondary hover:text-primary hover:underline"
+          className="mt-space-1 text-xs text-secondary hover:text-primary hover:underline"
         >
           {open
             ? "Show less"
@@ -418,7 +421,7 @@ function Conversations({
     )
   }
   return (
-    <ul className="space-y-2.5">
+    <ul className="space-y-space-3">
       {preview.unresolved.map((thread, index) => (
         <Conversation
           key={
@@ -479,9 +482,9 @@ export function PullRequestDetail({
       aria-label={`Pull request ${pr.repo} #${pr.number}`}
       className="flex min-h-0 w-full flex-col overflow-hidden rounded-lg border border-default bg-surface-level-1"
     >
-      <header className="flex items-start gap-3 border-b border-default px-5 py-4">
+      <header className="flex items-start gap-space-3 border-b border-default px-space-4 py-space-4">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2 text-xs text-secondary">
+          <div className="flex items-baseline gap-space-2 text-xs text-secondary">
             <span className="truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
             {data && (
@@ -493,11 +496,17 @@ export function PullRequestDetail({
               </span>
             )}
           </div>
-          <h2 className="mt-1 text-sm font-medium break-words text-primary">
+          <Text
+            as="h2"
+            variant="h5"
+            weight="medium"
+            color="primary"
+            className="mt-space-1 break-words"
+          >
             {data?.title ?? pr.title}
-          </h2>
+          </Text>
           {data && (
-            <p className="mt-1 text-xs text-secondary">
+            <p className="mt-space-1 text-xs text-secondary">
               {data.author ?? "Someone"} wants to merge {data.commits}{" "}
               {data.commits === 1 ? "commit" : "commits"} into{" "}
               <span className="font-mono">{data.base_ref}</span> from{" "}
@@ -510,12 +519,12 @@ export function PullRequestDetail({
           label="Close pull request preview"
           color="secondary"
           variant="plain"
-          className="-mt-1 -mr-1.5"
+          className="-mt-space-1 -mr-space-1"
           onClick={onClose}
         />
       </header>
 
-      <div className="border-b border-default px-5 py-3">
+      <div className="border-b border-default px-space-4 py-space-3">
         <PullRequestActions
           pr={pr}
           login={login}
@@ -527,14 +536,17 @@ export function PullRequestDetail({
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         {preview.isPending && (
-          <div className="space-y-3 p-5">
+          <div className="space-y-space-3 p-space-4">
             <Skeleton className="h-4 w-1/3" />
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-4 w-1/2" />
           </div>
         )}
         {preview.error && (
-          <p role="alert" className="px-5 py-4 text-xs text-error-secondary">
+          <p
+            role="alert"
+            className="px-space-4 py-space-4 text-xs text-error-secondary"
+          >
             {preview.error.message}
           </p>
         )}

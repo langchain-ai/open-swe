@@ -14,7 +14,7 @@ function WorkspaceReposPopover({ repos }: { repos: string[] }) {
   const titleId = useId()
   return (
     <Popover>
-      <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-primary focus-visible:outline-2 focus-visible:outline-[color:var(--border-focus)]">
+      <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none">
         OPENSWE_WORKSPACE_REPOS
       </PopoverTrigger>
       <PopoverContent

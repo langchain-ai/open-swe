@@ -265,6 +265,23 @@ async def control_repo_merge_methods(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "repo": f"{owner}/{name}", **flags})
 
 
+@app.post("/control/session-upload")
+async def control_reserve_session_upload(request: Request) -> JSONResponse:
+    """Reserve an upload thread as the remote MCP's ``upload_session`` tool does.
+
+    The E2E deployment mounts no remote MCP, so a spec reserves here and then
+    uploads through the real ``/threads/uploads`` route as ``oswe upload`` does."""
+    from openswe.threads.session_upload import SessionUploadHeader, reserve_session_upload
+
+    body = await request.json()
+    login = str(body.pop("login"))
+    email = body.pop("email", None)
+    reservation = await reserve_session_upload(
+        SessionUploadHeader.model_validate(body), login, email=email
+    )
+    return JSONResponse(reservation.model_dump())
+
+
 @app.post("/control/pull-request")
 async def control_seed_pull_request(request: Request) -> JSONResponse:
     """Seed an open pull request the PR search returns, without running the agent.
