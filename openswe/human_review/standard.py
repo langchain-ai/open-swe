@@ -679,13 +679,14 @@ async def assign(
     The repository's reviewer instructions decide who else may join. Without them one
     reviewer stands alone and one approval is enough, unless GitHub still wants approvals:
     then owners of code no approver or reviewer owns may join. ``replace`` is a person naming
-    the reviewer: Open SWE's pending picks for the same code are withdrawn first.
+    the reviewer, which these limits never refuse: Open SWE's pending picks for the same code
+    are withdrawn first.
     """
     approvers = await _github_approvers(request)
     coverage = await Coverage.load(request)
     instructed = await ReviewerInstructions.load(request) is not None
     review_required = bool(approvers) and not instructed and await _review_required(request)
-    if approvers and not instructed and not review_required:
+    if approvers and not instructed and not review_required and not replace:
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
             f"{names} already approved this pull request on GitHub, so it needs no "
