@@ -21,8 +21,13 @@ def _event(user_id: str) -> SlackEvent:
 def dispatched(monkeypatch: pytest.MonkeyPatch) -> list[SlackRequest]:
     requests: list[SlackRequest] = []
 
-    async def fetch_message(channel_id: str, thread_ts: str, message_ts: str) -> dict[str, str]:
-        return {"ts": message_ts, "thread_ts": "1.000", "user": "UAUTHOR", "text": "fix this"}
+    async def fetch_message(channel_id: str, thread_ts: str, message_ts: str) -> dict[str, object]:
+        return {
+            "ts": message_ts,
+            "thread_ts": "1.000",
+            "user": "UAUTHOR",
+            "reactions": [{"name": summon.SUMMON_REACTION, "users": ["UREACTOR", "USECOND"]}],
+        }
 
     async def resolve_thread_id(client: object, channel_id: str, thread_ts: str) -> str:
         return f"thread-{thread_ts}"
@@ -69,9 +74,11 @@ async def test_summon_reaction_tags_open_swe_for_the_reactor(
     assert request.explicit_mention
 
 
-async def test_summon_reaction_from_open_swe_is_ignored(dispatched: list[SlackRequest]) -> None:
+async def test_later_summon_reactions_do_not_restart_the_run(
+    dispatched: list[SlackRequest],
+) -> None:
     await summon.process_slack_summon_reaction(
-        _event("UBOT"),
+        _event("USECOND"),
         "Ev1",
         channel_context=SlackChannelContext(id="C123"),
         bot_user_id="UBOT",

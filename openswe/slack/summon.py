@@ -51,9 +51,10 @@ async def process_slack_summon_reaction(
     if is_dm_channel(channel_context) or await is_code_channel(item.channel):
         return
     message = await fetch_slack_thread_message_by_ts(item.channel, item.ts, item.ts)
-    if message is None:
+    # Later reactors are +1s, and acting on each would interrupt the first one's run.
+    if message is None or _first_summoner(message) != user_id:
         logger.info(
-            "Ignoring Slack summon reaction on a message that could not be read",
+            "Ignoring Slack summon reaction that is not the first on its message",
             extra={"slack_channel_id": item.channel, "slack_message_ts": item.ts},
         )
         return
@@ -79,6 +80,15 @@ async def process_slack_summon_reaction(
         team_id=team_id,
     )
     await run_slack_task(request.target, _dispatch(request))
+
+
+def _first_summoner(message: dict[str, object]) -> str:
+    reactions = message.get("reactions")
+    for reaction in reactions if isinstance(reactions, list) else []:
+        if isinstance(reaction, dict) and reaction.get("name") == SUMMON_REACTION:
+            users = reaction.get("users")
+            return str(users[0]) if isinstance(users, list) and users else ""
+    return ""
 
 
 async def _dispatch(request: SlackRequest) -> None:
