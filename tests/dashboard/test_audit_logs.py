@@ -7,8 +7,8 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from openswe.analytics import posthog
 from openswe.analytics import routes as analytics_routes
-from openswe.analytics import segment
 from openswe.api_keys.models import ApiKey
 from openswe.audit_logs import middleware, store
 from openswe.audit_logs.context import current_audit_log
@@ -136,7 +136,7 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
         return True
 
     monkeypatch.setattr(middleware, "append_safely", append)
-    monkeypatch.setattr(segment, "record_usage", record_usage)
+    monkeypatch.setattr(posthog, "record_usage", record_usage)
     monkeypatch.setattr(postgres, "configured", lambda: True)
     monkeypatch.setattr(BridgeStore, "heartbeat", heartbeat)
     application = app()

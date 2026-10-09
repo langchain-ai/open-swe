@@ -25,7 +25,7 @@ from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 
 from mcp.shared.exceptions import McpError
 from mcp.types import PaginatedRequestParams, Tool
-from openswe.analytics.segment import record_mcp_tool
+from openswe.analytics.posthog import record_mcp_tool
 from openswe.mcp.models import MCPConnection
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client

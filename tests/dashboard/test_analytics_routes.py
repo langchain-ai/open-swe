@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from openswe.analytics import queries, segment
+from openswe.analytics import posthog, queries
 from openswe.analytics import routes as analytics_routes
 from openswe.dashboard import oauth, routes
 from openswe.database import analytics as database
@@ -15,7 +15,7 @@ async def test_page_tracking_requires_session_and_rejects_raw_paths(monkeypatch)
     app = FastAPI()
     app.include_router(routes.router)
     delivery = AsyncMock()
-    monkeypatch.setattr(segment, "record_usage", delivery)
+    monkeypatch.setattr(posthog, "record_usage", delivery)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -43,7 +43,7 @@ async def test_telemetry_config_is_public_and_excludes_credentials(monkeypatch) 
     app = FastAPI()
     app.include_router(routes.router)
     monkeypatch.setenv("DD_ENV", "staging")
-    monkeypatch.setenv("SEGMENT_WRITE_KEY", "private-key")
+    monkeypatch.setenv("POSTHOG_API_KEY", "private-key")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:

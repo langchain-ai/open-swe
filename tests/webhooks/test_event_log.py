@@ -20,11 +20,11 @@ from openswe.webhooks import common, event_log
 from openswe.webhooks.event_log import EventLog, EventRefs
 
 
-async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
-    from openswe.analytics import segment
+async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
+    from openswe.analytics import posthog
     from openswe.webhooks.event_log import LoggedEvent
 
-    monkeypatch.setenv("SEGMENT_WRITE_KEY", "test-key")
+    monkeypatch.setenv("POSTHOG_API_KEY", "test-key")
     monkeypatch.setenv("DD_ENV", "staging")
     requests: list[dict[str, object]] = []
 
@@ -34,7 +34,7 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
 
     client_type = httpx.AsyncClient
     monkeypatch.setattr(
-        segment.httpx,
+        posthog.httpx,
         "AsyncClient",
         lambda **kwargs: client_type(**kwargs, transport=httpx.MockTransport(respond)),
     )
@@ -47,11 +47,16 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
         workspace_id=None,
         repository_id=None,
         pull_request_id=None,
-        payload={"action": "created", "comment": {"body": "private content"}},
+        payload={
+            "action": "created",
+            "repository": {"full_name": "acme/widgets"},
+            "comment": {"body": "private content"},
+        },
     )
-    await segment.record_webhook(event)
-    assert requests[0]["anonymousId"] == "open-swe:webhook:github"
+    await posthog.record_webhook(event)
+    assert requests[0]["properties"]["distinct_id"] == "open-swe:webhook:github"
     assert requests[0]["event"] == "Webhook Received"
+    assert requests[0]["properties"]["repo"] == "acme/widgets"
     assert "private content" not in json.dumps(requests)
     assert requests[0]["properties"]["action"] == "created"
     assert requests[0]["properties"]["environment"] == "staging"
@@ -59,28 +64,44 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     from openswe.users import User
 
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User(id=user_id)))
-    await segment.record_webhook(event.model_copy(update={"user_id": user_id}))
+    await posthog.record_webhook(event.model_copy(update={"user_id": user_id}))
     for event_type in ("page", "track"):
-        await segment.record_usage(
+        await posthog.record_usage(
             login="alice",
             email="alice@example.com",
             event_type=event_type,
             name="usage",
-            properties={},
+            properties={
+                "inputs": "private inputs",
+                "results": "private results",
+                "tool": "safe_tool",
+                "is_error": False,
+            },
         )
-    assert {request["userId"] for request in requests[1:]} == {str(user_id)}
-    assert requests[2]["traits"]["github_login"] == "alice"
+    assert {request["properties"]["distinct_id"] for request in requests[1:]} == {str(user_id)}
+    assert requests[2]["properties"]["$set"] == {
+        "email": "alice@example.com",
+        "github_login": "alice",
+    }
+    for email in (None, ""):
+        await posthog.record_usage(
+            login="alice", email=email, event_type="page", name="usage", properties={}
+        )
+        assert requests[-1]["properties"]["$set"] == {"github_login": "alice"}
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
-    await segment.record_usage(
+    await posthog.record_usage(
         login="unknown",
         email=None,
         event_type="page",
         name="usage",
         properties={},
     )
-    assert len(requests) == 6
-    monkeypatch.delenv("SEGMENT_WRITE_KEY")
-    await segment.record_webhook(event)
+    assert "private inputs" not in json.dumps(requests)
+    assert "private results" not in json.dumps(requests)
+    assert requests[3]["properties"]["tool"] == "safe_tool"
+    assert requests[3]["properties"]["is_error"] is False
+    monkeypatch.delenv("POSTHOG_API_KEY")
+    await posthog.record_webhook(event)
     assert len(requests) == 6
 
 
@@ -149,7 +170,7 @@ async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) ->
 async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from openswe.analytics import segment
+    from openswe.analytics import posthog
 
     started = asyncio.Event()
     release = asyncio.Event()
@@ -158,7 +179,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         started.set()
         await release.wait()
 
-    monkeypatch.setattr(segment, "record_webhook", slow_export)
+    monkeypatch.setattr(posthog, "record_webhook", slow_export)
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
         "openswe.slack.channels.SlackChannel.load",
@@ -200,7 +221,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         await asyncio.wait_for(started.wait(), timeout=2)
     finally:
         release.set()
-        await asyncio.gather(*event_log._SEGMENT_TASKS)
+        await asyncio.gather(*event_log._POSTHOG_TASKS)
 
     async with transaction() as conn:
         row = (
