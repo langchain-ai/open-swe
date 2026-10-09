@@ -24,8 +24,8 @@ mid-run cannot change what a reconnecting sandbox comes back to. The superseded
 snapshot is deleted once the new one is ready, so one workspace costs one image.
 
 Routing for new work picks a workspace in this order, first match wins: the
-existing thread's workspace, a ``workspace:<slug>`` tag on the opening message
-(``env:<slug>`` remains an accepted alias), the repository's owning workspace,
+existing thread's workspace, a ``/workspace:<slug>`` command on the opening message
+(``workspace:<slug>`` and ``env:<slug>`` remain accepted), the repository's owning workspace,
 the Slack channel's bound workspace, the user's default workspace preference,
 then ``default``. Nothing here is required: with no workspace resolved, or one
 whose snapshot is not ready, runs fall back to the configured base snapshot.
@@ -200,9 +200,6 @@ _SENSITIVE_CREATE_PARAM_PREFIXES = (
     "token_",
 )
 _SENSITIVE_HEADER_NAMES = frozenset({"authorization", "cookie", "proxy_authorization", "x_api_key"})
-# `workspace:my-box` (or the legacy `env:my-box` spelling) anywhere in a message,
-# as a whole word.
-_ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)")
 
 
 def slugify(name: str) -> str:
@@ -1560,25 +1557,6 @@ async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str
     neither.
     """
     return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
-
-
-def parse_workspace_tag(text: str) -> tuple[str | None, str]:
-    """Split a leading-or-inline ``workspace:<name>`` tag off a message.
-
-    ``env:<name>`` is still accepted as an alias. Returns
-    ``(slug, text_without_the_tag)``; ``(None, text)`` when there is no tag. The
-    caller decides whether the slug names a real workspace — an unresolvable tag
-    should be left in the text rather than silently dropped.
-    """
-    match = _ENV_TAG_RE.search(text or "")
-    if match is None:
-        return None, text
-    try:
-        slug = slugify(match.group(1))
-    except ValueError:
-        return None, text
-    before, after = text[: match.start()].rstrip(), text[match.end() :].lstrip()
-    return slug, f"{before} {after}".strip() if before and after else f"{before}{after}".strip()
 
 
 def require_capture_support() -> None:

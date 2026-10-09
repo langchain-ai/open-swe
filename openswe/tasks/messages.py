@@ -116,7 +116,7 @@ class TaskMessage(Base):
         introduced: set[str] = set()
         messages: list[RunMessage] = []
         for match in matches:
-            data: dict[str, object] = {"event_match": str(match.id)}
+            data: dict[str, str] = {"event_match": str(match.id)}
             if match.task_event is not None:
                 try:
                     data["task_event"] = TaskEventMetadata.model_validate(

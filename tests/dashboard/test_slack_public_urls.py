@@ -45,8 +45,7 @@ def test_slack_public_url_applies_to_manifest_and_oauth_without_changing_local_c
     user = User()
     link = AsyncMock(return_value=user)
     monkeypatch.setattr(user, "link", link)
-    monkeypatch.setattr(connect.User, "get", AsyncMock(return_value=user))
-    monkeypatch.setattr(connect.User, "for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(connect.User, "for_session", AsyncMock(return_value=user))
     app = FastAPI()
     app.include_router(routes.router)
     expected_base = (public_url or local_url).rstrip("/")
@@ -105,8 +104,8 @@ def test_slack_callback_links_the_slack_identity_to_the_session_user(
     user = User()
     link = AsyncMock(return_value=user)
     monkeypatch.setattr(user, "link", link)
-    get_user = AsyncMock(return_value=user)
-    monkeypatch.setattr(connect.User, "get", get_user)
+    for_session = AsyncMock(return_value=user)
+    monkeypatch.setattr(connect.User, "for_session", for_session)
 
     app = FastAPI()
     app.include_router(routes.router)
@@ -124,5 +123,5 @@ def test_slack_callback_links_the_slack_identity_to_the_session_user(
         )
         assert callback.status_code == 302, callback.text
 
-    get_user.assert_awaited_once_with(user.id)
+    for_session.assert_awaited_once_with(user.id, "alice")
     link.assert_awaited_once_with("slack", "U123", email="alice@example.com", team_id="T123")

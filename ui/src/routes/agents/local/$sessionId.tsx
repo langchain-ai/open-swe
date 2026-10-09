@@ -3,7 +3,7 @@ import { useEffect } from "react"
 
 import { LocalAgentThreadView } from "@/features/agents/components/LocalAgentThreadView"
 import { useReadyLegacyLocalThread } from "@/features/agents/lib/legacyLocal"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import {
   ensureThreadLoad,
   threadDetailFailed,

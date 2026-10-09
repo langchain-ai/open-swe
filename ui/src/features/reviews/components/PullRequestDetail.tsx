@@ -1,7 +1,10 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { XIcon } from "@phosphor-icons/react"
 import { useCallback, useRef, useState, type ReactNode } from "react"
-import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 
 import type {
@@ -12,15 +15,15 @@ import type {
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { HumanInputText } from "./HumanInputCard"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { navLink } from "../PullRequestLinks"
 import { TextPopover } from "./TextPopover"
 import { PullRequestFiles } from "./PullRequestFiles"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
-import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
+import {
+  PULL_REQUEST_STATUS,
+  pullRequestPreviewQuery,
+} from "@/features/reviews/lib/cache"
 import { useScrollAnchor } from "@/features/reviews/lib/scrollAnchor"
 import {
   useAgentBatch,
@@ -37,10 +40,10 @@ const skippedConclusions = new Set(["neutral", "skipped"])
 
 function checkTone(check: PreviewCheck): string {
   const rank = checkRank(check)
-  if (rank === 1) return "text-amber-700 dark:text-amber-400"
-  if (rank === 2) return "text-emerald-700 dark:text-emerald-400"
-  if (rank === 3) return "text-muted-foreground"
-  return "text-destructive"
+  if (rank === 1) return "text-status-yellow"
+  if (rank === 2) return "text-status-green"
+  if (rank === 3) return "text-secondary"
+  return "text-status-red"
 }
 
 function checkRank(check: PreviewCheck): number {
@@ -64,13 +67,11 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="border-t border-border px-5 py-4 first:border-t-0">
+    <section className="border-t border-default px-5 py-4 first:border-t-0">
       <div className="mb-2.5 flex items-baseline gap-2">
-        <h3 className="text-xs font-medium text-foreground">{heading}</h3>
+        <h3 className="text-xs font-medium text-primary">{heading}</h3>
         {count && (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {count}
-          </span>
+          <span className="text-xs text-secondary tabular-nums">{count}</span>
         )}
         {action && <div className="ml-auto">{action}</div>}
       </div>
@@ -85,7 +86,7 @@ function CheckRow({ check }: { check: PreviewCheck }) {
       <span className={cn("shrink-0 tabular-nums", checkTone(check))}>
         {checkMarks[checkRank(check)]}
       </span>
-      <span className="min-w-0 flex-1 truncate text-foreground">
+      <span className="min-w-0 flex-1 truncate text-primary">
         {check.url ? (
           <a
             className="hover:underline"
@@ -122,13 +123,13 @@ const checkGroups = [
 function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
   if (checks === null) {
     return (
-      <p className="text-xs text-amber-700 dark:text-amber-400">
+      <p className="text-xs text-warning-secondary">
         GitHub did not return the checks for this commit.
       </p>
     )
   }
   if (checks.length === 0) {
-    return <p className="text-xs text-muted-foreground">No checks ran.</p>
+    return <p className="text-xs text-secondary">No checks ran.</p>
   }
   const sorted = [...checks].sort((a, b) => checkRank(a) - checkRank(b))
   if (sorted.length <= groupChecksAbove) {
@@ -147,7 +148,7 @@ function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
         if (!group.length) return null
         return (
           <details key={label} open={rank === 0} className="group">
-            <summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground">
+            <summary className="cursor-pointer list-none text-xs text-secondary hover:text-primary">
               <span aria-hidden="true" className="inline-block w-3">
                 {"›"}
               </span>
@@ -203,7 +204,7 @@ function useResolveThreads(target: PullRequestRef) {
     onError: (_error, _threadIds, context) => context?.undo(),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: previewKey })
-      void queryClient.invalidateQueries({ queryKey: ["my-pr-details"] })
+      void queryClient.invalidateQueries({ queryKey: [PULL_REQUEST_STATUS] })
       if (result.failed.length)
         toast.error(
           `Could not resolve ${result.failed.length} conversation${result.failed.length === 1 ? "" : "s"}`
@@ -227,26 +228,27 @@ function AddToAgentBatch({
   const remove = useAgentBatchStore((state) => state.remove)
   if (entry?.state === "sent")
     return (
-      <Button size="sm" variant="outline" disabled>
+      <Button size="xs" color="secondary" variant="outlined" disabled>
         Sent to agent
       </Button>
     )
   if (entry)
     return (
       <Button
-        size="sm"
-        variant="outline"
+        size="xs"
+        color="secondary"
+        variant="outlined"
         title="Remove from the agent batch"
+        rightDecorator={XIcon}
         onClick={() => remove(key, entry.item.id)}
       >
         Queued for agent
-        <XIcon className="size-3" />
       </Button>
     )
   return (
     <TextPopover
       trigger={
-        <Button size="sm" variant="outline">
+        <Button size="xs" color="secondary" variant="outlined">
           Add to agent batch
         </Button>
       }
@@ -273,21 +275,22 @@ function AgentBatchBar({ target }: { target: PullRequestRef }) {
   const submit = useSubmitAgentBatch(target)
   if (!queued.length) return null
   return (
-    <div className="flex items-center gap-2 border-t border-border bg-card px-5 py-3">
-      <span className="text-xs text-foreground">
+    <div className="flex items-center gap-2 border-t border-default bg-surface-level-1 px-5 py-3">
+      <span className="text-xs text-primary">
         {queued.length} comment{queued.length === 1 ? "" : "s"} queued for the
         agent
       </span>
       <Button
-        size="sm"
-        variant="outline"
+        size="xs"
+        color="secondary"
+        variant="outlined"
         className="ml-auto"
         onClick={() => discard(key)}
       >
         Discard
       </Button>
       <Button
-        size="sm"
+        size="xs"
         onClick={() => submit.mutate(queued.map(({ item }) => item))}
       >
         Send to agent
@@ -313,38 +316,39 @@ function Conversation({
   }, [])
 
   return (
-    <li className="border-l-2 border-amber-600/40 pl-3">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">
+    <li className="border-l-2 border-warning pl-3">
+      <div className="flex items-center gap-2 text-xs text-secondary">
+        <span className="font-medium text-primary">
           {thread.author ?? "Someone"}
         </span>
         <span className="min-w-0 truncate font-mono">
           {thread.path}
           {thread.line !== null && `:${thread.line}`}
         </span>
-        <div className="ml-auto flex shrink-0 items-center gap-2 text-foreground">
+        <div className="ml-auto flex shrink-0 items-center gap-2 text-primary">
           {thread.url && (
             <AddToAgentBatch target={target} commentUrl={thread.url} />
           )}
           {thread.thread_id && (
             <Button
-              size="sm"
-              variant="outline"
+              size="xs"
+              color="secondary"
+              variant="outlined"
               onClick={() => resolve.mutate([thread.thread_id!])}
             >
               Resolve
             </Button>
           )}
           {thread.url && (
-            <a
-              className={navLink}
-              href={thread.url}
-              target="_blank"
-              rel="noreferrer"
+            <Button
+              size="xs"
+              color="secondary"
+              variant="plain"
+              leftDecorator={GithubLogoIcon}
+              as={<a href={thread.url} target="_blank" rel="noreferrer" />}
             >
-              <IoLogoGithub className="size-3.5" />
               Reply
-            </a>
+            </Button>
           )}
         </div>
       </div>
@@ -352,10 +356,10 @@ function Conversation({
         <div className="mt-1 max-w-[72ch]">
           <Markdown content={thread.body} />
           {thread.replies.length > 0 && (
-            <ul className="mt-2 space-y-2 border-t border-border pt-2">
+            <ul className="mt-2 space-y-2 border-t border-default pt-2">
               {thread.replies.map((reply, index) => (
                 <li key={reply.url ?? index}>
-                  <span className="text-xs font-medium text-foreground">
+                  <span className="text-xs font-medium text-primary">
                     {reply.author ?? "Someone"}
                   </span>
                   <Markdown content={reply.body} />
@@ -367,7 +371,7 @@ function Conversation({
       ) : (
         <p
           ref={measure}
-          className="mt-1 line-clamp-3 text-xs whitespace-pre-wrap text-foreground"
+          className="mt-1 line-clamp-3 text-xs whitespace-pre-wrap text-primary"
         >
           {thread.body}
         </p>
@@ -376,7 +380,7 @@ function Conversation({
         <button
           type="button"
           onClick={() => setOpen(!open)}
-          className="mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+          className="mt-1 text-xs text-secondary hover:text-primary hover:underline"
         >
           {open
             ? "Show less"
@@ -400,7 +404,7 @@ function Conversations({
 }) {
   if (preview.unresolved === null) {
     return (
-      <p className="text-xs text-amber-700 dark:text-amber-400">
+      <p className="text-xs text-warning-secondary">
         GitHub did not return the review threads, so unresolved comments cannot
         be counted here. Open the PR to check.
       </p>
@@ -408,7 +412,7 @@ function Conversations({
   }
   if (preview.unresolved.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-secondary">
         Nothing unresolved. Every review thread on this PR is closed.
       </p>
     )
@@ -473,27 +477,27 @@ export function PullRequestDetail({
   return (
     <aside
       aria-label={`Pull request ${pr.repo} #${pr.number}`}
-      className="flex min-h-0 w-full flex-col overflow-hidden rounded-lg border border-border bg-card"
+      className="flex min-h-0 w-full flex-col overflow-hidden rounded-lg border border-default bg-surface-level-1"
     >
-      <header className="flex items-start gap-3 border-b border-border px-5 py-4">
+      <header className="flex items-start gap-3 border-b border-default px-5 py-4">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+          <div className="flex items-baseline gap-2 text-xs text-secondary">
             <span className="truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
             {data && (
               <span className="tabular-nums">
-                <span className="text-emerald-700 dark:text-emerald-400">
+                <span className="text-success-secondary">
                   +{data.additions}
                 </span>{" "}
-                <span className="text-destructive">−{data.deletions}</span>
+                <span className="text-error-secondary">−{data.deletions}</span>
               </span>
             )}
           </div>
-          <h2 className="mt-1 text-sm font-medium break-words text-foreground">
+          <h2 className="mt-1 text-sm font-medium break-words text-primary">
             {data?.title ?? pr.title}
           </h2>
           {data && (
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-secondary">
               {data.author ?? "Someone"} wants to merge {data.commits}{" "}
               {data.commits === 1 ? "commit" : "commits"} into{" "}
               <span className="font-mono">{data.base_ref}</span> from{" "}
@@ -501,17 +505,17 @@ export function PullRequestDetail({
             </p>
           )}
         </div>
-        <button
-          type="button"
-          aria-label="Close pull request preview"
+        <IconButton
+          icon={XIcon}
+          label="Close pull request preview"
+          color="secondary"
+          variant="plain"
+          className="-mt-1 -mr-1.5"
           onClick={onClose}
-          className="-mt-1 -mr-1.5 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-        >
-          <XIcon className="size-4" />
-        </button>
+        />
       </header>
 
-      <div className="border-b border-border px-5 py-3">
+      <div className="border-b border-default px-5 py-3">
         <PullRequestActions
           pr={pr}
           login={login}
@@ -530,7 +534,7 @@ export function PullRequestDetail({
           </div>
         )}
         {preview.error && (
-          <p role="alert" className="px-5 py-4 text-xs text-destructive">
+          <p role="alert" className="px-5 py-4 text-xs text-error-secondary">
             {preview.error.message}
           </p>
         )}
@@ -542,7 +546,7 @@ export function PullRequestDetail({
                   <Markdown content={data.body} />
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-secondary">
                   This PR has no description.
                 </p>
               )}
@@ -564,8 +568,9 @@ export function PullRequestDetail({
               action={
                 resolvableIds.length > 1 && (
                   <Button
-                    size="sm"
-                    variant="outline"
+                    size="xs"
+                    color="secondary"
+                    variant="outlined"
                     onClick={() => resolve.mutate(resolvableIds)}
                   >
                     Resolve all
@@ -585,9 +590,7 @@ export function PullRequestDetail({
               }
             >
               {data.files.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  No files changed.
-                </p>
+                <p className="text-xs text-secondary">No files changed.</p>
               ) : (
                 <PullRequestFiles
                   pr={pr}

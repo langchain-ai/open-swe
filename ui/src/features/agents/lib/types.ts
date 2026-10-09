@@ -63,7 +63,7 @@ export type AcpToolKind =
   | "slack"
   | "linear"
   | "sql"
-  | "service-connection"
+  | "managed-tools"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
@@ -220,6 +220,8 @@ export interface Message {
   taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
+  /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */
+  invocationIds?: Array<string>
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
   timestampIsFallback?: boolean
@@ -329,6 +331,18 @@ export interface QueuedThreadMessage {
   pending?: boolean
   /** False when someone else sent it: only its sender may send it now or cancel it. */
   mine?: boolean
+  /** Held in the thread's queue for the agent's next model call, with no run of its own. */
+  waitsForAgent?: boolean
+  sender?: string | null
+}
+
+/** A message in the thread's queue, as `/threads/{id}/queued-messages` returns it. */
+export interface AgentQueuedMessage {
+  id: string
+  text: string
+  sender: string | null
+  platform: string | null
+  queued_at: string | null
 }
 
 export interface PendingThreadMessage extends Omit<
@@ -537,6 +551,10 @@ export interface AgentThread {
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
+  /** LangSmith cost of the thread's finished runs so far, in USD. */
+  costUsd?: number | null
+  /** LangSmith cost of each finished run, in USD, by invocation id. */
+  runCosts?: Record<string, number>
   sourceUrl?: string | null
   sourceAppUrl?: string | null
   codeChannelUrl?: string | null

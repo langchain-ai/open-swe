@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/macaw-components/Button"
 import type { OpenPullRequest } from "@/lib/api"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import { pullRequestKey } from "../lib/status"
@@ -25,8 +25,9 @@ export function ClosePullRequest({
       <TextPopover
         trigger={
           <Button
-            size="sm"
-            variant="outline"
+            size="xs"
+            color="secondary"
+            variant="outlined"
             disabled={close.isPending || close.isSuccess}
             aria-live="polite"
           >

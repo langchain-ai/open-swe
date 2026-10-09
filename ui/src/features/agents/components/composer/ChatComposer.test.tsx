@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import {
   cleanup,
   fireEvent,
@@ -85,7 +86,8 @@ function renderComposer(
           />
         </ThreadSourceProvider>
       </AgentThreadStreamBoundary>
-    </QueryClientProvider>
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
   )
 }
 
@@ -170,7 +172,8 @@ describe("ChatComposer stop button", () => {
         onStop={vi.fn()}
         onSubmit={vi.fn()}
         submitting
-      />
+      />,
+      { wrapper: TooltipProvider }
     )
 
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
@@ -185,7 +188,8 @@ describe("ChatComposer stop button", () => {
         onStop={onStop}
         onSubmit={vi.fn()}
         submitting={false}
-      />
+      />,
+      { wrapper: TooltipProvider }
     )
 
     expect(screen.getByRole("button", { name: "Queue message" })).toBeTruthy()
@@ -199,8 +203,9 @@ describe("ChatComposer options", () => {
   it("offers attachments without a plan-mode toggle", async () => {
     renderComposer(false)
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "More composer options" })
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "More composer options" }),
+      { key: "Enter" }
     )
 
     expect(
