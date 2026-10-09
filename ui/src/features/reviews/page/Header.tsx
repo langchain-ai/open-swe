@@ -10,6 +10,7 @@ import {
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
 import { ChatsCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatsCircle"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
@@ -251,9 +252,8 @@ export function Header({
                 type="button"
                 inert={!carrying}
                 onClick={() => jumpTo({ kind: "top" })}
-                title="Back to the status"
                 className={cn(
-                  "col-start-1 row-start-1 flex min-w-0 items-center gap-2 justify-self-start rounded px-0.5 text-left text-xs transition-[opacity,translate] duration-200 ease-out hover:bg-surface-level-1-hover motion-reduce:transition-none",
+                  "group col-start-1 row-start-1 flex min-w-0 items-center gap-2 justify-self-start rounded px-0.5 text-left text-xs transition-[opacity,translate] duration-200 ease-out hover:bg-surface-level-1-hover motion-reduce:transition-none",
                   !carrying && "translate-y-1 opacity-0"
                 )}
               >
@@ -263,6 +263,10 @@ export function Header({
                 />
                 <span className="truncate font-medium text-primary">
                   {current.standing.headline}
+                </span>
+                <span className="flex shrink-0 items-center gap-0.5 text-secondary group-hover:text-primary">
+                  <ArrowUpIcon className="size-3" />
+                  Back to top
                 </span>
               </button>
             )}

@@ -55,10 +55,11 @@ export function Rail({
       className="flex h-full min-h-0 flex-col bg-surface-level-1"
     >
       <div className="flex h-11 shrink-0 items-center gap-space-2 border-b border-default px-space-3">
-        <TabList className="border-0">
-          <TabLabel label="Chat" icon={AgentMark} />
+        <TabList className="self-stretch border-0">
+          <TabLabel label="Chat" icon={AgentMark} className="pb-0" />
           <TabLabel
             label="Discussion"
+            className="pb-0"
             badgeProps={
               open > 0
                 ? { children: String(open), color: "secondary" }
@@ -164,6 +165,8 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
   const excerpts = useReviewPage((state) => state.chatExcerpts)
   const removeExcerpt = useReviewPage((state) => state.removeChatExcerpt)
   const clearExcerpts = useReviewPage((state) => state.clearChatExcerpts)
+  const question = useReviewPage((state) => state.chatQuestion)
+  const clearQuestion = useReviewPage((state) => state.clearChatQuestion)
   const actions = useMemo(
     () => ({
       owner: pr.owner,
@@ -180,8 +183,18 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       excerpts,
       removeExcerpt,
       clearExcerpts,
+      question,
+      clearQuestion,
     }),
-    [pr, jumpTo, excerpts, removeExcerpt, clearExcerpts]
+    [
+      pr,
+      jumpTo,
+      excerpts,
+      removeExcerpt,
+      clearExcerpts,
+      question,
+      clearQuestion,
+    ]
   )
   if (meta.isPending)
     return (

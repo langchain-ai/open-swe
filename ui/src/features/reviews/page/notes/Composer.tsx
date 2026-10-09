@@ -33,8 +33,8 @@ export function Composer({
   const body = useReviewPage((state) => state.composerText)
   const setBody = useReviewPage((state) => state.setComposerText)
   const askAboutLines = useAskAboutLines(pr)
-  const askKey = useShortcutLabel("mod+shift+enter")
-  const addKey = useShortcutLabel("mod+enter")
+  const askKey = useShortcutLabel("mod+enter")
+  const addKey = useShortcutLabel("mod+shift+enter")
   const close = () => setComposer(null)
   const addToReview = () => {
     const text = body.trim()
@@ -53,7 +53,7 @@ export function Composer({
         className="rounded-lg border border-brand-subtle bg-surface-level-1 p-2.5 text-xs shadow-sm"
         onSubmit={(event) => {
           event.preventDefault()
-          addToReview()
+          ask()
         }}
       >
         <p className="mb-1.5 text-secondary">
@@ -71,8 +71,8 @@ export function Composer({
           onKeyDown={(event) => {
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
               event.preventDefault()
-              if (event.shiftKey) ask()
-              else addToReview()
+              if (event.shiftKey) addToReview()
+              else ask()
             }
             if (event.key === "Escape") {
               event.stopPropagation()
@@ -92,29 +92,26 @@ export function Composer({
             size="sm"
             color="secondary"
             variant="plain"
-            onClick={ask}
+            onClick={close}
           >
-            <AgentMark />
-            Ask Open SWE
-            <Kbd>{askKey}</Kbd>
+            Cancel
           </Button>
           <span className="flex-1" />
           <Button
             type="button"
             size="sm"
             color="secondary"
-            variant="plain"
-            onClick={close}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            size="sm"
+            variant="outlined"
             disabled={!body.trim() || pending.add.isPending}
+            onClick={addToReview}
           >
             {pending.add.isPending ? "Adding…" : "Add review comment"}
-            <Kbd variant="inherit">{addKey}</Kbd>
+            <Kbd>{addKey}</Kbd>
+          </Button>
+          <Button type="submit" size="sm">
+            <AgentMark />
+            Ask Open SWE
+            <Kbd variant="inherit">{askKey}</Kbd>
           </Button>
         </div>
       </form>

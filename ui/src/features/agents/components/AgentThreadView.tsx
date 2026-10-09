@@ -398,6 +398,23 @@ export function AgentThreadView({
       }))
     }
   }
+
+  const question = reviewChat?.question
+  const clearQuestion = reviewChat?.clearQuestion
+  useEffect(() => {
+    if (!question || !canPost) return
+    clearQuestion?.()
+    // oxlint-disable-next-line react/set-state-in-effect
+    submitWithExcerpts(question, []).catch((error: unknown) => {
+      console.error("Could not send the review question", error)
+      setRestoreDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: question,
+        images: [],
+      }))
+    })
+  }, [question, canPost, clearQuestion, submitWithExcerpts])
+
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>

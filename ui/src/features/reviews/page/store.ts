@@ -63,6 +63,8 @@ interface ReviewPageState {
   composerText: string
   expandedFinding: string | null
   chatDraft: { key: number; text: string } | undefined
+  /** A question the chat sends as soon as it can, then clears. */
+  chatQuestion: string | undefined
   /** Code attached to the next chat message, shown as chips above the composer. */
   chatExcerpts: ReadonlyArray<CodeExcerpt>
   /** Bumped to bring the discussion's open conversations into view. */
@@ -99,7 +101,9 @@ interface ReviewPageActions {
   setExpandedFinding: (id: string | null) => void
   focusChat: () => void
   askInChat: (text: string) => void
-  attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>, question: string) => void
+  sendInChat: (text: string) => void
+  clearChatQuestion: () => void
+  attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>) => void
   removeChatExcerpt: (index: number) => void
   clearChatExcerpts: () => void
   showOpenConversations: () => void
@@ -194,6 +198,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     composerText: "",
     expandedFinding: null,
     chatDraft: undefined,
+    chatQuestion: undefined,
     chatExcerpts: [],
     openConversationsKey: 0,
     findingsKey: 0,
@@ -222,6 +227,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
               composerText: "",
               expandedFinding: null,
               chatDraft: undefined,
+              chatQuestion: undefined,
               chatExcerpts: [],
               fileFilter: "",
               collapsed: new Set(),
@@ -316,7 +322,12 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       set({ chatDraft: { key: (get().chatDraft?.key ?? 0) + 1, text } })
       get().focusChat()
     },
-    attachToChat: (excerpts, question) => {
+    sendInChat: (chatQuestion) => {
+      set({ chatQuestion })
+      get().focusChat()
+    },
+    clearChatQuestion: () => set({ chatQuestion: undefined }),
+    attachToChat: (excerpts) => {
       const known = new Set(get().chatExcerpts.map(excerptKey))
       set({
         chatExcerpts: [
@@ -324,8 +335,6 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
           ...excerpts.filter((item) => !known.has(excerptKey(item))),
         ],
       })
-      if (question) get().askInChat(question)
-      else get().focusChat()
     },
     removeChatExcerpt: (index) =>
       set({

@@ -21,6 +21,9 @@ export const ReviewChatActionsContext = createContext<{
   excerpts?: ReadonlyArray<CodeExcerpt>
   removeExcerpt?: (index: number) => void
   clearExcerpts?: () => void
+  /** A question to send as soon as the chat can. */
+  question?: string
+  clearQuestion?: () => void
 } | null>(null)
 
 export function ReviewChatActions({ messages }: { messages: Array<Message> }) {
