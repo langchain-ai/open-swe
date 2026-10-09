@@ -95,7 +95,7 @@ Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.
 - **Repository permissions**:
   - **Actions**: Read-only — optional for CI diagnostics and log access. Grant **Read & write** only to enable `/baby-sit` to rerun evidence-backed flaky GitHub Actions jobs; existing installations must approve the elevation, and the token could then also cancel or delete runs.
   - **Checks**: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs and lets `/baby-sit` read third-party CI conclusions. Without it, check-run creation fails (logged, best-effort), reviews still work, and `/baby-sit` fails closed when it cannot read the complete check set.
-  - **Code scanning alerts**: Read-only — optional; lets Open SWE inspect code-scanning alerts directly so it can identify and patch reported vulnerabilities. Source-code changes still use the Contents permission above.
+  - **Code scanning alerts**: Read-only — optional; lets Open SWE inspect code-scanning alerts directly so it can identify and patch reported vulnerabilities. Source-code changes still use the Contents permission.
   - **Commit statuses**: Read-only — required for `/baby-sit` to evaluate the complete PR status set, including integrations that report via legacy commit statuses.
   - **Contents**: Read & write
   - **Issues**: Read & write
