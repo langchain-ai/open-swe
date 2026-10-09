@@ -21,8 +21,9 @@ def upgrade() -> None:
             ADD COLUMN complete boolean NOT NULL DEFAULT false
         """
     )
+    # No head, so the first planner at the PR's head rebuilds it from the diff, textless files included.
     op.execute(
-        "UPDATE pull_request_walkthrough SET plan = jsonb_build_object('head_sha', head_sha)"
+        "UPDATE pull_request_walkthrough SET head_sha = '', plan = jsonb_build_object('head_sha', '')"
     )
     op.execute("ALTER TABLE pull_request_walkthrough ALTER COLUMN plan SET NOT NULL")
     # Readers keep every line they approved; only their place in the old walk is dropped.
