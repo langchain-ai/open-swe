@@ -160,7 +160,7 @@ async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread
 
 @pytest.mark.parametrize("requested_action", [False, True])
 async def test_main_agent_records_the_incident_report_through_the_tool(
-    fake_store, monkeypatch, saved_thread_scope, requested_action
+    fake_store, registry_db, monkeypatch, saved_thread_scope, requested_action
 ):
     from deepagents import create_deep_agent
     from langgraph.checkpoint.memory import InMemorySaver

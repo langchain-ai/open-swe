@@ -131,7 +131,7 @@ class RunConfig(BaseModel):
 
     # A review guide run that only prepares chunks ahead of the reader, and may not post
     review_guide_prefetch: bool = False
-    # The review guide message whose "Looks good" this run records before the model runs.
+    # The review guide message whose "Next" this run records before the model runs.
     review_guide_approve_ts: str = ""
 
     # Reviewer run shape

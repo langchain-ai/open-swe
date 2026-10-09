@@ -9,7 +9,7 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
   return (
     <div className="space-y-1 text-xs">
       {pr.failingChecks.length > 0 && (
-        <p className="text-destructive">
+        <p className="text-error-secondary">
           {pr.failingChecks.slice(0, inlineLimit).map((name, index) => (
             <span key={`${name}-${index}`}>
               {index > 0 && <span aria-hidden="true"> · </span>}
@@ -19,7 +19,7 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
         </p>
       )}
       {overflow.length > 0 && (
-        <details className="text-destructive">
+        <details className="text-error-secondary">
           <summary className="cursor-pointer">+{overflow.length} more</summary>
           <ul className="mt-1 space-y-1">
             {overflow.map((name, index) => (
@@ -29,7 +29,7 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
         </details>
       )}
       {pr.pendingChecks.length > 0 && (
-        <details className="text-muted-foreground">
+        <details className="text-secondary">
           <summary className="cursor-pointer">
             {pr.pendingChecks.length} pending
           </summary>

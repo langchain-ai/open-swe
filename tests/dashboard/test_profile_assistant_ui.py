@@ -5,7 +5,7 @@ from openswe.dashboard.profiles import ProfileUpdate, get_profile, upsert_profil
 
 @pytest.mark.parametrize("flag", ["experimental_assistant_ui", "experimental_mcp_ptc"])
 async def test_conversation_preference_is_personal_and_survives_other_profile_edits(
-    fake_store, flag
+    user_records, flag
 ):
     defaults = {"default_model": "openai:gpt-5.6-sol", "reasoning_effort": "medium"}
     await upsert_profile("alice", "", ProfileUpdate(**defaults, **{flag: True}))

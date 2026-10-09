@@ -16,7 +16,8 @@ import appCss from "../styles.css?url"
 import type { QueryClient } from "@tanstack/react-query"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
-import { Toaster } from "@/components/ui/sonner"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
+import { Toaster } from "@/components/Toaster"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { PageTracking } from "@/lib/PageTracking"
@@ -76,10 +77,8 @@ export const Route = createRootRouteWithContext<{
   }),
   notFoundComponent: () => (
     <main className="container mx-auto p-4 pt-16">
-      <h1 className="text-2xl font-medium">404</h1>
-      <p className="text-muted-foreground">
-        The requested page could not be found.
-      </p>
+      <h1 className="text-2xl font-medium text-primary">404</h1>
+      <p className="text-secondary">The requested page could not be found.</p>
     </main>
   ),
   shellComponent: RootDocument,
@@ -109,25 +108,27 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <ThemeSync />
         <Toaster position="bottom-right" closeButton />
         <QueryClientProvider client={queryClient}>
-          <PageTracking />
-          <InvalidationStream />
-          <VersionMismatchBanner />
-          <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
-          <PerfHudMount />
-          {import.meta.env.VITE_DEVTOOLS !== "false" && (
-            <>
-              <TanStackDevtools
-                config={{ position: "bottom-right" }}
-                plugins={[
-                  {
-                    name: "Tanstack Router",
-                    render: <TanStackRouterDevtoolsPanel />,
-                  },
-                ]}
-              />
-              <ReactQueryDevtools initialIsOpen={false} />
-            </>
-          )}
+          <TooltipProvider>
+            <PageTracking />
+            <InvalidationStream />
+            <VersionMismatchBanner />
+            <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+            <PerfHudMount />
+            {import.meta.env.VITE_DEVTOOLS !== "false" && (
+              <>
+                <TanStackDevtools
+                  config={{ position: "bottom-right" }}
+                  plugins={[
+                    {
+                      name: "Tanstack Router",
+                      render: <TanStackRouterDevtoolsPanel />,
+                    },
+                  ]}
+                />
+                <ReactQueryDevtools initialIsOpen={false} />
+              </>
+            )}
+          </TooltipProvider>
         </QueryClientProvider>
         <Scripts />
       </body>

@@ -13,7 +13,7 @@ INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # summary message followed by messages[cutoff_index:].
 SUMMARIZATION_EVENT_KEY = "_summarization_event"
 
-Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval"]
+Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval", "deployment"]
 EntityKind = Literal["person", "channel", "system"]
 MessageKind = Literal["human", "system"]
 
