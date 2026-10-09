@@ -17,6 +17,7 @@ import {
   DropdownMenuSubTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Kbd } from "@langchain/macaw-components/Kbd"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner, SpinnerIcon } from "@langchain/macaw-components/Spinner"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
@@ -111,6 +112,7 @@ import {
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 import { reportError } from "@/lib/errorReporting"
@@ -194,6 +196,7 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const newThreadShortcut = useShortcutLabel("mod+n")
   const chat = useChatRoutes()
   const profile = useProfile()
   const concierge = useQuery({
@@ -745,10 +748,19 @@ export function AgentsSidebar({
         <Link
           to={chat.home}
           onClick={layout.closeOnMobile}
-          className={NAV_ROW_CLASS}
+          className={cn(
+            NAV_ROW_CLASS,
+            "group bg-surface-level-3 hover:bg-surface-level-4"
+          )}
         >
-          <PlusIcon size={16} weight="regular" />
-          New Thread
+          <PlusIcon size={20} className="-mx-0.5" />
+          New
+          <Kbd
+            aria-hidden
+            className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            {newThreadShortcut}
+          </Kbd>
         </Link>
         {profile.data?.concierge_mode && (
           <a
