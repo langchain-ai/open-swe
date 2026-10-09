@@ -804,67 +804,6 @@ async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
 
-async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypatch) -> None:
-    class FakeThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            assert thread_id == "tid"
-            return {
-                "thread_id": "tid",
-                "metadata": {"source": "dashboard", "github_login": "octocat"},
-            }
-
-    class FakeClient:
-        threads = FakeThreads()
-
-    async def unknown_activity(thread_id: str) -> None:
-        assert thread_id == "tid"
-        return None
-
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
-    patch_thread_module(monkeypatch, "get_thread_active_status", unknown_activity)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await handlers.send_dashboard_message(
-            "tid",
-            "octocat",
-            thread_runs.ThreadMessageBody(content="hello"),
-        )
-
-    assert exc_info.value.status_code == 502
-
-
-async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
-    class AdminThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": thread_id,
-                "metadata": {
-                    "source": "dashboard",
-                    "github_login": "workspace-admin",
-                    "admin_thread": True,
-                },
-            }
-
-        async def update(self, **kwargs: object) -> None:
-            raise AssertionError("must not update")
-
-    class AdminClient:
-        threads = AdminThreads()
-
-    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
-
-    with pytest.raises(HTTPException) as exc_info:
-        await handlers.send_dashboard_message(
-            "tid",
-            "teammate",
-            thread_runs.ThreadMessageBody(content="ship it"),
-        )
-
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in this thread"
-
-
 def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]]:
     threads: list[dict[str, object]] = []
     for index in range(count):

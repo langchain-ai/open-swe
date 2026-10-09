@@ -64,6 +64,7 @@ import {
   useAgentSkills,
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
+  useAgentThreadQueuedMessages,
 } from "@/features/agents/lib/queries"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -652,8 +653,14 @@ export function AgentThreadView({
     )
   }, [baseMessages, queryClient, queued, thread.id, thread.pendingMessages])
 
+  const agentQueue = useAgentThreadQueuedMessages(thread.id).data
   const queuedRows = useMemo(() => {
     const known = new Set(queued.map((entry) => entry.message.id))
+    // A steered follow-up is already on the transcript under the same id.
+    const shown = new Set([
+      ...known,
+      ...baseMessages.map((message) => message.id),
+    ])
     return [
       ...queued.map((entry) => ({
         id: entry.message.id,
@@ -672,8 +679,17 @@ export function AgentThreadView({
           createdAt: message.createdAt,
           pending: true,
         })),
+      ...(agentQueue ?? [])
+        .filter((message) => !shown.has(message.id))
+        .map((message) => ({
+          id: message.id,
+          content: message.text,
+          createdAt: message.queued_at ? Date.parse(message.queued_at) : 0,
+          waitsForAgent: true,
+          sender: message.sender,
+        })),
     ]
-  }, [isOwnQueued, queued, thread.pendingMessages])
+  }, [agentQueue, baseMessages, isOwnQueued, queued, thread.pendingMessages])
 
   const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedRows.length > 0

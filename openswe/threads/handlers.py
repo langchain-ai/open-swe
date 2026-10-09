@@ -10,12 +10,12 @@ from typing import Any
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
-from openswe.dashboard.options import normalize_model_choice
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
 from openswe.github.pull_request_status import get_pull_request_statuses
 from openswe.github.thread_token import invalidate_cached_github_token
+from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
@@ -31,9 +31,6 @@ from openswe.threads.principals import Principal
 from openswe.threads.runs import (
     _ASSISTANT_ID,
     QUEUED_BY_KEY,
-    ThreadMessageBody,
-    _notify_slack_web_handoff,
-    _user_message_content,
     dispatch_pending_follow_ups,
 )
 from openswe.threads.summary import (
@@ -41,7 +38,6 @@ from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     _assert_thread_postable,
     _assert_thread_promptable,
-    _is_thread_resolved,
     _now_ms,
     _refresh_latest_run_metadata,
     _thread_is_busy,
@@ -58,13 +54,11 @@ from openswe.transcript.subagents import attach_subagents
 from openswe.transcript.turns import settle_run_turn
 from openswe.utils.json_types import JsonObject, as_json_object, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import (
-    get_thread_active_status,
     langgraph_client,
-    queue_message_for_thread,
 )
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
-from openswe.utils.thread_settings import THREAD_SETTINGS_KEY, thread_model_choice
+from openswe.utils.thread_settings import THREAD_SETTINGS_KEY
 from openswe.utils.timing import phase
 
 logger = logging.getLogger(__name__)
@@ -192,94 +186,12 @@ async def get_dashboard_thread(
     return summary
 
 
-async def send_dashboard_message(
-    thread_id: str, login: str, body: ThreadMessageBody, *, email: str | None = None
-) -> dict[str, Any]:
-    client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-
-    metadata = thread_metadata(thread)
-    _assert_thread_postable(metadata, login, email)
-
-    prompt = body.content.strip()
-    now_ms = _now_ms()
-    chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
-    handoff_metadata = dict(metadata)
-    metadata_update: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
-        # Continuing on the web promotes a `/oswe` question thread for good.
-        "unlisted": False,
-        "updated_at_ms": now_ms,
-        "feedback_last_activity_at_ms": now_ms,
-        **await participant_metadata(metadata, login=login, email=email),
-    }
-    if chosen_model and chosen_effort:
-        metadata_update["model"] = chosen_model
-        metadata_update["effort"] = chosen_effort
-    pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
-
-    active = await get_thread_active_status(thread_id)
-    if active is None:
-        raise HTTPException(502, "could not determine whether thread is active")
-    if not active:
-        raise HTTPException(
-            409,
-            "thread is idle; start a run via the stream commands endpoint",
-        )
-
-    active_model = thread_model_choice(metadata)[0] if body.images else None
-    content = _user_message_content(prompt, body.images, model_id=active_model)
-    if pr_linked or metadata.get("auto_resolved_by_prs") is True:
-        async with agent_thread_pr_state_lock(client, thread_id):
-            current = await client.threads.get(thread_id)
-            metadata = thread_metadata(current)
-            if _is_thread_resolved(metadata):
-                metadata_update["resolved"] = False
-                metadata_update["resolved_at_ms"] = None
-            if metadata.get("auto_resolved_by_prs") is True:
-                metadata_update["auto_resolved_by_prs"] = False
-            if metadata.get("attention_reason"):
-                metadata_update["attention_reason"] = None
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    else:
-        if _is_thread_resolved(metadata):
-            metadata_update["resolved"] = False
-            metadata_update["resolved_at_ms"] = None
-        if metadata.get("attention_reason"):
-            metadata_update["attention_reason"] = None
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    await mirror_thread_metadata(thread_id, metadata_update)
-    queue_payload: dict[str, Any] = {
-        "text": prompt,
-        "source": DASHBOARD_SOURCE,
-        "surface": "web",
-        "queue_id": (
-            str(body.client_message_id) if body.client_message_id else f"queued-{uuid.uuid4()}"
-        ),
-        "created_at_ms": now_ms,
-        "sender": {
-            "id": f"github:{login}",
-            "platform": "github",
-            "github_login": login,
-            **({"email": email} if email else {}),
-        },
-    }
-    if isinstance(content, list):
-        queue_payload["images"] = [
-            block for block in content if isinstance(block, dict) and block.get("type") != "text"
-        ]
-    queued = await queue_message_for_thread(thread_id, queue_payload)
-    if not queued:
-        raise HTTPException(502, "failed to queue follow-up message")
-    try:
-        await _notify_slack_web_handoff(thread_id, handoff_metadata, client)
-    except Exception:
-        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
-    thread = await client.threads.get(thread_id)
-    return await _thread_summary(thread)
+async def get_dashboard_thread_queued_messages(
+    thread_id: str, login: str, *, email: str | None = None
+) -> list[QueuedPreview]:
+    """Messages waiting in the thread's queue for its agent's next model call."""
+    await _authorized_thread(thread_id, login, email=email)
+    return [message.preview() for message in await QueuedMessage.for_thread(thread_id)]
 
 
 async def _cancel_active_thread_runs(
