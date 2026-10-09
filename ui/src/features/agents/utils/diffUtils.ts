@@ -27,22 +27,32 @@ const macawSyntaxTheme = createCssVariablesTheme({
     "token-parameter": "var(--syntax-property)",
     "token-punctuation": "var(--syntax-operator)",
     "token-link": "var(--syntax-tag)",
-    "ansi-green": "var(--icon-success)",
-    "ansi-red": "var(--icon-error)",
   },
 })
 
 const DIFF_THEME = { light: "macaw-light", dark: "macaw-dark" } as const
 
-registerCustomTheme(DIFF_THEME.light, async () => ({
-  ...macawSyntaxTheme,
-  name: DIFF_THEME.light,
-  type: "light",
-}))
-registerCustomTheme(DIFF_THEME.dark, async () => ({
-  ...macawSyntaxTheme,
-  name: DIFF_THEME.dark,
-}))
+// Line highlight colors from pierre-light/pierre-dark.
+const PIERRE_GIT_COLORS = {
+  light: { added: "#18a46c", deleted: "#d52c36", modified: "#009fff" },
+  dark: { added: "#07c480", deleted: "#ff2e3f", modified: "#009fff" },
+}
+
+for (const type of ["light", "dark"] as const) {
+  const name = DIFF_THEME[type]
+  const git = PIERRE_GIT_COLORS[type]
+  registerCustomTheme(name, async () => ({
+    ...macawSyntaxTheme,
+    name,
+    type,
+    colors: {
+      ...macawSyntaxTheme.colors,
+      "gitDecoration.addedResourceForeground": git.added,
+      "gitDecoration.deletedResourceForeground": git.deleted,
+      "gitDecoration.modifiedResourceForeground": git.modified,
+    },
+  }))
+}
 
 const DIFF_OVERFLOW_STORAGE_KEY = "open-swe.diff.overflow"
 const diffOverflowListeners = new Set<() => void>()
