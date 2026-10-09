@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
   Outlet,
   Navigate,
@@ -8,7 +9,7 @@ import {
 } from "@tanstack/react-router"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
-import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
+import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -41,17 +42,16 @@ function AgentsLayout() {
   })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
-  const reviewNumber = Number(reviewMatch?.params.number)
-  const reviewRef = {
-    owner: reviewMatch?.params.owner ?? "",
-    repo: reviewMatch?.params.repo ?? "",
-    number: reviewNumber,
-  }
-  // A review page's sidebar row is the user's review chat thread.
-  const reviewChat = useReviewChat(
-    reviewRef,
-    Boolean(session.data) && Boolean(reviewMatch) && reviewNumber > 0
-  )
+  // A review page's sidebar row is the user's review chat thread. The page
+  // loads it; the layout only reads it, so off a review page it asks for nothing.
+  const reviewChat = useQuery({
+    ...reviewChatQuery({
+      owner: reviewMatch?.params.owner ?? "",
+      repo: reviewMatch?.params.repo ?? "",
+      number: Number(reviewMatch?.params.number),
+    }),
+    enabled: false,
+  })
   const activeReviewThreadId = reviewMatch
     ? reviewChat.data?.thread_id
     : undefined
