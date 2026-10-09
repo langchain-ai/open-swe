@@ -135,7 +135,9 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
       </div>
       {body && (
         <div className="overflow-hidden rounded-xl border border-subtle bg-surface-level-2">
-          <div className="max-h-[250px] overflow-auto px-space-3 py-space-2 text-sm text-primary">
+          <div
+            className={`px-space-3 py-space-2 text-sm text-primary${isLinear ? " max-h-[250px] overflow-auto" : ""}`}
+          >
             {isLinear ? (
               <Markdown content={body} />
             ) : blocks ? (
