@@ -208,7 +208,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     return {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
-      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-bg-context);border-right-color:transparent}${
+      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-bg-context);border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
         overflow === "scroll"
           ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
           : ""
@@ -220,6 +220,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       itemMetrics: {
         lineHeight: DIFF_ROW_HEIGHT,
         spacing: DIFF_VIRTUAL_METRICS.spacing,
+        paddingTop: DIFF_VIRTUAL_METRICS.spacing,
         diffHeaderHeight: FILE_HEADER_HEIGHT,
       },
       layout: { paddingTop: 0, paddingBottom: 160, gap: 10 },
