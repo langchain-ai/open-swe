@@ -18,7 +18,7 @@ export function ThinkingSpinner({
       aria-live="polite"
       aria-atomic="true"
     >
-      <LoadingIndicator className="size-3" speed="slow" />
+      <LoadingIndicator className="size-3" />
       <span className="shimmer-text text-xs">
         {settingUpSandbox
           ? "Agent is setting up the environment…"
