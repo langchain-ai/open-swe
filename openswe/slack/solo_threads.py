@@ -1,36 +1,30 @@
 """Mention-free follow-ups in Slack threads Open SWE was tagged in.
 
-Solo threads route every follow-up; shared threads ask a decision model whether
+Solo threads route every follow-up; shared threads ask Jev whether
 the newest message is addressed to Open SWE.
 """
 
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
-from openswe.config import ENV
 from openswe.prompts import prompt
 from openswe.slack.client import slack_thread_mutation_lock
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SlackClient
 from openswe.slack.payloads import SlackMessage
-from openswe.utils.gateway import gateway_base_url
+from openswe.utils.jev import select_jev_choice
 from openswe.utils.json_types import JsonObject
-
-if TYPE_CHECKING:
-    from langchain_openai.decisions import OpenAIDecisions
 
 logger = logging.getLogger(__name__)
 
 _NAMESPACE = "slack_solo_threads"
 _MAX_HISTORY_PAGES = 5
-_DECISION_MODEL = "gpt-6-luna"
-_DECISION_TIMEOUT_SECONDS = 3.0
-_DECISION_THRESHOLD = 0.8
 _DECISION_CONTEXT_MESSAGES = 20
+_ADDRESSED_CHOICES = ("addressed", "not_addressed")
 
 Participation = Literal["solo", "shared", "unknown"]
 
@@ -75,19 +69,6 @@ def _thread_is_solo(messages: list[SlackMessage], user_id: str) -> bool | None:
     return True
 
 
-def _decisions_client() -> OpenAIDecisions | None:
-    from langchain_openai.decisions import OpenAIDecisions
-
-    if openai_key := ENV.OPENAI_API_KEY.optional():
-        return OpenAIDecisions(model=_DECISION_MODEL, api_key=openai_key)
-    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-    if not gateway_key:
-        return None
-    return OpenAIDecisions(
-        model=_DECISION_MODEL, api_key=gateway_key, base_url=f"{gateway_base_url()}/openai/v1"
-    )
-
-
 def _transcript(messages: list[SlackMessage], bot_user_id: str) -> str:
     def speaker(message: SlackMessage) -> str:
         if message.user == bot_user_id:
@@ -108,26 +89,18 @@ async def _addressed_to_open_swe(
     channel_id: str, messages: list[SlackMessage], message_ts: str, bot_user_id: str
 ) -> bool:
     """Whether the newest message in a shared thread is meant for Open SWE; fails closed."""
-    from langchain_openai.decisions import Predicate
-
-    decisions = _decisions_client()
-    if decisions is None or messages[-1].ts != message_ts:
+    if messages[-1].ts != message_ts:
         return False
     # Slack retries slow acks; classify each message once so retries never re-ask or flip.
     if not await claim_slack_event(f"addressed-followup:{channel_id}:{message_ts}"):
         return False
-    async with asyncio.timeout(_DECISION_TIMEOUT_SECONDS):
-        response = await decisions.ainvoke(
-            {
-                "input": _transcript(messages, bot_user_id),
-                "questions": {
-                    "addressed": Predicate(instructions=prompt("slack/addressed-followup"))
-                },
-            },
-            config={"tags": ["nostream"]},
-        )
-    answer = response.predicates.get("addressed")
-    return answer is not None and answer.probability >= _DECISION_THRESHOLD
+    choice = await select_jev_choice(
+        _transcript(messages, bot_user_id),
+        question="addressed",
+        instructions=prompt("slack/addressed-followup/instructions"),
+        criteria={c: prompt(f"slack/addressed-followup/{c}") for c in _ADDRESSED_CHOICES},
+    )
+    return choice == "addressed"
 
 
 async def _track_participation(
