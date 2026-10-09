@@ -1,6 +1,6 @@
+import { CheckCircleFillIcon } from "@langchain/macaw-components/icons"
 import { Avatar as MacawAvatar } from "@langchain/macaw-components/Avatar"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
-import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 
 import type {
@@ -44,10 +44,9 @@ export const reviewStateWords: Record<ConversationReviewState, string> = {
 export function ReviewStateMark({ state }: { state: ConversationReviewState }) {
   if (state === "APPROVED")
     return (
-      <CheckCircleIcon
+      <CheckCircleFillIcon
         aria-hidden
         size={14}
-        weight="fill"
         className="shrink-0 text-icon-success"
       />
     )

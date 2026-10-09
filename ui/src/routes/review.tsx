@@ -1,5 +1,5 @@
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { useQuery } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"

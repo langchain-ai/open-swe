@@ -1,3 +1,4 @@
+import { ArrowLeftIcon, ArrowUpIcon } from "@langchain/macaw-components/icons"
 import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -9,8 +10,6 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
 import { ChatsCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatsCircle"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"

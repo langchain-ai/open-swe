@@ -1,3 +1,4 @@
+import { PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import {
@@ -8,8 +9,6 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"

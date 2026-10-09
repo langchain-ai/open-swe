@@ -1,3 +1,4 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Virtualizer, WorkerPoolContextProvider } from "@pierre/diffs/react"
 import {
@@ -7,7 +8,6 @@ import {
 } from "@pierre/trees/react"
 import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import type { FileContents } from "@pierre/diffs/react"
 import { useDiffLineSelection } from "@/features/agents/utils/diffSelection"
 import {

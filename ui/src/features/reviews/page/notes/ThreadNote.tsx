@@ -1,8 +1,7 @@
+import { CaretRightIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { useState } from "react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 
 import type {
   ReviewThread,

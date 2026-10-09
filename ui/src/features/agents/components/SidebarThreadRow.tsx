@@ -1,4 +1,10 @@
 import {
+  CaretDownIcon,
+  CaretRightIcon,
+  LaptopRegularIcon,
+  PushPinRegularIcon,
+} from "@langchain/macaw-components/icons"
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuTrigger,
@@ -15,8 +21,6 @@ import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { BookOpenTextIcon } from "@phosphor-icons/react/dist/ssr/BookOpenText"
 import { CalendarBlankIcon } from "@phosphor-icons/react/dist/ssr/CalendarBlank"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
@@ -24,9 +28,7 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
-import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
@@ -539,7 +541,7 @@ export function SidebarThreadRow({
 
       <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
         <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinIcon}
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? "Unpin thread" : "Pin thread"}
           size="xs"
           color="secondary"
@@ -787,7 +789,7 @@ function ThreadHoverCard({
   live?: PullRequestSnapshot
 }) {
   const onAMac = item.location === "local" || runsOnAMac(item.thread)
-  const LocationIcon = onAMac ? LaptopIcon : CloudIcon
+  const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
 
   return (

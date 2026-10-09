@@ -1,3 +1,7 @@
+import {
+  MagnifyingGlassRegularIcon,
+  WarningRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { useMemo, useState, type ReactNode } from "react"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
@@ -11,8 +15,6 @@ import {
 import { Input } from "@langchain/macaw-components/Input"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
-import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
 
 import { cn } from "@/lib/utils"
 
@@ -216,11 +218,7 @@ export function OwnershipPicker({
           </span>
           {item.warning && !elsewhere && (
             <span className="flex items-center gap-space-1 text-xs text-secondary">
-              <WarningIcon
-                size={12}
-                weight="regular"
-                className="text-icon-warning"
-              />{" "}
+              <WarningRegularIcon size={12} className="text-icon-warning" />{" "}
               {item.warning}
             </span>
           )}
@@ -295,7 +293,7 @@ export function OwnershipPicker({
               placeholder={searchPlaceholder}
               size="md"
               className="min-w-0 flex-1"
-              leftIcon={MagnifyingGlassIcon}
+              leftIcon={MagnifyingGlassRegularIcon}
               value={search}
               onChange={setSearch}
             />
@@ -335,11 +333,7 @@ export function OwnershipPicker({
           <div className="max-h-[50vh] min-h-0 flex-1 overflow-y-auto border-t border-default pb-space-2">
             {notice && (
               <p className="flex items-center gap-space-1 px-space-3 pt-space-3 text-xs text-secondary">
-                <WarningIcon
-                  size={12}
-                  weight="regular"
-                  className="text-icon-warning"
-                />{" "}
+                <WarningRegularIcon size={12} className="text-icon-warning" />{" "}
                 {notice}
               </p>
             )}

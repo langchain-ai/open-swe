@@ -1,3 +1,4 @@
+import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useRef, useState } from "react"
 import {
   ContextMenu,
@@ -14,7 +15,6 @@ import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 
 import { useNavigate } from "@tanstack/react-router"
@@ -94,7 +94,7 @@ function ThreadRepoIndicator({
 
 const TARGET_ICONS = {
   Cloud: CloudIcon,
-  "This Mac": LaptopIcon,
+  "This Mac": LaptopRegularIcon,
   "Local CLI": TerminalIcon,
 }
 

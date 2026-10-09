@@ -1,5 +1,5 @@
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useRef, useState } from "react"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 
 import { cn, formatElapsed } from "@/lib/utils"
 

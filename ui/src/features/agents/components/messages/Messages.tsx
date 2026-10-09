@@ -1,9 +1,11 @@
+import {
+  ArrowUpIcon,
+  CaretDownIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
 import { memo, useEffect, useMemo } from "react"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 

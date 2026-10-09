@@ -1,3 +1,4 @@
+import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,
   ReviewExcerptChips,
@@ -19,7 +20,6 @@ import { Icon } from "@langchain/macaw-components/Icon"
 import { Link } from "@langchain/macaw-components/Link"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { formatRelativeTime } from "@/lib/utils"
@@ -777,7 +777,7 @@ export function AgentThreadView({
               intent={bridgeError ? "error" : "info"}
               icon={
                 <Icon
-                  icon={LaptopIcon}
+                  icon={LaptopRegularIcon}
                   size="md"
                   className={
                     bridgeError ? "text-icon-error" : "text-icon-brand"
