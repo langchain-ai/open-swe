@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto"
 import pkg from "../package.json"
 import { ApiClient, ApiError, normalizeBackend } from "./api.ts"
 import { Bridge } from "open-swe-bridge-client"
-import { toolCommand } from "./commands.ts"
 import {
   forgetSession,
   readBridgeMemory,
@@ -18,13 +17,13 @@ import { isGitRepository, originRepo, repoFullName } from "./git.ts"
 import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
-import { serveMcp } from "./mcp.ts"
 import {
   followRun,
   RESULT_TOOL,
   type CliResult,
   type RunOutcome,
 } from "./stream.ts"
+import { uploadTranscript } from "./upload.ts"
 
 const USAGE = `oswe — run a cloud Open SWE agent against this directory
 
@@ -33,10 +32,9 @@ Usage:
   oswe logout                       Forget the session for the current backend
   oswe auth status                  Show which credential is in use and check it
   oswe run [options] [prompt...]    Start an agent bridged to this directory
-  oswe mcp                          Serve an MCP server on stdio
-  oswe tools                        List all tool subcommands and JSON schemas
-  oswe tool NAME [--json <object>] Call any MCP tool (JSON stdin also accepted)
-  oswe tool NAME --help            Show a tool's description and input schema
+  oswe upload [--backend <url>] CODE TRANSCRIPT_PATH
+                                    Fill the thread the upload_session MCP tool
+                                    reserved with a local session transcript
   oswe --help | --version
 
 Run options:
@@ -347,18 +345,6 @@ function parseCli(argv: readonly string[]) {
 }
 
 export async function main(argv: readonly string[]): Promise<number> {
-  const first = argv[0]
-  if (first === "tool" || first === "tools") {
-    try {
-      return await toolCommand(
-        first === "tool" ? argv.slice(1) : argv,
-        pkg.version
-      )
-    } catch (cause) {
-      fail(errorMessage(cause))
-      return 1
-    }
-  }
   let parsed: ReturnType<typeof parseCli>
   try {
     parsed = parseCli(argv)
@@ -393,9 +379,17 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await authStatusCommand()
       fail("usage: oswe auth status")
       return 2
-    case "mcp":
-      await serveMcp(pkg.version)
+    case "upload": {
+      const [code, transcriptPath] = positionals.slice(1)
+      if (!code || !transcriptPath || positionals.length !== 3) {
+        fail("usage: oswe upload [--backend <url>] CODE TRANSCRIPT_PATH")
+        return 2
+      }
+      const backend = values.backend ?? (await readBackend())
+      const threadId = await uploadTranscript(backend, code, transcriptPath)
+      out(`${normalizeBackend(backend)}/agents/${encodeURIComponent(threadId)}`)
       return 0
+    }
     case "run":
       return await runCommand({
         thread: values.thread,

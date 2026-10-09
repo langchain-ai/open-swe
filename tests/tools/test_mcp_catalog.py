@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 from cryptography.fernet import Fernet
 from mcp.types import Tool
@@ -10,8 +10,8 @@ from openswe.mcp import MCPConnectionUpdate, runtime
 from openswe.mcp import workspace as settings
 from openswe.tool_loaders import workspace_mcp as loader
 
-SEARCH = Tool(name="search", inputSchema={"type": "object"})
-FETCH = Tool(name="fetch", inputSchema={"type": "object"})
+SEARCH = Tool(name="search", input_schema={"type": "object"})
+FETCH = Tool(name="fetch", input_schema={"type": "object"})
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +70,7 @@ async def test_stale_catalog_is_served_then_refreshed(fake_store, monkeypatch):
     ("raised", "message"),
     [
         (
-            ExceptionGroup("session", [httpx.ConnectError("[Errno 8] nodename not known")]),
+            ExceptionGroup("session", [httpx2.ConnectError("[Errno 8] nodename not known")]),
             "Could not reach the MCP server: [Errno 8] nodename not known",
         ),
         (

@@ -208,7 +208,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     return {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
-      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}${
+      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-bg-context);border-right-color:transparent}${
         overflow === "scroll"
           ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
           : ""

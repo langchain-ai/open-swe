@@ -22,6 +22,7 @@ from openswe.input_messages import dynamic_context_hash, input_message_text, mes
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.threads import plan_api, workflow_approval_api
@@ -41,6 +42,8 @@ from openswe.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from openswe.tools.access import external_caller_run
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_preference import sandbox_only
 from openswe.users import User
 from openswe.utils.dashboard_links import (
@@ -219,6 +222,7 @@ def _exact_locator_filters(
     return filters
 
 
+@expose_mcp()
 @sandbox_only
 async def list_threads(
     participant: str | None = None,
@@ -619,6 +623,8 @@ def _looks_uuid(value: str) -> bool:
 
 
 async def _private_thread_context(actor: _Actor) -> bool:
+    if external_caller_run(RunConfig.parse(_config().get("configurable"))):
+        return True
     thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         return False
@@ -734,6 +740,7 @@ def _available_actions(
     return actions
 
 
+@expose_mcp()
 @sandbox_only
 async def get_thread(
     thread_id: str,
@@ -952,6 +959,7 @@ def _unexpected_action_arguments(
     return sorted(provided - allowed)
 
 
+@expose_mcp()
 @audit_tool()
 async def manage_thread(
     thread_id: str,
@@ -1089,6 +1097,7 @@ async def manage_thread(
         return _failure("Thread action failed")
 
 
+@expose_mcp()
 @audit_tool()
 async def start_thread(
     title: str,

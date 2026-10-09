@@ -13,9 +13,11 @@ from pydantic import BaseModel, Field
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
+from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
 from openswe.threads import terminal
 from openswe.threads.diffs import (
@@ -147,11 +149,13 @@ async def api_create_session(
 
 @router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
 @audit_endpoint
-async def api_upload_session(
-    request: Request,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    return await upload_session(UploadStream(request), session["sub"], email=session.get("email"))
+async def api_upload_session(request: Request) -> dict[str, Any]:
+    code = bearer_github_token(request)
+    if code is None:
+        raise HTTPException(401, "send the upload code as a bearer token")
+    ticket = decode_upload_ticket(code)
+    bind_audit_session(request, {"sub": ticket.sub, "user_id": ticket.user_id})
+    return await upload_session(UploadStream(request), ticket)
 
 
 @router.post("/threads/resolve-all")
