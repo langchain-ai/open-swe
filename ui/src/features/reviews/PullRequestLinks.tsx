@@ -1,28 +1,21 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Button } from "@langchain/macaw-components/Button"
+import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { useMutation } from "@tanstack/react-query"
-import { IoLogoGithub } from "react-icons/io5"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { ChevronDown } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
-import { Menu, MenuTrigger, MenuPopup, MenuItem } from "@/components/ui/menu"
-import {
-  Dialog,
-  DialogPopup,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
-
-import { buttonVariants } from "@/components/ui/button"
 import { api } from "@/lib/api"
-import { cn } from "@/lib/utils"
-
-export const navLink = cn(
-  buttonVariants({ variant: "ghost", size: "sm" }),
-  "px-1.5 text-muted-foreground"
-)
 
 export function PullRequestLinks({
   repo,
@@ -75,55 +68,60 @@ export function PullRequestLinks({
     <div className="text-xs">
       <span className="flex flex-wrap items-center gap-0.5">
         <span className="inline-flex items-center">
-          <button
-            type="button"
-            className={navLink}
+          <Button
+            size="xs"
+            color="secondary"
+            variant="plain"
             disabled={thread.isPending || thread.isSuccess}
             aria-live="polite"
             onClick={() => thread.mutate()}
           >
             {thread.isPending ? "Opening thread…" : "Agent"}
-          </button>
-          <Menu>
-            <MenuTrigger
-              className={cn(navLink, "border-l border-border px-1")}
-              aria-label="Agent options"
-            >
-              <ChevronDown className="size-3" />
-            </MenuTrigger>
-            <MenuPopup align="start">
-              <MenuItem onClick={() => setMessageOpen(true)}>
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                icon={CaretDownIcon}
+                label="Agent options"
+                size="xs"
+                color="secondary"
+                variant="plain"
+                tooltipProps={{ disabled: true }}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => setMessageOpen(true)}>
                 Send a message…
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
         <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
-          <DialogPopup className="gap-4 p-5">
-            <DialogTitle>Send a message to the agent</DialogTitle>
-            <DialogDescription>
-              {repo}#{number} · {title}
-            </DialogDescription>
+          <DialogContent
+            title="Send a message to the agent"
+            description={`${repo}#${number} · ${title}`}
+          >
             <form
-              className="flex flex-col gap-4"
+              className="flex flex-col gap-space-4"
               onSubmit={(event) => {
                 event.preventDefault()
                 if (message.trim() && !send.isPending) send.mutate()
               }}
             >
               <Textarea
+                size="md"
                 autoFocus
                 aria-label="Message"
                 placeholder="What should the agent do?"
                 value={message}
                 maxLength={10000}
                 disabled={send.isPending}
-                onChange={(event) => setMessage(event.target.value)}
+                onChange={setMessage}
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-space-2">
                 <Button
-                  type="button"
-                  variant="ghost"
+                  color="secondary"
+                  variant="plain"
                   onClick={() => setMessageOpen(false)}
                 >
                   Cancel
@@ -136,27 +134,42 @@ export function PullRequestLinks({
                 </Button>
               </div>
             </form>
-          </DialogPopup>
+          </DialogContent>
         </Dialog>
         {!onReviewPage && (
           <>
-            <Link
-              className={navLink}
-              to="/agents/reviews/$owner/$repo/$number"
-              params={{ owner: owner!, repo: name!, number: String(number) }}
+            <Button
+              size="xs"
+              color="secondary"
+              variant="plain"
+              as={
+                <Link
+                  to="/agents/reviews/$owner/$repo/$number"
+                  params={{
+                    owner: owner!,
+                    repo: name!,
+                    number: String(number),
+                  }}
+                />
+              }
             >
               Reviewer
-            </Link>
-            <a
-              className={navLink}
-              href={`https://github.com/${repo}/pull/${number}`}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="GitHub"
-              title="Open on GitHub"
+            </Button>
+            <IconButton
+              asChild
+              icon={GithubLogoIcon}
+              label="GitHub"
+              size="xs"
+              color="secondary"
+              variant="plain"
+              tooltipProps={{ title: "Open on GitHub" }}
             >
-              <IoLogoGithub className="size-3.5" />
-            </a>
+              <a
+                href={`https://github.com/${repo}/pull/${number}`}
+                target="_blank"
+                rel="noreferrer"
+              />
+            </IconButton>
           </>
         )}
       </span>

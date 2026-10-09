@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect } from "react"
 
@@ -84,14 +85,15 @@ function ReviewsPage() {
           )}
         >
           <div className="flex items-center gap-3">
-            <h1 className="font-heading text-base font-medium text-foreground">
+            <h1 className="font-heading text-base font-medium text-primary">
               Pull Requests
             </h1>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-space-1">
               {tabs.map(([value, label]) => (
-                <button
+                <Button
                   key={value}
-                  type="button"
+                  color="secondary"
+                  variant={tab === value ? "normal" : "plain"}
                   aria-pressed={tab === value}
                   onClick={() => {
                     changeFilters({
@@ -100,20 +102,14 @@ function ReviewsPage() {
                       pr: undefined,
                     })
                   }}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 text-xs transition-colors",
-                    tab === value
-                      ? "bg-sidebar-row-hover font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-sidebar-row-hover"
-                  )}
                 >
                   {label}
-                </button>
+                </Button>
               ))}
             </div>
             <OpenPullRequestInput />
             <ReviewBookmarklet />
-            <span className="hidden text-xs text-muted-foreground lg:inline">
+            <span className="hidden text-xs text-secondary lg:inline">
               Drag to your bookmarks bar
             </span>
           </div>

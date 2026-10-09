@@ -21,23 +21,25 @@ export const ShellEntryBody = memo(function ShellEntryBody({
   return (
     <div className="space-y-1.5">
       {command && (
-        <pre className="cursor-text overflow-x-auto font-mono text-[12px] leading-relaxed whitespace-pre text-foreground/85 select-text">
-          <span className="text-muted-foreground/80">$ </span>
+        <pre className="cursor-text overflow-x-auto font-mono text-xxs leading-relaxed whitespace-pre text-primary select-text">
+          <span className="text-tertiary">$ </span>
           {command}
         </pre>
       )}
       {output && <ToolResultBody value={output} />}
-      {loadError && <p className="text-[12px] text-destructive">{loadError}</p>}
+      {loadError && (
+        <p className="text-xxs text-error-secondary">{loadError}</p>
+      )}
       {!loadError && pendingOutput && (
-        <p className="font-mono text-[12px] text-muted-foreground">
+        <p className="font-mono text-xxs text-secondary">
           {output ? "Loading the rest of the output…" : "Loading output…"}
         </p>
       )}
       {!output && !pendingOutput && chunk.status === "in_progress" && (
-        <p className="font-mono text-[12px] text-muted-foreground">Running…</p>
+        <p className="font-mono text-xxs text-secondary">Running…</p>
       )}
       {!output && !pendingOutput && chunk.status === "pending" && (
-        <p className="font-mono text-[12px] text-warning-foreground">
+        <p className="font-mono text-xxs text-warning-secondary">
           Waiting for approval…
         </p>
       )}

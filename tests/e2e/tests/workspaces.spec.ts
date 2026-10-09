@@ -248,7 +248,7 @@ test.describe("Workspaces", () => {
     await page
       .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
       .click();
-    const confirmation = page.getByRole("alertdialog");
+    const confirmation = page.getByRole("dialog");
     await expect(confirmation).toContainText(`Delete ${DRAFT_NAME}?`);
     await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect(await findWorkspace(page, DRAFT_SLUG)).toBeDefined();
@@ -508,7 +508,9 @@ test.describe("Workspaces", () => {
     await expect(page.getByText("Refresh log")).toBeVisible();
     // Each stage is visible to everyone, not only through the agent's tools.
     for (const label of ["boot", "setup", "update", "capture"]) {
-      await expect(page.getByText(`✓ ${label}`)).toBeVisible();
+      await expect(
+        page.getByText(label, { exact: true }).getByLabel("Succeeded"),
+      ).toBeVisible();
     }
     await expect(
       page.getByRole("link", { name: "Configure default", exact: true }),
