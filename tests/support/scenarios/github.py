@@ -44,6 +44,7 @@ class GitHub:
     reviews: dict[str, ReviewState] = field(default_factory=dict)
     requested: set[str] = field(default_factory=set)
     repo_files: dict[str, str] = field(default_factory=dict)
+    code_owner_review_required: bool = False
     _row: PullRequest | None = None
 
     @property
@@ -106,6 +107,13 @@ class GitHub:
             if (content := self.repo_files.get(path.removeprefix("contents/"))) is None:
                 return httpx2.Response(404, json={"message": "Not Found"}, request=request)
             return httpx2.Response(200, text=content, request=request)
+        if path.startswith("rules/branches/"):
+            rules = (
+                [{"type": "pull_request", "parameters": {"require_code_owner_review": True}}]
+                if self.code_owner_review_required
+                else []
+            )
+            return httpx2.Response(200, json=rules, request=request)
         if path == f"pulls/{self.number}":
             return httpx2.Response(200, json=self.pull, request=request)
         if path.startswith("collaborators/") and path.endswith("/permission"):

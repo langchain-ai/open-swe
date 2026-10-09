@@ -184,6 +184,7 @@ class ReviewScenario(Scenario):
         self.author: Person | None = None
         self.files: list[str] = []
         self.repo_files: dict[str, str] = {}
+        self.code_owner_review_required = False
         self.agent: Agent = TakesSuggestions()
         self.request: HumanReviewRequest | None = None
         self.coverage = Coverage(())
@@ -210,6 +211,10 @@ class ReviewScenario(Scenario):
         """The repository's ``.open-swe/REVIEWERS.md`` on its base branch."""
         self.repo_files[REVIEWER_INSTRUCTIONS_PATH] = text
 
+    def requires_code_owner_review(self) -> None:
+        """A ruleset on the base branch requires a code owner's approval for every owned file."""
+        self.code_owner_review_required = True
+
     def pull_request(self, *, author: Person, files: list[str]) -> None:
         self.author = author
         self.files = files
@@ -229,6 +234,7 @@ class ReviewScenario(Scenario):
             self.codeowners,
             author_user_id=self._directory[self.author.login].id,
             repo_files=self.repo_files,
+            code_owner_review_required=self.code_owner_review_required,
         )
         self._slack = Slack(self, channels={"reviews": _REVIEWS}, describe_update=_card_reviewers)
         self._slack.wake = self._woken

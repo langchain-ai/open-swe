@@ -947,16 +947,18 @@ async def _settle_posted(
 ) -> None:
     """React once the pull request is approved; until then, time how long it has sat green."""
     approvers = sorted(login for login, state in states.items() if state == "APPROVED")
-    if approvers and await ReviewerInstructions.load(request) is None:
-        await ReviewCard(request).mark_approved()
-        await ReviewPicks(request).release(
-            ", ".join(f"@{login}" for login in approvers) + " approved it", cause="approved"
-        )
-        return
     if approvers:
-        request = await _ask_for_more_reviewers(request, approvers)
+        coverage = await Coverage.load(request)
+        owners_missing = coverage is not None and bool(coverage.missing(approvers))
+        if not owners_missing and await ReviewerInstructions.load(request) is None:
+            await ReviewCard(request).mark_approved()
+            await ReviewPicks(request).release(
+                ", ".join(f"@{login}" for login in approvers) + " approved it", cause="approved"
+            )
+            return
+        request = await _ask_for_more_reviewers(request, approvers, coverage)
         approved = {login.lower() for login in approvers}
-        if not any(
+        if not owners_missing and not any(
             p.github_login.lower() not in approved for p in request.reviewers + request.picks
         ):
             await ReviewCard(request).mark_approved()
@@ -1054,8 +1056,11 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
         await _settle_posted(request, pull, snapshot, states)
         return True
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
-        if await ReviewerInstructions.load(request) is not None:
-            request = await _ask_for_more_reviewers(request, approvers)
+        coverage = await Coverage.load(request)
+        if (coverage is not None and coverage.missing(approvers)) or (
+            await ReviewerInstructions.load(request) is not None
+        ):
+            request = await _ask_for_more_reviewers(request, approvers, coverage)
         else:
             picked = len(request.reviewers) + len(request.picks)
             request = await ReviewPicks(request).release(
@@ -1120,11 +1125,12 @@ class AutoAssignResult:
 
 @dataclass(frozen=True, slots=True)
 class PickTrigger:
-    """Background work that needs a reviewer picked; the Slack thread's agent decides."""
+    """Background work that needs a reviewer picked; the implementer decides."""
 
     kind: Literal["unclaimed", "expired", "declined", "approved"]
     logins: tuple[str, ...] = ()
     reason: str = ""
+    owners_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1207,15 +1213,15 @@ async def _auto_assign(
 
 
 async def _ask_for_more_reviewers(
-    request: HumanReviewRequest, approvers: list[str]
+    request: HumanReviewRequest, approvers: list[str], coverage: Coverage | None
 ) -> HumanReviewRequest:
     """Release picks whose code owner areas an approval covers, then ask the implementer, once
-    per set of approvers, to add anyone the repository's reviewer instructions still require.
+    per set of approvers, to add anyone GitHub or the repository's reviewer instructions still
+    require.
 
-    Code owners only guide who reviews; what an approval leaves wanting is the instructions' call.
+    Code owners only guide who reviews unless GitHub requires their approval.
     """
     names = ", ".join(f"@{login}" for login in approvers)
-    coverage = await Coverage.load(request)
     if coverage is not None:
         request = await ReviewPicks(request).release(
             f"{names} approved the code you were asked to review",
@@ -1245,7 +1251,11 @@ async def _ask_for_more_reviewers(
             "code_owner_areas": [list(area.handles) for area in open_areas],
         },
     )
-    trigger = PickTrigger("approved", tuple(approvers))
+    trigger = PickTrigger(
+        "approved",
+        tuple(approvers),
+        owners_required=coverage is not None and bool(coverage.missing(approvers)),
+    )
     if not await _wake_picker(request, asked=False, trigger=trigger, suggestions=suggestions):
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is not None:

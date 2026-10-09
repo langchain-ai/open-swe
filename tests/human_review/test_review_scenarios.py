@@ -194,3 +194,38 @@ async def test_one_approval_is_enough_without_reviewer_instructions(
             await scenario.reviews_on_github(bob)
             await scenario.wait(days=1)
             scenario.expect(joined(bob, cause="accepted_pick"), edited(bob))
+
+
+async def test_github_requiring_code_owner_review_asks_every_areas_owners(
+    scenario: ReviewScenario,
+) -> None:
+    """GitHub requiring code owner review asks every area's owners.
+
+    A ruleset on the base branch requires a code owner's approval for every owned file. Bob's
+    approval covers the API but not the UI, so one approval is not enough: Open SWE asks the
+    implementer for a UI owner, and it picks Dana.
+    """
+    ada = scenario.person("ada", NEW_YORK)
+    bob = scenario.person("bob", NEW_YORK)
+    dana = scenario.person("dana", NEW_YORK)
+    scenario.owns("/api/", bob)
+    scenario.owns("/ui/", dana)
+    scenario.requires_code_owner_review()
+    scenario.pull_request(author=ada, files=["api/server.py", "api/routes.py", "ui/page.tsx"])
+
+    async with scenario.from_(ada.at("Mon 10:00")):
+        with scenario.step("Ada asks for a review, and nobody signs up within two hours"):
+            await scenario.request_review()
+            await scenario.wait(hours=2)
+            scenario.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
+
+        with scenario.step("Bob accepts and approves; the UI still needs one of its owners"):
+            await scenario.clicks(bob, "accept")
+            await scenario.reviews_on_github(bob)
+            scenario.expect(
+                joined(bob, cause="accepted_pick"),
+                edited(bob),
+                picked(dana),
+                requested_on_github(dana),
+                dm_to(dana, "reviewer_pick"),
+            )

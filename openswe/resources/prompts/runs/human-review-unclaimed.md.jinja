@@ -1,4 +1,4 @@
-{% if trigger and trigger.kind == "approved" %}@{{ trigger.logins | join(", @") }} approved {{ pr_url }}. Decide from the repository's reviewer instructions below whether anyone else still has to review it, and if so call `assign_human_reviewer` for each of them now. If the instructions require nobody else, do nothing.
+{% if trigger and trigger.kind == "approved" %}@{{ trigger.logins | join(", @") }} approved {{ pr_url }}.{% if trigger.owners_required %} GitHub requires an approval from a code owner of every changed file, so each code owner area below needs one of its owners: call `assign_human_reviewer` for one owner of each now.{% endif %}{% if instructions %} Decide from the repository's reviewer instructions below whether anyone else still has to review it, and if so call `assign_human_reviewer` for each of them now.{% endif %} Otherwise assign nobody.
 {% if suggestions %}
 Code owner areas nobody who approved or was asked owns:
 {% for suggestion in suggestions %}

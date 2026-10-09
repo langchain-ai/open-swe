@@ -190,15 +190,21 @@ class Area:
 class Coverage:
     """A pull request's owned changed files split by owners, the largest area first.
 
-    The first reviewer comes from the largest area; the rest get one reviewer each after an approval.
+    ``required`` is GitHub requiring a code owner's approval for every owned file; otherwise
+    the areas only guide who reviews.
     """
 
     areas: tuple[Area, ...]
+    required: bool = False
 
     def uncovered(self, logins: Collection[str]) -> list[Area]:
         """Areas none of ``logins`` owns."""
         lowered = {login.lower() for login in logins}
         return [area for area in self.areas if not area.owners & lowered]
+
+    def missing(self, approvers: Collection[str]) -> list[Area]:
+        """Areas GitHub still requires an owner's approval for before the pull request can merge."""
+        return self.uncovered(approvers) if self.required else []
 
     def of(self, login: str) -> list[Area]:
         return [area for area in self.areas if login.lower() in area.owners]
@@ -221,7 +227,9 @@ class Coverage:
         return counts
 
     @classmethod
-    async def build(cls, codeowners: CodeOwners, paths: list[str]) -> Self:
+    async def build(
+        cls, codeowners: CodeOwners, paths: list[str], *, required: bool = False
+    ) -> Self:
         grouped: dict[tuple[str, ...], list[str]] = {}
         for path in paths:
             if handles := codeowners.owners_for(path):
@@ -244,7 +252,10 @@ class Coverage:
                     )
                 owners.update(login.lower() for login in teams[handle])
             areas.append(Area(handles, frozenset(owners), tuple(files)))
-        return cls(tuple(sorted(areas, key=lambda area: (-len(area.files), area.handles))))
+        return cls(
+            tuple(sorted(areas, key=lambda area: (-len(area.files), area.handles))),
+            required=required,
+        )
 
     @classmethod
     async def load(cls, request: HumanReviewRequest) -> Self | None:
@@ -256,6 +267,9 @@ class Coverage:
                 if not files:
                     return None
                 codeowners = await CodeOwners.fetch(pull.repo, pr.base_ref or None)
+                required = (
+                    await pull.repo.requires_code_owner_review(pr.base_ref) if pr.base_ref else True
+                )
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to read code-owner coverage",
@@ -264,7 +278,9 @@ class Coverage:
             return None
         if codeowners is None:
             return None
-        return await cls.build(codeowners, [changed.filename for changed in files])
+        return await cls.build(
+            codeowners, [changed.filename for changed in files], required=required
+        )
 
 
 REVIEWER_INSTRUCTIONS_PATH = ".open-swe/REVIEWERS.md"

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import quote
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient
@@ -530,6 +530,25 @@ class RepoClient:
         """The rulesets' rules that apply to branch ``name``."""
         return await self.pages(f"rules/branches/{quote(name, safe='')}")
 
+    async def requires_code_owner_review(self, branch: str) -> bool:
+        """Whether a ruleset requires a code owner's approval for pull requests into ``branch``.
+
+        An unreadable answer counts as required, so callers never loosen a review GitHub demands.
+        """
+        try:
+            rules = _BRANCH_RULES.validate_python(await self.branch_rules(branch))
+        except httpx2.HTTPError, ValueError:
+            logger.warning(
+                "Could not read branch rules; assuming code owner review is required",
+                extra={"repository": self.full_name, "branch": branch},
+                exc_info=True,
+            )
+            return True
+        return any(
+            rule.type == "pull_request" and rule.parameters.require_code_owner_review
+            for rule in rules
+        )
+
     async def commits(self, *, path: str, since: str, ref: str | None = None) -> object:
         """The first 100 commits since ``since`` that touched ``path``, on ``ref`` or the default."""
         params = {"path": path, "since": since, "per_page": "100"}
@@ -572,6 +591,18 @@ async def or_none[T](read: Awaitable[T]) -> T | None:
 
 def _json_or_none(response: httpx2.Response) -> object:
     return None if response.status_code == 204 or not response.content else response.json()
+
+
+class _RuleParameters(BaseModel):
+    require_code_owner_review: bool = False
+
+
+class _BranchRule(BaseModel):
+    type: str
+    parameters: _RuleParameters = _RuleParameters()
+
+
+_BRANCH_RULES = TypeAdapter(list[_BranchRule])
 
 
 class _GitHubErrorBody(BaseModel):

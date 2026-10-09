@@ -62,6 +62,7 @@ class Team:
     volunteer: str | None
     approver: tuple[str, int] | None
     every_area_reviewed: bool = False
+    code_owner_review_required: bool = False
 
     @property
     def author(self) -> str:
@@ -84,6 +85,8 @@ class Team:
             scenario.habit(people[login], action, after=_hours(hours))
         if self.every_area_reviewed:
             scenario.reviewer_instructions(_EVERY_AREA)
+        if self.code_owner_review_required:
+            scenario.requires_code_owner_review()
         scenario.pull_request(author=people[self.author], files=self.files)
         return scenario
 
@@ -134,6 +137,8 @@ class Team:
         ]
         if self.every_area_reviewed:
             lines.append(f"    scenario.reviewer_instructions({_EVERY_AREA!r})")
+        if self.code_owner_review_required:
+            lines.append("    scenario.requires_code_owner_review()")
         lines += [
             f"    scenario.pull_request(author={self.author}, files={self.files!r})",
             "",
@@ -190,6 +195,7 @@ def teams(draw: st.DrawFn) -> Team:
         volunteer=draw(st.none() | st.sampled_from(others)),
         approver=draw(st.none() | st.tuples(st.sampled_from(others), st.integers(1, 30))),
         every_area_reviewed=draw(st.booleans()),
+        code_owner_review_required=draw(st.booleans()),
     )
 
 
