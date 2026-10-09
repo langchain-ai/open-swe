@@ -60,6 +60,7 @@ from openswe.slack.responses import (
 )
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from openswe.slack.solo_threads import allow_solo_thread_followup
+from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
 from openswe.slack.thread_feedback import (
     handle_slack_feedback_interaction,
     is_slack_feedback_payload,
@@ -430,6 +431,16 @@ async def slack_webhook(
         if event.reaction in common.FEEDBACK_REACTIONS:
             background_tasks.add_task(common.process_slack_reaction_added, raw_event, event_id)
             return accepted("Reaction feedback queued")
+        if event.reaction == SUMMON_REACTION and channel_context is not None:
+            background_tasks.add_task(
+                process_slack_summon_reaction,
+                event,
+                event_id,
+                channel_context=channel_context,
+                bot_user_id=envelope.bot_user_id(common.SLACK_BOT_USER_ID),
+                team_id=team_id,
+            )
+            return accepted("Summon reaction queued")
         return ignored("Reaction not tracked for feedback")
 
     if event.type == "reaction_removed":
