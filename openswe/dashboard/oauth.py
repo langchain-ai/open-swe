@@ -16,7 +16,7 @@ import httpx2
 import jwt
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import APIKeyCookie
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 from starlette.requests import HTTPConnection
 
 from openswe.config import ENV
@@ -44,6 +44,8 @@ STATE_TTL_SECONDS = 600
 HANDOFF_TTL_SECONDS = 120
 TERMINAL_TICKET_TTL_SECONDS = 60
 TERMINAL_TICKET_AUDIENCE = "open-swe-cloud-terminal"
+UPLOAD_TICKET_TTL_SECONDS = 60 * 60
+UPLOAD_TICKET_AUDIENCE = "open-swe-session-upload"
 JWT_ALG = "HS256"
 
 
@@ -79,6 +81,41 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
         raise HTTPException(401, "invalid terminal ticket")
     email = payload.get("email")
     return {"sub": login, "email": email if isinstance(email, str) else None}
+
+
+class UploadTicket(BaseModel):
+    """Who may fill which reserved session-upload thread, as ``oswe upload`` presents it."""
+
+    sub: str = Field(min_length=1)
+    email: str | None = None
+    thread_id: str = Field(min_length=1)
+
+
+def issue_upload_ticket(*, login: str, email: str | None, thread_id: str) -> str:
+    now = int(time.time())
+    payload = {
+        "aud": UPLOAD_TICKET_AUDIENCE,
+        "sub": login,
+        "email": email,
+        "thread_id": thread_id,
+        "iat": now,
+        "exp": now + UPLOAD_TICKET_TTL_SECONDS,
+    }
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def decode_upload_ticket(token: str) -> UploadTicket:
+    try:
+        payload = jwt.decode(
+            token,
+            _secret(),
+            algorithms=[JWT_ALG],
+            audience=UPLOAD_TICKET_AUDIENCE,
+            options={"require": ["aud", "sub", "thread_id", "iat", "exp"]},
+        )
+        return UploadTicket.model_validate(payload)
+    except (jwt.PyJWTError, ValidationError) as exc:
+        raise HTTPException(401, "invalid or expired upload code") from exc
 
 
 GITHUB_APP_CLIENT_ID = ENV.GITHUB_APP_CLIENT_ID.get()

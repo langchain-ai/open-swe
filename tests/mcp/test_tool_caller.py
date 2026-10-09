@@ -1,31 +1,34 @@
-"""CLI MCP reuses the Python tool contract and rechecks caller permissions."""
+"""The remote MCP reuses the Python tool contract and rechecks caller permissions."""
 
 import json
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
 from mcp.types import CallToolResult, TextContent, Tool
 from pydantic import JsonValue
 
 from openswe.mcp import MCPConnection, runtime
-from openswe.mcp.cli_tools import CLIArguments, cli_mcp_invoke, cli_mcp_tools
+from openswe.mcp.caller import ToolCaller, UnknownTool
+from openswe.sandboxes.tool_runtime import tool_parameters
 from tests.mcp_helpers import Transport, fake_mcp_server
+
+USER = ToolCaller(login="user", email=None)
+ADMIN = ToolCaller(login="admin", email=None)
 
 
 @pytest.mark.asyncio
-async def test_catalog_respects_session_admin_and_uses_python_schema(
+async def test_catalog_respects_admin_and_uses_python_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
-    assert {tool.access for tool in await cli_mcp_tools({"sub": "user"})} == {"session"}
-    tools = await cli_mcp_tools({"sub": "admin"})
-    by_name = {tool.name: tool for tool in tools}
-    assert "manage_feature_flags" in by_name
-    assert "read_only_sql" in by_name
-    assert "publish_workspace" not in by_name
-    assert by_name["manage_feature_flags"].parameters["required"] == ["action"]
-    properties = by_name["manage_feature_flags"].parameters["properties"]
+    assert {access for _, access in (await USER.tools()).values()} == {"session"}
+    tools = await ADMIN.tools()
+    assert "read_only_sql" in tools
+    assert "upload_session" in tools
+    assert "publish_workspace" not in tools
+    parameters = tool_parameters(tools["manage_feature_flags"][0])
+    assert parameters["required"] == ["action"]
+    properties = parameters["properties"]
     assert isinstance(properties, dict) and "flags" in properties
 
 
@@ -34,14 +37,12 @@ async def test_invoke_rechecks_admin_and_runs_private_admin_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
-    arguments = CLIArguments(root={"action": "read"})
-    with pytest.raises(HTTPException) as exc:
-        await cli_mcp_invoke("manage_feature_flags", arguments, {"sub": "user"})
-    assert exc.value.status_code == 404
+    with pytest.raises(UnknownTool):
+        await USER.invoke("manage_feature_flags", {"action": "read"})
 
     get_settings = AsyncMock(return_value={"example": True})
     monkeypatch.setattr("openswe.tools.manage_feature_flags.get_instance_settings", get_settings)
-    result = await cli_mcp_invoke("manage_feature_flags", arguments, {"sub": "admin"})
+    result = await ADMIN.invoke("manage_feature_flags", {"action": "read"})
     assert isinstance(result.content, str)
     content = json.loads(result.content)
     assert content["scope"] == "instance"
@@ -52,9 +53,7 @@ async def test_invoke_rechecks_admin_and_runs_private_admin_tool(
 @pytest.mark.asyncio
 async def test_invoke_validates_python_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
-    result = await cli_mcp_invoke(
-        "manage_feature_flags", CLIArguments(root={"action": "invalid"}), {"sub": "admin"}
-    )
+    result = await ADMIN.invoke("manage_feature_flags", {"action": "invalid"})
     assert result.status == "error"
     assert "action" in str(result.content)
 
@@ -114,19 +113,13 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
     fake_mcp_server(monkeypatch, call=call)
-    alice = {"sub": "alice"}
-    bob = {"sub": "bob"}
-    alice_tools = await cli_mcp_tools(alice)
-    remote = next(tool for tool in alice_tools if tool.name.startswith("mcp_linear_search_"))
-    assert remote.parameters["type"] == "object"
-    assert next(tool for tool in await cli_mcp_tools(bob) if tool.name == remote.name)
-    assert "alice.example" in str(
-        (await cli_mcp_invoke(remote.name, CLIArguments(root={}), alice)).content
-    )
-    assert "instance.example" in str(
-        (await cli_mcp_invoke(remote.name, CLIArguments(root={}), bob)).content
-    )
+    alice = ToolCaller(login="alice", email=None)
+    bob = ToolCaller(login="bob", email=None)
+    name = next(name for name in await alice.tools() if name.startswith("mcp_linear_search_"))
+    assert tool_parameters((await alice.tools())[name][0])["type"] == "object"
+    assert name in await bob.tools()
+    assert "alice.example" in str((await alice.invoke(name, {})).content)
+    assert "instance.example" in str((await bob.invoke(name, {})).content)
     personal["linear"] = personal["linear"].model_copy(update={"allowed_tools": []})
-    with pytest.raises(HTTPException) as exc:
-        await cli_mcp_invoke(remote.name, CLIArguments(root={}), alice)
-    assert exc.value.status_code == 404
+    with pytest.raises(UnknownTool):
+        await alice.invoke(name, {})

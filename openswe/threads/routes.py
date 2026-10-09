@@ -16,6 +16,7 @@ from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
+from openswe.github.token_auth import bearer_github_token
 from openswe.threads import terminal
 from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
@@ -145,11 +146,11 @@ async def api_create_session(
 
 @router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
 @audit_endpoint
-async def api_upload_session(
-    request: Request,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    return await upload_session(UploadStream(request), session["sub"], email=session.get("email"))
+async def api_upload_session(request: Request) -> dict[str, Any]:
+    code = bearer_github_token(request)
+    if code is None:
+        raise HTTPException(401, "send the upload code as a bearer token")
+    return await upload_session(UploadStream(request), code)
 
 
 @router.post("/threads/resolve-all")

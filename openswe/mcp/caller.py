@@ -1,9 +1,9 @@
 """A person calling Open SWE's agent tools from outside any thread.
 
-The ``oswe`` CLI and the remote MCP server both serve this catalog: every agent
-tool opted in with ``@expose_mcp``, plus the integration MCPs the person may use
-in a private thread. Each call runs through a tool node exactly as in a private
-thread the caller owns, so injected state and access policies resolve the same way.
+The remote MCP server serves this catalog: every agent tool opted in with
+``@expose_mcp``, plus the integration MCPs the person may use in a private
+thread. Each call runs through a tool node exactly as in a private thread the
+caller owns, so injected state and access policies resolve the same way.
 """
 
 from dataclasses import dataclass
@@ -39,6 +39,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.user_skills",
     "openswe.tools.threads",
     "openswe.tools.report_platform_issue",
+    "openswe.tools.upload_session",
     "openswe.slack.tools.request_pr_review",
 )
 
@@ -73,11 +74,6 @@ def _exposed() -> dict[str, tuple[BaseTool, Access]]:
 class ToolCaller:
     login: str
     email: str | None
-
-    @classmethod
-    def from_session(cls, session: dict[str, object]) -> Self:
-        email = session.get("email")
-        return cls(login=str(session["sub"]), email=email if isinstance(email, str) else None)
 
     @classmethod
     async def for_github_account(cls, external_id: str) -> Self:
