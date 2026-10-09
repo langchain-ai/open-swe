@@ -61,10 +61,12 @@ export function useSidebarKeyboardNav({
   viewport,
   activeKeys,
   archiveActive,
+  enabled,
 }: {
   viewport: React.RefObject<HTMLElement | null>
   activeKeys: ReadonlyArray<string>
   archiveActive: () => void
+  enabled: boolean
 }) {
   const latest = useRef({ viewport, activeKeys, archiveActive })
   useEffect(() => {
@@ -81,6 +83,7 @@ export function useSidebarKeyboardNav({
         aliases: ["down", "inbox"],
         shortcuts: ["j"],
         group: "Thread",
+        available: enabled,
         run: () => openRow(rows().adjacent(1)),
       },
       {
@@ -89,6 +92,7 @@ export function useSidebarKeyboardNav({
         aliases: ["up", "inbox"],
         shortcuts: ["k"],
         group: "Thread",
+        available: enabled,
         run: () => openRow(rows().adjacent(-1)),
       },
       {
@@ -97,6 +101,7 @@ export function useSidebarKeyboardNav({
         aliases: ["done", "mark done", "triage"],
         shortcuts: ["e"],
         group: "Thread",
+        available: enabled,
         run: () => {
           const list = rows()
           const current = list.current()
@@ -108,7 +113,7 @@ export function useSidebarKeyboardNav({
         },
       },
     ]
-  }, [])
+  }, [enabled])
   useRegisterAppCommands(commands)
 
   return (event: React.KeyboardEvent<HTMLElement>) => {

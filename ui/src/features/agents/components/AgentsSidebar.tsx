@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
@@ -115,6 +115,7 @@ import {
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
+import { sectionOf } from "@/lib/appLocation"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 import { reportError } from "@/lib/errorReporting"
@@ -526,6 +527,9 @@ export function AgentsSidebar({
     : activeThreadId
       ? `cloud:${activeThreadId}`
       : undefined
+  const onInbox = useRouterState({
+    select: (state) => sectionOf(state.location.pathname) === "/agents/inbox",
+  })
   const activeKeys = [
     ...(activeKey ? [activeKey] : []),
     ...(activeReview ? [reviewRequestKey(activeReview)] : []),
@@ -533,6 +537,7 @@ export function AgentsSidebar({
   const onThreadListKeyDown = useSidebarKeyboardNav({
     viewport: scrollViewport,
     activeKeys,
+    enabled: !onInbox,
     archiveActive: () => {
       if (activeLocalSessionId)
         setArchived({ location: "local", id: activeLocalSessionId }, true)
