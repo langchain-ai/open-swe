@@ -74,3 +74,21 @@ it("requires a chosen channel when the repository has no review destination", as
   fireEvent.click(button)
   await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
 })
+
+it.each([
+  { mergeable: false },
+  { mergeState: "dirty" },
+  { ci: "failing" as const },
+  { draft: true },
+  { state: "closed" as const },
+])("hides the button when the request would be refused: %o", (change) => {
+  vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
+    available: true,
+  })
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RequestHumanReview pr={{ ...pr, ...change }} />
+    </QueryClientProvider>
+  )
+  expect(screen.queryByRole("button")).toBeNull()
+})

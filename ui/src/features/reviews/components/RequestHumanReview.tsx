@@ -7,13 +7,15 @@ import { api, type OpenPullRequest } from "@/lib/api"
 import { pullRequestKey } from "../lib/status"
 import { PullRequestActionButton } from "./PullRequestActionButton"
 
-/** Why the server would refuse the request, as far as the list's status can tell. */
-function refusal(pr: OpenPullRequest): string | null {
-  if (pr.mergeable === false || pr.mergeState === "dirty")
-    return "Resolve the merge conflicts first"
-  if (pr.ci === "failing" && pr.mergeState !== "unstable")
-    return "Fix the failing required checks first"
-  return null
+/** Whether the server would refuse the request, as far as the list's status can tell. */
+function refused(pr: OpenPullRequest): boolean {
+  return (
+    pr.state !== "open" ||
+    pr.draft !== false ||
+    pr.mergeable === false ||
+    pr.mergeState === "dirty" ||
+    (pr.ci === "failing" && pr.mergeState !== "unstable")
+  )
 }
 
 /** Posts a review card in the repository's Slack review channel. */
@@ -21,12 +23,11 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const availability = useQuery({
     queryKey: ["human-review-availability", pr],
     queryFn: () => api.humanReviewAvailability(pr),
-    enabled: pr.reviewDecision !== "approved",
+    enabled: pr.reviewDecision !== "approved" && !refused(pr),
     staleTime: 60_000,
   })
   const [channel, setChannel] = useState<string | null>(null)
   const needsChannel = availability.isSuccess && !availability.data.available
-  const blocked = refusal(pr)
   const requestReview = useMutation({
     mutationFn: () =>
       api.requestHumanReview(pr, needsChannel ? (channel ?? "") : ""),
@@ -55,7 +56,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     },
     retry: false,
   })
-  if (pr.reviewDecision === "approved") return null
+  if (pr.reviewDecision === "approved" || refused(pr)) return null
   const label =
     requestReview.isPending || requestReview.isSuccess
       ? "Review requested"
@@ -66,7 +67,6 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     <span
       className="inline-flex items-center gap-2"
       onClick={(event) => event.stopPropagation()}
-      title={blocked ?? undefined}
     >
       {needsChannel && !requestReview.isSuccess && (
         <SlackChannelCombobox
@@ -81,7 +81,6 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       <PullRequestActionButton
         label={label}
         disabled={
-          blocked !== null ||
           !availability.isSuccess ||
           (needsChannel && !channel) ||
           requestReview.isPending ||
