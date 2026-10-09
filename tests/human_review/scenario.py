@@ -54,6 +54,9 @@ TOKYO = "Asia/Tokyo"
 _REVIEWS = "CREVIEWS"
 _SIGN_UP = "open_swe_option_select_review"
 _PICK_NOTICES = frozenset({"reviewer_pick", "review_snooze_ended"})
+_MENTION = re.compile(r"@([A-Za-z0-9-]+)")
+_APPROVED = re.compile(r"^(@[^\n]*?) approved ", re.MULTILINE)
+_WAITING = re.compile(r"Still reviewing or asked: ([^.]*)\.")
 _INSTRUCTIONS = re.compile(r"<reviewer-instructions>(.*?)</reviewer-instructions>", re.DOTALL)
 _SUGGESTION = re.compile(r"Open SWE suggests @([A-Za-z0-9-]+): (.+?)(?: Unless|$)", re.MULTILINE)
 
@@ -135,26 +138,36 @@ class TakesSuggestions:
 
 @dataclass(frozen=True)
 class FollowsInstructions:
-    """Assigns the first person the repository's reviewer instructions name, as a model would
-    read them; without instructions it takes Open SWE's suggestions."""
+    """Asks the first person the repository's reviewer instructions name who has neither
+    approved nor been asked, one at a time, as a model reading staged instructions would.
+
+    Without anyone named in the instructions it takes Open SWE's suggestions.
+    """
 
     async def woken(self, scenario: ReviewScenario, thread_id: str, prompt: str) -> None:
         instructions = _INSTRUCTIONS.search(prompt)
-        named = re.search(r"@([A-Za-z0-9-]+)", instructions.group(1)) if instructions else None
-        if named is None:
+        named = _MENTION.findall(instructions.group(1)) if instructions else []
+        if not named:
             await TakesSuggestions().woken(scenario, thread_id, prompt)
+            return
+        done = {*_mentions(_APPROVED.search(prompt)), *_mentions(_WAITING.search(prompt))}
+        login = next((login for login in named if login not in done), None)
+        if login is None:
+            scenario.record("agent", "woken; the instructions ask for nobody else", source=AGENT)
             return
         result = await scenario.use_tool(
             thread_id,
             assign_human_reviewer,
             pr_url=scenario.pr_url,
-            github_login=named.group(1),
-            reason="The repository's reviewer instructions name them.",
+            github_login=login,
+            reason="The repository's reviewer instructions name them next.",
         )
         outcome = str(result.get("next") if result.get("success") else result.get("error"))
-        scenario.record(
-            "agent", f"assign_human_reviewer @{named.group(1)} → {outcome}", source=AGENT
-        )
+        scenario.record("agent", f"assign_human_reviewer @{login} → {outcome}", source=AGENT)
+
+
+def _mentions(match: re.Match[str] | None) -> list[str]:
+    return _MENTION.findall(match.group(1)) if match else []
 
 
 @dataclass(frozen=True)

@@ -644,6 +644,16 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
     return Outcome("Review declined; Open SWE will find another reviewer.")
 
 
+async def _review_required(request: HumanReviewRequest) -> bool:
+    """Whether GitHub still wants an approval before merging; unreadable counts as wanted."""
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            return await pull.review_required()
+    except GitHubAppUnavailable:
+        return True
+
+
 async def _github_approvers(request: HumanReviewRequest) -> list[str]:
     """Who has approved the pull request on GitHub; empty when GitHub cannot be read."""
     pr = request.pull_request
@@ -666,17 +676,20 @@ async def assign(
 ) -> RequestResult:
     """Pick ``github_login`` to review: show them on the card and DM them.
 
-    The first reviewer stands alone. More join only for code owner areas nobody on the request
-    owns, and unasked only once someone approved. ``replace`` is a person naming the reviewer:
-    Open SWE's pending picks for the same code are withdrawn first.
+    The repository's reviewer instructions decide who else may join. Without them one
+    reviewer stands alone and one approval is enough, unless GitHub still wants approvals:
+    then owners of code no approver or reviewer owns may join. ``replace`` is a person naming
+    the reviewer: Open SWE's pending picks for the same code are withdrawn first.
     """
     approvers = await _github_approvers(request)
     coverage = await Coverage.load(request)
-    if approvers and (coverage is None or not coverage.uncovered(approvers)):
+    instructed = await ReviewerInstructions.load(request) is not None
+    review_required = bool(approvers) and not instructed and await _review_required(request)
+    if approvers and not instructed and not review_required:
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
-            f"{names} already approved this pull request on GitHub for all of its code "
-            "owners, so it needs no reviewer. Do not pick anyone."
+            f"{names} already approved this pull request on GitHub, so it needs no "
+            "reviewer. Do not pick anyone."
         )
     user = await User.for_login("github", github_login)
     if user is None:
@@ -707,23 +720,14 @@ async def assign(
         request = await HumanReviewRequest.get(request.id) or request
     assigned = [p.github_login for p in request.reviewers + request.picks]
     alongside = bool(assigned or approvers)
-    if alongside and not replace:
+    if alongside and not replace and not instructed:
         open_areas = coverage.uncovered([*assigned, *approvers]) if coverage is not None else []
-        if not any(area in open_areas for area in theirs):
+        if not review_required or not any(area in open_areas for area in theirs):
             return RequestResult(
                 success=False,
                 error=(
-                    "This pull request already has a reviewer for the code "
-                    f"@{github_login} owns. Do not pick anyone else for it."
-                ),
-                claimed=True,
-            )
-        if not approvers:
-            return RequestResult(
-                success=False,
-                error=(
-                    "Reviewers for the other code owners are picked only after the first "
-                    "reviewer approves. Do not pick anyone else yet."
+                    "This pull request already has a reviewer, and one review is enough. "
+                    "Do not pick anyone else."
                 ),
                 claimed=True,
             )
@@ -1130,6 +1134,7 @@ class PickTrigger:
     logins: tuple[str, ...] = ()
     reason: str = ""
     review_required: bool = False
+    waiting_on: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1251,10 +1256,16 @@ async def _ask_for_more_reviewers(
             "code_owner_areas": [list(area.handles) for area in open_areas],
         },
     )
+    approved = {login.lower() for login in approvers}
     trigger = PickTrigger(
         "approved",
         tuple(approvers),
         review_required=review_required,
+        waiting_on=tuple(
+            p.github_login
+            for p in request.reviewers + request.picks
+            if p.github_login.lower() not in approved
+        ),
     )
     if not await _wake_picker(request, asked=False, trigger=trigger, suggestions=suggestions):
         async with HumanReviewRequest.locked(request.id) as (_, row):

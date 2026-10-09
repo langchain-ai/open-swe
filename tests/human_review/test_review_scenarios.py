@@ -229,3 +229,41 @@ async def test_github_requiring_code_owner_review_asks_every_areas_owners(
                 requested_on_github(dana),
                 dm_to(dana, "reviewer_pick"),
             )
+
+
+async def test_reviews_follow_the_repositorys_stages_one_at_a_time(
+    scenario: ReviewScenario,
+) -> None:
+    """Reviews follow the repository's stages, one at a time.
+
+    The repository's reviewer instructions ask for a teammate first and a hard code owner
+    only after that teammate approves. Open SWE asks the implementer each time an approval
+    lands, so Carol is asked only once Bob has approved.
+    """
+    ada = scenario.person("ada", NEW_YORK)
+    bob = scenario.person("bob", NEW_YORK)
+    carol = scenario.person("carol", NEW_YORK)
+    scenario.owns("/api/", bob, carol)
+    scenario.reviewer_instructions(
+        "Ask one teammate first: @bob. Only once a teammate approves, ask the hard code "
+        "owner @carol. Never ask both at once."
+    )
+    scenario.pull_request(author=ada, files=["api/server.py"])
+    scenario.agent = FollowsInstructions()
+
+    async with scenario.from_(ada.at("Mon 10:00")):
+        with scenario.step("Ada asks for a review; the implementer asks her teammate only"):
+            await scenario.request_review()
+            await scenario.wait(hours=2)
+            scenario.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
+
+        with scenario.step("Bob accepts and approves; now the hard code owner is asked"):
+            await scenario.clicks(bob, "accept")
+            await scenario.reviews_on_github(bob)
+            scenario.expect(
+                joined(bob, cause="accepted_pick"),
+                edited(bob),
+                picked(carol),
+                requested_on_github(carol),
+                dm_to(carol, "reviewer_pick"),
+            )
