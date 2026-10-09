@@ -341,8 +341,8 @@ test.describe("review page", () => {
       timeout: 30_000,
     });
     await expect(chatCard(toDiscard)).toContainText("Draft review comment");
+    await chatCard(toPost).getByRole("button", { name: toPost }).click();
     await expect(inlineCard(toPost)).toContainText("Draft review comment");
-    await expect(inlineCard(toDiscard)).toContainText("Draft review comment");
     await expect(inlineCard(toPost).getByLabel("Comment body")).toHaveValue(
       "Rename ZETA_5 to something descriptive.",
     );
