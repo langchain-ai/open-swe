@@ -21,8 +21,15 @@ from openswe.input_messages import dynamic_context_hash, input_message_text, mes
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
+from openswe.slack.client import (
+    delete_slack_thread_associations,
+    get_active_slack_thread,
+    lookup_slack_thread_id,
+    parse_github_pr_url,
+    parse_slack_thread_url,
+)
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from openswe.slack.thinking import release_slack_location_status
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
@@ -966,6 +973,7 @@ async def manage_thread(
     fingerprint: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
+    replace_current: bool = False,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `manage_thread` tool."""
@@ -988,6 +996,8 @@ async def manage_thread(
     )
     if unexpected:
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
+    if replace_current and action != "send_message":
+        return _failure("replace_current is only supported for send_message")
     if action == "admin_cancel" and not actor.admin:
         return _failure("Only workspace admins can cancel another user's thread")
     if action == "send_message":
@@ -1005,13 +1015,52 @@ async def manage_thread(
             return resolved
         thread_id, summary = resolved
         if action == "send_message":
-            return await _send_message(
+            source_id: str | None = None
+            if replace_current:
+                current = _config().get("configurable", {}).get("thread_id")
+                if not isinstance(current, str) or not current:
+                    return _failure("Current thread ID is unavailable")
+                source = await _authorized_locator(current, actor)
+                if isinstance(source, dict):
+                    return source
+                source_id = source[0]
+                if source_id == thread_id:
+                    return _failure("Cannot replace the current thread with itself")
+            result = await _send_message(
                 thread_id,
                 actor,
                 message or "",
                 model_id=model_id,
                 effort=effort,
             )
+            if source_id is not None and result.get("success"):
+                try:
+                    await resolve_dashboard_thread(
+                        source_id, actor.login, resolved=True, email=actor.email
+                    )
+                    client = langgraph_client()
+                    active = await get_active_slack_thread(client, source_id)
+                    if active:
+                        channel = active.get("channel_id")
+                        timestamp = active.get("thread_ts")
+                        if isinstance(channel, str) and isinstance(timestamp, str):
+                            await delete_slack_thread_associations(
+                                client, channel, timestamp, expected_thread_id=source_id
+                            )
+                            await release_slack_location_status(channel, timestamp)
+                    await client.threads.update(
+                        thread_id=source_id, metadata={"replaced_by_thread_id": thread_id}
+                    )
+                except Exception:
+                    logger.exception("Thread replacement cleanup failed")
+                    return {
+                        **result,
+                        "success": False,
+                        "dispatched": True,
+                        "error": "Target received the message, but current-thread cleanup failed",
+                    }
+                result.update(replaced_thread_id=source_id, target_thread_id=thread_id)
+            return result
         if action == "cancel":
             thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
             return {"success": True, "thread": _list_item(thread)}

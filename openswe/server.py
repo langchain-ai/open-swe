@@ -135,6 +135,7 @@ from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
+from openswe.middleware.pr_thread_reminder import pr_thread_reminder_before_model
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware
 from openswe.middleware.require_user_reply import (
@@ -2116,7 +2117,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     *(
                         []
                         if stop_summary_mode
-                        else [check_message_queue_before_model, deliver_event_matches_before_model]
+                        else [
+                            check_message_queue_before_model,
+                            deliver_event_matches_before_model,
+                            pr_thread_reminder_before_model,
+                        ]
                     ),
                     *(
                         []
