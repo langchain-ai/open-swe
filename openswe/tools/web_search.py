@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 from openswe.config import ENV
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 WEB_SEARCH_MAX_INLINE_CHARS = 100_000
 
 
+@expose_mcp()
 async def web_search(
     query: str,
     num_results: int = 5,

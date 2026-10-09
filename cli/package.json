@@ -16,7 +16,6 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.31.0",
     "open-swe-bridge-client": "workspace:*",
     "zod": "^4.6.5"
   }
