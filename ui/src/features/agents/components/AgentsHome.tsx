@@ -50,6 +50,8 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 
+import { ANNOTATION_DRAFT_KEY } from "@/features/annotations/PageAnnotations"
+
 const LAST_LOCAL_REPO_KEY = "open-swe.desktop.last-repo"
 /** Name the key had while local repositories were called projects. */
 const LEGACY_LAST_LOCAL_REPO_KEY = "open-swe.desktop.last-project"
@@ -70,11 +72,22 @@ export function AgentsHome({
   initialRepo,
   initialLocalRepo,
   initialNoRepo,
+  annotationDraft,
 }: {
   initialRepo?: string
   initialLocalRepo?: string
   initialNoRepo?: boolean
+  annotationDraft?: string
 }) {
+  const [annotationText] = useState(() => {
+    if (!annotationDraft || typeof window === "undefined") return ""
+    return sessionStorage.getItem(ANNOTATION_DRAFT_KEY) ?? ""
+  })
+  const annotationRestore = useMemo(
+    () =>
+      annotationText ? { key: 1, text: annotationText, images: [] } : null,
+    [annotationText]
+  )
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -603,6 +616,7 @@ export function AgentsHome({
             </Banner>
           )}
           <AgentPromptBar
+            restoreDraft={annotationRestore}
             activeRun={
               optimisticDraftThread
                 ? { threadId: pendingThreadId ?? "", running: true }
