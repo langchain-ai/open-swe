@@ -147,6 +147,8 @@ export interface ChatComposerProps {
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
+  /** The run target is a staged move that takes effect with the next message. */
+  runTargetPending?: boolean
   localRepos?: Array<DesktopProject>
   selectedLocalRepoPath?: string | null
   selectedLocalRepoBranch?: string | null
@@ -283,6 +285,7 @@ export const ChatComposer = memo(function ChatComposer({
   onRepoChange,
   runTarget,
   onRunTargetChange,
+  runTargetPending,
   localRepos = [],
   selectedLocalRepoPath = null,
   selectedLocalRepoBranch = null,
@@ -704,7 +707,11 @@ export const ChatComposer = memo(function ChatComposer({
   const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
       {runTarget && (
-        <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+        <RunTargetSelector
+          onChange={onRunTargetChange}
+          pending={runTargetPending}
+          value={runTarget}
+        />
       )}
       {runTarget !== "local" && onWorkspaceChange && (
         <WorkspaceSelector

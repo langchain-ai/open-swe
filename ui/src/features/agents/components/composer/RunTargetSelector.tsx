@@ -100,24 +100,30 @@ function MenuOption({
 export function RunTargetSelector({
   value,
   onChange,
+  pending = false,
 }: {
   value: RunTarget
   /** Omitted while the target can't change. */
   onChange?: (value: RunTarget) => void
+  pending?: boolean
 }) {
   const current = (
     <>
       <TriggerIcon icon={value === "local" ? LaptopIcon : CloudIcon} />
       <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+      {pending && <span className="text-tertiary">· next message</span>}
     </>
   )
+  const title = pending ? "Moves with your next message" : undefined
   if (!onChange)
     return (
-      <span className="flex items-center gap-1 text-secondary">{current}</span>
+      <span className="flex items-center gap-1 text-secondary" title={title}>
+        {current}
+      </span>
     )
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={TRIGGER_CLASS_NAME}>
+      <DropdownMenuTrigger className={TRIGGER_CLASS_NAME} title={title}>
         {current}
         <ComposerControlChevron />
       </DropdownMenuTrigger>

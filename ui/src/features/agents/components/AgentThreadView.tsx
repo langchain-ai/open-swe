@@ -1029,6 +1029,7 @@ export function AgentThreadView({
                   : {})}
                 {...(canMove && {
                   runTarget: handoff ?? runsHere,
+                  runTargetPending: handoff !== null,
                   onRunTargetChange: isStreaming
                     ? undefined
                     : (next: RunTarget) =>
