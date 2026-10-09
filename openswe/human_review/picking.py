@@ -10,13 +10,13 @@ away from it for not accepting, is skipped.
 
 import asyncio
 import logging
+import posixpath
 import re
 from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from html import escape
-from pathlib import PurePosixPath
 from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -298,7 +298,7 @@ class ReviewerInstructions:
                     REVIEWER_INSTRUCTIONS_PATH, ref, max_chars=_REVIEWER_INSTRUCTIONS_MAX_CHARS
                 )
                 if text:
-                    text = await cls._include(repo, ref, text)
+                    text = await cls._include(repo, ref, REVIEWER_INSTRUCTIONS_PATH, text)
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to read reviewer instructions",
@@ -308,21 +308,29 @@ class ReviewerInstructions:
         return cls(text) if text else None
 
     @staticmethod
-    async def _include(repo: RepoClient, ref: str | None, text: str) -> str:
-        """Replace each ``@path`` line with that file at ``ref``; a line naming no file, such as
-        a team mention, stays as written."""
+    async def _include(repo: RepoClient, ref: str | None, path: str, text: str) -> str:
+        """Replace each ``@path`` line of the file at ``path`` with the file it names at ``ref``.
+
+        ``@/a/b`` is from the repository root and ``@a/b`` from ``path``'s directory. A line
+        naming no file, such as a team mention, or a path outside the repository stays as written.
+        """
         parts: list[str] = []
         end = 0
         for line in _INCLUDE.finditer(text):
-            path = line.group(1).lstrip("/")
-            if ".." in PurePosixPath(path).parts:
+            named = line.group(1)
+            resolved = posixpath.normpath(
+                named.lstrip("/")
+                if named.startswith("/")
+                else posixpath.join(posixpath.dirname(path), named)
+            )
+            if resolved in {".", ".."} or resolved.startswith("../"):
                 continue
-            content = await repo.read_file(path, ref, max_chars=_INCLUDED_FILE_MAX_CHARS)
+            content = await repo.read_file(resolved, ref, max_chars=_INCLUDED_FILE_MAX_CHARS)
             if content is None:
                 continue
             parts += [
                 text[end : line.start()],
-                f'<included_file name="{escape(path)}">\n{content}\n</included_file>',
+                f'<included_file name="{escape(resolved)}">\n{content}\n</included_file>',
             ]
             end = line.end()
         return "".join([*parts, text[end:]])

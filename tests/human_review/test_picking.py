@@ -89,17 +89,19 @@ async def test_strict_codeowners_fetch_distinguishes_missing_from_unreadable(
         assert (owners is None) == (status == 404)
 
 
-async def test_reviewer_instructions_include_only_repository_files(
+async def test_reviewer_instructions_include_only_files_inside_the_repository(
     monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
 ) -> None:
     from openswe.github import http as github_http
 
     files = {
         ".open-swe/REVIEWERS.md": (
-            "Ask the owners below.\n@.github/CODEOWNERS\n@langchain-ai/security\n@../secrets\n"
-            "Mentions like @.github/CODEOWNERS inside a sentence stay."
+            "Ask the owners below.\n@../.github/CODEOWNERS\n@/docs/teams.md\n"
+            "@langchain-ai/security\n@../../secrets\n"
+            "Mentions like @../.github/CODEOWNERS inside a sentence stay."
         ),
         ".github/CODEOWNERS": "/api/ @bob",
+        "docs/teams.md": "Infra reviews deployments.",
     }
     fetched: list[str] = []
 
@@ -122,10 +124,11 @@ async def test_reviewer_instructions_include_only_repository_files(
     assert instructions.text == (
         "Ask the owners below.\n"
         '<included_file name=".github/CODEOWNERS">\n/api/ @bob\n</included_file>\n'
-        "@langchain-ai/security\n@../secrets\n"
-        "Mentions like @.github/CODEOWNERS inside a sentence stay."
+        '<included_file name="docs/teams.md">\nInfra reviews deployments.\n</included_file>\n'
+        "@langchain-ai/security\n@../../secrets\n"
+        "Mentions like @../.github/CODEOWNERS inside a sentence stay."
     )
-    assert "../secrets" not in fetched
+    assert not any("secrets" in path for path in fetched)
 
 
 def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
