@@ -69,7 +69,6 @@ export function useThreadActions(pr: PullRequestRef, thread: ReviewThread) {
               login,
               avatar_url: `https://github.com/${login}.png?size=40`,
               bot: false,
-              posted_by: null,
             }
           : null,
         created_at: new Date().toISOString(),

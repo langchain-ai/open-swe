@@ -1240,17 +1240,6 @@
           "login": {
             "title": "Login",
             "type": "string"
-          },
-          "posted_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Posted By"
           }
         },
         "required": [

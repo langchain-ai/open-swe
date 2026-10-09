@@ -25,7 +25,6 @@ router = APIRouter(tags=["review"])
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # Open SWE stamps everything it publishes, including what it posts with a person's token.
 _OPEN_SWE_MARKER_RE = re.compile(r"<!--\s*open-swe-review(?:er|-comment)\b")
-OPEN_SWE_LOGIN = "open-swe"
 # Open SWE's GitHub footers point back at this page or ask for GitHub reactions; here they're noise.
 _OPEN_SWE_FOOTER_RES = (
     re.compile(r"-{3,}\s*\n\*Your feedback helps Open SWE learn\.[^\n]*\*"),
@@ -178,17 +177,13 @@ class ConversationAuthor(BaseModel):
     login: str
     avatar_url: str
     bot: bool
-    # Set when Open SWE posted through this person's GitHub account; ``login`` is then Open SWE.
-    posted_by: str | None = None
 
+    # GitHub's account type only: a body marker is anyone's to paste, so it never makes a bot.
     @classmethod
-    def of(cls, user: _GitHubUser | None, body: str | None = None) -> Self | None:
+    def of(cls, user: _GitHubUser | None) -> Self | None:
         if user is None:
             return None
-        bot = user.type == "Bot"
-        if not bot and body and _OPEN_SWE_MARKER_RE.search(body):
-            return cls(login=OPEN_SWE_LOGIN, avatar_url="", bot=True, posted_by=user.login)
-        return cls(login=user.login, avatar_url=user.avatar_url, bot=bot)
+        return cls(login=user.login, avatar_url=user.avatar_url, bot=user.type == "Bot")
 
 
 class ConversationComment(BaseModel):
@@ -203,7 +198,7 @@ class ConversationComment(BaseModel):
     def of(cls, comment: _GitHubIssueComment) -> Self:
         return cls(
             id=comment.id,
-            author=ConversationAuthor.of(comment.user, comment.body),
+            author=ConversationAuthor.of(comment.user),
             created_at=comment.created_at,
             body=_display_body(comment.body),
             html_url=comment.html_url,
@@ -254,7 +249,7 @@ class ThreadComment(BaseModel):
         return cls(
             id=comment.id,
             review_id=comment.pull_request_review_id,
-            author=ConversationAuthor.of(comment.user, comment.body),
+            author=ConversationAuthor.of(comment.user),
             created_at=comment.created_at,
             body=_display_body(comment.body),
             html_url=comment.html_url,
@@ -368,7 +363,7 @@ class Conversation(BaseModel):
             items.append(
                 ConversationReview(
                     id=review.id,
-                    author=ConversationAuthor.of(review.user, review.body),
+                    author=ConversationAuthor.of(review.user),
                     created_at=review.submitted_at,
                     body=_display_body(review.body),
                     html_url=review.html_url,

@@ -84,7 +84,7 @@ export function Avatar({
     <MacawAvatar
       size={size}
       shape={author?.bot ? "square" : "circle"}
-      label={author?.posted_by ? "" : displayName(author)}
+      label={displayName(author)}
       imageUrl={author?.avatar_url || undefined}
       fallbackIcon={<AgentMark className="size-[70%]" />}
       className={cn("shrink-0", className)}
@@ -127,17 +127,7 @@ export function Byline({
       <span className="truncate font-medium text-primary">
         {displayName(author)}
       </span>
-      {author?.bot && (
-        <Tag
-          title={
-            author.posted_by
-              ? `Posted through ${author.posted_by}'s GitHub account`
-              : undefined
-          }
-        >
-          {author.posted_by ? `via ${author.posted_by}` : "bot"}
-        </Tag>
-      )}
+      {author?.bot && <Tag>bot</Tag>}
       {verb && <span className="text-secondary">{verb}</span>}
       {href ? (
         <a
