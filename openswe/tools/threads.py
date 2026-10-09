@@ -18,12 +18,21 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
+from openswe.input_messages import (
+    dynamic_context_hash,
+    input_message_text,
+    message_author_name,
+    message_on_behalf_of,
+    message_sender_id,
+)
 from openswe.invocation import resolve_invocation_id
+from openswe.message_authorship import concierge_author
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from openswe.slack.dm import is_concierge_thread
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
@@ -91,6 +100,7 @@ class _Actor:
     login: str
     email: str | None
     name: str
+    concierge: bool = False
 
     @property
     def session(self) -> dict[str, Any]:
@@ -128,7 +138,14 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         await enforce_github_login_gate(login)
     except HTTPException:
         return None
-    return _Actor(login=login, email=email, name=login)
+    cfg = RunConfig.parse(configurable)
+    slack = cfg.slack_thread
+    return _Actor(
+        login=login,
+        email=email,
+        name=login,
+        concierge=slack is not None and is_concierge_thread(slack.channel_context, slack.thread_ts),
+    )
 
 
 async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
@@ -401,6 +418,9 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
             "text": text[:_MAX_DETAIL_MESSAGE_CHARS],
             "truncated": truncated,
             "sender_id": message_sender_id(content),
+            "on_behalf_of": message_on_behalf_of(content),
+            "author_name": message_author_name(content),
+            "authorship": "delegated" if message_on_behalf_of(content) else None,
             "timestamp": _message_timestamp(message),
         }
     return None
@@ -438,6 +458,9 @@ def _transcript(state: Any) -> dict[str, Any]:
                 "text": returned_text,
                 "truncated": len(returned_text) < len(text),
                 "sender_id": message_sender_id(content),
+                "on_behalf_of": message_on_behalf_of(content),
+                "author_name": message_author_name(content),
+                "authorship": "delegated" if message_on_behalf_of(content) else None,
                 "timestamp": _message_timestamp(message),
             }
         )
@@ -857,8 +880,7 @@ async def _send_message(
     model_id: str | None,
     effort: str | None,
 ) -> dict[str, Any]:
-    # The dashboard's own send: a busy thread gets the message steered into its
-    # open turn or queued as a follow-up run, both shown on the transcript at once.
+    author = await concierge_author(actor.login, actor.email) if actor.concierge else None
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
@@ -875,6 +897,7 @@ async def _send_message(
         actor.login,
         json.dumps(command).encode(),
         email=actor.email,
+        author=author,
     )
     try:
         reply = _CommandReply.model_validate_json(content or b"{}")
@@ -1119,6 +1142,7 @@ async def start_thread(
                 "runs/started-thread", instructions=instructions, other_repos=clean_repos[1:]
             ),
             repos=clean_repos,
+            author=await concierge_author(actor.login, actor.email) if actor.concierge else None,
             visibility="private" if visibility == "private" else "public",
         )
     except HTTPException as exc:

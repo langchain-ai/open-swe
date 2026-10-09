@@ -188,6 +188,22 @@ def message_sender_id(content: object, *, kind: MessageKind | None = None) -> st
     return None
 
 
+def message_on_behalf_of(content: object) -> str | None:
+    for message in _input_message_elements(content):
+        principal = message.get("on_behalf_of")
+        if principal:
+            return principal
+    return None
+
+
+def message_author_name(content: object) -> str | None:
+    for message in _input_message_elements(content):
+        name = message.get("author_name")
+        if name:
+            return name
+    return None
+
+
 def _envelope_body(message: ElementTree.Element) -> str:
     """The authored text of an envelope, accepting the stored ``<content>`` shape."""
     return (message.text or "").strip() or (message.findtext("content") or "").strip()

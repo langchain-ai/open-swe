@@ -98,6 +98,7 @@ from openswe.desktop import (
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
+    message_on_behalf_of,
     message_sender_id,
     person_introduction,
     visible_dynamic_context_hashes,
@@ -996,7 +997,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 candidate_id
                 for candidate in reversed(state.get("messages") or [])
                 if isinstance(candidate, HumanMessage)
-                and (candidate_id := message_sender_id(candidate.content, kind="human")) is not None
+                and (
+                    candidate_id := (
+                        message_on_behalf_of(candidate.content)
+                        or message_sender_id(candidate.content, kind="human")
+                    )
+                )
+                is not None
             ),
             None,
         )

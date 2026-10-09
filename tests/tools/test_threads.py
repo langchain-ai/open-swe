@@ -416,3 +416,47 @@ async def test_manage_thread_rejects_plan_format_conversion(
 
     assert result == {"success": False, "error": "existing plan format is html"}
     update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("delegated", [False, True])
+async def test_delegation_survives_message_serialization_and_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+    delegated: bool,
+) -> None:
+    from openswe.message_authorship import concierge_author
+    from openswe.threads.runs import _attributed_run_messages
+    from openswe.users import User
+
+    monkeypatch.setattr(
+        User, "for_person", AsyncMock(return_value=SimpleNamespace(display_name="Ramon Nogueira"))
+    )
+    monkeypatch.setattr(
+        User,
+        "canonical_person",
+        AsyncMock(
+            return_value={
+                "id": "user:ramon",
+                "github_login": "ramon-langchain",
+                "display_name": "Ramon Nogueira",
+            }
+        ),
+    )
+    author = await concierge_author("ramon-langchain", None) if delegated else None
+    messages, _, _ = await _attributed_run_messages(
+        "target",
+        "ramon-langchain",
+        metadata={},
+        content="Correct the scope",
+        creating=True,
+        email=None,
+        client=SimpleNamespace(),
+        author=author,
+    )
+    transcript = threads_tool._transcript({"values": {"messages": messages}})
+    message = transcript["messages"][-1]
+    assert message["text"] == "Correct the scope"
+    assert message["sender_id"] == ("system:concierge-user:ramon" if delegated else "user:ramon")
+    assert message["on_behalf_of"] == ("user:ramon" if delegated else None)
+    assert ('kind="system"' if delegated else 'kind="human"') in messages[-1]["content"]
+    if delegated:
+        assert "Concierge on behalf of Ramon Nogueira" in messages[0]["content"]

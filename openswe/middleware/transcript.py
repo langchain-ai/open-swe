@@ -44,6 +44,8 @@ from openswe.database import postgres
 from openswe.input_messages import (
     delivered_event_match_ids,
     input_message_text,
+    message_author_name,
+    message_on_behalf_of,
     message_sender_id,
 )
 from openswe.middleware.trace import OpenSWEMiddleware
@@ -1138,6 +1140,13 @@ def _parse_turn_id(raw: str | None) -> UUID | None:
 
 def _sender(human: HumanMessage, ids: RunIds, metadata: Mapping[str, object]) -> MessageSender:
     """Who asked for this turn, from the message envelope then the run config."""
+    if principal := message_on_behalf_of(human.content):
+        return MessageSender(
+            login=message_sender_id(human.content) or "unknown",
+            kind="concierge",
+            display_name=message_author_name(human.content),
+            on_behalf_of=principal,
+        )
     login = (
         message_sender_id(human.content, kind="human")
         or _string(ids.configurable.get("github_login"))

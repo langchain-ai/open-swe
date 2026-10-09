@@ -21,6 +21,7 @@ from openswe.input_messages import (
     build_input_messages,
     visible_dynamic_context_hashes,
 )
+from openswe.message_authorship import message_context
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
@@ -262,9 +263,16 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         if isinstance(value, str):
                             cast(dict[str, str], person)[key] = value
                     person = await User.canonical_person(person)
+                    raw_author = content.get("author")
+                    author: SystemIdentity | None = None
+                    if isinstance(raw_author, dict) and all(
+                        isinstance(raw_author.get(key), str) for key in ("id", "display_name")
+                    ):
+                        author = cast(SystemIdentity, raw_author)
                     structured = build_input_messages(
                         blocks,
-                        {"sender_id": person["id"], "surface": "web", "kind": "human"},
+                        message_context(person["id"], author),
+                        systems=[author] if author else None,
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)
