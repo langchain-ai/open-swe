@@ -31,6 +31,7 @@ async def test_page_tracking_requires_session_and_rejects_raw_paths(monkeypatch)
         assert response.status_code == 204
     delivery.assert_awaited_once_with(
         login="alice",
+        email=None,
         event_type="page",
         name="agents",
         properties={"page_name": "agents", "surface": "dashboard"},

@@ -48,6 +48,13 @@ async def _capture(
             "$geoip_disable": True,
         },
     }
+    traits = properties.get("$set")
+    if isinstance(traits, dict):
+        capture_properties = payload["properties"]
+        if isinstance(capture_properties, dict):
+            capture_properties["$set"] = {
+                key: value for key, value in traits.items() if key in {"email", "github_login"}
+            }
     if timestamp:
         payload["timestamp"] = timestamp
     try:
@@ -63,6 +70,7 @@ async def _capture(
 async def record_usage(
     *,
     login: str,
+    email: str | None,
     event_type: str,
     name: str,
     properties: dict[str, str | bool],
@@ -79,7 +87,7 @@ async def record_usage(
             {
                 **properties,
                 "distinct_id": str(user.id),
-                "$process_person_profile": False,
+                "$set": {"email": email, "github_login": login},
             },
         )
     except Exception:
@@ -119,6 +127,7 @@ async def record_mcp_tool(tool: str, is_error: bool) -> None:
         cfg = RunConfig.from_config(get_config())
         await record_usage(
             login=cfg.github_login or "",
+            email=cfg.user_email,
             event_type="track",
             name="MCP Tool Called",
             properties={"tool": tool, "surface": "mcp", "is_error": is_error},

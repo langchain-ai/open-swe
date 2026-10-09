@@ -63,6 +63,7 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     for event_type in ("page", "track"):
         await posthog.record_usage(
             login="alice",
+            email="alice@example.com",
             event_type=event_type,
             name="usage",
             properties={
@@ -73,10 +74,14 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
             },
         )
     assert {request["properties"]["distinct_id"] for request in requests[1:]} == {str(user_id)}
-    assert "$set" not in requests[2]["properties"]
+    assert requests[2]["properties"]["$set"] == {
+        "email": "alice@example.com",
+        "github_login": "alice",
+    }
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
     await posthog.record_usage(
         login="unknown",
+        email=None,
         event_type="page",
         name="usage",
         properties={},

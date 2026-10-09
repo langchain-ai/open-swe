@@ -55,6 +55,7 @@ async def api_page_view(
 
     await record_usage(
         login=session["sub"],
+        email=session.get("email"),
         event_type="page",
         name=body.page_name,
         properties={"page_name": body.page_name, "surface": "dashboard"},
