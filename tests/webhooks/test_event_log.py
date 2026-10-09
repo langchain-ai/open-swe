@@ -83,6 +83,11 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
         "email": "alice@example.com",
         "github_login": "alice",
     }
+    for email in (None, ""):
+        await posthog.record_usage(
+            login="alice", email=email, event_type="page", name="usage", properties={}
+        )
+        assert requests[-1]["properties"]["$set"] == {"github_login": "alice"}
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
     await posthog.record_usage(
         login="unknown",
@@ -97,7 +102,7 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     assert requests[3]["properties"]["is_error"] is False
     monkeypatch.delenv("POSTHOG_API_KEY")
     await posthog.record_webhook(event)
-    assert len(requests) == 4
+    assert len(requests) == 6
 
 
 async def _partitions() -> set[str]:

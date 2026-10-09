@@ -54,7 +54,9 @@ async def _capture(
         capture_properties = payload["properties"]
         if isinstance(capture_properties, dict):
             capture_properties["$set"] = {
-                key: value for key, value in traits.items() if key in {"email", "github_login"}
+                key: value
+                for key, value in traits.items()
+                if key in {"email", "github_login"} and isinstance(value, str) and value
             }
     if timestamp:
         payload["timestamp"] = timestamp
