@@ -27,14 +27,16 @@ busy-check and the custom store-queue) with one function that uses:
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Self
 from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
+from pydantic import BaseModel, ConfigDict
 
 from openswe.config import ENV
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -45,15 +47,41 @@ from openswe.input_messages import (
     build_run_input,
 )
 from openswe.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
+from openswe.remote_runtime.client import (
+    RemoteRuntimeConfigurationError,
+    remote_run_context,
+    remote_runtime_client,
+)
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
+from openswe.ui_invalidations import Topic
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
 LangGraphRunConfig = dict[str, Any]
+
+
+_PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
+
+
+class RunMetadata(BaseModel):
+    """What ``create_durable_run`` records on a run and the run-complete webhook reads back."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    pull_request: PullRequestKey | None = None
+    """The pull request whose review page shows this run; its start and end refresh it."""
+
+    @classmethod
+    def of_run(cls, assistant_id: str, config: LangGraphRunConfig | None) -> Self:
+        cfg = RunConfig.from_config(config)
+        if assistant_id not in _PULL_REQUEST_GRAPHS or cfg.repo is None or cfg.pr_number is None:
+            return cls()
+        return cls(pull_request=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number))
+
 
 # The server's legacy-named compatibility marker selects the v3 stream path.
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
@@ -236,6 +264,30 @@ def _slack_channel_metadata(configurable: object) -> dict[str, str]:
     return {key: value for key, value in values.items() if value}
 
 
+def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
+    """The workspace a thread's follow-up run carries; ``environment`` is the pre-workspace key."""
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
+    """Config for a system-started run that continues a thread where its last run left off."""
+    configurable: dict[str, Any] = {"thread_id": thread_id}
+    for key in ("source", "repo", "github_login", "triggering_user_email"):
+        value = metadata.get(key)
+        if value is not None:
+            configurable["user_email" if key == "triggering_user_email" else key] = value
+    workspace = thread_workspace(metadata)
+    if workspace is not None:
+        configurable["workspace"] = workspace
+        configurable["environment"] = workspace
+    configurable.update(SourceContext.from_metadata(metadata).dump())
+    return configurable
+
+
 def prepare_run_config(
     config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
@@ -303,16 +355,24 @@ async def create_durable_run(
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
+    use_mda: bool = False,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread.
+    means the caller already created and titled the thread. ``use_mda`` runs the
+    graph on its Managed Deep Agents deployment instead of this one.
     """
     client = client or dispatch_client()
+    remote_client = remote_runtime_client(assistant_id) if use_mda else None
+    if use_mda and remote_client is None:
+        raise RemoteRuntimeConfigurationError(
+            f"No Managed Deep Agents runtime serves {assistant_id}"
+        )
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
-    run_metadata = dict(metadata or {})
+    recorded = RunMetadata.of_run(assistant_id, config)
+    run_metadata = dict(metadata or {}) | recorded.model_dump(exclude_none=True)
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
@@ -341,7 +401,21 @@ async def create_durable_run(
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
-    run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    if remote_client is not None:
+        # The thread here stays the index the webhooks and dashboard read; the run and
+        # its checkpoints live on the remote deployment, which reaches back through
+        # the tool server with the token in its context.
+        create_kwargs["context"] = await remote_run_context(
+            run_config["configurable"], thread_id=thread_id, assistant_id=assistant_id
+        )
+        create_kwargs["config"] = {
+            key: value for key, value in run_config.items() if key != "configurable"
+        }
+        run = await remote_client.runs.create(thread_id, assistant_id, **create_kwargs)
+    else:
+        run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    if recorded.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=recorded.pull_request)
     cfg = RunConfig.from_config(run_config)
     if assistant_id == "agent" and cfg.slack_ask is not True:
         from openswe.slack.thinking import sync_slack_background_status
@@ -375,6 +449,7 @@ async def dispatch_agent_run(
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
     source_context: SourceContext | None = None,
+    use_mda: bool = False,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
@@ -415,4 +490,5 @@ async def dispatch_agent_run(
         client=client,
         multitask_strategy=multitask_strategy,
         source_context=source_context,
+        use_mda=use_mda,
     )

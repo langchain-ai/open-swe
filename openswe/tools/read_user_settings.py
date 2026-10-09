@@ -11,7 +11,6 @@ from openswe.credential_scope import private_credential_login
 from openswe.dashboard.feature_flags import feature_flag_names
 from openswe.dashboard.personal_settings import PROFILE_SETTING_KEYS
 from openswe.dashboard.profiles import get_profile, normalize_profile_for_response
-from openswe.dashboard.user_credentials import get_notion_status
 from openswe.dashboard.user_instructions import get_user_instructions
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.tools.access import Policy, access
@@ -43,10 +42,8 @@ def _safe_profile_settings(
 
 
 async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict[str, Any]:
-    profile, instruction_record, notion = await asyncio.gather(
-        get_profile(login),
-        get_user_instructions(login),
-        get_notion_status(login),
+    profile, instruction_record = await asyncio.gather(
+        get_profile(login), get_user_instructions(login)
     )
     instructions = instruction_record.get("instructions") if instruction_record else ""
     profile_settings = _safe_profile_settings(profile, own_settings=own_settings)
@@ -60,9 +57,6 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
         "login": login,
         "profile": profile_settings,
         "instructions": instructions if isinstance(instructions, str) else "",
-        "connections": {
-            "notion": notion.get("notion", {"connected": False}),
-        },
     }
 
 

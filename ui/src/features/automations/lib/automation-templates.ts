@@ -1,13 +1,11 @@
-import {
-  BookOpenIcon,
-  BugIcon,
-  FlaskIcon,
-  GitPullRequestIcon,
-  NotePencilIcon,
-  PackageIcon,
-  ShieldCheckIcon,
-} from "@phosphor-icons/react"
-import type { Icon } from "@phosphor-icons/react"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { BookOpenIcon } from "@phosphor-icons/react/dist/ssr/BookOpen"
+import { BugIcon } from "@phosphor-icons/react/dist/ssr/Bug"
+import { FlaskIcon } from "@phosphor-icons/react/dist/ssr/Flask"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { NotePencilIcon } from "@phosphor-icons/react/dist/ssr/NotePencil"
+import { PackageIcon } from "@phosphor-icons/react/dist/ssr/Package"
+import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
 
 export interface AutomationTemplate {
   /** Stable id used as the `?template=` search param on the new-automation route. */
@@ -18,7 +16,7 @@ export interface AutomationTemplate {
   prompt: string
   /** Default 5-field cron expression (UTC). */
   schedule: string
-  icon: Icon
+  icon: IconComponent
 }
 
 export const AUTOMATION_TEMPLATES: ReadonlyArray<AutomationTemplate> = [

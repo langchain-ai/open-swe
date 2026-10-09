@@ -1,0 +1,33 @@
+{% if moved %}
+The pull request changed since your last turn, and the walkthrough was paused until the reader's message above. It is now at head `{{ head_sha }}`. The plan and the reader's walk were carried over by content: lines the reader approved stay approved, unchanged lines keep their chunk, and new or edited lines are unplanned. Tell the reader in one or two sentences what changed, then do what their message asks.
+
+{% endif %}
+{% if clicked %}
+{% if approved %}
+The reader clicked "Next" on “{{ approved }}”, and it is approved.
+{% else %}
+The reader clicked "Next" on a message that is no longer on screen, so nothing was approved.
+{% endif %}
+
+{% endif %}
+Where the reader stands:
+
+- On screen: {{ ("“" ~ status.on_screen ~ "”") if status.on_screen else "nothing" }}
+- Next: {{ ("chunk " ~ status.next) if status.next else "no planned chunk is left" }}
+{% if status.asked %}
+- Their order, ahead of the plan's: {{ status.asked | join(", ") }}
+{% endif %}
+- Chunks: {{ "" if status.chunks else "none planned yet" }}
+{% for chunk in status.chunks %}
+  {{ chunk.number }}. “{{ chunk.title }}”, {{ chunk.state }}{% if chunk.lines %}: {{ chunk.lines | join("; ") }}{% endif %}
+
+{% endfor %}
+- Other: {{ status.other_lines }} lines, {{ status.other_state }}
+- Unplanned: {{ status.unplanned }}
+
+```
+{{ (status.unplanned_lines | join("\n")) or "nothing" }}
+{% if status.more_files_unplanned %}
+… and {{ status.more_files_unplanned }} more files
+{% endif %}
+```

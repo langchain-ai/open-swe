@@ -281,7 +281,7 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 **GitHub.** GitHub-triggered conversations are public. Agent GitHub operations use the App installation identity, while PRs use the initiating commenter's OAuth. The commenter must have a linked account; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
 
-**How a run picks its workspace.** A workspace owns repositories, Slack channels, MCP connections, and workspace settings, and carries the sandbox prompt/snapshot/scripts described above. New work is routed to a workspace in this order, first match wins: the thread it belongs to already has one; the message that opened the thread carries a `workspace:<slug>` tag (`env:<slug>` still works as an alias); the repository belongs to a workspace; the Slack channel it was posted in is bound to a workspace; the user has a default workspace set under **Settings → General**; otherwise it falls back to `default`. GitHub events for a repository that no workspace owns follow `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE`: `default` (the default) routes them to the `default` workspace, and `ignore` drops them without creating a run. Workspace records and their repository and Slack-channel bindings live in PostgreSQL (see **Analytics storage** above), not the LangGraph Store; a workspace's MCP connections and workspace settings do stay in the Store, keyed by the workspace's slug.
+**How a run picks its workspace.** A workspace owns repositories, Slack channels, MCP connections, and workspace settings, and carries the sandbox prompt/snapshot/scripts described above. New work is routed to a workspace in this order, first match wins: the thread it belongs to already has one; the message that opened the thread starts with `/workspace:<slug>` (`workspace:<slug>` and `env:<slug>` anywhere in the message still work); the repository belongs to a workspace; the Slack channel it was posted in is bound to a workspace; the user has a default workspace set under **Settings → General**; otherwise it falls back to `default`. GitHub events for a repository that no workspace owns follow `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE`: `default` (the default) routes them to the `default` workspace, and `ignore` drops them without creating a run. Workspace records and their repository and Slack-channel bindings live in PostgreSQL (see **Analytics storage** above), not the LangGraph Store; a workspace's MCP connections and workspace settings do stay in the Store, keyed by the workspace's slug.
 
 ---
 
@@ -477,7 +477,7 @@ This prevents the publisher from approving their
 own PR; it does not prevent other task participants from approving it.
 
 Public threads load workspace MCP connections and organization skills. Personal
-Notion connections, user skills, and user custom instructions are available only in a private thread
+MCP connections, user skills, and user custom instructions are available only in a private thread
 started by its immutable owner. The same ownership check applies when a personal
 MCP tool refreshes its credentials at execution time.
 

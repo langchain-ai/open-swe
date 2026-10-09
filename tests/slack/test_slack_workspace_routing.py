@@ -123,7 +123,7 @@ async def test_a_bound_channel_outranks_a_named_repository(
             "thread_ts": "1700000000.000100",
             "event_ts": "1700000000.000200",
             "user_id": "U123",
-            "text": "<@UBOT> workspace:internal hello" if inherited_workspace else "<@UBOT> hello",
+            "text": "<@UBOT> /workspace:internal hello" if inherited_workspace else "<@UBOT> hello",
             "bot_user_id": "UBOT",
         }
     )

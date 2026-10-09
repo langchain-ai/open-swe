@@ -14,7 +14,6 @@ from pydantic import BaseModel
 
 from openswe.openai_responses.associations import guest_thread_ids
 from openswe.review.session import ReviewSessionMetadata
-from openswe.review.walkthrough import Walkthrough
 from openswe.tasks.flags import task_coordination_enabled
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -36,6 +35,7 @@ from openswe.threads.summary import (
     assert_thread_readable,
     metadata_title,
     thread_is_bot_triggered,
+    thread_is_owner,
     thread_is_readable,
     thread_is_unlisted,
     thread_source,
@@ -45,6 +45,7 @@ from openswe.transcript.subagents import attach_subagents
 from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_search_filters
+from openswe.walkthrough.record import Walkthrough
 from openswe.workspaces.routing import workspace_for_repo
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
@@ -144,9 +145,12 @@ def _metadata_matches_filters(
     repo: str | None = None,
     ownerless: bool = False,
     admin_threads: bool | None = None,
+    owner: str | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
     if thread_is_unlisted(metadata):
+        return False
+    if owner and not thread_is_owner(metadata, owner):
         return False
     thread_repo = _metadata_repo(metadata)[2]
     if repo and thread_repo.lower() != repo.lower():
@@ -611,6 +615,7 @@ async def _collect_thread_candidates(
     bot: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    owned: bool = False,
     admin_threads: bool | None = None,
     viewer_login: str | None = None,
     viewer_email: str | None = None,
@@ -673,6 +678,7 @@ async def _collect_thread_candidates(
                     repo=repo,
                     ownerless=ownerless,
                     admin_threads=admin_threads,
+                    owner=viewer_login if owned else None,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -832,6 +838,7 @@ async def list_dashboard_thread_repos(
     email: str | None = None,
     include_resolved: bool = False,
     include_automations: bool = False,
+    owned: bool = False,
     include_all: bool = False,
 ) -> list[dict[str, Any]]:
     """The repositories the viewer's threads ran in, newest activity first.
@@ -847,6 +854,7 @@ async def list_dashboard_thread_repos(
         viewer_email=email,
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
+        owned=owned,
     )
     repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
@@ -901,6 +909,7 @@ async def list_dashboard_threads_page(
     bot: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    owned: bool = False,
     filter_participant_login: str | None = None,
     include_private: bool = True,
     surfaced_only: bool = False,
@@ -937,6 +946,7 @@ async def list_dashboard_threads_page(
         bot=bot,
         repo=repo,
         ownerless=ownerless,
+        owned=owned,
         admin_threads=admin_threads,
         viewer_login=login,
         viewer_email=email,
@@ -973,6 +983,7 @@ async def list_dashboard_threads_page(
                     repo=repo,
                     ownerless=ownerless,
                     admin_threads=admin_threads,
+                    owner=login if owned else None,
                 )
                 and (
                     not surfaced_only

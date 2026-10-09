@@ -1,16 +1,21 @@
-import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import {
-  CaretRightIcon,
-  ClockIcon,
-  GithubLogoIcon,
-  KanbanIcon,
-  SlackLogoIcon,
-} from "@phosphor-icons/react"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
 import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
 import { CRON_PRESETS } from "@/features/automations/lib/cron"
-import { cn } from "@/lib/utils"
 
 interface TriggerMenuProps {
   /** Lists the schedule presets; called with a cron, or null for Custom. */
@@ -39,14 +44,50 @@ const SCHEDULE_OPTIONS: Array<{
   { id: "custom", label: "Custom (cron)", cron: null },
 ]
 
-const ITEM =
-  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-
-function GroupLabel({ children }: { children: ReactNode }) {
+function TriggerGroup({
+  icon: GroupIcon,
+  label,
+  children,
+}: {
+  icon: IconComponent
+  label: string
+  children: ReactNode
+}) {
   return (
-    <div className="flex items-center gap-2 px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+    <DropdownMenuGroup>
+      <DropdownMenuLabel className="flex items-center gap-space-2 px-space-2 pt-space-2 pb-space-1 text-xxs font-medium text-tertiary">
+        <GroupIcon size={14} weight="regular" />
+        {label}
+      </DropdownMenuLabel>
       {children}
-    </div>
+    </DropdownMenuGroup>
+  )
+}
+
+function TriggerItem({
+  label,
+  more,
+  onSelect,
+}: {
+  label: string
+  more?: boolean
+  onSelect: () => void
+}) {
+  return (
+    <DropdownMenuItem
+      size="sm"
+      onSelect={onSelect}
+      className="gap-space-2 text-secondary focus:text-primary"
+    >
+      <span className="flex-1">{label}</span>
+      {more && (
+        <CaretRightIcon
+          size={14}
+          weight="regular"
+          className="text-icon-tertiary"
+        />
+      )}
+    </DropdownMenuItem>
   )
 }
 
@@ -59,109 +100,55 @@ export function TriggerMenu({
   className,
   "aria-label": ariaLabel,
 }: TriggerMenuProps) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
-
-  const choose = (action: () => void) => {
-    action()
-    setOpen(false)
-  }
-
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label={ariaLabel}
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className={className}
-      >
-        {children}
-      </button>
-
-      {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-border bg-card pb-1 shadow-lg">
-          {onGitHub && (
-            <>
-              <GroupLabel>
-                <GithubLogoIcon className="size-3.5" />
-                {AUTOMATION_EVENT_PROVIDERS.github.label}
-              </GroupLabel>
-              <button
-                type="button"
-                onClick={() => choose(onGitHub)}
-                className={ITEM}
-              >
-                <span className="flex-1">Issue and pull request events</span>
-                <CaretRightIcon className="size-3.5 opacity-50" />
-              </button>
-            </>
-          )}
-          {onSlack && (
-            <>
-              <GroupLabel>
-                <SlackLogoIcon className="size-3.5" />
-                {AUTOMATION_EVENT_PROVIDERS.slack.label}
-              </GroupLabel>
-              <button
-                type="button"
-                onClick={() => choose(onSlack)}
-                className={ITEM}
-              >
-                <span className="flex-1">Channel messages</span>
-                <CaretRightIcon className="size-3.5 opacity-50" />
-              </button>
-            </>
-          )}
-          {onLinear && (
-            <>
-              <GroupLabel>
-                <KanbanIcon className="size-3.5" />
-                {AUTOMATION_EVENT_PROVIDERS.linear.label}
-              </GroupLabel>
-              <button
-                type="button"
-                onClick={() => choose(onLinear)}
-                className={ITEM}
-              >
-                <span className="flex-1">Issue events</span>
-                <CaretRightIcon className="size-3.5 opacity-50" />
-              </button>
-            </>
-          )}
-          {onSchedule && (
-            <>
-              <GroupLabel>
-                <ClockIcon className="size-3.5" />
-                Schedule
-              </GroupLabel>
-              {SCHEDULE_OPTIONS.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() => choose(() => onSchedule(option.cron))}
-                  className={cn(ITEM)}
-                >
-                  <span className="flex-1">{option.label}</span>
-                  {option.cron === null && (
-                    <CaretRightIcon className="size-3.5 opacity-50" />
-                  )}
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-      )}
-    </div>
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button type="button" aria-label={ariaLabel} className={className}>
+          {children}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        {onGitHub && (
+          <TriggerGroup
+            icon={GithubLogoIcon}
+            label={AUTOMATION_EVENT_PROVIDERS.github.label}
+          >
+            <TriggerItem
+              label="Issue and pull request events"
+              more
+              onSelect={onGitHub}
+            />
+          </TriggerGroup>
+        )}
+        {onSlack && (
+          <TriggerGroup
+            icon={SlackLogoIcon}
+            label={AUTOMATION_EVENT_PROVIDERS.slack.label}
+          >
+            <TriggerItem label="Channel messages" more onSelect={onSlack} />
+          </TriggerGroup>
+        )}
+        {onLinear && (
+          <TriggerGroup
+            icon={KanbanIcon}
+            label={AUTOMATION_EVENT_PROVIDERS.linear.label}
+          >
+            <TriggerItem label="Issue events" more onSelect={onLinear} />
+          </TriggerGroup>
+        )}
+        {onSchedule && (
+          <TriggerGroup icon={ClockIcon} label="Schedule">
+            {SCHEDULE_OPTIONS.map((option) => (
+              <TriggerItem
+                key={option.id}
+                label={option.label}
+                more={option.cron === null}
+                onSelect={() => onSchedule(option.cron)}
+              />
+            ))}
+          </TriggerGroup>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

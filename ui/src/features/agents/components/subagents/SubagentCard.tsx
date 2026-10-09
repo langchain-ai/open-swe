@@ -1,11 +1,15 @@
 import { memo } from "react"
-import { Link } from "@tanstack/react-router"
-import { ArrowUpRight, Bot, Loader2 } from "lucide-react"
+import { Link as RouterLink } from "@tanstack/react-router"
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { Link } from "@langchain/macaw-components/Link"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 
 import { SubagentActivity } from "./SubagentActivity"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useOptionalThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
+import { cn } from "@/lib/utils"
 
 /** Coerce an unknown tool-argument value to a trimmed string, or `""`. */
 export function asString(value: unknown): string {
@@ -35,38 +39,45 @@ export const SubagentCard = memo(function SubagentCard({
     ) : null
 
   return (
-    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-accent p-2.5">
+    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-default bg-surface-level-2 p-2.5">
       <div className="flex min-w-0 items-center gap-1.5">
         {isRunning ? (
-          <Loader2
-            className="h-3 w-3 shrink-0 animate-spin text-primary"
-            aria-hidden
-          />
+          <Spinner size="xxs" className="shrink-0 text-icon-brand" />
         ) : (
-          <Bot
-            className={`h-3 w-3 shrink-0 ${isError ? "text-red-400" : "text-primary"}`}
+          <RobotIcon
+            size={12}
+            weight="regular"
+            className={cn(
+              "shrink-0",
+              isError ? "text-icon-error" : "text-icon-brand"
+            )}
             aria-hidden
           />
         )}
-        <span className="truncate text-[11px] font-medium text-muted-foreground">
+        <span className="truncate text-xxs font-medium text-secondary">
           {subagentType}
         </span>
         {source?.kind === "transcript" && namespace && namespace.length > 0 && (
           <Link
-            to="/agents/$threadId"
-            params={{ threadId: source.threadId }}
-            search={{ subagent: chunk.toolCallId }}
-            className="ml-auto flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-muted-foreground/70 hover:bg-background hover:text-foreground"
+            as={
+              <RouterLink
+                to="/agents/$threadId"
+                params={{ threadId: source.threadId }}
+                search={{ subagent: chunk.toolCallId }}
+              />
+            }
+            variant="xs"
+            rightDecorator={ArrowUpRightIcon}
+            className="ml-auto shrink-0"
             aria-label="Open subagent transcript"
             title="Open subagent transcript"
           >
             Open
-            <ArrowUpRight className="h-3 w-3" aria-hidden />
           </Link>
         )}
       </div>
       {description && (
-        <p className="line-clamp-5 text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground/70">
+        <p className="line-clamp-5 text-xxs leading-4 break-words whitespace-pre-wrap text-tertiary">
           {description}
         </p>
       )}
