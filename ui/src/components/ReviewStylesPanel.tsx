@@ -1,4 +1,5 @@
 import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Select } from "@langchain/macaw-components/Select"
@@ -218,17 +219,14 @@ export function ReviewStylesPanel() {
         <Banner intent="error">
           <span className="text-xs text-error-secondary">
             Your GitHub connection expired.{" "}
-            <a
-              href={loginUrl()}
-              className="font-medium underline underline-offset-2"
-            >
+            <MacawLink href={loginUrl()} variant="sm">
               Sign in with GitHub again
-            </a>{" "}
+            </MacawLink>{" "}
             to list installed repos and run style analysis.
           </span>
         </Banner>
       )}
-      <section className="space-y-4">
+      <section className="space-y-space-4">
         <AddRepositoryField
           id="add-repo"
           value={addRepo}
@@ -238,19 +236,19 @@ export function ReviewStylesPanel() {
           onAdd={handleAdd}
         />
 
-        <div className="space-y-2">
+        <div className="space-y-space-2">
           <p className="text-xs font-medium text-primary">Repositories</p>
           {(styles.data ?? []).length === 0 ? (
             <p className="text-xs text-secondary">No repositories yet.</p>
           ) : (
-            <ul className="flex flex-wrap gap-2">
+            <ul className="flex flex-wrap gap-space-2">
               {(styles.data ?? []).map((s) => (
                 <li key={s.full_name}>
                   <button
                     type="button"
                     aria-pressed={selected === s.full_name}
                     className={cn(
-                      "inline-flex max-w-full items-center gap-space-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-level-1-hover",
+                      "inline-flex max-w-full items-center gap-space-2 rounded-md border px-space-2 py-space-1 text-left text-xs transition-colors hover:bg-surface-level-1-hover",
                       selected === s.full_name
                         ? "border-brand bg-selected font-medium"
                         : "border-default"
@@ -275,7 +273,7 @@ export function ReviewStylesPanel() {
 
       <div className="border-t border-default" />
 
-      <section className="space-y-3">
+      <section className="space-y-space-3">
         {!selected || !active ? (
           <p className="text-xs text-secondary">
             Select a repository above to view or edit its review style prompt.
@@ -285,7 +283,7 @@ export function ReviewStylesPanel() {
             <p className="text-sm font-medium text-primary">
               {active.full_name}
             </p>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-space-2 text-xs">
               <Badge color={statusColor(active.status)} size="xs">
                 {active.status}
               </Badge>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Button } from "@langchain/macaw-components/Button"
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react"
 import type { FileTreeBatchOperation } from "@pierre/trees"
 
@@ -11,7 +12,6 @@ import {
   treeThemeStyle,
 } from "@/features/agents/components/DiffFilesView"
 import { useDirectoryEntries } from "@/features/agents/lib/workspaceFiles"
-import { cn } from "@/lib/utils"
 
 interface FileBrowserPanelProps {
   target: TerminalTarget
@@ -196,7 +196,7 @@ export function FileBrowserPanel({
           size="sm"
           color="secondary"
           variant="plain"
-          iconClassName={cn(isPending && "animate-spin")}
+          loading={isPending}
           onClick={() => {
             refresh()
             onRefreshSelectedFile?.()
@@ -218,13 +218,17 @@ export function FileBrowserPanel({
         />
       </div>
       {error ? (
-        <button
-          type="button"
-          onClick={refresh}
-          className="p-space-4 text-left text-xs leading-relaxed text-error-secondary"
-        >
-          {error} Click to retry.
-        </button>
+        <div className="flex flex-col items-start gap-space-2 p-space-4 text-xs text-error-secondary">
+          {error}
+          <Button
+            size="xs"
+            variant="outlined"
+            color="secondary"
+            onClick={refresh}
+          >
+            Retry
+          </Button>
+        </div>
       ) : null}
       <FileTree
         model={model}

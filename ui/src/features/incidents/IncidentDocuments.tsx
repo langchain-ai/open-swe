@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
+import { Text } from "@langchain/macaw-components/Text"
 import { Button } from "@langchain/macaw-components/Button"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -49,9 +50,11 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
     }
   }
   return (
-    <section className="space-y-4 rounded-xl border border-default bg-surface-level-1 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-primary">Postmortem summary</h2>
+    <section className="space-y-space-4 rounded-xl border border-default bg-surface-level-1 p-space-4">
+      <div className="flex flex-wrap items-center justify-between gap-space-2">
+        <Text as="h2" variant="h5" weight="medium" color="primary">
+          Postmortem summary
+        </Text>
         <Button
           color="secondary"
           variant="outlined"
@@ -68,7 +71,7 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
         </div>
       )}
       {markdown ? (
-        <div className="mx-auto max-w-3xl py-5 sm:px-4">
+        <div className="mx-auto max-w-3xl py-space-4 sm:px-space-4">
           <Markdown content={markdown} />
         </div>
       ) : (

@@ -101,7 +101,7 @@ export function WorkspaceSandboxSection({
 
   return (
     <SettingsSection
-      title="Sandbox image"
+      title="Sandbox Image"
       description="Every run in this workspace boots from this image. The setup script builds it nightly from the base snapshot; the update script refreshes it while it is in use."
     >
       {record.slug !== "default" && (
@@ -137,7 +137,7 @@ export function WorkspaceSandboxSection({
           </span>
         }
       />
-      <div className="space-y-3 border-b border-default px-space-4 py-3.5">
+      <div className="space-y-space-3 border-b border-default px-space-4 py-space-3">
         <p className="text-xs text-secondary">
           Applies to new sandboxes and image builders, not existing threads.
           Leave sizes blank to inherit deployment defaults. If only CPU or
@@ -199,7 +199,7 @@ export function WorkspaceSandboxSection({
           </Button>
         </div>
       </div>
-      <div className="space-y-3 px-space-4 py-3.5 text-primary">
+      <div className="space-y-space-3 px-space-4 py-space-3 text-primary">
         <div className="text-sm">
           <div>Setup script</div>
           <span className="mt-0.5 block text-xs text-secondary">

@@ -127,7 +127,7 @@ function HealthItem({
   label: string
 }) {
   return (
-    <span className="flex items-center gap-1 whitespace-nowrap">
+    <span className="flex items-center gap-space-1 whitespace-nowrap">
       <Icon size={14} weight="regular" className={iconClassName} />
       {count}
       <span className="hidden @xl:inline">
@@ -195,7 +195,7 @@ function HealthDetails({
 }) {
   if (unavailable) {
     return (
-      <p className="border-t border-subtle pt-3 text-xs text-secondary">
+      <p className="border-t border-subtle pt-space-3 text-xs text-secondary">
         GitHub health is unavailable. This PR is not marked clean.
       </p>
     )
@@ -208,15 +208,15 @@ function HealthDetails({
     !health.checksAvailable ||
     !health.commentsAvailable
   return (
-    <div className="space-y-3 border-t border-subtle pt-3">
+    <div className="space-y-space-3 border-t border-subtle pt-space-3">
       {health.mergeConflictState === "conflicting" && (
-        <div className="flex items-start gap-2 text-sm text-error-secondary">
+        <div className="flex items-start gap-space-2 text-sm text-error-secondary">
           <WarningRegularIcon size={16} className="mt-0.5 shrink-0" />
           <span>This branch has merge conflicts.</span>
         </div>
       )}
       {health.failingChecks.length > 0 && (
-        <div className="space-y-1.5" data-testid="pr-failing-checks">
+        <div className="space-y-space-2" data-testid="pr-failing-checks">
           <p className="text-xs font-medium text-primary">
             Failing checks ({health.failingChecks.length})
           </p>
@@ -239,7 +239,7 @@ function HealthDetails({
             return (
               <div
                 key={`${label}-${index}`}
-                className="flex items-center gap-2 px-1 py-0.5 text-xs text-primary"
+                className="flex items-center gap-space-2 px-space-1 py-0.5 text-xs text-primary"
               >
                 {content}
               </div>
@@ -248,7 +248,7 @@ function HealthDetails({
         </div>
       )}
       {(health.unresolvedReviewThreadCount ?? 0) > 0 && (
-        <div className="space-y-2" data-testid="pr-unresolved-comments">
+        <div className="space-y-space-2" data-testid="pr-unresolved-comments">
           <p className="text-xs font-medium text-primary">
             Unresolved comments ({health.unresolvedReviewThreadCount})
           </p>
@@ -258,7 +258,7 @@ function HealthDetails({
               : "Pull request"
             const content = (
               <>
-                <div className="flex items-center gap-1.5 text-[11px] text-secondary">
+                <div className="flex items-center gap-space-2 text-xxs text-secondary">
                   <ChatCircleIcon
                     size={12}
                     weight="regular"
@@ -276,7 +276,7 @@ function HealthDetails({
             return (
               <div
                 key={`${location}-${index}`}
-                className="space-y-1 px-1 py-0.5"
+                className="space-y-space-1 px-space-1 py-0.5"
               >
                 {content}
               </div>
@@ -309,12 +309,12 @@ export function PullRequestHoverCard({
   return (
     <div
       data-testid={`pr-hover-card-${pullRequest.repoFullName}-${pullRequest.number}`}
-      className="w-96 max-w-[calc(100vw-2rem)] space-y-3 p-1"
+      className="w-96 max-w-[calc(100vw-2rem)] space-y-space-3 p-space-1"
     >
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-space-2 text-sm">
         <span
           className={cn(
-            "rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+            "rounded-full px-space-2 py-space-1 text-xs font-medium capitalize",
             PR_STATE_STYLES[state]
           )}
         >
@@ -336,12 +336,12 @@ export function PullRequestHoverCard({
       <p className="text-base leading-snug font-medium text-primary">
         {pullRequest.title}
       </p>
-      <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
+      <div className="flex min-w-0 items-center gap-space-2 text-xs text-secondary">
         <span className="truncate">{pullRequest.baseRef}</span>
         <span aria-hidden="true">←</span>
         <span className="truncate">{pullRequest.headRef}</span>
       </div>
-      <div className="flex items-center gap-2 text-sm text-secondary">
+      <div className="flex items-center gap-space-2 text-sm text-secondary">
         <Avatar
           size="sm"
           label={pullRequest.author ?? "Unknown author"}
@@ -350,7 +350,7 @@ export function PullRequestHoverCard({
         <span className="min-w-0 truncate">
           {pullRequest.author ?? "Unknown author"}
         </span>
-        <span className="ml-auto flex shrink-0 items-center gap-2">
+        <span className="ml-auto flex shrink-0 items-center gap-space-2">
           <span className="text-success-secondary">
             +{pullRequest.diffStats.additions}
           </span>
@@ -386,7 +386,7 @@ function PullRequestLink({
   const scopes = onFix ? fixScopes(pullRequest, health) : []
 
   return (
-    <div className="@container flex min-w-0 items-center gap-1 rounded-xl border border-default bg-surface-level-1 p-1 text-xs text-secondary shadow-sm">
+    <div className="@container flex min-w-0 items-center gap-space-1 rounded-xl border border-default bg-surface-level-1 p-space-1 text-xs text-secondary shadow-sm">
       <HoverCard openDelay={250} closeDelay={100}>
         <HoverCardTrigger asChild>
           <a
@@ -396,7 +396,7 @@ function PullRequestLink({
             aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
             data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
             data-pr-tone={tone}
-            className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg px-2 py-1 transition-colors hover:bg-surface-level-1-hover"
+            className="flex min-w-0 flex-1 items-center gap-space-2 overflow-hidden rounded-lg px-space-2 py-space-1 transition-colors hover:bg-surface-level-1-hover"
           >
             <GitPullRequestIcon
               size={14}
@@ -407,9 +407,9 @@ function PullRequestLink({
               #{pullRequest.number}
             </span>
             <span className="min-w-0 flex-1 truncate">{pullRequest.title}</span>
-            <span className="flex shrink-0 items-center gap-2 @xl:gap-3">
+            <span className="flex shrink-0 items-center gap-space-2 @xl:gap-space-3">
               <HealthSummary health={health} />
-              <span className="hidden gap-1 @2xl:flex">
+              <span className="hidden gap-space-1 @2xl:flex">
                 <span className="text-success-secondary">
                   +{pullRequest.diffStats.additions}
                 </span>
@@ -419,7 +419,7 @@ function PullRequestLink({
               </span>
               <span
                 className={cn(
-                  "rounded-full px-2 py-0.5 font-medium capitalize",
+                  "rounded-full px-space-2 py-0.5 font-medium capitalize",
                   PR_STATE_STYLES[state]
                 )}
               >
@@ -562,7 +562,10 @@ export function ThreadPullRequests({
   const hiddenCount = pullRequests.length - 1
 
   return (
-    <div data-testid="thread-pull-requests" className="space-y-1.5 pb-2">
+    <div
+      data-testid="thread-pull-requests"
+      className="space-y-space-2 pb-space-2"
+    >
       {visiblePullRequests.map((pullRequest) => (
         <PullRequestLink
           key={healthKey(pullRequest.repoFullName, pullRequest.number)}
