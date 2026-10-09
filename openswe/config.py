@@ -209,7 +209,7 @@ ENV.var(
 )
 ENV.var(
     "REVIEWER_RUNTIME_API_KEY",
-    "LangSmith service key the backend uses to call REVIEWER_RUNTIME_URL.",
+    "LangSmith key the backend uses to call REVIEWER_RUNTIME_URL; defaults to LANGSMITH_API_KEY.",
     secret=True,
 )
 ENV.var(
