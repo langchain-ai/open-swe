@@ -8,6 +8,7 @@ from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_requests import PullRequest
 from openswe.human_review import lifecycle, posted, standard
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.posted import linked_pull_request
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.users import User, UserPreferences
@@ -29,13 +30,14 @@ def test_a_message_linking_several_pull_requests_is_not_watched() -> None:
     assert linked_pull_request(text) is None
 
 
-async def test_external_authors_are_not_watched(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_external_authors_are_not_watched(
+    monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
+) -> None:
     from openswe.github.pull_requests import PullRequestPayload
 
     monkeypatch.setattr(posted, "skip_on_preview", lambda _: False)
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=User()))
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
-    monkeypatch.setattr(posted, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=None))
     details = PullRequestPayload.model_validate({"user": {"login": "external"}, "state": "open"})
     monkeypatch.setattr(
@@ -50,7 +52,7 @@ async def test_external_authors_are_not_watched(monkeypatch: pytest.MonkeyPatch)
 
 
 async def test_blocked_reactions_track_an_approved_posts_current_head(
-    registry_db: None, slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+    registry_db: None, slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
 ) -> None:
     pr = await PullRequest(owner="lc", repo="repo", number=7).save()
     request = await HumanReviewRequest(
@@ -72,10 +74,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
         check_state="pending",
         unresolved_threads=0,
     )
-    monkeypatch.setattr(standard, "repo_token", AsyncMock(return_value="token"))
-    monkeypatch.setattr(
-        standard, "assess_readiness", AsyncMock(return_value=Readiness(snapshot, []))
-    )
+    monkeypatch.setattr(Readiness, "assess", AsyncMock(return_value=Readiness(snapshot, [])))
     monkeypatch.setattr(
         standard, "latest_review_states", AsyncMock(return_value={"grace": "APPROVED"})
     )
@@ -103,7 +102,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User()))
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
     monkeypatch.setattr(
-        standard, "fetch_changed_files", AsyncMock(return_value=[ChangedFile(filename="app.py")])
+        ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
     )
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
@@ -112,9 +111,12 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is not None
-    monkeypatch.setattr(
-        CodeOwners, "fetch", AsyncMock(side_effect=standard.RepoFileUnreadableError("unreadable"))
-    )
+
+    async def unreadable(*_: object, strict: bool = False) -> None:
+        if strict:
+            raise standard.RepoFileUnreadableError("unreadable")
+
+    monkeypatch.setattr(CodeOwners, "fetch", unreadable)
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is None
@@ -213,16 +215,16 @@ async def test_retirement_clears_in_flight_and_stale_blockers(
 
     async def retire() -> None:
         retiring.set()
-        await lifecycle.retire(request, "merged", "merged")
+        await ReviewCard(request).retire("merged", "merged")
 
     monkeypatch.setattr(lifecycle, "add_slack_reaction", add)
     monkeypatch.setattr(lifecycle, "remove_slack_reaction", remove)
     async with asyncio.TaskGroup() as tasks:
-        tasks.create_task(lifecycle.update_blocked_reactions(request, snapshot))
+        tasks.create_task(ReviewCard(request).update_blocked_reactions(snapshot))
         await asyncio.wait_for(adding.wait(), timeout=5)
         tasks.create_task(retire())
         await retiring.wait()
         release.set()
     assert not reactions
-    await lifecycle.update_blocked_reactions(request, snapshot)
+    await ReviewCard(request).update_blocked_reactions(snapshot)
     assert not reactions

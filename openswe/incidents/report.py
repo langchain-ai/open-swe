@@ -12,6 +12,14 @@ from openswe.prompts import prompt
 
 CONTEXT_MARKER = "INCIDENT_CONTEXT "
 _CONTEXT_HEADER = re.compile(r"INCIDENT_CONTEXT (\{[^\n]*\})")
+_CONTEXT_HEADER_LINE = re.compile(r"^INCIDENT_CONTEXT \{[^\n]*\}\n?")
+
+
+def context_message(text: str) -> str:
+    """The Slack message under an incident context header, or ``text`` when it has none."""
+    return _CONTEXT_HEADER_LINE.sub("", text, count=1)
+
+
 # Only a bracket group made entirely of evidence references, as finalize_report appends them
 # ("[slack:1.0]", "[slack:1.0, tool:9fd2…]"). A bracket in the finding itself, such as
 # "[Errno 111]", carries meaning and has to survive into the digest.

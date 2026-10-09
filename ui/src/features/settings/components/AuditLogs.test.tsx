@@ -37,6 +37,7 @@ function event(operation_name: string): AuditLog {
       settings_changes: {
         default_repo: { before: "[REDACTED]", after: null },
       },
+      expedited_exclusions: null,
     },
   }
 }

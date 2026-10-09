@@ -49,9 +49,11 @@ from openswe.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import (
     lookup_slack_thread_run_mapping,
+    post_slack_thread_reply_with_ts,
     update_slack_trace_reply_for_web_handoff,
 )
 from openswe.source_context import SourceContext
@@ -83,7 +85,7 @@ from openswe.transcript.events import (
     TurnQueued,
     TurnRequested,
 )
-from openswe.transcript.turns import open_turn_id, recorded_turn_id
+from openswe.transcript.turns import OpenTurn, recorded_turn_id
 from openswe.users import User
 from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
@@ -138,14 +140,6 @@ class DashboardImageBody(BaseModel):
     base64: str = Field(min_length=1)
     mime_type: str = Field(alias="mimeType", min_length=1)
     file_name: str | None = Field(default=None, alias="fileName")
-
-
-class ThreadMessageBody(BaseModel):
-    content: str = Field(default="", max_length=20_000)
-    images: list[DashboardImageBody] = Field(default_factory=list)
-    model_id: str | None = None
-    effort: str | None = None
-    client_message_id: uuid.UUID | None = None
 
 
 class ThreadRenameBody(BaseModel):
@@ -416,6 +410,38 @@ async def _build_dashboard_configurable(
             if value is not None:
                 configurable[key] = value
     return configurable
+
+
+class SessionCreateBody(BaseModel):
+    prompt: str = Field(min_length=1)
+    repo: str | None = Field(default=None, pattern=r"^[^/\s]+/[^/\s]+$")
+    workspace: str | None = None
+    visibility: Literal["public", "private"] | None = None
+    start: bool = True
+
+
+async def create_dashboard_session(
+    body: SessionCreateBody, login: str, *, email: str | None = None
+) -> str:
+    """Create a fresh owned thread using the person's dashboard defaults."""
+    profile = await get_profile(login) or {}
+    repo = body.repo if body.repo is not None else profile.get("default_repo")
+    repo_config = _parse_repo(repo) or {}
+    if repo:
+        if not repo_config:
+            raise HTTPException(422, "repo must be owner/name")
+        await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
+    await _ensure_dashboard_github_token(login)
+    thread = await create_dashboard_thread_record(
+        str(uuid.uuid4()),
+        login=login,
+        email=email,
+        repo_config=repo_config,
+        prompt=body.prompt,
+        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
+        workspace=await _resolve_requested_workspace(body.workspace, repo_config, login=login),
+    )
+    return str(thread["thread_id"])
 
 
 async def start_dashboard_thread(
@@ -1119,14 +1145,15 @@ async def steer_running_thread(
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
+    turn: OpenTurn | None,
     email: str | None = None,
 ) -> dict[str, Any]:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
-    The message joins the active turn instead of opening a new one: it is
-    recorded on the transcript right away and left for the run to pick up
-    before its next model call. The reply mirrors the protocol's success
-    envelope so the caller cannot tell a steer from a start.
+    The message joins ``turn`` instead of opening a new one: it is recorded on
+    the transcript right away and left for the run to pick up before its next
+    model call. The reply mirrors the protocol's success envelope so the caller
+    cannot tell a steer from a start.
     """
     params = command.get("params")
     if not isinstance(params, dict):
@@ -1138,7 +1165,10 @@ async def steer_running_thread(
 
     client = langgraph_client()
     latest_run_id = metadata.get("latest_run_id")
-    live_run_id = latest_run_id if isinstance(latest_run_id, str) and latest_run_id else None
+    # A turn learns its run id only once the run starts or is queued.
+    live_run_id = turn.run_id if turn is not None else None
+    if live_run_id is None and isinstance(latest_run_id, str) and latest_run_id:
+        live_run_id = latest_run_id
     # The run keeps the model it started with, so images are held to it. Thread
     # metadata may already name the model of a follow-up queued behind it.
     run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
@@ -1164,13 +1194,8 @@ async def steer_running_thread(
     )
     structured[-1]["id"] = message_id
 
-    # The live run's own turn, never a follow-up queued behind it.
-    turn_id = (
-        await open_turn_id(thread_id, live_run_id)
-        if metadata.get("transcript") == TRANSCRIPT_VERSION
-        else None
-    )
-    if turn_id is not None:
+    if turn is not None:
+        turn_id = turn.turn_id
         attachments, pending = _transcript_attachments(command_images, message_id)
         await append(
             thread_id,
@@ -1391,10 +1416,7 @@ async def dispatch_pending_follow_ups(
     the store; the new run's first model call picks it up. Returns the run id,
     or ``None`` when nothing was waiting.
     """
-    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
-    value = queued.get("value") if isinstance(queued, Mapping) else None
-    messages = value.get("messages") if isinstance(value, Mapping) else None
-    if not isinstance(messages, list) or not messages:
+    if not await QueuedMessage.for_thread(thread_id):
         return None
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(
@@ -1433,6 +1455,26 @@ async def _notify_slack_web_handoff(
         return
     if not isinstance(thread_ts, str) or not thread_ts:
         return
+
+    thread = await client.threads.get(thread_id)
+    current_metadata = thread.get("metadata") or {}
+    if not current_metadata.get("slack_web_handoff_notified"):
+        await client.threads.update(
+            thread_id=thread_id, metadata={"slack_web_handoff_notified": True}
+        )
+        message_ts, error = await post_slack_thread_reply_with_ts(
+            channel_id,
+            thread_ts,
+            "This conversation has moved to Web; subsequent replies will appear in the dashboard.",
+            agent_thread_id=thread_id,
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        if not message_ts:
+            await client.threads.update(
+                thread_id=thread_id, metadata={"slack_web_handoff_notified": False}
+            )
+            logger.warning("Failed to post Web handoff notice", extra={"slack_error": error})
 
     trace_message_ts = slack_thread.get("trace_message_ts")
     if not isinstance(trace_message_ts, str) or not trace_message_ts:

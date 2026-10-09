@@ -507,6 +507,16 @@
             ],
             "title": "Delegated From Sandbox Id"
           },
+          "expedited_exclusions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExpeditedExclusions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "request_method": {
             "anyOf": [
               {
@@ -1119,7 +1129,7 @@
               "discriminator": {
                 "mapping": {
                   "line": "#/components/schemas/LineComment",
-                  "thread": "#/components/schemas/ThreadComment"
+                  "thread": "#/components/schemas/ThreadComment-Input"
                 },
                 "propertyName": "kind"
               },
@@ -1128,7 +1138,7 @@
                   "$ref": "#/components/schemas/LineComment"
                 },
                 {
-                  "$ref": "#/components/schemas/ThreadComment"
+                  "$ref": "#/components/schemas/ThreadComment-Input"
                 }
               ]
             },
@@ -1182,6 +1192,7 @@
               "discriminator": {
                 "mapping": {
                   "comment": "#/components/schemas/ConversationComment",
+                  "commit": "#/components/schemas/ConversationCommit",
                   "review": "#/components/schemas/ConversationReview"
                 },
                 "propertyName": "kind"
@@ -1192,15 +1203,26 @@
                 },
                 {
                   "$ref": "#/components/schemas/ConversationReview"
+                },
+                {
+                  "$ref": "#/components/schemas/ConversationCommit"
                 }
               ]
             },
             "title": "Items",
             "type": "array"
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewThread"
+            },
+            "title": "Threads",
+            "type": "array"
           }
         },
         "required": [
-          "items"
+          "items",
+          "threads"
         ],
         "title": "Conversation",
         "type": "object"
@@ -1211,6 +1233,10 @@
             "title": "Avatar Url",
             "type": "string"
           },
+          "bot": {
+            "title": "Bot",
+            "type": "boolean"
+          },
           "login": {
             "title": "Login",
             "type": "string"
@@ -1218,7 +1244,8 @@
         },
         "required": [
           "login",
-          "avatar_url"
+          "avatar_url",
+          "bot"
         ],
         "title": "ConversationAuthor",
         "type": "object"
@@ -1283,6 +1310,52 @@
         "title": "ConversationCommentCreate",
         "type": "object"
       },
+      "ConversationCommit": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "kind": {
+            "const": "commit",
+            "default": "commit",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "author",
+          "created_at",
+          "message",
+          "html_url"
+        ],
+        "title": "ConversationCommit",
+        "type": "object"
+      },
       "ConversationRef": {
         "properties": {
           "id": {
@@ -1325,10 +1398,6 @@
             "title": "Id",
             "type": "integer"
           },
-          "inline_comment_count": {
-            "title": "Inline Comment Count",
-            "type": "integer"
-          },
           "kind": {
             "const": "review",
             "default": "review",
@@ -1352,8 +1421,7 @@
           "created_at",
           "body",
           "html_url",
-          "state",
-          "inline_comment_count"
+          "state"
         ],
         "title": "ConversationReview",
         "type": "object"
@@ -1451,6 +1519,13 @@
         ],
         "title": "CreateResponseRequest",
         "type": "object"
+      },
+      "CredentialKind": {
+        "enum": [
+          "oauth",
+          "secret"
+        ],
+        "type": "string"
       },
       "CustomToolCallItem": {
         "properties": {
@@ -1561,6 +1636,135 @@
         "title": "EnabledReviewRepoUpdate",
         "type": "object"
       },
+      "ExcludedHunk": {
+        "additionalProperties": false,
+        "description": "A hunk left off the card.",
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "guideline": {
+            "title": "Guideline",
+            "type": "string"
+          },
+          "header": {
+            "title": "Header",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "digest",
+          "header",
+          "additions",
+          "deletions",
+          "guideline",
+          "reason"
+        ],
+        "title": "ExcludedHunk",
+        "type": "object"
+      },
+      "Exclusion": {
+        "description": "Changes the agent judged to qualify under the target repository's APPROVALS.md.",
+        "properties": {
+          "guideline": {
+            "title": "Guideline",
+            "type": "string"
+          },
+          "hunks": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Hunks",
+            "type": "array"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "guideline",
+          "reason"
+        ],
+        "title": "Exclusion",
+        "type": "object"
+      },
+      "ExpeditedExclusions": {
+        "additionalProperties": false,
+        "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
+        "properties": {
+          "approvals_md_sha256": {
+            "title": "Approvals Md Sha256",
+            "type": "string"
+          },
+          "base_sha": {
+            "title": "Base Sha",
+            "type": "string"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "hunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedHunk"
+            },
+            "title": "Hunks",
+            "type": "array"
+          },
+          "pull_request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request Id"
+          },
+          "requested": {
+            "items": {
+              "$ref": "#/components/schemas/Exclusion"
+            },
+            "title": "Requested",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_sha",
+          "head_sha",
+          "approvals_md_sha256",
+          "requested"
+        ],
+        "title": "ExpeditedExclusions",
+        "type": "object"
+      },
       "FeedbackResponse": {
         "properties": {
           "errors": {
@@ -1659,6 +1863,73 @@
           "arguments"
         ],
         "title": "FunctionCallItem",
+        "type": "object"
+      },
+      "Gateway": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tool_count"
+        ],
+        "title": "Gateway",
+        "type": "object"
+      },
+      "GatewayStatus": {
+        "description": "What one person sees for a gateway: ready, or what to connect first.",
+        "properties": {
+          "gateway": {
+            "$ref": "#/components/schemas/Gateway"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/MissingCredential"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "tool_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Count"
+          },
+          "workspaces": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workspaces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "gateway",
+          "workspaces",
+          "ready"
+        ],
+        "title": "GatewayStatus",
         "type": "object"
       },
       "GitHubTrigger": {
@@ -1984,6 +2255,24 @@
         "type": "string"
       },
       "JsonValue": {},
+      "LabelChange": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "selected"
+        ],
+        "title": "LabelChange",
+        "type": "object"
+      },
       "LineComment": {
         "description": "A comment on diff lines that lives only in the agent's prompt, not on GitHub.",
         "properties": {
@@ -2356,6 +2645,57 @@
           "name"
         ],
         "title": "MCPToolDescription",
+        "type": "object"
+      },
+      "ManagedConnectResponse": {
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "connected"
+        ],
+        "title": "ManagedConnectResponse",
+        "type": "object"
+      },
+      "ManagedToolsView": {
+        "description": "The managed tools gateways the caller's workspaces use, and what each still needs.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "gateways": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayStatus"
+            },
+            "title": "Gateways",
+            "type": "array"
+          },
+          "langsmith_connected": {
+            "default": false,
+            "title": "Langsmith Connected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configured",
+          "gateways"
+        ],
+        "title": "ManagedToolsView",
         "type": "object"
       },
       "MarkReadyAction": {
@@ -2742,6 +3082,29 @@
         "title": "MintedApiKey",
         "type": "object"
       },
+      "MissingCredential": {
+        "description": "A service in the gateway this person has not connected yet.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "display_name",
+          "kind"
+        ],
+        "title": "MissingCredential",
+        "type": "object"
+      },
       "ModelList": {
         "properties": {
           "data": {
@@ -2943,6 +3306,30 @@
             "default": false,
             "title": "Reviewrequired",
             "type": "boolean"
+          },
+          "reviewers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PullRequestReviewer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewers"
+          },
+          "state": {
+            "default": "open",
+            "enum": [
+              "open",
+              "closed",
+              "merged"
+            ],
+            "title": "State",
+            "type": "string"
           },
           "statusAvailable": {
             "default": false,
@@ -3662,6 +4049,18 @@
             ],
             "title": "Experimental Background Callbacks"
           },
+          "experimental_mcp_ptc": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Mcp Ptc"
+          },
           "experimental_task_coordination": {
             "anyOf": [
               {
@@ -3953,6 +4352,59 @@
         "title": "PullRequestFixContext",
         "type": "object"
       },
+      "PullRequestLabel": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "title": "PullRequestLabel",
+        "type": "object"
+      },
+      "PullRequestLabels": {
+        "properties": {
+          "available": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestLabel"
+            },
+            "title": "Available",
+            "type": "array"
+          },
+          "selected": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestLabel"
+            },
+            "title": "Selected",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "selected"
+        ],
+        "title": "PullRequestLabels",
+        "type": "object"
+      },
       "PullRequestPreview": {
         "properties": {
           "additions": {
@@ -4102,6 +4554,47 @@
         "title": "PullRequestReviewSubmit",
         "type": "object"
       },
+      "PullRequestReviewer": {
+        "description": "Someone who reviewed the pull request, and where their review stands.\n\nA comment never overrides an earlier approval or change request, as on GitHub.",
+        "properties": {
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatarurl"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "approved",
+              "changes_requested",
+              "dismissed",
+              "commented"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "login",
+          "state"
+        ],
+        "title": "PullRequestReviewer",
+        "type": "object"
+      },
       "PullRequestSearchResult": {
         "properties": {
           "body": {
@@ -4234,6 +4727,61 @@
           "running"
         ],
         "title": "PullRequestThreadStatus",
+        "type": "object"
+      },
+      "QueuedPreview": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
+          },
+          "sender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "sender",
+          "platform",
+          "queued_at"
+        ],
+        "title": "QueuedPreview",
         "type": "object"
       },
       "ReasoningParam": {
@@ -4698,19 +5246,6 @@
         "title": "ReviewChat",
         "type": "object"
       },
-      "ReviewCommentUpdate": {
-        "properties": {
-          "body": {
-            "title": "Body",
-            "type": "string"
-          }
-        },
-        "required": [
-          "body"
-        ],
-        "title": "ReviewCommentUpdate",
-        "type": "object"
-      },
       "ReviewCounts": {
         "properties": {
           "bugs": {
@@ -5094,6 +5629,105 @@
         "title": "ReviewSummaryRef",
         "type": "object"
       },
+      "ReviewThread": {
+        "description": "An inline thread: its first comment's anchor, then every reply in order.",
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadComment-Output"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "diff_hunk": {
+            "title": "Diff Hunk",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "original_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Line"
+          },
+          "outdated": {
+            "title": "Outdated",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          },
+          "side": {
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Line"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "path",
+          "line",
+          "start_line",
+          "side",
+          "original_line",
+          "diff_hunk",
+          "outdated",
+          "resolved",
+          "comments"
+        ],
+        "title": "ReviewThread",
+        "type": "object"
+      },
       "ReviewerEvalStart": {
         "properties": {
           "dataset_name": {
@@ -5173,6 +5807,30 @@
           "developer"
         ],
         "type": "string"
+      },
+      "RolloutAccepted": {
+        "properties": {
+          "commits": {
+            "title": "Commits",
+            "type": "integer"
+          },
+          "status": {
+            "const": "accepted",
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "target",
+          "commits"
+        ],
+        "title": "RolloutAccepted",
+        "type": "object"
       },
       "ScheduleCreateBody": {
         "properties": {
@@ -5408,6 +6066,63 @@
           }
         },
         "title": "ScheduleUpdateBody",
+        "type": "object"
+      },
+      "SessionCreateBody": {
+        "properties": {
+          "prompt": {
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "pattern": "^[^/\\s]+/[^/\\s]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          },
+          "start": {
+            "default": true,
+            "title": "Start",
+            "type": "boolean"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "enum": [
+                  "public",
+                  "private"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "SessionCreateBody",
         "type": "object"
       },
       "SkillCreate": {
@@ -5740,7 +6455,7 @@
         "title": "TextAnchor",
         "type": "object"
       },
-      "ThreadComment": {
+      "ThreadComment-Input": {
         "properties": {
           "comment_url": {
             "maxLength": 1000,
@@ -5763,6 +6478,58 @@
         "required": [
           "kind",
           "comment_url"
+        ],
+        "title": "ThreadComment",
+        "type": "object"
+      },
+      "ThreadComment-Output": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "review_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Id"
+          }
+        },
+        "required": [
+          "id",
+          "review_id",
+          "author",
+          "created_at",
+          "body",
+          "html_url"
         ],
         "title": "ThreadComment",
         "type": "object"
@@ -5820,6 +6587,19 @@
           "title"
         ],
         "title": "ThreadRenameBody",
+        "type": "object"
+      },
+      "ThreadResolution": {
+        "properties": {
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "resolved"
+        ],
+        "title": "ThreadResolution",
         "type": "object"
       },
       "ThreadResolveBody": {
@@ -7174,6 +7954,17 @@
               }
             ],
             "title": "Human Review Auto Assign Minutes"
+          },
+          "managed_tools_gateway_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Tools Gateway Id"
           },
           "model_routing_enabled": {
             "agent_feature_flag": true,
@@ -9956,6 +10747,37 @@
         ]
       }
     },
+    "/dashboard/api/managed-tools/gateways": {
+      "get": {
+        "description": "Gateways an admin can pick for a workspace, read with the admin's own LangSmith login.",
+        "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Gateway"
+                  },
+                  "title": "Response Api List Managed Tools Gateways Dashboard Api Managed Tools Gateways Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Managed Tools Gateways",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/mcps": {
       "get": {
         "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
@@ -10514,17 +11336,15 @@
         ]
       }
     },
-    "/dashboard/api/my-credentials/notion": {
-      "delete": {
-        "operationId": "disconnect_my_notion_dashboard_api_my_credentials_notion_delete",
+    "/dashboard/api/my-managed-tools": {
+      "get": {
+        "operationId": "api_my_managed_tools_dashboard_api_my_managed_tools_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Notion Dashboard Api My Credentials Notion Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ManagedToolsView"
                 }
               }
             },
@@ -10536,26 +11356,159 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Disconnect My Notion",
+        "summary": "Api My Managed Tools",
         "tags": [
-          "dashboard",
-          "notion"
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/{gateway}/connect/{slug}": {
+      "get": {
+        "description": "A Slack card button: mint the consent link here, for the signed-in owner only.",
+        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools__gateway__connect__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": true,
+            "schema": {
+              "title": "Card",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Connect Managed Tool From Card",
+        "tags": [
+          "dashboard"
         ]
       },
-      "get": {
-        "operationId": "get_my_notion_status_dashboard_api_my_credentials_notion_get",
+      "post": {
+        "description": "A consent link for one service; from a thread's card, the thread resumes once connected.",
+        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools__gateway__connect__slug__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Thread Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Card"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Notion Status Dashboard Api My Credentials Notion Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ManagedConnectResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -10563,10 +11516,9 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Get My Notion Status",
+        "summary": "Api Connect Managed Tool",
         "tags": [
-          "dashboard",
-          "notion"
+          "dashboard"
         ]
       }
     },
@@ -10805,232 +11757,6 @@
         "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/notion/callback": {
-      "get": {
-        "operationId": "notion_callback_dashboard_api_notion_callback_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": true,
-            "schema": {
-              "title": "State",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "code",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Code"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error_description",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error Description"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Notion Callback",
-        "tags": [
-          "dashboard",
-          "notion"
-        ]
-      }
-    },
-    "/dashboard/api/notion/desktop/exchange": {
-      "post": {
-        "description": "Finish a desktop Notion connection with the app's own session.",
-        "operationId": "notion_desktop_exchange_dashboard_api_notion_desktop_exchange_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DesktopConnectExchange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Notion Desktop Exchange Dashboard Api Notion Desktop Exchange Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Notion Desktop Exchange",
-        "tags": [
-          "dashboard",
-          "notion"
-        ]
-      }
-    },
-    "/dashboard/api/notion/login": {
-      "get": {
-        "operationId": "notion_login_dashboard_api_notion_login_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "redirect_to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Notion Login",
-        "tags": [
-          "dashboard",
-          "notion"
         ]
       }
     },
@@ -11792,8 +12518,11 @@
             "name": "scope",
             "required": false,
             "schema": {
-              "const": "mine",
               "default": "mine",
+              "enum": [
+                "mine",
+                "review-requested"
+              ],
               "title": "Scope",
               "type": "string"
             }
@@ -12663,6 +13392,94 @@
         "tags": [
           "dashboard",
           "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/review-assignments": {
+      "get": {
+        "operationId": "api_review_assignments_dashboard_api_review_assignments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated",
+              "enum": [
+                "created",
+                "updated"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenPullRequests"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Review Assignments",
+        "tags": [
+          "dashboard",
+          "human-review"
         ]
       }
     },
@@ -13580,72 +14397,6 @@
       }
     },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments": {
-      "get": {
-        "operationId": "api_list_review_comments_dashboard_api_reviews__owner___repo___pr_number__comments_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api List Review Comments Dashboard Api Reviews  Owner   Repo   Pr Number  Comments Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Review Comments",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      },
       "post": {
         "operationId": "api_post_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments_post",
         "parameters": [
@@ -13715,93 +14466,6 @@
           }
         ],
         "summary": "Api Post Review Comment",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}": {
-      "patch": {
-        "operationId": "api_update_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments__comment_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "comment_id",
-            "required": true,
-            "schema": {
-              "title": "Comment Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewCommentUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Update Review Comment Dashboard Api Reviews  Owner   Repo   Pr Number  Comments  Comment Id  Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Update Review Comment",
         "tags": [
           "dashboard",
           "review"
@@ -14365,6 +15029,139 @@
           }
         ],
         "summary": "Api Get Review Image",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/labels": {
+      "get": {
+        "operationId": "api_get_pull_request_labels_dashboard_api_reviews__owner___repo___pr_number__labels_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestLabels"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Pull Request Labels",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "patch": {
+        "operationId": "api_change_pull_request_label_dashboard_api_reviews__owner___repo___pr_number__labels_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Change Pull Request Label",
         "tags": [
           "dashboard",
           "review"
@@ -15021,6 +15818,169 @@
           }
         ],
         "summary": "Api Submit Pull Request Review",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/threads/{comment_id}/replies": {
+      "post": {
+        "operationId": "api_reply_to_review_thread_dashboard_api_reviews__owner___repo___pr_number__threads__comment_id__replies_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "title": "Comment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationCommentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadComment-Output"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reply To Review Thread",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/threads/{thread_node_id}/resolution": {
+      "put": {
+        "operationId": "api_set_review_thread_resolution_dashboard_api_reviews__owner___repo___pr_number__threads__thread_node_id__resolution_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "thread_node_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadResolution"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Review Thread Resolution",
         "tags": [
           "dashboard",
           "review"
@@ -16737,6 +17697,55 @@
           "dashboard",
           "threads"
         ]
+      },
+      "post": {
+        "operationId": "api_create_session_dashboard_api_threads_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Create Session Dashboard Api Threads Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Session",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
       }
     },
     "/dashboard/api/threads/page": {
@@ -16930,6 +17939,16 @@
           },
           {
             "in": "query",
+            "name": "owned",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Owned",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -17093,6 +18112,16 @@
             "schema": {
               "default": false,
               "title": "Include Automations",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owned",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Owned",
               "type": "boolean"
             }
           },
@@ -18148,6 +19177,58 @@
           }
         ],
         "summary": "Api Get Thread Pull Request Status",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/queued-messages": {
+      "get": {
+        "operationId": "api_get_thread_queued_messages_dashboard_api_threads__thread_id__queued_messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QueuedPreview"
+                  },
+                  "title": "Response Api Get Thread Queued Messages Dashboard Api Threads  Thread Id  Queued Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Queued Messages",
         "tags": [
           "dashboard",
           "threads"
@@ -20158,6 +21239,25 @@
           }
         },
         "summary": "Linear Webhook"
+      }
+    },
+    "/webhooks/rollout": {
+      "post": {
+        "description": "Verify a deployment event, record it, and acknowledge it.",
+        "operationId": "rollout_webhook_webhooks_rollout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolloutAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rollout Webhook"
       }
     },
     "/webhooks/run-complete": {
