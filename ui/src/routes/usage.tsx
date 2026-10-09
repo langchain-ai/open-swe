@@ -1515,7 +1515,7 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
     <div className="space-y-space-4 p-space-4">
       <div className="grid gap-space-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (
-          <Card key={card.label} className="p-space-3">
+          <Card key={card.label} className="bg-surface-level-3 p-space-3">
             <div className="text-xs text-secondary">{card.label}</div>
             <div className="mt-space-1 text-lg font-medium tabular-nums">
               {formatNumber(card.value)}
