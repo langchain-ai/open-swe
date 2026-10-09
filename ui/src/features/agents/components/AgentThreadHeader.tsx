@@ -265,17 +265,17 @@ export function AgentThreadHeader({
   const header = (
     <header
       data-desktop-drag-region=""
-      className="relative z-10 h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
+      className="relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
     >
       <div
         className={cn(
-          "flex h-full w-full items-center gap-3 px-4",
-          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
-          panelCollapsed && "pr-14"
+          "flex h-full w-full items-center gap-space-3 px-space-4",
+          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-space-8"),
+          panelCollapsed && "pr-space-8"
         )}
       >
         {title && (
-          <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
+          <div className="flex min-w-0 items-center gap-space-1 text-sm font-medium">
             {(thread || localThread) && (
               <ThreadRepoIndicator thread={thread} localThread={localThread} />
             )}
@@ -285,7 +285,7 @@ export function AgentThreadHeader({
                 onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
-                className="min-w-0 rounded-md bg-surface-level-2 px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                className="min-w-0 rounded-md bg-surface-level-2 px-space-2 py-space-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 style={{ width: editorWidth }}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -311,7 +311,7 @@ export function AgentThreadHeader({
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                className="min-w-0 truncate rounded-md px-space-2 py-space-1 text-left transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 onClick={startRename}
               >
                 {savingTitle ?? title}
@@ -346,7 +346,7 @@ export function AgentThreadHeader({
             )}
           </div>
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-space-3">
           <span
             role="img"
             aria-label={`Runs on ${target}`}

@@ -57,6 +57,19 @@ describe("keyboard shortcut utilities", () => {
     ).toBe(true)
   })
 
+  it("never takes over browser navigation shortcuts", () => {
+    const cmdL = new KeyboardEvent("keydown", { key: "l", metaKey: true })
+    expect(eventMatchesShortcut(cmdL, "mod+l", "mac")).toBe(false)
+    expect(eventMatchesShortcut(cmdL, "meta+l", "mac")).toBe(false)
+    expect(
+      eventMatchesShortcut(
+        new KeyboardEvent("keydown", { key: "l", ctrlKey: true }),
+        "ctrl+l",
+        "other"
+      )
+    ).toBe(false)
+  })
+
   it("formats platform-specific shortcut labels", () => {
     expect(formatShortcut("mod+k", "mac")).toBe("⌘K")
     expect(formatShortcut("mod+alt+b", "other")).toBe("Ctrl Alt B")

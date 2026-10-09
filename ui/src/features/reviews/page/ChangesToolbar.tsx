@@ -1,4 +1,6 @@
 import { XIcon } from "@langchain/macaw-components/icons"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { Text } from "@langchain/macaw-components/Text"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ColumnsIcon } from "@phosphor-icons/react/dist/ssr/Columns"
@@ -38,14 +40,16 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
   ).length
 
   return (
-    <div className="w-full px-4 pb-3">
+    <div className="w-full px-space-4 pb-space-3">
       {detail && steps === 0 && open && files.length > 0 && (
-        <div className="mb-4">
+        <div className="mb-space-4">
           <WalkthroughCallout pr={pr} detail={detail} />
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-default pb-2">
-        <h2 className="text-[13px] font-semibold text-primary">Changes</h2>
+      <div className="flex flex-wrap items-center gap-x-space-3 gap-y-space-2 border-b border-default pb-space-2">
+        <Text as="h2" variant="sm" weight="semibold" color="primary">
+          Changes
+        </Text>
         {diff.data ? (
           <span className="text-xs text-secondary tabular-nums">
             {plural(files.length, "file")} ·{" "}
@@ -69,7 +73,7 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
           </span>
         )}
         {diff.data && fileFilter.trim() && (
-          <span className="flex items-center gap-1 rounded-md bg-brand-subtle py-0.5 pr-0.5 pl-1.5 text-xs text-brand-primary tabular-nums">
+          <span className="flex items-center gap-space-1 rounded-md bg-brand-subtle py-0.5 pr-0.5 pl-space-1 text-xs text-brand-primary tabular-nums">
             Showing {shownCount} of {files.length} matching “{fileFilter.trim()}
             ”
             <IconButton
@@ -106,16 +110,16 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
         <DiffWrapToggle />
       </div>
       {diff.data?.truncated && (
-        <p className="mt-2 text-xs text-secondary">
+        <p className="mt-space-2 text-xs text-secondary">
           GitHub only returned some of this PR&apos;s files.{" "}
-          <a
-            className="underline"
+          <MacawLink
             href={githubUrls.pullRequest(pr, "/files")}
             target="_blank"
             rel="noreferrer"
+            variant="sm"
           >
             See every file on GitHub
-          </a>
+          </MacawLink>
         </p>
       )}
     </div>

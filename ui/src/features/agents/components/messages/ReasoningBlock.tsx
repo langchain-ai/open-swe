@@ -45,7 +45,7 @@ export function ReasoningBlock({
   const expanded = isLive || userExpanded
 
   return (
-    <div className="my-1">
+    <div className="my-space-1">
       <button
         type="button"
         onClick={() => {
@@ -75,7 +75,7 @@ export function ReasoningBlock({
         )}
       </button>
       {expanded && trimmed && (
-        <div className="ms-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary">
+        <div className="ms-space-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary">
           {trimmed}
         </div>
       )}

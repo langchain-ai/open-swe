@@ -254,6 +254,7 @@ class SlackInteraction(SlackPayload):
 
     type: str = ""
     trigger_id: str = ""
+    response_url: str = ""
     action_id: str = ""
     value: str = ""
     container: SlackInteractionContainer = Field(default_factory=SlackInteractionContainer)
@@ -297,6 +298,8 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
+    kind: str = ""
+    subject: str = ""
 
 
 class SlackViewSubmission(SlackPayload):

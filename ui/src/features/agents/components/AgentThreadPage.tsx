@@ -84,7 +84,7 @@ function AgentThreadContent({
 
   if (threadQuery.isPending && !timedOut) {
     return (
-      <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+      <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )

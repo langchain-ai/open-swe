@@ -1,4 +1,5 @@
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 import {
   ReviewChatActionsContext,
   ReviewExcerptChips,
@@ -771,7 +772,7 @@ export function AgentThreadView({
           />
         )}
         {(macOffline || bridgeError) && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent={bridgeError ? "error" : "info"}
               icon={
@@ -791,7 +792,7 @@ export function AgentThreadView({
           </div>
         )}
         {thread.status === "error" && !reconnect.label && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent="error"
               action={
@@ -815,7 +816,7 @@ export function AgentThreadView({
         {source.kind === "transcript" && source.workspaceStale && (
           <div
             hidden={dismissedWarning === workspaceWarningKey}
-            className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
+            className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3"
           >
             <Banner
               key={workspaceWarningKey}
@@ -832,7 +833,7 @@ export function AgentThreadView({
           </div>
         )}
         {thread.attentionReason === "prs_closed" && !thread.resolved && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent="info"
               icon={
@@ -886,12 +887,12 @@ export function AgentThreadView({
               }
             />
           ) : isHydrating ? (
-            <div className="flex flex-1 items-center justify-center px-6">
-              <img
-                src={`${import.meta.env.BASE_URL}logo-mark.png`}
-                alt="Loading conversation"
-                className="size-12 animate-pulse"
-              />
+            <div
+              role="status"
+              aria-label="Loading conversation"
+              className="flex flex-1 items-center justify-center px-space-5"
+            >
+              <Spinner size="md" />
             </div>
           ) : (
             <PullRequestPreviewProvider

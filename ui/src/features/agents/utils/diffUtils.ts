@@ -158,6 +158,10 @@ export const DIFF_UNSAFE_CSS = `
   border-bottom: 1px solid var(--border-default) !important;
 }
 
+[data-code] {
+  scrollbar-gutter: auto;
+}
+
 [data-separator] {
   background-color: var(--bg-surface-level-1-hover) !important;
   color: var(--text-secondary) !important;

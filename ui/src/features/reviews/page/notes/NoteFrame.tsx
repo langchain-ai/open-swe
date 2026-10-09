@@ -16,7 +16,7 @@ export function NoteFrame({
 }) {
   return (
     <div
-      className={cn("sticky left-0 px-3 py-1.5 font-sans", className)}
+      className={cn("sticky left-0 px-space-3 py-space-1 font-sans", className)}
       style={{
         maxWidth: "min(784px, calc(var(--review-pane-width, 100vw) - 72px))",
       }}

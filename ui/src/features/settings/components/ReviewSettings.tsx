@@ -107,7 +107,7 @@ export function ReviewSettings({
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Review configuration">
+      <SettingsSection title="Review Configuration">
         <div className="divide-y divide-default">
           <TierRow
             settings={settings}

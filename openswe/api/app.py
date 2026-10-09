@@ -51,6 +51,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.database.store_imports import run_store_import
+    from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
@@ -118,6 +119,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Startup continues: skills still in the Store are missing until an
         # import succeeds.
         logger.exception("Importing skills from the LangGraph Store failed")
+    try:
+        # The review-style analyzer is gone; its nightly crons would fail every run.
+        await delete_analyzer_crons()
+    except Exception:  # noqa: BLE001
+        logger.exception("Deleting review-style analyzer crons failed")
     blob_import = asyncio.create_task(run_blob_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
