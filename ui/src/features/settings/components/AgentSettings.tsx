@@ -1,11 +1,6 @@
+import { Select } from "@langchain/macaw-components/Select"
+
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
 import { ModelPairControl } from "./WorkspaceSettingsSections"
 
@@ -38,24 +33,15 @@ export function AgentSettings() {
           description="Pick a model for each turn automatically."
           control={
             <Select
-              items={ROUTING_ITEMS}
+              aria-label="Adaptive routing"
+              options={ROUTING_ITEMS}
               value={routingChoice(profile?.model_routing_enabled)}
-              onValueChange={(v) =>
+              onChange={(v) =>
                 v && save({ model_routing_enabled: ROUTING[v]?.value ?? null })
               }
               disabled={!ready}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROUTING_ITEMS.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              triggerClassName="w-40"
+            />
           }
         />
         <SettingsRow
@@ -63,6 +49,7 @@ export function AgentSettings() {
           description="Model and reasoning effort when adaptive routing is off."
           control={
             <ModelPairControl
+              label="Default"
               models={models}
               model={
                 profile?.default_model ?? options?.default_agent_model ?? null
@@ -84,6 +71,7 @@ export function AgentSettings() {
           description="Model and reasoning effort for delegated tasks."
           control={
             <ModelPairControl
+              label="Subagent"
               models={models}
               model={profile?.default_subagent_model ?? null}
               effort={profile?.subagent_reasoning_effort ?? null}

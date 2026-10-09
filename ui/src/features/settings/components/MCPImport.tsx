@@ -1,7 +1,7 @@
 import { useState } from "react"
+import { Button } from "@langchain/macaw-components/Button"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import type { MCPConnectionUpdate, MCPOAuthUpdate } from "@/lib/api"
 
 export type ImportedMCP = Pick<
@@ -130,7 +130,7 @@ export function MCPImport({
   const [error, setError] = useState<string | null>(null)
   return (
     <form
-      className="space-y-3 rounded-md border p-4"
+      className="space-y-3 rounded-md border border-default p-space-4"
       onSubmit={(event) => {
         event.preventDefault()
         try {
@@ -144,16 +144,17 @@ export function MCPImport({
         }
       }}
     >
-      <p className="text-sm font-medium">Import MCP JSON</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm font-medium text-primary">Import MCP JSON</p>
+      <p className="text-xs text-secondary">
         Paste a Claude-style mcpServers configuration. Review each connection
         before saving. New connections preselect all tools after discovery.
       </p>
       <Textarea
         aria-label="MCP configuration JSON"
-        className="h-48 max-h-64 resize-y font-mono"
+        size="md"
+        inputClassName="h-48 max-h-64 font-mono"
         value={text}
-        onChange={(event) => setText(event.target.value)}
+        onChange={setText}
         autoComplete="off"
         spellCheck={false}
         placeholder={
@@ -161,15 +162,21 @@ export function MCPImport({
         }
       />
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-error-secondary">
           {error}
         </p>
       )}
-      <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={!text.trim()}>
+      <div className="flex gap-space-2">
+        <Button type="submit" color="primary" size="xs" disabled={!text.trim()}>
           Review connections
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+        <Button
+          type="button"
+          size="xs"
+          color="secondary"
+          variant="plain"
+          onClick={onCancel}
+        >
           {text ? "Cancel import" : "Close import"}
         </Button>
       </div>

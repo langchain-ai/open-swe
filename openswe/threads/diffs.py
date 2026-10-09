@@ -7,16 +7,12 @@ from functools import cache
 from importlib import resources
 from typing import TYPE_CHECKING, Any
 
-import httpx2
 from fastapi import HTTPException
 
+from openswe.github.http import GitHubClient
 from openswe.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
 from openswe.slack.client import parse_github_pr_url
-from openswe.threads.access import (
-    _authorized_thread,
-    _github_token_for_login,
-    _readable_thread_metadata,
-)
+from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.proxy import _PROXY_REQUEST_TIMEOUT
 from openswe.threads.summary import _metadata_repo
 from openswe.utils.json_types import thread_metadata
@@ -232,17 +228,11 @@ async def get_dashboard_thread_branch_diff(
     if pull_request is None and head_ref == base_ref:
         raise HTTPException(404, "thread never branched off its base")
 
-    token = await _github_token_for_login(login)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx2.AsyncClient(headers=headers, timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with GitHubClient.as_user(login, timeout=_PROXY_REQUEST_TIMEOUT) as github:
         if pull_request is not None:
-            diff = await build_pr_diff_files(client, full_name, pull_request)
+            diff = await build_pr_diff_files(github.http, full_name, pull_request)
         elif head_ref is not None:
-            diff = await build_compare_diff_files(client, full_name, base_ref, head_ref)
+            diff = await build_compare_diff_files(github.http, full_name, base_ref, head_ref)
         else:
             raise HTTPException(404, "thread has no branch")
 

@@ -1,13 +1,13 @@
 /** @vitest-environment jsdom */
 
 import { useRef, useState } from "react"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { SkillPromptText } from "../SkillBadge"
 import { ComposerPromptEditor } from "./ComposerPromptEditor"
 import type { ComposerPromptEditorHandle } from "./ComposerPromptEditor"
-import { TooltipProvider } from "@/components/ui/tooltip"
 
 afterEach(() => cleanup())
 
