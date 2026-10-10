@@ -216,7 +216,9 @@ The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d08
 
 When PRs conflict with the preview tree, the run makes one `oswe` call (an Open SWE agent on the backend in the `OPEN_SWE_BACKEND_URL` repository variable) that merges all of them; the summary marks those PRs `conflicts resolved by oswe`, and later runs replay the resolution from a git rerere cache. PRs the agent cannot resolve are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch. Resolve the conflict before reapplying the label. Use **force** only to rebuild an unchanged preview tree.
 
-Before publishing a changed tree, the run typechecks the dashboard. On failure it reassembles once without the rerere cache, then asks `oswe` to commit a fix-up (`preview: fix typecheck errors (oswe)`), which later runs replay while the tree underneath is unchanged. If the typecheck still fails, nothing is published, the run fails, and `refs/preview-failed` records the tree so later runs fail fast until it changes.
+Before publishing a changed tree, the run typechecks the dashboard. On failure it tries the published fix-up and asks `oswe` for a separate fix-up (`preview: fix typecheck errors (oswe)`), which later runs replay while the tree underneath is unchanged. It reassembles without the rerere cache only if remaining typecheck errors identify files that conflicted. Unrelated typecheck and lint fixes stay out of conflict-resolution merge commits. If the typecheck still fails, nothing is published, the run fails, and `refs/preview-failed` records the tree so later runs fail fast until it changes.
+
+Successful publication, including an unchanged preview tree, records an inputs fingerprint in `refs/preview-inputs/latest`. Scheduled runs skip assembly when main, the labelled PR numbers and head commits, and the manual branch revision (or its absence) are unchanged. Other triggers and **force** bypass this skip.
 
 The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
 
