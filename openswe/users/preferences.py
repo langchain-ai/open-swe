@@ -19,6 +19,8 @@ class UserPreferences(BaseModel):
     experimental_act_as_approval: bool = False
     # Open SWE acts as this person in shared threads without asking first.
     act_as_always_allowed: bool = False
+    # Shared Slack threads this person is in answer untagged messages addressed to Open SWE.
+    experimental_addressed_followups: bool = False
 
 
 class UserPreferencesPatch(BaseModel):
@@ -41,3 +43,6 @@ class UserPreferencesPatch(BaseModel):
     # A consent control, so never agent-manageable.
     experimental_act_as_approval: bool | None = None
     act_as_always_allowed: bool | None = None
+    experimental_addressed_followups: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )

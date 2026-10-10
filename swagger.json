@@ -3947,6 +3947,17 @@
             ],
             "title": "Experimental Act As Approval"
           },
+          "experimental_addressed_followups": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Addressed Followups"
+          },
           "experimental_assistant_ui": {
             "agent_feature_flag": true,
             "anyOf": [

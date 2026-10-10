@@ -628,6 +628,7 @@ async def slack_webhook(
             thread_ts=thread_ts,
             message_ts=original_message_ts,
             user_id=user_id,
+            bot_user_id=bot_user_id,
             explicit_mention=explicit_mention,
         )
     if not (in_kitchen_channel or solo_followup):

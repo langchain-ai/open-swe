@@ -110,6 +110,7 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     state.history.append({"ts": "1000.0", "user": "U1", "text": "initial question"})
     monkeypatch.setattr(solo_threads.SlackClient, "bot", state.bot)
     monkeypatch.setattr(solo_threads, "slack_thread_mutation_lock", state.mutation_lock)
+    monkeypatch.setattr(solo_threads, "_addressed_to_open_swe", AsyncMock(return_value=False))
     monkeypatch.setattr(routes, "get_langgraph_client", lambda: cast(LangGraphClient, state))
     monkeypatch.setattr(routes, "is_kitchen_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(routes.service, "process_slack_mention", state.process)
@@ -155,6 +156,18 @@ async def test_second_human_permanently_disarms_even_after_another_mention(
     assert (await harness.send("<@BOT> continue"))["status"] == "accepted"
     assert (await harness.send("untagged"))["status"] == "ignored"
     assert (await harness.send("my followup", user="U2"))["status"] == "ignored"
+
+
+async def test_shared_thread_routes_messages_addressed_to_open_swe(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await harness.send("<@BOT> help")
+    assert (await harness.send("I have thoughts", user="U2"))["status"] == "ignored"
+    monkeypatch.setattr(solo_threads, "_addressed_to_open_swe", AsyncMock(return_value=True))
+    assert (await harness.send("can you also fix the tests?", user="U2"))["status"] == "ignored"
+    monkeypatch.setattr(solo_threads, "_participant_opted_in", AsyncMock(return_value=True))
+    assert (await harness.send("please fix the tests", user="U2"))["status"] == "accepted"
+    assert harness.requests[-1].treat_all_messages_as_mentions is True
 
 
 async def test_preexisting_second_human_on_later_page_prevents_arming(harness: _Harness) -> None:
