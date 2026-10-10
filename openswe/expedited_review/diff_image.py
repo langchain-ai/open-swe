@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pygments.lexer import Lexer
 from pygments.lexers import get_lexer_for_filename
 from pygments.styles import get_style_by_name
-from pygments.token import _TokenType
+from pygments.token import Token, _TokenType
 from pygments.util import ClassNotFound
 
 from openswe.expedited_review.eligibility import ChangedFile
@@ -213,23 +213,41 @@ class Row:
     continuation: bool
 
 
+def lexer_for(filename: str) -> Lexer | None:
+    try:
+        return get_lexer_for_filename(filename, stripnl=False)
+    except ClassNotFound:
+        logger.debug(
+            "No lexer for diff file; drawing it unhighlighted", extra={"diff_file": filename}
+        )
+        return None
+
+
+def line_tokens(lexer: Lexer | None, text: str) -> list[tuple[_TokenType, str]]:
+    """``text`` split into pygments tokens that concatenate back to exactly ``text``."""
+    if not text.strip() or lexer is None:
+        return [(Token.Text, text)]
+    tokens: list[tuple[_TokenType, str]] = []
+    consumed = 0
+    for token, value in lexer.get_tokens(text):
+        fragment = text[consumed : consumed + len(value)]
+        if fragment != value:
+            break
+        consumed += len(value)
+        if fragment:
+            tokens.append((token, fragment))
+    if consumed < len(text):
+        tokens.append((Token.Text, text[consumed:]))
+    return tokens or [(Token.Text, text)]
+
+
 class Highlighter:
     """Per-line pygments colouring, so a diff row never inherits a neighbour's state."""
 
     def __init__(self, filename: str, theme: DiffTheme) -> None:
         self._theme = theme
-        self._lexer = self._pick_lexer(filename)
+        self._lexer = lexer_for(filename)
         self._style = get_style_by_name(_STYLE_NAME)
-
-    @staticmethod
-    def _pick_lexer(filename: str) -> Lexer | None:
-        try:
-            return get_lexer_for_filename(filename, stripnl=False)
-        except ClassNotFound:
-            logger.debug(
-                "No lexer for diff file; drawing it unhighlighted", extra={"diff_file": filename}
-            )
-            return None
 
     def _span(self, token: _TokenType, value: str) -> Span:
         while not self._style.styles_token(token) and token.parent is not None:
@@ -244,20 +262,7 @@ class Highlighter:
         )
 
     def spans(self, text: str) -> list[Span]:
-        if not text.strip() or self._lexer is None:
-            return [Span(text, self._theme.text)]
-        spans: list[Span] = []
-        consumed = 0
-        for token, value in self._lexer.get_tokens(text):
-            fragment = text[consumed : consumed + len(value)]
-            if fragment != value:
-                break
-            consumed += len(value)
-            if fragment:
-                spans.append(self._span(token, fragment))
-        if consumed < len(text):
-            spans.append(Span(text[consumed:], self._theme.text))
-        return spans or [Span(text, self._theme.text)]
+        return [self._span(token, value) for token, value in line_tokens(self._lexer, text)]
 
 
 class Wrapper:

@@ -21,6 +21,7 @@ from openswe.expedited_review.channels import (
     sendable_channel,
     still_internal,
 )
+from openswe.expedited_review.diff_html import render_diff_html
 from openswe.expedited_review.diff_image import render_diff_png
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.expedited_review.readiness import (
@@ -142,6 +143,39 @@ class ReviewCard:
             return None
         return file_id
 
+    async def _attach_diff_page(self, title: str, files: list[ChangedFile]) -> None:
+        """Post the whole diff as an interactive HTML page just above the card; best effort."""
+        approval = self.request
+        shown = ExpeditedDiff(files, approval.excluded_hunks).shown
+        if not shown:
+            return
+        pr = approval.pull_request
+        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        try:
+            page = await asyncio.to_thread(
+                render_diff_html, shown, label=label, title=title, url=pr.url
+            )
+        except Exception:
+            logger.warning(
+                "Failed to render expedited review diff page",
+                extra={"approval_id": str(approval.id)},
+                exc_info=True,
+            )
+            return
+        try:
+            await upload_slack_thread_file(
+                approval.slack_channel_id,
+                approval.slack_thread_ts,
+                f"diff-{approval.head_sha[:12]}.html",
+                page,
+                title=f"Diff of {label}",
+            )
+        except SlackRequestError as exc:
+            logger.warning(
+                "Failed to post expedited review diff page",
+                extra={"approval_id": str(approval.id), "slack_error": exc.code},
+            )
+
     async def _warn_target(self, card: tuple[str, list[Block]]) -> tuple[str, list[Block]]:
         pr = self.request.pull_request
         if not pr.base_ref:
@@ -188,6 +222,7 @@ class ReviewCard:
                     title=escape(title),
                 )
             )
+        await self._attach_diff_page(title, files)
         return await post_slack_thread_reply_with_ts(
             approval.slack_channel_id,
             approval.slack_thread_ts,

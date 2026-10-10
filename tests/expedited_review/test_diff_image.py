@@ -4,6 +4,7 @@ from io import BytesIO
 import pytest
 from PIL import Image, ImageColor, ImageDraw
 
+from openswe.expedited_review.diff_html import render_diff_html
 from openswe.expedited_review.diff_image import (
     DiffFile,
     DiffImageRenderer,
@@ -186,3 +187,18 @@ def test_png_paints_intraline_backgrounds_only_for_replacements() -> None:
         for color in (theme.add_highlight, theme.remove_highlight):
             assert any(rgb == ImageColor.getrgb(color) and count > 100 for count, rgb in colors)
             assert all(rgb != ImageColor.getrgb(color) for _, rgb in addition_colors)
+
+
+def test_html_page_escapes_patch_and_path_content() -> None:
+    hostile = "@@ -1,1 +1,1 @@\n-a = 1\n+b = '</script><img src=x onerror=alert(1)>'\n"
+    page = render_diff_html(
+        [ChangedFile(filename="<x>.py", additions=1, deletions=1, patch=hostile)],
+        label="o/r#1",
+        title="<b>title</b>",
+        url="https://github.com/o/r/pull/1",
+    ).decode()
+
+    assert "<img" not in page
+    assert "<b>title" not in page
+    assert "&lt;x&gt;.py" in page
+    assert page.count("<script>") == 1
