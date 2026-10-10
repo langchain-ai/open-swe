@@ -15,7 +15,6 @@ from openswe.walkthrough.plan import (
     PlanChunk,
     RangeError,
     claim,
-    claim_hunks,
 )
 from openswe.walkthrough.render import render_chunk
 
@@ -70,7 +69,8 @@ def _added(changes: list[FileChange]) -> dict[str, set[int]]:
 
 
 def _place(plan: Plan, changes: list[FileChange], title: str, *hunks: FileHunks) -> PlanChunk:
-    chunk = PlanChunk(title=title, lines=claim_hunks(list(hunks), plan.unplanned(changes)))
+    lines = plan.hunks(changes).claim(list(hunks), plan.unplanned(changes))
+    chunk = PlanChunk(title=title, lines=lines)
     plan.add_chunk(chunk)
     return chunk
 
@@ -132,7 +132,7 @@ def test_a_chunk_takes_whole_hunks_across_files_and_a_hunk_is_placed_once(repo: 
     )
     changes = _changes(repo, base, head)
     plan = Plan.start(head, changes)
-    both = (FileHunks(path="core.py", hunks=[1]), FileHunks(path="cli.py", hunks=[1]))
+    both = (FileHunks(path="core.py", hunks=["-4"]), FileHunks(path="cli.py", hunks=["+1"]))
 
     chunk = _place(plan, changes, "Return 2 and print it", *both)
 
@@ -141,7 +141,7 @@ def test_a_chunk_takes_whole_hunks_across_files_and_a_hunk_is_placed_once(repo: 
         ("core.py", "-", 4),
         ("core.py", "+", 4),
     ]
-    with pytest.raises(RangeError, match="no available hunk @1"):
+    with pytest.raises(RangeError, match="no available hunk -4"):
         _place(plan, changes, "Again", both[0])
 
 
@@ -158,8 +158,8 @@ def test_a_push_keeps_planned_lines_by_content_and_new_lines_join_their_hunks_ch
     changes = _changes(repo, base, head)
     plan = Plan.start(head, changes)
     plan.add_other(claim([FileRanges(path="cli.py", added=[(1, 1)])], plan.unplanned(changes)))
-    _place(plan, changes, "Print one", FileHunks(path="cli.py", hunks=[1]))
-    _place(plan, changes, "Return 10", FileHunks(path="core.py", hunks=[1]))
+    _place(plan, changes, "Print one", FileHunks(path="cli.py", hunks=["+1"]))
+    _place(plan, changes, "Return 10", FileHunks(path="core.py", hunks=["-4"]))
 
     new_head = _commit(
         repo,
@@ -196,9 +196,38 @@ def test_approved_lines_stay_approved_after_a_rebase(repo: Path) -> None:
     )
     new_changes = _changes(repo, new_base, new_head)
     plan = Plan.start(new_head, new_changes)
-    _place(plan, new_changes, "Everything", FileHunks(path="core.py", hunks=[1]))
-    _place(plan, new_changes, "CLI", FileHunks(path="cli.py", hunks=[1]))
+    _place(plan, new_changes, "Everything", FileHunks(path="core.py", hunks=["-4"]))
+    _place(plan, new_changes, "CLI", FileHunks(path="cli.py", hunks=["+1"]))
     reader = Reader.of(Walk(head_sha=new_head), plan, seen)
 
     assert [c.title for c in plan.chunks if reader.remaining(c.lines)] == ["CLI"]
     assert reader.next_chunk() is plan.chunks[1]
+
+
+def test_a_split_hunk_goes_to_two_chunks_and_each_part_keeps_its_new_lines_after_a_push(
+    repo: Path,
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    jobs = "def one():\n    return 1\n\n\ndef two():\n    return 2\n"
+    head = _commit(repo, {"jobs.py": jobs}, "jobs")
+    changes = _changes(repo, base, head)
+    plan = Plan.start(head, changes)
+    plan.split([LineRef.of(line) for line in changes[0].lines if line.text == "def two():"])
+
+    _place(plan, changes, "One", FileHunks(path="jobs.py", hunks=["+1"]))
+    _place(plan, changes, "Two", FileHunks(path="jobs.py", hunks=["+5"]))
+
+    assert [[ref.lineno for ref in chunk.lines] for chunk in plan.chunks] == [[1, 2, 3, 4], [5, 6]]
+
+    new_head = _commit(
+        repo, {"jobs.py": f"import os\n\n\n{jobs}\n\ndef three():\n    return 3\n"}, "more"
+    )
+    new_changes = _changes(repo, base, new_head)
+    moved = plan.carried_to(new_head, new_changes)
+
+    texts = [{ref.text for ref in chunk.lines} for chunk in moved.chunks]
+    assert {"import os", "def one():"} <= texts[0]
+    assert {"def two():", "def three():"} <= texts[1]
+    assert "def three():" not in texts[0]
+    assert moved.unplanned(new_changes) == []

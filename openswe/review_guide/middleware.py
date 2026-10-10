@@ -166,7 +166,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                         head_sha=head.head.sha,
                         clicked=bool(self._approve_ts),
                         approved=approved.title if approved else "",
-                        status=reader.status(unplanned).model_dump(),
+                        status=reader.status(unplanned, workspace.hunks).model_dump(),
                     )
                 )
             ],

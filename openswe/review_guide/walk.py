@@ -15,7 +15,7 @@ from typing import Self
 from pydantic import BaseModel
 
 from openswe.walkthrough.diff import ChangedLine, FileChange, line_key
-from openswe.walkthrough.plan import LineRef, Plan, PlanChunk, hunk_spans
+from openswe.walkthrough.plan import Hunks, LineRef, Plan, PlanChunk
 from openswe.walkthrough.render import fenced
 
 OTHER = "other"
@@ -271,7 +271,7 @@ class Reader:
             reasons.append("Other has not been approved or skipped")
         return reasons
 
-    def status(self, unplanned: list[ChangedLine]) -> WalkStatus:
+    def status(self, unplanned: list[ChangedLine], hunks: Hunks) -> WalkStatus:
         current = self.walk.on_screen
         upcoming = self.next_chunk()
         chunks: list[ReaderChunk] = []
@@ -300,7 +300,7 @@ class Reader:
         )
         left = set(self.remaining(LineRef.of(line) for line in unplanned))
         open_lines = [line for line in unplanned if LineRef.of(line) in left]
-        spans = hunk_spans(open_lines)
+        spans = hunks.spans(open_lines)
         return WalkStatus(
             on_screen=current.title if current else None,
             chunks=chunks,

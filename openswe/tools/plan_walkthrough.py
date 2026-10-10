@@ -7,7 +7,7 @@ from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
 from openswe.ui_invalidations import Topic
 from openswe.walkthrough.checkout import CheckoutError
-from openswe.walkthrough.plan import FileHunks, RangeError
+from openswe.walkthrough.plan import FileHunks, FileSplits, RangeError
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError
 
@@ -48,6 +48,16 @@ async def walkthrough_plan_chunk(
     except PLANNING_ERRORS as exc:
         return {"success": False, "error": str(exc)}
     return await _planned(workspace, chunk=number)
+
+
+async def walkthrough_split_hunks(files: list[FileSplits]) -> dict[str, Any]:
+    """Implement the `walkthrough_split_hunks` tool."""
+    try:
+        workspace = await _workspace()
+        await workspace.split(files)
+    except PLANNING_ERRORS as exc:
+        return {"success": False, "error": str(exc)}
+    return await _planned(workspace)
 
 
 async def walkthrough_move_to_other(

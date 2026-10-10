@@ -14,10 +14,9 @@ import type {
 } from "@/features/reviews/lib/chatDiffActions"
 import { rangeBounds, toPierreSide } from "@/features/reviews/lib/lineRange"
 import {
-  changeCounts,
   patchHeader,
+  rangeLineCount,
   walkthroughFileDiff,
-  walkthroughHunks,
 } from "@/features/reviews/lib/walkthroughDiff"
 import { isAnchored, mirroredThreadIds, type AnchoredFinding } from "./findings"
 import type { CommentDraftTarget, DiffOrder, DiffTarget } from "./store"
@@ -89,8 +88,6 @@ export function isRenderable(file: ReviewDiffFile): boolean {
 
 type EntryBody = Omit<DiffEntry, "step" | "id">
 
-const WHOLE = -1
-
 function whole(file: ReviewDiffFile): EntryBody {
   return {
     file,
@@ -110,8 +107,8 @@ export function buildEntries(
     return sorted.map((file) => ({ ...whole(file), id: file.path, step: null }))
 
   const byPath = new Map(sorted.map((file) => [file.path, file]))
-  // Hunk indexes earlier steps showed, per file; `WHOLE` once one showed it all.
-  const shown = new Map<string, Set<number>>()
+  const seen = new Set<string>()
+  const shownWhole = new Set<string>()
   const groups: Array<{
     title: string
     summary: string
@@ -123,26 +120,21 @@ export function buildEntries(
     for (const lines of step.files) {
       const file = byPath.get(lines.path)
       if (!file) continue
-      const before = shown.get(file.path) ?? new Set<number>()
-      shown.set(file.path, before)
-      if (before.has(WHOLE)) continue
-      const held = file.unrenderable ? null : walkthroughHunks(file, lines)
-      if (!held) {
-        if (before.size > 0) continue
-        before.add(WHOLE)
+      // "Other changes" is for what the steps left out, not a second copy.
+      if (step.other && shownWhole.has(file.path)) continue
+      seen.add(file.path)
+      const sliced = file.unrenderable ? null : walkthroughFileDiff(file, lines)
+      if (!sliced) {
+        shownWhole.add(file.path)
         entries.push(whole(file))
         continue
       }
-      // Each hunk shows once, in the first step that holds it.
-      const fresh = held.filter((index) => !before.has(index))
-      if (fresh.length === 0) continue
-      for (const index of fresh) before.add(index)
-      const sliced = walkthroughFileDiff(file, fresh)
-      entries.push(
-        sliced
-          ? { file, fileDiff: sliced, ...changeCounts(sliced) }
-          : whole(file)
-      )
+      entries.push({
+        file,
+        fileDiff: sliced,
+        additions: rangeLineCount(lines.added),
+        deletions: rangeLineCount(lines.deleted),
+      })
     }
     if (entries.length === 0) continue
     const group = {
@@ -153,7 +145,7 @@ export function buildEntries(
     if (step.other) other = group
     groups.push(group)
   }
-  const leftover = sorted.filter((file) => !shown.has(file.path)).map(whole)
+  const leftover = sorted.filter((file) => !seen.has(file.path)).map(whole)
   if (leftover.length > 0) {
     if (other) other.entries.push(...leftover)
     else
