@@ -1,8 +1,10 @@
 """Smol Machines local and cloud sandbox backend."""
 
 import logging
+import shlex
 
 from deepagents.backends.protocol import (
+    DeleteResult,
     ExecuteResponse,
     FileDownloadResponse,
     FileUploadResponse,
@@ -40,6 +42,16 @@ class SmolSandbox(BaseSandbox):
             truncated=result.stdout_truncated or result.stderr_truncated,
         )
 
+    async def adelete(self, file_path: str) -> DeleteResult:
+        quoted = shlex.quote(file_path)
+        exists = await self.aexecute(f"test -e {quoted} || test -L {quoted}")
+        if exists.exit_code != 0:
+            return DeleteResult(error=f"Error: '{file_path}' not found")
+        result = await self.aexecute(f"rm -rf -- {quoted}")
+        if result.exit_code != 0:
+            return DeleteResult(error=f"Error deleting '{file_path}': {result.output.strip()}")
+        return DeleteResult(path=file_path)
+
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         raise NotImplementedError("SmolSandbox is async-only; use aupload_files.")
 
@@ -66,11 +78,20 @@ class SmolSandbox(BaseSandbox):
             try:
                 content = await self._machine.read_file(path)
             except Exception as exc:
-                logger.warning(
-                    "Smol sandbox file download failed", extra={"path": path}, exc_info=True
+                missing = isinstance(exc, FileNotFoundError) or (
+                    isinstance(exc, SmolError) and exc.code == "NOT_FOUND"
                 )
-                error = "file_not_found" if isinstance(exc, FileNotFoundError) else str(exc)
-                responses.append(FileDownloadResponse(path=path, error=error))
+                if missing:
+                    logger.debug(
+                        "Smol sandbox file was not found", extra={"path": path}, exc_info=True
+                    )
+                else:
+                    logger.warning(
+                        "Smol sandbox file download failed", extra={"path": path}, exc_info=True
+                    )
+                responses.append(
+                    FileDownloadResponse(path=path, error="file_not_found" if missing else str(exc))
+                )
             else:
                 responses.append(FileDownloadResponse(path=path, content=content))
         return responses
