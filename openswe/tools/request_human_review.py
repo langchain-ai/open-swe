@@ -27,8 +27,10 @@ from openswe.slack.client import (
     fetch_slack_thread_message_by_ts,
     parse_github_pr_url,
 )
+from openswe.slack.dm import send_dm
 from openswe.slack.payloads import SlackMessage
 from openswe.tools.manage_baby_sit import dispatch_run_config
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 
 
@@ -52,6 +54,7 @@ async def _repository_refusal(pr_ref: GitHubPrRef, thread_id: str) -> str | None
     return None
 
 
+@expose_mcp()
 @audit_tool()
 async def request_human_review(
     pr_url: str, inline_summary: str, channel: str = ""
@@ -66,12 +69,14 @@ async def request_human_review(
         )
     cfg = RunConfig.from_config(get_config())
     thread_id = cfg.thread_id
+    login = cfg.github_login or ""
     if not thread_id:
+        if cfg.source == "mcp" and login:
+            return await _request_for_mcp_caller(pr_ref, login, inline_summary, channel)
         return _failure("No executable agent thread is available")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
-    login = cfg.github_login or ""
     origin = Origin(
         requester=await User.for_login("github", login) if login else None,
         thread_id=thread_id,
@@ -94,6 +99,41 @@ async def request_human_review(
         "slack_channel_id": result.channel,
         "next": f"{posted} People sign up from the card and it merges on its own once they "
         "approve. You are woken if nobody signs up. Do not announce or link the card; do not poll.",
+    }
+
+
+async def _request_for_mcp_caller(
+    pr_ref: GitHubPrRef, login: str, inline_summary: str, channel: str
+) -> dict[str, Any]:
+    """Request review as a person calling over MCP, who has no thread to point at the card."""
+    try:
+        await repo_access.require_repo_access_for_user(login, f"{pr_ref.owner}/{pr_ref.repo}")
+    except HTTPException as exc:
+        return _failure(f"You cannot access {pr_ref.owner}/{pr_ref.repo}: {exc.detail}")
+    requester = await User.for_login("github", login)
+    if requester is None:
+        return _failure("Sign in to the Open SWE dashboard before requesting a review")
+    result = await request_review(
+        pr_ref, Origin(requester=requester), channel=channel, inline_summary=inline_summary
+    )
+    if not result.success:
+        return _failure(result.error)
+    if result.reused or result.summary_updated:
+        posted = "This pull request already had an open review request; no new card was posted."
+    elif requester.slack_user_id and await send_dm(
+        requester.slack_user_id,
+        f"Review requested for <{pr_ref.url}|{pr_ref.repo}#{pr_ref.number}> "
+        f"in <#{result.channel}>.",
+    ):
+        posted = "The review card is posted and the person was sent a Slack DM pointing to it."
+    else:
+        posted = "The review card is posted."
+    return {
+        "success": True,
+        "request_id": result.request_id,
+        "permalink": result.permalink,
+        "next": f"{posted} People sign up from the card and it merges on its own once they "
+        "approve. If nobody signs up, Open SWE picks a reviewer. Do not poll.",
     }
 
 
