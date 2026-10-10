@@ -137,11 +137,15 @@ async def test_web_breakout_does_not_post_or_bind_slack(monkeypatch: pytest.Monk
 
 @pytest.mark.parametrize(
     ("explicit", "target"),
-    [(None, "C1"), ("C3", "C3")],
+    [(None, "C1"), ("C3", "C3"), ("#team-oss-kitchen", "C3")],
 )
 async def test_slack_breakout_thread_success(
     monkeypatch: pytest.MonkeyPatch, explicit: str | None, target: str
 ) -> None:
+    destination = _channel(private=False)
+    assert destination is not None
+    destination.id = target
+    monkeypatch.setattr(SlackChannel, "resolve", AsyncMock(return_value=destination))
     permalink = None
     captured: dict[str, Any] = {"stored_mappings": []}
     new_ts = "1700000000.111111"
