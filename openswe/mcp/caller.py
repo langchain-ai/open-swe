@@ -40,6 +40,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.threads",
     "openswe.tools.report_platform_issue",
     "openswe.tools.upload_session",
+    "openswe.tools.hook_events",
     "openswe.slack.tools.request_pr_review",
     "openswe.tools.request_human_review",
     "openswe.tools.expedite_pr_approval",

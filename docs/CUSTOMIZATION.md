@@ -435,6 +435,66 @@ Desktop (local) runs do not load MCP connections yet. GitHub PR follow-ups targe
 private thread are rejected unless the commenter owns that thread, before credentials
 are read or a run is dispatched.
 
+### Forwarding Claude Code hook events
+
+Claude Code can forward its [hook events](https://code.claude.com/docs/en/hooks) to Open SWE
+through the `record_hook_event` tool on Open SWE's remote MCP server, using that server's
+existing OAuth login. Connect the server as `oswe`:
+
+```bash
+claude mcp add --transport http oswe https://<host>/oswe/mcp
+```
+
+Then add an `mcp_tool` handler under each event in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "oswe",
+            "tool": "record_hook_event",
+            "input": {
+              "event": {
+                "hook_event_name": "${hook_event_name}",
+                "session_id": "${session_id}",
+                "prompt_id": "${prompt_id}",
+                "transcript_path": "${transcript_path}",
+                "cwd": "${cwd}",
+                "permission_mode": "${permission_mode}",
+                "agent_id": "${agent_id}",
+                "agent_type": "${agent_type}",
+                "tool_name": "${tool_name}",
+                "tool_use_id": "${tool_use_id}",
+                "tool_input": "${tool_input}",
+                "tool_response": "${tool_response}",
+                "prompt": "${prompt}",
+                "last_assistant_message": "${last_assistant_message}",
+                "message": "${message}",
+                "source": "${source}",
+                "reason": "${reason}",
+                "model": "${model}",
+                "error": "${error}"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Repeat the handler for `UserPromptSubmit`, `PreToolUse`, `PostToolUseFailure`, `Stop`,
+`SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact`, `Notification`, and
+`SessionEnd`. Claude Code sends a field the event lacks as an empty string, and an object
+field nested in `event` as a JSON string. Launch-time `SessionStart` hooks fire before MCP
+servers connect, so Claude Code skips them. The tool only logs each event at debug level
+and returns an empty result, so it never blocks Claude Code.
+
 ### Adding a Python tool
 
 Create a new file in `openswe/tools/`, define a function, and add it to the tools list.
