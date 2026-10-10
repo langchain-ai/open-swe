@@ -84,7 +84,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         label={label}
         disabled={
           reason !== null ||
-          !availability.isSuccess ||
+          availability.isPending ||
           (needsChannel && !channel) ||
           requestReview.isPending ||
           requestReview.isSuccess

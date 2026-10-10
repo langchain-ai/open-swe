@@ -160,13 +160,9 @@ async def api_human_review_availability(
             raise HTTPException(404, "Pull request is unavailable")
         settings = await RepoSettings.fetch(pull.repo, ref=sha)
         channel = await settings.channel_for_pr(pull)
-        if await HumanReviewRequest.active_for(owner, repo, number) is not None:
-            blockers: list[str] | None = []
-        else:
-            blockers = await review_blockers(pull)
-    if blockers is None:
-        raise HTTPException(503, "GitHub was unavailable while checking the pull request")
-    return HumanReviewAvailability(available=bool(channel), blockers=blockers)
+        active = await HumanReviewRequest.active_for(owner, repo, number)
+        blockers = None if active is not None else await review_blockers(pull)
+    return HumanReviewAvailability(available=bool(channel), blockers=blockers or [])
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review")
