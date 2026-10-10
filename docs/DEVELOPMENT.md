@@ -325,7 +325,8 @@ Resolve the conflict before reapplying the label.
 Use **force** only to rebuild an unchanged preview tree.
 
 Before publishing a changed tree, the run typechecks the dashboard.
-On failure it reassembles once without the rerere cache, then asks `oswe` to commit a fix-up (`preview: fix typecheck errors (oswe)`), which later runs replay while the tree underneath is unchanged.
+Docker image pulls retry up to three times; if the image or Docker daemon is unavailable, the run fails without publishing, attempting a typecheck fix, discarding the rerere cache, or recording a failed tree, so a later cron run can retry.
+On a genuine typecheck failure it reassembles once without the rerere cache, then asks `oswe` to commit a fix-up (`preview: fix typecheck errors (oswe)`), which later runs replay while the tree underneath is unchanged.
 If the typecheck still fails, nothing is published, the run fails, and `refs/preview-failed` records the tree so later runs fail fast until it changes.
 
 The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
