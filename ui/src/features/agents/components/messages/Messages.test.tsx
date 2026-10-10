@@ -138,7 +138,7 @@ describe("Messages", () => {
   it("shows run activity while a stream is starting with no messages", () => {
     render(<Messages messages={[]} isStreaming />)
 
-    expect(screen.getByRole("status").textContent).toBe("Working…")
+    expect(screen.getByRole("status").textContent).toBe("Working…0s")
   })
 
   it("shows reconnect activity in the existing status line", () => {
@@ -151,7 +151,7 @@ describe("Messages", () => {
     )
 
     expect(screen.getByRole("status").textContent).toBe(
-      "Reconnecting… 3/12 (retrying in 4s)"
+      "Reconnecting… 3/12 (retrying in 4s)0s"
     )
   })
 
