@@ -417,9 +417,12 @@ ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
 # --- Sandboxes ---------------------------------------------------------------------------------
 ENV.var(
     "SANDBOX_TYPE",
-    "Sandbox provider: langsmith, modal, daytona, runloop, e2b or local.",
+    "Sandbox provider: langsmith, modal, daytona, runloop, e2b, smol or local.",
     default="langsmith",
 )
+ENV.var("SMOL_SANDBOX_TARGET", "Smol Machines backend: local or cloud.", default="local")
+ENV.var("SMOL_SANDBOX_IMAGE", "Smol Machines sandbox image.")
+ENV.var("SMOL_SANDBOX_SETUP_COMMAND", "One-time command to install sandbox tools in a new Smol VM.")
 ENV.var("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", "Root filesystem size for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_VCPUS", "vCPUs for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_MEM_BYTES", "Memory for new sandboxes.")

@@ -26,12 +26,13 @@ SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "modal": ("openswe.sandboxes.providers.modal", "create_modal_sandbox"),
     "runloop": ("openswe.sandboxes.providers.runloop", "create_runloop_sandbox"),
     "e2b": ("openswe.sandboxes.providers.e2b", "create_e2b_sandbox"),
+    "smol": ("openswe.sandboxes.providers.smol", "create_smol_sandbox"),
     "local": ("openswe.sandboxes.providers.local", "create_local_sandbox"),
 }
 
 # Providers whose SDKs live in an optional dependency group rather than the base
 # install: SANDBOX_TYPE=<key> requires the sandbox-<key> (or sandbox-providers) extra.
-OPTIONAL_PROVIDER_EXTRAS = {"daytona", "modal", "runloop", "e2b"}
+OPTIONAL_PROVIDER_EXTRAS = {"daytona", "modal", "runloop", "e2b", "smol"}
 
 # Top-level SDK modules each optional provider imports; when one of these is the
 # module that triggered a ModuleNotFoundError, its extra isn't installed.
@@ -40,6 +41,7 @@ _PROVIDER_SDK_MODULES = {
     "modal": {"modal", "langchain_modal"},
     "runloop": {"runloop_api_client", "langchain_runloop"},
     "e2b": {"e2b", "langchain_e2b"},
+    "smol": {"smol"},
 }
 
 
@@ -82,9 +84,9 @@ async def create_sandbox(
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
+    Supported values: langsmith (default), daytona, modal, runloop, e2b, smol, local.
 
-    langsmith and modal provision natively async. local stays on
+    langsmith, modal and smol provision natively async. local stays on
     ``asyncio.to_thread`` because ``LocalShellBackend`` setup performs synchronous
     filesystem I/O. daytona, e2b and runloop stay there because their
     ``langchain_*`` wrappers bind synchronous SDK handles.
