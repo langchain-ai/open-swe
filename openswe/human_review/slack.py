@@ -1,4 +1,4 @@
-"""Slack interactivity for human review cards and picks: I'll review, Accept, Decline, Snooze, and Dismiss."""
+"""Slack interactivity for human review cards and picks: I'll review, Accept, Decline, Snooze, Dismiss, and Merge."""
 
 import logging
 from dataclasses import dataclass
@@ -14,7 +14,7 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import SNOOZE_DURATIONS, claim, decline, snooze
+from openswe.human_review.standard import SNOOZE_DURATIONS, claim, decline, merge_now, snooze
 from openswe.prompts import prompt
 from openswe.slack.blocks import (
     InputBlock,
@@ -172,7 +172,9 @@ async def _process(
             outcome = await ReviewCard(request).dismiss(slack_user_id)
         else:
             user = await User.for_person({"id": f"slack:{slack_user_id}"})
-            if action == "decline":
+            if action == "merge":
+                outcome = await merge_now(request, user)
+            elif action == "decline":
                 outcome = await decline(request, user, choice)
             elif action == "snooze":
                 outcome = await snooze(request, user, choice)
@@ -253,7 +255,7 @@ async def handle_button(
             logger.warning("Could not open a reviewer pick modal", extra=extra)
             return ignored("Could not open pick modal")
         return accepted("Pick modal opened")
-    if button.action not in {"review", "dismiss"}:
+    if button.action not in {"review", "dismiss", "merge"}:
         logger.warning("Ignored an unknown human review click", extra=extra)
         return ignored("Unknown human review action")
     logger.info("Queued a human review click", extra=extra)

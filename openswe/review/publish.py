@@ -280,6 +280,7 @@ class ReviewAssessment(BaseModel):
     risk_score: int = Field(ge=1, le=5, strict=True)
     decision: Literal["would_approve", "needs_human_review"]
     explanation: str = Field(min_length=1, max_length=1500)
+    summary: str = Field(default="", max_length=300)
 
 
 def render_review_body(

@@ -985,6 +985,52 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     return True
 
 
+async def merge_now(request: HumanReviewRequest, user: User | None) -> Outcome:
+    """Merge an approved pull request for a teammate with write access who clicked Merge.
+
+    Open SWE's own wait for checks and threads does not apply; GitHub's branch protection does.
+    """
+    if request.kind != "standard" or request.state != "open":
+        return Outcome("This review request is already closed.")
+    writer = await resolve_writer(request, user)
+    if isinstance(writer, Outcome):
+        return writer
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            readiness = await Readiness.assess(pull)
+            if readiness is None:
+                return Outcome("Open SWE could not read the pull request from GitHub. Try again.")
+            snapshot = readiness.snapshot
+            if snapshot.merged or snapshot.state != "open":
+                return Outcome("This pull request is no longer open.")
+            if snapshot.changes_requested_by:
+                return Outcome(
+                    f"Changes were requested by {', '.join(snapshot.changes_requested_by)}."
+                )
+            if not snapshot.approved_review_ids:
+                return Outcome("It needs an approval on GitHub before it can merge.")
+            async with HumanReviewRequest.locked(request.id) as (_, row):
+                if row is None or row.state != "open":
+                    return Outcome("This review request is already closed.")
+                result = await merge_pull_request(
+                    row, snapshot.head_sha, snapshot.allowed_merge_methods, pull
+                )
+    except GitHubAppUnavailable:
+        return Outcome("Open SWE cannot reach this repository's GitHub App installation.")
+    logger.info(
+        "Merge clicked on a human review card",
+        extra={
+            "request_id": str(request.id),
+            "github_login": writer.github_login,
+            "merge_status": result.status,
+        },
+    )
+    if result.status == "merged":
+        await ReviewCard(request).mark_merged()
+    return Outcome(result.message)
+
+
 async def settle_pull_request(owner: str, repo: str, number: int) -> None:
     request = await HumanReviewRequest.active_for(owner, repo, number)
     if request is not None:
