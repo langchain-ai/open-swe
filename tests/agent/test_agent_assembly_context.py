@@ -22,6 +22,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.middleware.model_selection import RouteSelection
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.server import _registered_tool_name, get_agent
 
@@ -343,8 +344,8 @@ async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     )
     route = await model_selection.select_route({"messages": []})
 
-    assert route == "default"
-    assert model_selection._models[route] is agent["model"]
+    assert route.route == "default"
+    assert model_selection._models[route.route] is agent["model"]
     assert agent["make_model_calls"][0][0] == "google_genai:gemini-3.8-flash"
 
 
@@ -763,7 +764,8 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
 
     monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "jev")
     monkeypatch.setattr(
-        "openswe.middleware.model_selection._select_jev_route", AsyncMock(return_value="default")
+        "openswe.middleware.model_selection._select_jev_route",
+        AsyncMock(return_value=RouteSelection("default")),
     )
     config = _base_config()
     config["configurable"].update(
@@ -788,7 +790,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     for agent in (captured, followup_agent):
         middleware = cast(list[object], agent["middleware"])
         selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
-        assert await selection.select_route({"messages": []}) == "default"
+        assert (await selection.select_route({"messages": []})).route == "default"
         assert selection._models["default"] is agent["model"]
         assert agent["make_model_calls"][0][0] == expected_model
         prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
@@ -827,7 +829,7 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
             for item in cast(list[object], captured["middleware"])
             if isinstance(item, ModelSelectionMiddleware)
         )
-        assert await selection.select_route({"messages": []}) == (
+        assert (await selection.select_route({"messages": []})).route == (
             "fast" if source == "dashboard" else "default"
         )
 

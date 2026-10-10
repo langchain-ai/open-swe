@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Annotated, Literal, NotRequired
 
 from langchain.agents.middleware.types import (
@@ -16,7 +17,7 @@ from langgraph.runtime import Runtime
 from openswe.input_messages import input_message_text, message_sender_id
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.utils.jev import select_jev_choice
+from openswe.utils.jev import JevDecision, select_jev_choice
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +58,26 @@ def _route_criteria() -> dict[Route, str]:
     return {route: prompt(f"model-selection/{route}") for route in ROUTES}
 
 
-async def _select_jev_route(task: str) -> SelectedRoute:
-    return (
-        await select_jev_choice(
-            task,
-            question="route",
-            instructions=prompt("model-selection/instructions"),
-            criteria=_route_criteria(),
-        )
-        or "default"
+@dataclass(frozen=True)
+class RouteSelection:
+    route: SelectedRoute
+    classifier: JevDecision | None = None
+
+    @property
+    def persist(self) -> bool:
+        return self.classifier is None or self.classifier.outcome == "accepted"
+
+
+async def _select_jev_route(task: str) -> RouteSelection:
+    decision = JevDecision()
+    route = await select_jev_choice(
+        task,
+        question="route",
+        instructions=prompt("model-selection/instructions"),
+        criteria=_route_criteria(),
+        decision=decision,
     )
+    return RouteSelection(route or "default", decision)
 
 
 class ModelSelectionState(AgentState):
@@ -128,18 +139,18 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     async def select_route(
         self,
         state: ModelSelectionState,
-    ) -> SelectedRoute:
+    ) -> RouteSelection:
         """Select the model route for a turn."""
         if requested_model := state.get("requested_model"):
             if self._requested_model_factory is not None:
                 self.use_requested_model(requested_model, state.get("requested_effort"))
-                return "default"
+                return RouteSelection("default")
         if self._routing_mode is None:
-            return "default"
+            return RouteSelection("default")
         if model_route := state.get("model_route"):
-            return normalize_route(model_route)
+            return RouteSelection(normalize_route(model_route))
         if self._routing_mode == "fast":
-            return "fast"
+            return RouteSelection("fast")
         messages = state.get("messages", [])
         task = _latest_human_task(messages)[-8_000:]
         return await _select_jev_route(task)
@@ -150,10 +161,10 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         runtime: Runtime,
     ) -> dict[str, SelectedRoute]:
         del runtime
-        route = await self.select_route(state)
+        selection = await self.select_route(state)
         if self._routing_mode == "auto" or state.get("requested_model"):
-            await _emit_routed_model(self._models, self._route_model_ids, route)
-        return {"model_route": route}
+            await _emit_routed_model(self._models, self._route_model_ids, selection.route)
+        return {"model_route": selection.route} if selection.persist else {}
 
     async def awrap_model_call(
         self,

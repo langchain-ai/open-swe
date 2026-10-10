@@ -7,6 +7,7 @@ from typing import Literal
 
 import httpx2
 from langchain_typesafe import Choice, TypeSafeClassifier
+from langchain_typesafe.client import TypeSafePermissionDeniedError
 
 from openswe.config import ENV
 from openswe.utils.gateway import gateway_base_url
@@ -58,24 +59,46 @@ async def select_jev_choices(
         return results
     for decision in tracked.values():
         decision.reason = "classifier_error"
-    try:
-        async with (
-            asyncio.timeout(JEV_TIMEOUT_SECONDS),
-            httpx2.AsyncClient(timeout=JEV_TIMEOUT_SECONDS) as client,
-        ):
-            classifier = TypeSafeClassifier(
-                model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
-                api_key=typesafe_key or gateway_key,
-                **({} if typesafe_key else {"base_url": gateway_base_url()}),
-                async_client=client,
-            )
-            response = await classifier.ainvoke(
-                {"state": task, "questions": dict(questions)},
-                config={"tags": ["nostream"]},
-            )
-    except Exception:
-        logger.exception("Jev classification failed", extra={"questions": list(questions)})
-        return results
+    for attempt in range(2):
+        use_gateway = not typesafe_key or attempt == 1
+        try:
+            async with (
+                asyncio.timeout(JEV_TIMEOUT_SECONDS),
+                httpx2.AsyncClient(timeout=JEV_TIMEOUT_SECONDS) as client,
+            ):
+                classifier = TypeSafeClassifier(
+                    model="typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0",
+                    api_key=gateway_key if use_gateway else typesafe_key,
+                    **({"base_url": gateway_base_url()} if use_gateway else {}),
+                    async_client=client,
+                )
+                response = await classifier.ainvoke(
+                    {"state": task, "questions": dict(questions)},
+                    config={"tags": ["nostream"]},
+                )
+            break
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status is None:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+            if isinstance(exc, TypeSafePermissionDeniedError) or status in (401, 403):
+                for decision in tracked.values():
+                    decision.reason = "classifier_auth_failure"
+                logger.error(
+                    "Jev classifier credential rejected",
+                    extra={
+                        "questions": list(questions),
+                        "classifier_transport": "gateway" if use_gateway else "direct",
+                        "status_code": status,
+                        "error_type": type(exc).__name__,
+                        "gateway_retry_available": bool(not use_gateway and gateway_key),
+                    },
+                )
+                if not use_gateway and gateway_key:
+                    continue
+            else:
+                logger.exception("Jev classification failed", extra={"questions": list(questions)})
+            return results
     for question, spec in questions.items():
         decision = tracked[question]
         try:
