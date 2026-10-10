@@ -1,0 +1,270 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:7c1a7ce6fd2306cd5282dda46f54eac822c45fab92d6814ce94f2d41ed6835fc",
+  "claims": [
+    {
+      "id": "claim_f18bb1750f504f9694e551ad194f96d5",
+      "statement": "Open SWE divides durable state between LangGraph threads for execution conversations, runs, checkpoints, and metadata; the LangGraph Store for plan-review documents/comments; and PostgreSQL for relational and independently retained data including workspace, user, transcript, blob, task, and delivery records.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/database/migrations/versions/0024_thread_transcript.py#L1-L11",
+          "version": "repo-lines-v1:sha256:5ac55a1f21315025a4adaa2dee3f67e8831416e0a1851d90153b95c5bc5c7e06:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM3ZDkwOGRhOGU0YTU2YjQwOGRjMGUzYmYwN2NjZTQyMTU5MTY3ODAwMGRkNjY1NjE3NDM5MGFjNDJmOWU3MDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1ZmM4NGJhZTJkOTE2Zjg0MjA4ZGQyZjNkNDFjMzE5M2VmMjIxMmI4ZjM1ZGNjNTAyOGE2NDlkMDQ5NDZmYzUifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/messages.py#L1-L62",
+          "version": "repo-lines-v1:sha256:33cda0c1141f5c62057c6485f694e0c4ab3f5fc4bf78e70c52cc3141c5e21722:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmZmM3NGJlZTdiZjI0OTIwYjI1OTQ4Y2UyYzYxNTgyMjJiNDk3MWRhNTZiMDc3ZDRkMzcxNjE1YTcyYjc0N2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlZmNkOTlhMGYxYzExNTdiOTdkNWVhNmE1ZmRkMmM4Mzg0MzcwNzk3OTZjYWQ2NWViMjdkODZhYjg2YmQwNGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlkNDM3YWM1NTEyMDM5NmZlNjdiYjI4MjIwOTIwODhhODZlZDI2N2VhOGI0Mjk2MDk1MGI0OTlmNmY3ZWIxYzUifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/creation.py#L1-L51",
+          "version": "repo-lines-v1:sha256:f20b2a0053db3bba7c4609132fe5cb5994597d1b4a142db88d8c457fc3b6ce96:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU0NDdkYzcxNGJmYmJjM2EwNzU4MWJmOGMwMDAxNjZiZDc5MjQ3MDAzNDdhOWUxNTc1M2JkNzNlN2QyMDIwYTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU3MGExOWJmNTg2OWJlYTc1MWYyOWJhNTEwMWU2OTUzMTg0MTE5OTc0OGMwMWYyYWI1MWVhMmZkNDE5NGY3YjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3ODY3Yjg0NzIzOTBkM2Y3MGU0ZGM1YzY4OWZhNDBkYjVlM2EyNmM5MDQwYzUxZWMzNWYwM2E3ZDBhMjUxN2YifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/plan_store.py#L1-L10",
+          "version": "repo-lines-v1:sha256:14e1f7c660248b12e801fcb72ad3b8f76d59fc53526375056d9d978a771adb5e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyMmVkYWMyZWY5YTEwZTliZTk1MTU2YmU2MjBlNDFmYTdiZDM0ZTZlNDk1MDQxZjliZjY1NzZkNjA5OTFkYzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZlZWI5MmMyOWY3ZmY3ZjFmOTI4YmJhNGJlYjM5NzU0ZGE4YzM2ZTViNzA3ZDU0YWVjNjU4ODkwNWViZTUxZjUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5834c945459a46ad912e9ae80d20044f",
+      "statement": "PostgreSQL is configured from POSTGRES_URI, requires a PostgreSQL URI scheme, uses the open_swe schema, and migrates Alembic heads under a transaction-scoped advisory lock so concurrent replicas serialize initialization.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/database/postgres.py#L198-L241",
+          "version": "repo-lines-v1:sha256:eab82d7d2a5dbb8bba84251a9ae142808e87d7e0ee0fa691cf7c39abed9e5482:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5ODAzMWM1MmJmOWZmZDMwN2E2ODkwZTFkM2ZiYjAxMzQ3YzQyMDk2NDNmZDYzMjhhY2VjYjk0ZTUxYmU3MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiMmQxOTc0NGQ2NDNhN2EzYjYxN2JjMzdkNWYzN2U4NjgyNDA2MDIwNjFkZTk0ZDMzZjJkMGEwZWYzZDc2ZmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViYTA5MjMxMzFmYWNkZjA5OWMzYTU3ODJhZGYxMzE0MjM1NjI2OWMxMTdiMDNlM2RmMmY3MGFiNjkzMzUxNWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMxODhhZTVjY2ZhMDkwNWNlYzdkMzJlNTM0ZGFiMjM1ZGViOTZiOTZlNDg0YjU3OWYzYTBmOGQ5OGM4Mzc3YzYifQ"
+        },
+        {
+          "resource": "repo://openswe/database/postgres.py#L35-L71",
+          "version": "repo-lines-v1:sha256:5e9edff5925722632661843179983768b318c98330ff2e416203b2d025bc9263:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVhNDMwMjc3ZmQ3NmFhMzUyN2M5ODc4MmM3ODFjODJjZjY4ODlmNGE1NjY5ZWU2YjM4MTgxMmVlZTk4ZmVkZmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVjNzIzZWE2Nzg2MmZiYWQwNDI4MTMwNTI2NGI3OTZjMzYxYjg4NWJmM2NlNzg5ODllZmMxZGJkNmJmM2ExNzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNkOWNkNWM0NGZiNTU0NDliNTQ1YWZmMWI3ZTMwODk3ZDU3ZGI5YzEwZjFiYjU3MDE2YWY3YmQ4YTZmOGE4MjUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_68ae5b369b6c4825a1e410c883dbcafd",
+      "statement": "PostgreSQL provides read-only and repeatable-read snapshot transaction contexts; the latter exists to keep a multi-statement read consistent with a live event stream.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/database/postgres.py#L153-L186",
+          "version": "repo-lines-v1:sha256:8ab74e6656043afb363f2b99ad6f8f60398a3a0e6a3e3583f2f42838b2e0b3e5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3Y2ZmM2YxNzg0MmRlYzZlN2U5MWMzZTNiOGZjZTBhODIyZmMzMTEyNzM4MWIwMGY0NGE5ZjEzMzMzMDNhMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhMTViMGViNWZlODg5OGFiMTUwMGI3YmMxY2UzMDQ3YzE1MGZhMDc3ZWRkNjEwZGY2ZjIzZTlmNWEzMWM3NjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA1ZTJiYWM1YWVhMzY3NmE3MzM2MWY4Zjg2YWQ5M2JjZDA2NjE5YTgxZDAwZmU2ZmI4YTk0YzIzNDc3YzFkYzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMxNDJhMTBkZGU0YWEzMzFlNzY1MGM2MGNhY2VjMTljNzkyYmQyM2EzZWZkOTA0MTBmZmM5YzZkOThjZWQzMWIifQ"
+        },
+        {
+          "resource": "repo://tests/database/test_postgres_read_only.py#L8-L25",
+          "version": "repo-lines-v1:sha256:fa4702e3f8443bef40a301942ef6236d8dba69cdc78cd6b9c57a4a811fc392be:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0NDg0YWE3NGNlNzNkMWRmZDhhNTBiZWIyMjk3NDRlODMwMDEwNzMzNzkyOTdhZTA3YTJiZTU4YzhkMTQ1ODUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwN2E2MzczNDQ4NTFmYTdlYWM5NGU4NDRkM2FkMGEzMzBhYTFmZTNkMjQ5YTM1MTJhZjQ5MDA1MWUyY2RlOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg0MmJhM2ZkMDhmMWJmNjZiNmM5Y2UzYTk4ODI3ZDEyNmIwYzE3OTViOTFmNzIxODM5ODBmMzIyZDdjNDE1MTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f8fed765a4f647579ac79cfe7ed12d3c",
+      "statement": "Workspace rows keep administrator-editable definition fields separate from snapshot and refresh state fields so concurrent refresh and definition writes do not revert each other.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/rows.py#L167-L209",
+          "version": "repo-lines-v1:sha256:30ecba5ab5a45b74e0ad757de222ed6b8d44c895c5f741c275e8f9f265c38f45:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlNmI0ODBiZDBhZGNjNDFiNmExMGQzNWEzNDVjZGQ3YjFlOGVjNzA4OWYwZTEzZGQ4YmI2ODEzZDJkZjhkM2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgwMzQ5Y2JjYTkyODQzZWUyOGY1NmNkMTBhYTQzNjI1M2JlYjU2MTMwNTBmOWNkMmU3NjA4ODJjMDhlMzk4NDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE4MmRiZTM2ZWRlMTNlYTBiNTA4ZjcyMWM3MjhkNGRjZmQ1YTIzNzEzZTNjZDRlNTcxMmVhZTQ1Y2FhZDcwYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA3ZTJlZDU3MGViNTgwNTcwMDdiZTY4ZjNkMGQ2Y2ZkZmUzZDkzODAwZWRjZjkyYTAzOTVlOTUyZWFjZjgyNDYifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_store.py#L105-L140",
+          "version": "repo-lines-v1:sha256:5a296a759d146b540770ae16a2188c22df2fda062b0d07875b264a0a6c500b8c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlOWQ4OWY1NDlmYjIyNjQ1NTY1ZjBmMjAzNGIwYzg2MTcxOGVmNDA0MjEyZjlhNjA4MWRiZDgxNWE3MzFhMDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA5ZjkzMDgzYzE5NzEyMWI5ODI3MDBiYThhZmFiZDE3MjJjZjFkM2U3NDA0NTA5ZTgwZWZhMjcyNDdmNjJmMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjliYWUyMzg2OGM2MjIxNzg1ODdmNjc4MDFlNzIzYjAxMzdlNWE3N2VkN2E0YzlkNWMyMTA2OGFmNGViYTdkYWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f280e35ee764247880298d7d2150aa2",
+      "statement": "The database guarantees that each repository and Slack channel belongs to at most one workspace because workspace binding tables key on the bound resource; kitchen channels must be bound to the same workspace.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/rows.py#L1-L12",
+          "version": "repo-lines-v1:sha256:8aa4fbcaeeeb7f667bdac98fc6303492334b5abc1d5be3171689c981db2d6c41:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFjOGI3MTliNmIyYjg0MjI1MzM2OTUxYmI5ZmE1MjNjY2JmN2IzYTg5NGQ0OGIyMzYzZWI5ZjY3NjNjZTQzYzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzMWY0OWZmNWUxNDZmZjU0M2NlNmUxYzU4ODcxMTZkMDBjYTkxZGE1ZmQ4MDc5MTg2ZGIyYTk2OTFhNDVhZGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI0YjRmYmZiMjhhYjI1NzZkYmJhMzZjZGMwNGUyNjhlMDhjNmQ4MTBjMzhjNGY1N2Y0YjY1MDZiY2Q2YzY5NjUifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L98-L102",
+          "version": "repo-lines-v1:sha256:9583b1f45afd878afbef9a5e00eb6b35d72de88c596d81912420e77387fd1356:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzlkNzM3ZmZmZmRmZjFmMjJhYTIwNTEyYWQwMTZjNmQ3ODYyMzdlZTMzMzg0MzY2ODdkOWIxOWEzZmVkN2Q0MCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNTkwOWE1M2E2MThkMDI4ZTFkMzAwMGMwYTdhYmNlZWNiZTVmYjM3ZjRlNTExZWZlNDY2NDNmYWQ2ZTY2ODcyZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGM1NTZlYTdiNDA4NzJlMDFmNTBlNmJjMjhiZWI4OWFiMmM0YTk5N2YxY2I2OTA4ZTdhNjE5MDkxYzk5YTc3MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjIzY2ZjODcyNjUwNTE5NjZjOTdkNzY0YjJmZmJmZTFiODM2NzBmMTExZTUxZWU5N2FkOGE2ZTQ2YTBmODYzMCJ9"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_migration.py#L100-L123",
+          "version": "repo-lines-v1:sha256:bad5f075fa821ad7c5fb071d708a5f4a4336b742927e464f7de655273673057d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiNzY2MTFiOGI2NmZlMGFlMWE2NTRhMTllMDFmMWRmMjFjMGNlNWVkNjIxZjk1MjBkN2RhNDZmZTYxMGY4NTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZkY2FmMzQzNGM0MzFjYzhjNzg5ZDA5MDRjZjYyYTkzYTJlMDIzNTJjMTM3ZWIzZWFhY2RkMWQxZmQ2NTRmYTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_migration.py#L47-L71",
+          "version": "repo-lines-v1:sha256:ff373181f2afb0c83d31148d5e99cd2c72cee0d9e589239f1030cfc582f6602a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5MWFmZjA1OWQ5MjM4NjIyMGMzOTljZmExOWFiMDdiN2U2NmNmZTA5MTM0ZDk3YmVmMTMxYjA4NTI3YmQ1MDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwNThkNzUwYzE1N2RhZWRlMzUyZTUyMmZkYmVjMmJlYzg1ZDg0NDU3MDM0ZTZlZDBjYThlYzA4YzFlZGJiZTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU2ODBiMGYyOTI4YWMwZGJmM2RkNGEzMWQ1YzE2ZTkxOThhMjlhNjA4NmQzOWNmYjU3YzIwZjYwYmUzM2E2NWQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_15fff05847bc4853814b83078b0143d5",
+      "statement": "Workspace resolution is centralized and selects the first of recorded thread workspace, valid tag, Slack channel owner, repository owner, user default, or default workspace; repository routability propagates unreadable ownership while other resolution paths log and fall back to default.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/routing.py#L1-L19",
+          "version": "repo-lines-v1:sha256:fc889d1c758ceae1e62b54a1da15f8bc52944368fc8772375198bfcafb5441fa:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5ODg0NWZhOTNjNGExZWU1NzIxMmMzZTIyMjE3Nzk1NmY5YmMxZjVjYTg2YzEzYjc2Y2ZhOTE0NjZkZTY1YjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0MTQ5MTk2MWEzMjQxMzg4NjY1ODBmYTk0OWNjMWJiZGIwYmNkMmY0ZmUwNTlmNDExZWU2MmNkMDFhNmE3YmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIyZWQ3MTZhZmY0NmJiNmRlMjY5ZGIxMDJiZGI0NDJkY2RjOTc2ZmE4MWYwODg4YTA1ZmExYzQ3NGQ4ZjA1NGMifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/routing.py#L129-L190",
+          "version": "repo-lines-v1:sha256:3bc1941ef2df5fde9a973fb636c7491fb82227a262c615d13335b97c8582df12:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkNTVmNGVjYWEwNTYzZTYzNDEwODc5ZjBiZTNmNDQwMWUwNDkyNjAwNDk1ZmEyNjdjMGQ0ZGNmZWU4YzlmODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlZGVkMDJkYjAzM2IxM2Y5ODgzZGE4ODcwYjQ2ZTE3MGFkNzA2MjMxMDY4OGVlMjY3ODllZWQxNDdlODZkYzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYwYTdkZGIzZWI3MjU5Y2U0OTY5ZGI5YTYxNTdkMDY0ODgzMjQxY2I1MGE0ZTlmYzY2Yjg5NzhjMjQ5OGFmYWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_routing.py#L103-L114",
+          "version": "repo-lines-v1:sha256:e033d1dc624d7be7b06366d5e441f4352c989b4df4bdc71dde9e77e421b3619a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2YzE4NTdjNTYzZjhkMTQ0MjJlY2ZiNTA5ZWZiNzZlZjQ1NmU4NjVjMTk1MWMwODcwYTBkOTcyMDIwMzM0ZjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1OWU5ZmNhYTU1NWYzMDEyMGUwMzNmNGYxYjIzMmQwMjc1ZWQ0NmE1ODU1ZDFhNThhMjMzZjRiMWZmOWViMjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI1ZDIyZmEwMTJlNTQzMTIzNjMzYWRiMjg4NjU1ZGZiNmM3ZjBmYjM1ZmY3ZGJhNzFhNjc5OGM1NWYzMTY0N2YiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_routing.py#L31-L70",
+          "version": "repo-lines-v1:sha256:ec84a5a6bc99b118b37eec05a05c932452c10cb5932197daf1b2a0ac78a38f89:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiMzcxNGRiY2U0YmRiMDhmMmNiZGVhNTZhZjk5MjUxMWM3NGYwOTQ1MjljNjQ0MmZlOWJhZmZmN2U3NDQyZTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRjY2FmNDY4YTg0ZjRiODRlMTI0YTI5MzY5NzNjNDRmOTUxNDI2MTBlNjRkN2E5MWNkM2MzNDMwM2E2YzM4M2IifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e712de201f9b40f4b3c51e3e9df0465b",
+      "statement": "Workspace refreshes publish a stable-name snapshot but runs boot from the immutable recorded snapshot ID; during capture or a failed recapture, a prior ready snapshot remains the boot input.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/store.py#L18-L31",
+          "version": "repo-lines-v1:sha256:04b819457b2967f81a6f80720b5948c76235d3f4902e567db9675a5063e43415:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0Zjc3NDY0NmI1YWU4OThmNDFmZDY3NDZhNDQzZDBkNzJiNGM4OGRjMTljZDVlMWU3OWYzYzg5YWRhOWZjYTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRkMTI4MGIyYzkzMjg3ZGRjZjdmMDRiMDVjMDliZmZjY2Y3NjQ3NGE4YzA0NjVlYzc4ZjVlMGMwNzAyNTVmNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1MGIzOTRiMTNiMjU0NjRlMGI4Njg1NmMwMGQyN2RiMTRjNWVlNGExNmFiOGIwZmNjNjg5MTZhZTAyODBkYjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyZDU4ZTY4M2NmMGY0YWUyODI3YWI1OGYwNTI0MTNlZWVjMTBlYzliODEzNjMwY2ZhZGVhNGNjNjA3ZWUyNTMifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L640-L664",
+          "version": "repo-lines-v1:sha256:2f27c5fd95cbe2843c2350e28eccf6c7f20e9da7fb0ba94ffb8401c86f7b0543:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzZDAwY2YyNzA5NjRkNDRhMTNkZmFjODc1MmIwOWZjYzQzNWIwZjE5YjMxNmFiY2Y4MWE3YWE2NGJiMTIyZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhZDZiYTNjOTFlMTkyZDJhZDQ3NmY0OGQwMDc5YjhkN2RhNDY3ZTA3ZDAzMjNhMDRhMTY2NzUyOTU1MjUzYTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE1MjE2ODIwZWM5NWQxYTU2ZTE0OTljZGM1ODU4MzliYjllOTJmNDFmNzBmNzQ3MzcxY2M5MWZlNTg1ZGFiNjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMzMGM5Y2QwYmM5NTM0OTViNDU0NmY3MWVhZGM2YjEwZjZlNjVlNjhhNzA0MWFhODEyM2Q4OWJlYzViZDdmODkifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_store.py#L155-L186",
+          "version": "repo-lines-v1:sha256:36a4231941250f504a9bb016c392cedd58dc694b294fef288a4a7691153d008e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkYThmOWRlYjZiNDA3NWUwZGIzNDc5MDE4NDJhMzdmMTM1YTk4YTM5ODRhM2MxODMyMmE4YjczYjIyNWIzMWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUxMTU4OTc3MjcyMTNmNjE2NmU2MGRkYTMzNjFmMzBjNTljY2MwYjIyMWVjNjA1MjlhZjZmMWE0ODU0MzY3NmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ2ODEzNWRhYTM4ZTYyMzQ4ZGYwYTk0YTg5ODVhYzc3ZTM3Y2M5YmFiZDA5N2IwYWM2Mjk1NWUyNGQxNDcyMjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7895d05e4ef845e88095a16b6993f7d9",
+      "statement": "A user is a stable UUID-backed person, provider identities are keyed by immutable provider external ID, and only an authorized GitHub identity can establish a new user while Slack is linked to an existing person.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/users/models.py#L1-L9",
+          "version": "repo-lines-v1:sha256:46617b634b5fc2387475e6b9182e51957c73cea095320de6a55a8e375e0e1412:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjNlNjE3YmQ2MjQ3MjI4MTJjNzBkM2U0ODZkMTRmMTdiOGJiZjY5NDA5MzAxYmJjZDQ0M2IwNTBjNjhiNzRiNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjU0NjkzMDc0OGMzOGZhYjcwNTkxYjZkM2ExN2ZkMTFlMTdkNWJlNDYxYmZlNzRmODM0Mjg5M2FhZTY5OTIxMyJ9"
+        },
+        {
+          "resource": "repo://openswe/users/models.py#L377-L401",
+          "version": "repo-lines-v1:sha256:df4513a5b7f6cc52fcdd6857a7c303dfd3fe0f24bbf70467b5cc73556eb39cbc:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk0YjY3MTI0ZjQ4YmQzN2FmOThjZGI1M2RkMGQzZTgxNTk2M2E3MTE4ODNmOTA2YjM5Zjc3NWYzMmUzNGUxNmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZkZWI5NjU4ZDNkMzdiNDU0MzljNDBjMjFkZDM5MGYwODY1NmY4N2RmMTdkN2FhNGJlNGMyN2QxMWE5NzFlM2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU4NTZkNmFiNTE1NzIzZTU4YWZmN2NkYjE0OTUxNjc1ZDQ2ZDU2YWE0MWJhZGNkYmI4Y2Y4NzU3NTJhZjAzOTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyYzE3ODU2NGI2MDJmZjM3NjIwYzIxMGNkOTA1N2ViMzdhNGYyYjM1NGNmYWRiOTNmZTcwYjRiNDNkNTZlZDkifQ"
+        },
+        {
+          "resource": "repo://openswe/users/models.py#L45-L74",
+          "version": "repo-lines-v1:sha256:d8484631ef014706bb0d4888b258673e12c7c50d6473fd9c3245dd64d8473986:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkZmFhZTgxNjA2YjA3MzAwZmVhNjNmOTUxZjE2MGVjOGVkYmFiMWExNWZmYjgwMjM5ZmEzZWUwODczMWM3NDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhMjdiODE2NDUwYzAyMTg4ZTYzZWY3OWFmMGIxMzgxOTU0YjI0NDM4MDY3YWM2ZjUyNWNkODRkZDFmMjJlMDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDlkNzUwYjBkODIxMTY1MmZiZmU4ZjY4YzVmYjY5MGRiMDcyMDcwYzk2ZGJkNzlhZjEyNjlhMmM2NDBkMDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBhNTI5NWY5YThhYzYzNDRhMDkxYzQ2NDhlMzljZGM1MzExMGI3MzE2ZjNhYzUwOWY2NmNmZmYxZWQxNjhiZWIifQ"
+        },
+        {
+          "resource": "repo://openswe/users/models.py#L545-L558",
+          "version": "repo-lines-v1:sha256:a1f07f4f6cc0ca0857abfd595252f7d9ef51040ab7fda129b345b5a48bb7b5a0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmNThlNjFjNDdkMWM5ZDZjMzc0ZTA3NzQwNTE4NDczOWFkOWMwOGY4MjUyZTUyZmVmODIzMjdiNjUxMGVkMzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ0NjI2ODBhMjY3MTI0NTRiOGM0NDNjMjk0MjZjNDhiMjRmMDhiMjEwZDhlYmMyZGE2ZjlhZjc1MjZlZWJiOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZiYmZiMTg3ZjNmNWY3YTE0ZWVlMWVkYWFmN2FlYTNkMjJhNGQwNjA0YWEwMGNkOTY2MzQwMmU4ZWE4NjU2ZTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_74bfe32190b1400f975040c6456756bf",
+      "statement": "Per-person JSON records and OAuth credentials resolve a supplied mutable GitHub login to users.id; writes for unknown users are rejected, and OAuth token/client-secret fields are stored encrypted with one credential per user and provider.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/dashboard/oauth_credentials.py#L1-L8",
+          "version": "repo-lines-v1:sha256:191af0d5c30826c929994d47e95629ccaa6863c946fb0e1ecdcb46fee9c4f010:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWI1MzkyYzEyNjk5ODBkMWFkMzk1MzkxM2JlMzdiYzBhZDc3MmRmZDMwMTVjNDcxNmIwZTExMjhlODA3MDMyNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2UwYjc4MmIyZWVkNTEyNjc0YWE0ZmUzYTkzN2U3Mzg0ZmExYzIyOGNjZjk5MGUwNTg5ZTY3MmM5NTBiNDc1ZSJ9"
+        },
+        {
+          "resource": "repo://openswe/dashboard/oauth_credentials.py#L25-L85",
+          "version": "repo-lines-v1:sha256:e3b42b4b561fddcab84ecbd9b58f1be35a558956a68f93133de5b2d450a5a58d:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJlMDZiMjllYzEwODczYjZiMWYwODU1ZTkyMWMwMzY3ZGE1ZjNmNTUxZGNlZDNkZTEyYzI4OTg0NDM3ZDhiY2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwN2FlMmUxZDEyZTc5MDVmZWVkNTE3N2I2YzVhZTIzNDAwNjBhNDNjZDQ1MGM0YTMzOTA2MWM1Njk0Mzc2NzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODcifQ"
+        },
+        {
+          "resource": "repo://openswe/users/records.py#L1-L6",
+          "version": "repo-lines-v1:sha256:d0423f09efb1046089a45aed7c9c9c631e367b9c3d5fc5207fc33685c82948d6:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGFjOGIxN2RjYjhmYzExOTYwMDRmZTllN2E0MmY2N2JkNTE2MjhlYTMzYmMwNmUwYTNlZGQxOTQyMGE0MmRhYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMmNkZTRhNWNhYWQwOGY3OGEzYjViZmFmMWYzOGU0ZDExNWE1ZjA4NDUyNDIxODFmNjA2OTk2MzUxOTgyNTA2MyJ9"
+        },
+        {
+          "resource": "repo://openswe/users/records.py#L33-L88",
+          "version": "repo-lines-v1:sha256:61d0bb2c2187c075177f43a27bcad9fcb7f4ea6afd808248920300a5bf06d9ce:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE3NDdkMDcwMmE1NGEwYWY0Y2JhNjNkZjRiZmUyOTBkOGIyYzRhZWFlYzc2OTJhNTY5OTU4ZDU5ODAxNjZmMWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMxYzY1MjYzZDZkODYyMWFjMDU3MzQ4NWVmYTE5NmM0ZTkwZGQzMmIxOWEwOTZhN2RmZTgxZTUxNzhkOTZmOTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3MzFjMDljNjA0OWI5MjJkOTQ3NDI1N2ExYjA2Y2Q1NzdlZDRhMTI3NzZiNmNiNjk1NDYyMjlmYzYxM2JjNzEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f87859bb8aa04df29ba6c52d4ba9b583",
+      "statement": "The PostgreSQL transcript model makes append-only thread_event authoritative while related thread, turn, message, tool-call, attachment, checkpoint, and tool-output tables provide efficient retained UI and artifact reads.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/database/migrations/versions/0024_thread_transcript.py#L1-L11",
+          "version": "repo-lines-v1:sha256:5ac55a1f21315025a4adaa2dee3f67e8831416e0a1851d90153b95c5bc5c7e06:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM3ZDkwOGRhOGU0YTU2YjQwOGRjMGUzYmYwN2NjZTQyMTU5MTY3ODAwMGRkNjY1NjE3NDM5MGFjNDJmOWU3MDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1ZmM4NGJhZTJkOTE2Zjg0MjA4ZGQyZjNkNDFjMzE5M2VmMjIxMmI4ZjM1ZGNjNTAyOGE2NDlkMDQ5NDZmYzUifQ"
+        },
+        {
+          "resource": "repo://openswe/database/migrations/versions/0024_thread_transcript.py#L27-L230",
+          "version": "repo-lines-v1:sha256:39e2d86d9f6b436dcd03bb7a21654bd8767172523901276b266bef14f50f97c0:eyJzZWxlY3RlZExpbmVDb3VudCI6MjA0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkMzRjMzcyYzNhMzBkMjVkMWUwYTk5YzAwOTMyZTU3ZTMyZDViYzdmZTViZWEzNjQ4ODFlNjk5YzZhYjRhN2MwIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlODhmNmZmY2QyNGViNjBhOGRlNjM4YmM5MGJkNTJhYTcyZTY2MThiY2UyYjkxYTg4NjdkZTQ2MTdjODYzZjBhIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhMzgzMzgxNzI1MGU1YzE2ZjIyZjJhMDBkYmM4N2VlM2QwMTQ3ZWM3OWFkM2U5MzkwYjRlYWUzMjc0NjQyNjk1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1MGI3MTEwZGMyZjgxZDBhZDUxM2NkNzRkYTg3M2E2NmQ3NTlkN2RjYWU2MjIxODM1ZTM4MDhkZDMwYjRhOWFkIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_b6d2743e1753425689f38332896bf65d",
+      "statement": "Offloaded deepagents blobs are stored in PostgreSQL by thread and path, support scoped store operations and idempotent cross-thread copying, and are imported from the legacy LangGraph Store before its entries are deleted.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/blobs.py#L1-L86",
+          "version": "repo-lines-v1:sha256:d0bc6f79672028f84c73135527517e991139a22b787920746ed0a873aa0c0703:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4YzcyNmQxYTNlMjRlOTM1YTUzMTA1MGQ2MTU1OGZiZDFlNWU5YTQ3OTk0NmZlZjQ2MjcxOTRhM2RkMTViZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAxYWFmZWFmZGI1YTRmZDJiNzQ3ODc2ZjMzYjMwODgzMDkxODMyOTA0ZGUyZDNhYzI4MjcxZDQ4YTc1NWE2YTUifQ"
+        },
+        {
+          "resource": "repo://openswe/threads/blobs.py#L101-L149",
+          "version": "repo-lines-v1:sha256:f0195496e3511956b8fdad7ecf847fcb9f4b261c07c80bf038e5bc244fc79b97:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzNThkMTViMjY2OTc4ODNhNTQxMjBmNTg4NzE0ZTJkMmNiZjNlNTY5MDc0Y2IzOGMxNDA2MzY5NmNmZWQ4Y2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiNTI0NTgwMDg4M2FkOTUyOTg2Y2Y0NjY5NzYyZTFmMmM4OTIyODE5ZDNkYzU4ODQ3MWE2NTUwZmFhNmQxOTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM0Y2IwZmYyNzRmZDEwZGE2ZjFkNWIxOWM3YjhkYjRlZjA0YjIwY2EzOThjMzgxMTU5MWVlZDk2NjA2OWRlM2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a0d6349c3183472a9c6bbeb6444c01fc",
+      "statement": "Task delegation persists a workspace-scoped coordinator/worker relationship in PostgreSQL, serializes reservation per coordinator, derives an idempotent worker identity from coordinator and tool-call ID, validates the created worker thread's security-sensitive metadata, and retains launch errors for retry decisions.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/database/migrations/versions/0051_179eb756b3cf_task_coordination.py#L11-L57",
+          "version": "repo-lines-v1:sha256:16a2f17f053e0bc1e0ec4abb13c322343d92a23a35c3bce06affbd25ab39a2d3:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVmODc2NjQ5ODM4M2FmYjA3NjIwYzg3YzAzNjVjYjYwMzEzMjljOGVjMWVhMGYyYTMwYzNlZTk1YzRmYjhiOGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1OTMxNjYxYWIyYjYxOWY2MmVmNDdiZWZmYTVjNGUzMzNjN2YwMGE4OTk0OGU0ZGQ3N2Q1Yzg4ZDE4ZGFlZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0NDYyMWUwNWNlMzQ5YTI3ZTgzMzZjYzY4ZTQyOTI3N2Q4ZmE2MzJhNWY0OTkyYmJkMzAzYzMxZDNkODU5ZWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzZjA2MWIwMDdjZGJlOWRiMjkyOTA0OTY2M2M4OTBlYTJjYmY5YjQ2ODIzMGJhZGI5MjQ5YTg0MGI2Y2ZiMTAifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L267-L374",
+          "version": "repo-lines-v1:sha256:73fba4811fb7823b844698bbca8d9f5cb479c83fca2fdc568270b01dae512277:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3MDdhODEyYmExNzhiNjA5Nzg3YTY5Y2MzZTUwNjlhM2JhYzFiYTNiZWYwNjBiNDgwMWIzNTJkYWM3YTNkNTcxIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0ODkzZjQwZTM3ODFlYjg5NmM4MmQwNDZhMDgwNjdhMTFlMzVjZGYyZjFkZmFmMjZmZWE5MGI4ZGI2Njc2NDEzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3OWM5ZjFjOGE1MDE4YWUxMDg1MDI4MzdhZWM2OTNjZmI0MWQyYmJiMmM0NTJkNjk3MmExYmU0NDRjNjY5MjEyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJmYjExYjc3MTQ3YzA0YjZmZWQyY2JlYmEzZTdkZDcyY2YyNDlkNDA0YjM0MzI0ZDczODYyMWUzNmFjNGZkMWY2In0"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L377-L417",
+          "version": "repo-lines-v1:sha256:73030b697357f235c487f2143d6d2c327265b8dacba1bc016d1c2614e3e15abb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVhMjI1MGM2NjJmMjFkODIwYTllOTVlODkwMzE0NjA0MzAwYTA1MjEzMTcyZTU3NjM0ZDBkZWJjZjVkNWQyMTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5NDdmZjRjNTViZDA4Y2E5ZjNjNjkwM2U5NTJmMjEzMDhkN2Y5Mjc3NjAwMDRjMzI3ZDMyNDNjYzZhY2FlNDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3NjViYWEyOTM2MTNlNjM3YmFmYmI4NmVhZTNjNmU5NTQ3NTJlY2UxMGRkMTliYWYwMTBiZGQyOTJhZDAyNWMifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/store.py#L32-L99",
+          "version": "repo-lines-v1:sha256:a182c66abcab06cea5df787c8f63e9850442104710ce2394a7c8b07b4987bced:eyJzZWxlY3RlZExpbmVDb3VudCI6NjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmODY3MDA1ZTE0YjEyZGQyYTVmMTdkZmU3M2M0NDg3ZTI5ZjM3MTMyOGVlZjFhOWM4MjMzZDZhOTQ4ODk3YjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MDhhYzJmODA3NmQzZWYyNTE3NTUwZTY0ZGMxMzY4MjFiZTliNzQzNTc2MmU5M2U1ZGNmODU5NzBkYzY5MTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyZWZlMTUyYmRlZmNlN2ZiOWRiN2ExNzdkMDhiYTNlZDMwNTQzODcxZGNlNjhmYzc3ZmJiZTYzMGNlOTkxNTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM5NGU4Y2IyNmIzZTY2OWNhZTlhYWE5NjQwYzA5MjBkZTI2YjZmZmRmMzAzYjVjMGYzM2MyZDVmN2U5OWM1ZGYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2b00002156e74bdfb16f32806a3d4077",
+      "statement": "Task messages are recorded idempotently before dispatch, acknowledged from recipient checkpointed message IDs, delivered under a per-recipient advisory lock with a three-attempt cap, retained for seven days after delivery, and cancellation removes queued work.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/messages.py#L1-L35",
+          "version": "repo-lines-v1:sha256:c9a56db707789fa2bf00ac8d942a3d4535bca359803b79b1fc96d8a25e9f67b8:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmZmM3NGJlZTdiZjI0OTIwYjI1OTQ4Y2UyYzYxNTgyMjJiNDk3MWRhNTZiMDc3ZDRkMzcxNjE1YTcyYjc0N2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA2Yjc3MzY0ZGVkNmIyNjljZjQ4YjcyMDNhNzRlMmQ0Mzc4OWMwZjg5N2NiOGNiYzc5ZjBlZmU2N2M3M2IxMWIifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/messages.py#L146-L214",
+          "version": "repo-lines-v1:sha256:0a3476363708cd3fbbb8627c84bcc11563ee654d70303b6b3bb0626866374c97:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMGI0NTNmNWUwYzkyZDVmNmMyNTFhNWVhMTk2MGQ3MmYzYmQwNzk1NmFlODU3ZGEyMGUzMWE4OGM1NTk2OWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjMDZlZWNmZmJmM2M5NGM0N2JmYWJjYjQ1ZWYwMWExZmYyMzkwMjkzM2IzYjY5MDk1ZjM2MGFhNmY3OWEyNDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3NDhlZDUwOTUzMzk1ZjY0OWY3YWE2MDBhZTc2MWViODgyMzBhZTlkZmJjNTBiYzRlOThiZmUzZTA4MTUwZWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/messages.py#L64-L112",
+          "version": "repo-lines-v1:sha256:1fbdaae9ebaef48758966378e8f118d323089ce427e89011bf6e6509710f213f:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYyZDJmMWI3NTJhNzcxMjdhYTBhYTRmNTA4ZjFjY2RiMzFkYzdjYWViNzQwNTEyYWRmNmRkNGY4YmVmNTg1NGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY3ODgxMDI4ODAzOTAxNzI1OWEwYjEwYTE3OGNjOGZmNmMzNmVlODFlODc3MTlkMjI4Zjc2NmU1NjQ5ZWU2MWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM5MmFhMTA1YTJjZDFjOTAzNzliZmE2MWVhMTczMTIyYzNkOWZjMTQxMTA4OWQ4MWQwYmI4MDUwNDFjODVmZTQifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L541-L590",
+          "version": "repo-lines-v1:sha256:388a70ac4cccc3e31d23e347816e494955e63ec52fc9824d0fb5845388f7a1a6:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiZmM5YmJiZTViYTQzMTE4YzZhNjE4YmYwYWY0MTUxOTkyOGFjZmQxODQ5NzcwYzgzNDA5NTg0Y2EzNDI1NDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5ZTU0OWZjNjM0YTRlMGEwNTdhMTVhYmZhN2FlMWY3MGNhNzc3YTA1YzBlYWIyNzU3MmJiYjU2YzcwODcwYjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDMwYmJlMTNjMTM3MmI5MzA5ZTQ2NzE2MzY0NzAyZjcxODRkMmRkN2Y0MTc4ZWI0NDM5NmQ0OWY4N2Q2N2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFiYWMwN2VhM2E5YTVjYzdiM2QwZjc4ZDEwMWQ3Y2NmOWJlZWZlNTVlZjQyM2ZhOWY1YWE5Yjc5ZmFhYjRjZDMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_17830c5824764d13874dc42d73b44d95",
+      "statement": "Startup performs locked, resumable Store-to-PostgreSQL imports; an import completes only after no moved or waiting records and at least a day since movement, while user records without a users row remain for a future pass and pending OAuth flows are intentionally excluded.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/api/app.py#L71-L127",
+          "version": "repo-lines-v1:sha256:5079e6353da39339947611a6ccbcc2255882cfd7ec6c934d2ec95c8308f5b02f:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVkZjZkMmQyYTllZjg4MWVhMjhkYWJmZjJmMzk0MDQxZGZlZTE4Nzk1Zjg5ZTQyMDI2Mjg3M2UzOTI1MmY1ZTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBhZDQxOGNlZTUxZTMzN2E4OTMxY2E1MzIzMTcxYmYxNDYyMmY5ODY5OTQ2MzcxZTc5NTFkZjE5NzVmMTQxM2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMxM2E2YTBjZGJjMzA4Y2RhYWQ1OWQwNmJmODhjNGFjYzM0NjEwYTM4NTMzNjZlZDUyYzg4YTNlY2QxMDExZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE5OTlmZjNjYjhjNTJiZGU4N2I5NGU3Y2VhYWM5MjQ5M2Q0YWYyYjQ2NDZlZDA3ZGNhMTVkNjgxYjBiNGJkNzYifQ"
+        },
+        {
+          "resource": "repo://openswe/database/store_imports.py#L1-L64",
+          "version": "repo-lines-v1:sha256:5b3241645a1ab67499b597ae6aefba2c13b6cd19eb7cc58860b19aa06ca56750:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFhODM3ZTEyZTg1MGFiYjVhNDIxOGFhNTUyM2E4MjRmMTkwZjhkMDBkMDczZjdmNzc4MDMyNDY2OTQ5ZWI0MjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM4MzQyNmRiYmI1NTQwNWJlZjRhZDJkMDU0NWViMGE0NTAyZTU4NTQxMzg1ZDE0ZmEwY2U0ZWM4YmRmNmJkM2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMifQ"
+        },
+        {
+          "resource": "repo://openswe/users/import_records.py#L1-L24",
+          "version": "repo-lines-v1:sha256:b98739cc747a80a906d909a7acee01d0ab91e30b9652c086956165264a67d310:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlZjcwZDhhMDg4MDcyOTgwYmQzNGRkYjhmMmUyZGM4NDgwZjg1Y2EwY2Q2Njk4ZjQ2MDY2MWE4NDUwNDViMzIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjYThhMjk3ZDcyZDZmOWQ1YjRlYTYxYTI0OWE5Zjk5YjZhNmU5N2Q1NGRlOWMwODU0YTc5YWU4MzAyZWE5ZDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZhMTFjMDU2N2QwYTVmOWU5YjEzNWY2NWNkMjUzNzJkZmQ2Mjg3NzVmN2MxZWQyNTNmOGJhZDQyZGQyZDY2NjkifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-10-10T08:14:14.686Z"
+  }
+}
