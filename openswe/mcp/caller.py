@@ -64,7 +64,7 @@ def _exposed() -> dict[str, tuple[BaseTool, Access]]:
     for module in _TOOL_MODULES:
         import_module(module)
     names = list(EXPOSED_TOOLS)
-    functions = apply_tool_descriptions([func for func, _ in EXPOSED_TOOLS.values()])
+    functions = apply_tool_descriptions([func for func, _ in EXPOSED_TOOLS.values()], mcp=True)
     return {
         name: (
             StructuredTool.from_function(
