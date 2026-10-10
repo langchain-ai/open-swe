@@ -1,5 +1,10 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import {
+  CaretLeftIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
 import { Kbd } from "@langchain/macaw-components/Kbd"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
@@ -80,8 +85,6 @@ export function InboxPage() {
   })
   const [snoozing, setSnoozing] = useState<InboxItem | null>(null)
   const list = useRef<HTMLDivElement>(null)
-  const end = useRef<HTMLDivElement>(null)
-  const endInView = useInView(end, list)
 
   const reviewRows = useMemo(
     () => reviews.data?.pages.flatMap((page) => page.pullRequests) ?? [],
@@ -110,21 +113,31 @@ export function InboxPage() {
       markAgentThreadViewed(queryClient, selected.thread.id)
   }, [selected, queryClient])
 
-  // Like Superhuman, the list has no end you can see: the next page loads before
-  // scrolling or J/K reach the last row. Most threads never wait on you, so a
-  // page can add few rows and the effect keeps going until the list is full.
-  const wantMore = endInView || items.length - index <= PREFETCH_ROWS
-  const moreThreads =
-    split !== "reviews" && threads.hasMore && !threads.isFetchingNextPage
-  const moreReviews =
-    split !== "agents" && reviews.hasNextPage && !reviews.isFetchingNextPage
-  const fetchThreads = threads.fetchNextPage
-  const fetchReviews = reviews.fetchNextPage
+  // The page follows the selection, so J/K off a page's last row turn the page.
+  const pageStart = Math.floor(index / PAGE_SIZE) * PAGE_SIZE
+  const pageItems = items.slice(pageStart, pageStart + PAGE_SIZE)
+  const threadsLeft = split !== "reviews" && threads.hasMore
+  const reviewsLeft = split !== "agents" && Boolean(reviews.hasNextPage)
+  // Keep the page after this one loaded so turning to it never waits. Most
+  // threads never wait on you, so this can take several fetches.
+  const wantMore = items.length < pageStart + 2 * PAGE_SIZE
+  const fetchThreads =
+    wantMore && threadsLeft && !threads.isFetchingNextPage
+      ? threads.fetchNextPage
+      : null
+  const fetchReviews =
+    wantMore && reviewsLeft && !reviews.isFetchingNextPage
+      ? reviews.fetchNextPage
+      : null
   useEffect(() => {
-    if (!wantMore) return
-    if (moreThreads) fetchThreads()
-    if (moreReviews) void fetchReviews()
-  }, [wantMore, moreThreads, moreReviews, fetchThreads, fetchReviews])
+    fetchThreads?.()
+    void fetchReviews?.()
+  }, [fetchThreads, fetchReviews])
+  const turnPage = (step: 1 | -1) => {
+    const start = pageStart + step * PAGE_SIZE
+    const item = items[start]
+    if (item) setSelection({ key: item.key, index: start })
+  }
 
   useEffect(() => {
     list.current
@@ -271,6 +284,32 @@ export function InboxPage() {
               Inbox
             </h1>
             <span className="text-xs text-tertiary">{waitingCount}</span>
+            {items.length > PAGE_SIZE || threadsLeft || reviewsLeft ? (
+              <div className="ml-auto flex items-center gap-space-1">
+                <span className="text-xs text-tertiary tabular-nums">
+                  {pageStart + 1}–{pageStart + pageItems.length} of{" "}
+                  {threadsLeft || reviewsLeft ? "many" : items.length}
+                </span>
+                <IconButton
+                  icon={CaretLeftIcon}
+                  label="Previous page"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
+                  disabled={pageStart === 0}
+                  onClick={() => turnPage(-1)}
+                />
+                <IconButton
+                  icon={CaretRightIcon}
+                  label="Next page"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
+                  disabled={items.length <= pageStart + PAGE_SIZE}
+                  onClick={() => turnPage(1)}
+                />
+              </div>
+            ) : null}
           </div>
           <GroupedTabs<InboxSplit>
             size="xs"
@@ -296,24 +335,19 @@ export function InboxPage() {
           ) : items.length === 0 ? (
             <InboxZero split={split} />
           ) : (
-            items.map((item, itemIndex) => (
+            pageItems.map((item, offset) => (
               <InboxRow
                 key={item.key}
                 item={item}
                 now={now}
                 selected={item.key === selected?.key}
                 onSelect={() => {
-                  setSelection({ key: item.key, index: itemIndex })
+                  setSelection({ key: item.key, index: pageStart + offset })
                   list.current?.focus({ preventScroll: true })
                 }}
               />
             ))
           )}
-          {items.length > 0 &&
-            (threads.isFetchingNextPage || reviews.isFetchingNextPage) && (
-              <InboxSkeleton rows={2} />
-            )}
-          <div ref={end} aria-hidden className="h-px" />
         </div>
         <footer className="flex flex-wrap gap-x-space-3 gap-y-space-1 border-t border-default px-space-4 py-space-2 text-xxs text-tertiary">
           <span>
@@ -504,27 +538,7 @@ function InboxZero({ split }: { split: InboxSplit }) {
   )
 }
 
-/** Rows from the end at which J/K start loading the next page. */
-const PREFETCH_ROWS = 10
-
-/** Whether `target` is within a screen of `root`'s visible area. */
-function useInView(
-  target: React.RefObject<HTMLElement | null>,
-  root: React.RefObject<HTMLElement | null>
-): boolean {
-  const [inView, setInView] = useState(false)
-  useEffect(() => {
-    const element = target.current
-    if (!element || !root.current) return
-    const observer = new IntersectionObserver(
-      ([entry]) => setInView(Boolean(entry?.isIntersecting)),
-      { root: root.current, rootMargin: "0px 0px 100% 0px" }
-    )
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [target, root])
-  return inView
-}
+const PAGE_SIZE = 50
 
 // setTimeout overflows past ~24.8 days; a longer wait just re-arms when it fires.
 const MAX_TIMEOUT_MS = 2 ** 31 - 1
@@ -616,10 +630,10 @@ function SnoozePicker({
   )
 }
 
-function InboxSkeleton({ rows = 4 }: { rows?: number }) {
+function InboxSkeleton() {
   return (
     <div aria-hidden>
-      {[80, 64, 72, 58].slice(0, rows).map((width) => (
+      {[80, 64, 72, 58].map((width) => (
         <div key={width} className="mb-0.5 flex flex-col gap-1.5 px-2.5 py-2.5">
           <Skeleton className="h-2.5" style={{ width: `${width}%` }} />
           <Skeleton className="h-2 w-1/3" />
