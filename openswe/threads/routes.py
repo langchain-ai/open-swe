@@ -13,9 +13,12 @@ from pydantic import BaseModel, Field
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
+from openswe.github.token_auth import bearer_github_token
+from openswe.message_queue import QueuedPreview
 from openswe.threads import terminal
 from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
@@ -39,6 +42,7 @@ from openswe.threads.handlers import (
     get_dashboard_thread,
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
+    get_dashboard_thread_queued_messages,
     get_dashboard_thread_state,
     interrupt_transcript_turns,
     rename_dashboard_thread,
@@ -143,13 +147,18 @@ async def api_create_session(
     return {"thread_id": thread_id}
 
 
-@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
+@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY, response_model=None)
 @audit_endpoint
-async def api_upload_session(
-    request: Request,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    return await upload_session(UploadStream(request), session["sub"], email=session.get("email"))
+async def api_upload_session(request: Request) -> dict[str, Any] | Response:
+    code = bearer_github_token(request)
+    if code is None:
+        raise HTTPException(401, "send the upload token as a bearer token")
+    ticket = decode_upload_ticket(code)
+    bind_audit_session(request, {"sub": ticket.sub, "user_id": ticket.user_id})
+    summary = await upload_session(UploadStream(request), ticket)
+    if summary is None:
+        return Response(status_code=204)
+    return summary
 
 
 @router.post("/threads/resolve-all")
@@ -288,6 +297,15 @@ async def api_get_thread_pull_request_status(
         thread_id,
         session["sub"],
         email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/queued-messages", response_model=list[QueuedPreview])
+async def api_get_thread_queued_messages(
+    thread_id: str, session: dict[str, Any] = SESSION_DEP
+) -> list[QueuedPreview]:
+    return await get_dashboard_thread_queued_messages(
+        thread_id, session["sub"], email=session.get("email")
     )
 
 

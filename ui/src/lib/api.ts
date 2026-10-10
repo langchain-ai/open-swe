@@ -702,8 +702,6 @@ export interface ReposPayload {
   repositories: Array<Repository>
 }
 
-export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
-
 /** What a positive approval assessment does; `null` is the `dry_run` default. */
 export type ReviewApprovalMode = "off" | "dry_run" | "approve"
 
@@ -715,16 +713,8 @@ export interface ReviewStyle {
   full_name: string
   owner?: string
   name?: string
-  status: ReviewStyleStatus
   custom_prompt: string | null
   approval_mode?: ReviewApprovalMode | null
-  analysis_summary: string | null
-  top_reviewers: Array<string>
-  prs_sampled: number
-  reviews_sampled: number
-  analysis_thread_id: string | null
-  analysis_run_id: string | null
-  error: string | null
   created_by?: string
   created_at?: string
   updated_at?: string
@@ -992,30 +982,6 @@ export interface SubmittedReview {
   id: number
   html_url: string
   state: string
-}
-
-export interface ReviewCommentResult {
-  id: number
-  html_url: string
-}
-
-export interface PrReviewComment {
-  id: number
-  author: string
-  author_avatar_url: string
-  path: string
-  line: number | null
-  side: "LEFT" | "RIGHT"
-  body: string
-  html_url: string
-  created_at: string
-  is_open_swe: boolean
-  // Outdated: the line no longer appears in the current diff, so it can't render inline.
-  is_outdated: boolean
-}
-
-export interface ReviewCommentsPayload {
-  comments: Array<PrReviewComment>
 }
 
 export interface ReviewCounts {
@@ -1522,20 +1488,6 @@ export const api = {
   getApprovalsFile: (full_name: string) =>
     request<ApprovalsFileStatus>(
       `/review-styles/${encodeURIComponent(full_name)}/approvals-file`
-    ),
-  analyzeReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/analyze`,
-      {
-        method: "POST",
-      }
-    ),
-  cancelReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/cancel`,
-      {
-        method: "POST",
-      }
     ),
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
@@ -2095,21 +2047,6 @@ export const api = {
     request<PostedReviewComment>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
       { method: "POST", body: JSON.stringify(comment) }
-    ),
-  listReviewComments: (owner: string, repo: string, number: number) =>
-    request<ReviewCommentsPayload>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
-    ),
-  updateReviewComment: (
-    owner: string,
-    repo: string,
-    number: number,
-    commentId: number,
-    body: string
-  ) =>
-    request<ReviewCommentResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments/${commentId}`,
-      { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   startReviewerEval: (body: ReviewerEvalStartRequest) =>

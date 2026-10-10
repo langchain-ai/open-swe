@@ -1,4 +1,10 @@
 import {
+  CaretDownIcon,
+  CaretRightIcon,
+  LaptopRegularIcon,
+  PushPinRegularIcon,
+} from "@langchain/macaw-components/icons"
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuTrigger,
@@ -15,8 +21,6 @@ import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { BookOpenTextIcon } from "@phosphor-icons/react/dist/ssr/BookOpenText"
 import { CalendarBlankIcon } from "@phosphor-icons/react/dist/ssr/CalendarBlank"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
@@ -24,9 +28,7 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
-import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
@@ -228,12 +230,12 @@ export function sidebarRowClassName({
   archived: boolean
 }): string {
   return cn(
-    "flex items-center gap-2 rounded-lg pr-2.5 transition-colors",
+    "flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
     paddingLeft,
     // Only ever on screen while "Show archived" is on; without this an
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
-    compact ? "h-7 gap-1.5" : "h-8",
+    compact ? "h-7 gap-space-2" : "h-8",
     "text-primary",
     active
       ? "bg-selected group-hover/row:bg-selected-hover"
@@ -497,7 +499,7 @@ export function SidebarThreadRow({
       )}
       <SidebarRowTitle marquee={marquee} title={item.title} />
 
-      <span className="flex shrink-0 items-center gap-1.5 group-hover/row:hidden">
+      <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
         {thread?.automationActionPosted && (
           <SlackLogoIcon
@@ -539,7 +541,7 @@ export function SidebarThreadRow({
 
       <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
         <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinIcon}
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? "Unpin thread" : "Pin thread"}
           size="xs"
           color="secondary"
@@ -564,11 +566,11 @@ export function SidebarThreadRow({
     paddingLeft:
       hasSubagents || workers.length > 0
         ? indent
-          ? "pl-4"
-          : "pl-2"
+          ? "pl-space-4"
+          : "pl-space-2"
         : indent
-          ? "pl-6"
-          : "pl-2.5",
+          ? "pl-space-5"
+          : "pl-space-2",
     archived,
   })
 
@@ -725,7 +727,7 @@ function SidebarSubagentRow({
         paddingLeft: nested
           ? indent
             ? "pl-18"
-            : "pl-16"
+            : "pl-space-9"
           : indent
             ? "pl-13.5"
             : "pl-11.5",
@@ -733,7 +735,7 @@ function SidebarSubagentRow({
       })}
     >
       <SidebarRowTitle marquee={marquee} title={subagent.title} />
-      <span className="flex shrink-0 items-center gap-1.5">
+      <span className="flex shrink-0 items-center gap-space-2">
         {subagent.status === "error" && (
           <ErrorIndicator label="Subagent failed" />
         )}
@@ -789,12 +791,12 @@ function ThreadHoverCard({
   live?: PullRequestSnapshot
 }) {
   const onAMac = item.location === "local" || runsOnAMac(item.thread)
-  const LocationIcon = onAMac ? LaptopIcon : CloudIcon
+  const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-start gap-2">
+    <div className="flex min-w-0 flex-col gap-space-2">
+      <div className="flex items-start gap-space-2">
         <span className="min-w-0 flex-1 text-xs font-medium text-primary">
           {item.title}
         </span>
@@ -812,12 +814,12 @@ function ThreadHoverCard({
           className="mt-0.5 shrink-0 text-icon-secondary"
           aria-label={locationLabel}
         />
-        <span className="mt-px shrink-0 text-[11px] text-secondary">
+        <span className="mt-px shrink-0 text-xxs text-secondary">
           {compactAge(item.updatedAt)}
         </span>
       </div>
       {item.repoLabel && (
-        <div className="flex min-w-0 items-center gap-1.5 text-secondary">
+        <div className="flex min-w-0 items-center gap-space-2 text-secondary">
           <FolderIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
           <span className="min-w-0 truncate text-xxs">{item.repoLabel}</span>
         </div>
@@ -828,7 +830,7 @@ function ThreadHoverCard({
           target="_blank"
           rel="noreferrer"
           onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto -mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+          className="pointer-events-auto -mx-space-1 flex min-w-0 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
         >
           <PullRequestIcon state={item.pr.state} live={live} />
           <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
@@ -840,8 +842,8 @@ function ThreadHoverCard({
 
 function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-start gap-2">
+    <div className="flex min-w-0 flex-col gap-space-2">
+      <div className="flex items-start gap-space-2">
         <span className="min-w-0 flex-1 text-xs font-medium text-primary">
           {subagent.title}
         </span>
@@ -861,11 +863,11 @@ function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
             aria-label="Subagent finished"
           />
         )}
-        <span className="mt-px shrink-0 text-[11px] text-secondary">
+        <span className="mt-px shrink-0 text-xxs text-secondary">
           {compactAge(subagent.endedAt ?? subagent.startedAt)}
         </span>
       </div>
-      <div className="flex min-w-0 items-center gap-1.5 text-secondary">
+      <div className="flex min-w-0 items-center gap-space-2 text-secondary">
         <RobotIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
         <span className="min-w-0 truncate text-xxs">
           {subagent.subagentType}
@@ -971,7 +973,7 @@ function SidebarTaskWorkerRow({
           aria-label="Asynchronous task worker"
         />
         <SidebarRowTitle marquee={marquee} title={worker.title} />
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-secondary">
+        <span className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary">
           {worker.status === "running" && (
             <RunningIndicator label="Worker running" />
           )}

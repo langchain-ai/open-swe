@@ -66,7 +66,16 @@ export function useSidebarLayout() {
     if (window.matchMedia("(max-width: 767px)").matches) setCollapsedState(true)
   }, [])
 
-  return { width, collapsed, setWidth, setCollapsed, toggle, closeOnMobile }
+  return {
+    width,
+    collapsed,
+    setWidth,
+    setCollapsed,
+    /** For a page that wants the room while it is open; the stored preference is untouched. */
+    setCollapsedForPage: setCollapsedState,
+    toggle,
+    closeOnMobile,
+  }
 }
 
 export type SidebarLayout = ReturnType<typeof useSidebarLayout>
@@ -133,7 +142,7 @@ export function SidebarFrame({
         data-sidebar-expand=""
         onClick={toggle}
         className={cn(
-          "fixed top-2 left-2 z-30 size-7",
+          "fixed top-2 left-2 z-sidebar size-7",
           isDesktop && "left-[90px]"
         )}
       />,
@@ -147,8 +156,8 @@ export function SidebarFrame({
       style={{ width }}
       className={cn(
         "relative flex h-svh shrink-0 flex-col",
-        "max-md:fixed max-md:inset-0 max-md:z-40 max-md:!w-full",
-        "max-md:duration-200 max-md:ease-out max-md:animate-in max-md:fade-in-0 max-md:slide-in-from-left-4",
+        "max-md:fixed max-md:inset-0 max-md:z-pane max-md:!w-full",
+        "max-md:duration-normal max-md:ease-out max-md:animate-in max-md:fade-in-0 max-md:slide-in-from-left-4",
         className
       )}
     >
@@ -209,7 +218,7 @@ function ResizeHandle({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       className={cn(
-        "absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
+        "absolute top-0 right-0 z-resize-handle h-full w-1 cursor-col-resize touch-none select-none",
         "after:absolute after:inset-y-0 after:right-0 after:border-r after:border-transparent after:transition-colors",
         "hover:after:border-default",
         dragging && "after:border-default"
@@ -241,7 +250,7 @@ export function SidebarCollapseButton({
       onClick={onToggle}
       className={cn(
         "shrink-0",
-        isDesktop && "fixed top-2 left-[90px] z-30 size-7",
+        isDesktop && "fixed top-2 left-[90px] z-sidebar size-7",
         className
       )}
     />

@@ -34,7 +34,7 @@ export function TaskEventMessage({
 
   return (
     <div
-      className="my-3 flex flex-col items-start gap-space-1"
+      className="my-space-3 flex flex-col items-start gap-space-1"
       data-testid="task-event"
       data-message-id={messageId}
     >

@@ -20,9 +20,9 @@ function EditAutomationPage() {
 
   if (schedulesQuery.isLoading) {
     return (
-      <div className="mx-auto w-full max-w-3xl px-6 py-10">
+      <div className="mx-auto w-full max-w-3xl px-space-5 py-space-7">
         <Skeleton className="h-9 w-64" />
-        <Skeleton className="mt-6 h-32 w-full" />
+        <Skeleton className="mt-space-5 h-32 w-full" />
       </div>
     )
   }

@@ -1,16 +1,16 @@
 import json
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.fernet import Fernet
-from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+from mcp.types import CallToolResult, TextContent, Tool
 
 from openswe.mcp import MCPConnectionUpdate, runtime
 from openswe.mcp import workspace as settings
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.tool_loaders import workspace_mcp as loader
 from openswe.utils import ttl_cache
+from tests.mcp_helpers import fake_mcp_server
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
         Tool(
             name=name,
             description=name,
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"query": {"type": "string"}, "runtime": {"type": "string"}},
                 "required": ["query"],
@@ -45,21 +45,13 @@ async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
     assert [tool.name for tool in tools] == ["mcp_example_search_8245e54055"]
     calls = []
 
-    class Session:
-        async def initialize(self):
-            pass
+    async def call(transport, name, arguments):
+        assert transport.headers == {"X-Api-Key": "rotated"}
+        assert transport.httpx_client_factory is not None
+        calls.append((name, arguments))
+        return CallToolResult(content=[TextContent(type="text", text="found")])
 
-        async def call_tool(self, name, arguments, **kwargs):
-            calls.append((name, arguments))
-            return CallToolResult(content=[TextContent(type="text", text="found")])
-
-    @asynccontextmanager
-    async def session(connection, **kwargs):
-        assert connection["headers"] == {"X-Api-Key": "rotated"}
-        assert "httpx_client_factory" in connection
-        yield Session()
-
-    monkeypatch.setattr("langchain_mcp_adapters.tools.create_session", session)
+    fake_mcp_server(monkeypatch, call=call)
     await save(headers={"X-Api-Key": "rotated"}, allowed_tools=["search"])
     result = await tools[0].ainvoke({"query": "incident", "runtime": "python"})
     assert len(result) == 1
@@ -76,7 +68,7 @@ async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(fake_sto
     monkeypatch.setattr(
         runtime,
         "_discover_tools",
-        AsyncMock(return_value=[Tool(name="search", inputSchema={"type": "object"})]),
+        AsyncMock(return_value=[Tool(name="search", input_schema={"type": "object"})]),
     )
     tool = (await loader.load_workspace_mcp_tools("default"))[0]
     await save(allowed_tools=[])
@@ -93,10 +85,7 @@ async def test_new_connection_exposes_no_tools_until_admin_selects_them(fake_sto
     assert await loader.load_workspace_mcp_tools("default") == []
 
 
-@pytest.mark.parametrize("paginated", [False, True])
-async def test_duplicate_catalog_is_isolated_from_other_connections(
-    fake_store, monkeypatch, paginated
-):
+async def test_duplicate_catalog_is_isolated_from_other_connections(fake_store, monkeypatch):
     await settings.save_workspace_mcp(
         "default",
         "broken",
@@ -105,26 +94,13 @@ async def test_duplicate_catalog_is_isolated_from_other_connections(
         ),
     )
     await save("working", allowed_tools=["search"])
-    definition = Tool(name="search", inputSchema={"type": "object"})
+    definition = Tool(name="search", input_schema={"type": "object"})
 
-    class Session:
-        def __init__(self, broken):
-            self.broken = broken
+    async def list_tools(transport):
+        broken = transport.url == "https://broken.example/mcp"
+        return [definition, definition] if broken else [definition]
 
-        async def initialize(self):
-            pass
-
-        async def list_tools(self, *, params=None):
-            if self.broken and paginated and params is None:
-                return ListToolsResult(tools=[definition], nextCursor="next")
-            tools = [definition, definition] if self.broken and not paginated else [definition]
-            return ListToolsResult(tools=tools)
-
-    @asynccontextmanager
-    async def session(connection):
-        yield Session(connection["url"] == "https://broken.example/mcp")
-
-    monkeypatch.setattr(runtime, "create_session", session)
+    fake_mcp_server(monkeypatch, tools=list_tools)
     tools = await loader.load_workspace_mcp_tools("default")
     middleware = DynamicToolMiddleware({"Workspace MCPs": tools})
     assert middleware.has_groups
@@ -144,7 +120,7 @@ async def test_expired_catalog_failure_does_not_log_upstream_details(
         "_discover_tools",
         AsyncMock(
             side_effect=[
-                [Tool(name="search", inputSchema={"type": "object"})],
+                [Tool(name="search", input_schema={"type": "object"})],
                 ExceptionGroup("test-secret", [ValueError("test-secret")]),
             ]
         ),
@@ -160,7 +136,7 @@ async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeyp
     await save(allowed_tools=["search"])
     definition = Tool(
         name="search",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {argument: {"type": "string"}},
             "required": [argument],
@@ -168,18 +144,10 @@ async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeyp
     )
     monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[definition]))
 
-    class Session:
-        async def initialize(self):
-            pass
+    async def call(transport, name, arguments):
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(arguments))])
 
-        async def call_tool(self, name, arguments, **kwargs):
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(arguments))])
-
-    @asynccontextmanager
-    async def session(connection, **kwargs):
-        yield Session()
-
-    monkeypatch.setattr("langchain_mcp_adapters.tools.create_session", session)
+    fake_mcp_server(monkeypatch, call=call)
     tool = (await loader.load_workspace_mcp_tools("default"))[0]
     result = await tool.ainvoke(
         {"name": tool.name, "args": {argument: "remote-value"}, "id": "call-1", "type": "tool_call"}

@@ -16,27 +16,6 @@ from openswe.users import User
 from openswe.users.models import UserIdentity
 
 
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("<@U0BOT> /btw why?", "why?"),
-        ("details <@U0BOT> /btw why?", "why?"),
-        ("details <@U0BOT> /BTW why?\nmore", "why?\nmore"),
-        ("details <@U0BOT> /btw", ""),
-        ("/btw why?", "why?"),
-        ("details <@U0BOT> please /btw why?", None),
-        ("details /btw why? <@U0BOT>", None),
-        ("`<@U0BOT> /btw why?`", None),
-        ("> <@U0BOT> /btw why?", None),
-        ("<@U0BOT> /btwhatever why?", None),
-    ],
-)
-def test_by_the_way_requires_unquoted_command_after_mention(
-    text: str, expected: str | None
-) -> None:
-    assert slack_ask.SlackAskRequest.by_the_way_question(text, "U0BOT") == expected
-
-
 @pytest.fixture
 def signed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)

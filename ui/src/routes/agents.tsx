@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
   Outlet,
   Navigate,
@@ -6,8 +7,6 @@ import {
   useMatch,
   useRouterState,
 } from "@tanstack/react-router"
-
-import { useQuery } from "@tanstack/react-query"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
@@ -43,15 +42,15 @@ function AgentsLayout() {
   })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
-  const reviewNumber = Number(reviewMatch?.params.number)
-  // A review page's sidebar row is the user's review chat thread.
+  // A review page's sidebar row is the user's review chat thread. The page
+  // loads it; the layout only reads it, so off a review page it asks for nothing.
   const reviewChat = useQuery({
     ...reviewChatQuery({
       owner: reviewMatch?.params.owner ?? "",
       repo: reviewMatch?.params.repo ?? "",
-      number: reviewNumber,
+      number: Number(reviewMatch?.params.number),
     }),
-    enabled: Boolean(session.data) && Boolean(reviewMatch) && reviewNumber > 0,
+    enabled: false,
   })
   const activeReviewThreadId = reviewMatch
     ? reviewChat.data?.thread_id
@@ -92,7 +91,7 @@ function AgentsLayout() {
 
   if (session.isLoading) {
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1 p-6">
+      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1 p-space-5">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )
@@ -131,13 +130,13 @@ function AgentsLayout() {
           ? {
               owner: reviewMatch.params.owner,
               repo: reviewMatch.params.repo,
-              number: reviewNumber,
+              number: Number(reviewMatch.params.number),
             }
           : undefined
       }
     >
       {awaitingRuntimeChoice ? (
-        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+        <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
           <Skeleton className="h-40 w-full max-w-md" />
         </main>
       ) : (

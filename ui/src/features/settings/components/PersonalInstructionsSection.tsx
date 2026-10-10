@@ -48,7 +48,7 @@ export function PersonalInstructionsSection() {
   const mutating = save.isPending || clear.isPending
 
   return (
-    <SettingsSection title="Personal instructions">
+    <SettingsSection title="Personal Instructions">
       <SettingsPanel>
         {instructions.isLoading ? (
           <Skeleton className="h-40 w-full" />

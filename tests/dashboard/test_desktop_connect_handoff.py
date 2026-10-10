@@ -58,8 +58,7 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         return user
 
     monkeypatch.setattr(user, "link", fake_link)
-    monkeypatch.setattr(connect.User, "get", AsyncMock(return_value=user))
-    monkeypatch.setattr(connect.User, "for_login", AsyncMock(return_value=user))
+    monkeypatch.setattr(connect.User, "for_session", AsyncMock(return_value=user))
     monkeypatch.setattr(connect, "slack_oauth_configured", lambda: True)
     monkeypatch.setattr(
         connect,

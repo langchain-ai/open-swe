@@ -1,3 +1,11 @@
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+  MagnifyingGlassRegularIcon,
+  PlusIcon,
+  PushPinRegularIcon,
+  StackRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -9,21 +17,15 @@ import {
   DropdownMenuSubTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Kbd } from "@langchain/macaw-components/Kbd"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner, SpinnerIcon } from "@langchain/macaw-components/Spinner"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
-import { NotePencilIcon } from "@phosphor-icons/react/dist/ssr/NotePencil"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
-import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
-import { StackIcon } from "@phosphor-icons/react/dist/ssr/Stack"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -116,6 +118,7 @@ import {
   useRegisterAppCommands,
 } from "@/lib/appCommands"
 import { sectionOf } from "@/lib/appLocation"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 import { reportError } from "@/lib/errorReporting"
@@ -137,7 +140,7 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
 }
 
 const NAV_ROW_CLASS =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-surface-level-2-hover"
+  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm font-medium text-primary transition-colors hover:bg-surface-level-2-hover"
 
 /** Threads shown per repo before the group needs a "Show more". */
 const REPO_PREVIEW_COUNT = 5
@@ -201,6 +204,7 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const newThreadShortcut = useShortcutLabel("mod+n")
   const chat = useChatRoutes()
   const profile = useProfile()
   const concierge = useQuery({
@@ -734,13 +738,13 @@ export function AgentsSidebar({
     >
       <div
         className={cn(
-          "flex items-center justify-between px-4 pb-4",
-          isDesktop ? "pt-13" : "pt-5"
+          "flex items-center justify-between px-space-4 pb-space-4",
+          isDesktop ? "pt-13" : "pt-space-4"
         )}
       >
         <Link
           to="/my-settings"
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-primary"
+          className="flex items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
           <img
             src={`${import.meta.env.BASE_URL}logo-mark.png`}
@@ -749,9 +753,9 @@ export function AgentsSidebar({
           />
           Open SWE
         </Link>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-space-1">
           <IconButton
-            icon={MagnifyingGlassIcon}
+            icon={MagnifyingGlassRegularIcon}
             label="Search"
             size="sm"
             color="secondary"
@@ -769,10 +773,19 @@ export function AgentsSidebar({
         <Link
           to={chat.home}
           onClick={layout.closeOnMobile}
-          className={NAV_ROW_CLASS}
+          className={cn(
+            NAV_ROW_CLASS,
+            "group bg-surface-level-3 hover:bg-surface-level-4"
+          )}
         >
-          <NotePencilIcon size={16} weight="regular" />
-          New Thread
+          <PlusIcon size={20} className="-mx-0.5" />
+          New
+          <Kbd
+            aria-hidden
+            className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            {newThreadShortcut}
+          </Kbd>
         </Link>
         {profile.data?.concierge_mode && (
           <a
@@ -806,24 +819,24 @@ export function AgentsSidebar({
       <div className="relative flex min-h-0 flex-1 flex-col">
         {scrollEdges.top && (
           <>
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 border-t border-default" />
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-default" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-sticky-header h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
           </>
         )}
         {scrollEdges.bottom && (
           <>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 border-b border-default" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-floating-bar border-b border-default" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-sticky-header h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
           </>
         )}
         <div
           ref={scrollViewport}
-          className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
+          className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2"
           onScroll={measureScrollEdges}
           onKeyDown={onThreadListKeyDown}
         >
           <SidebarNav
-            className={isDesktop ? "pb-3" : "pb-4"}
+            className={isDesktop ? "pb-space-3" : "pb-space-4"}
             onNavigate={layout.closeOnMobile}
           />
           {user && (
@@ -856,7 +869,7 @@ export function AgentsSidebar({
             />
           )}
           {sourcesLoading && allItems.length > 0 && (
-            <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-tertiary">
+            <div className="flex items-center gap-space-2 px-space-2 py-space-2 text-xs text-tertiary">
               <Spinner size="xxs" />
               Loading threads…
             </div>
@@ -865,7 +878,7 @@ export function AgentsSidebar({
           {(filteredPinnedItems.length > 0 ||
             pinnedGroups.length > 0 ||
             (repoMode && noRepoPinned && noRepoAvailable)) && (
-            <section className="mb-3">
+            <section className="mb-space-3">
               <SidebarSectionHeader
                 label="Pinned"
                 collapsed={sectionCollapsed("pinned")}
@@ -901,7 +914,7 @@ export function AgentsSidebar({
 
           {repoMode &&
             (unpinnedGroups.length > 0 || noRepoAvailable || isDesktop) && (
-              <section className="mb-3">
+              <section className="mb-space-3">
                 <SidebarSectionHeader
                   label={workspaceMode ? "Workspaces" : "Repositories"}
                   collapsed={!workspaceMode && sectionCollapsed("repos")}
@@ -954,7 +967,7 @@ export function AgentsSidebar({
             )}
 
           {!repoMode && (
-            <section className="mb-3">
+            <section className="mb-space-3">
               <SidebarSectionHeader
                 label="Recents"
                 collapsed={sectionCollapsed("recents")}
@@ -967,7 +980,7 @@ export function AgentsSidebar({
                 action={
                   <SidebarSectionAction
                     label="New thread"
-                    icon={NotePencilIcon}
+                    icon={PlusIcon}
                     onClick={() => {
                       layout.closeOnMobile()
                       void navigate({ to: chat.home })
@@ -993,7 +1006,7 @@ export function AgentsSidebar({
             </section>
           )}
           {isEmpty && !cloudError && !localThreads.isError && (
-            <p className="px-2.5 py-6 text-center text-xs text-tertiary">
+            <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
               {hasActiveFilters(prefs.filters)
                 ? "No threads match these filters."
                 : "No threads yet."}
@@ -1002,7 +1015,7 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 p-2">
+      <div className="flex items-center gap-space-2 p-space-2">
         <div className="min-w-0 flex-1">
           {user ? (
             <SidebarUserMenu user={user} showSettingsLink />
@@ -1060,14 +1073,14 @@ function WorkspaceGroupSection({
 }) {
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   return (
-    <div className="mb-1">
+    <div className="mb-space-1">
       <button
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="group/workspace flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
+        className="group/workspace flex w-full items-center gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
       >
-        <StackIcon size={14} weight="regular" className="shrink-0" />
+        <StackRegularIcon size={14} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
         <Caret
           weight="regular"
@@ -1078,7 +1091,7 @@ function WorkspaceGroupSection({
         />
       </button>
       {!collapsed && (
-        <div className="pl-2">{workspace.repos.map(renderRepoGroup)}</div>
+        <div className="pl-space-2">{workspace.repos.map(renderRepoGroup)}</div>
       )}
     </div>
   )
@@ -1171,19 +1184,19 @@ function RepoGroup({
     : threads.length > REPO_PREVIEW_COUNT || (externalHasMore ?? repo.hasMore)
 
   return (
-    <div className="mb-1">
-      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
+    <div className="mb-space-1">
+      <div className="group/folder flex items-center gap-space-2 rounded-md pr-space-1 pl-space-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
         <button
           type="button"
           onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
+          className="flex min-w-0 flex-1 items-center gap-space-2 py-space-1 text-left"
         >
           <Folder size={16} weight="regular" className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
         </button>
         <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinIcon}
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
           tooltipProps={{
             title: pinned ? "Unpin repository" : "Pin repository",
@@ -1195,7 +1208,7 @@ function RepoGroup({
           className="hidden group-hover/folder:inline-flex"
         />
         <IconButton
-          icon={NotePencilIcon}
+          icon={PlusIcon}
           label={`Compose message in ${group.label}`}
           tooltipProps={{ title: "Compose message" }}
           size="xs"
@@ -1209,19 +1222,21 @@ function RepoGroup({
         <>
           {shown.map((item) => renderRow(item, pullRequestFor(item)))}
           {shown.length === 0 && loading && (
-            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-xs text-tertiary">
+            <div className="flex items-center gap-space-2 py-space-1 pr-space-2 pl-space-5 text-xs text-tertiary">
               <Spinner size="xxs" />
               Loading chats…
             </div>
           )}
           {shown.length === 0 && !loading && !repo.isError && (
-            <p className="py-1 pr-2.5 pl-6 text-xs text-tertiary">No chats</p>
+            <p className="py-space-1 pr-space-2 pl-space-5 text-xs text-tertiary">
+              No chats
+            </p>
           )}
           {repo.isError && (
             <button
               type="button"
               onClick={() => void repo.refetch()}
-              className="w-full py-1 pr-2.5 pl-6 text-left text-xs text-error-secondary"
+              className="w-full py-space-1 pr-space-2 pl-space-5 text-left text-xs text-error-secondary"
             >
               Retry loading chats
             </button>
@@ -1235,7 +1250,7 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-xs text-tertiary transition-colors hover:text-primary disabled:cursor-wait disabled:opacity-60"
+              className="flex w-full items-center gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left text-xs text-tertiary transition-colors hover:text-primary disabled:cursor-wait disabled:opacity-60"
             >
               {loading && <Spinner size="xxs" />}
               {loading ? "Loading…" : "Show more"}
@@ -1263,16 +1278,20 @@ function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
         Loading threads
       </span>
       {groups.map((widths, groupIndex) => (
-        <div key={groupIndex} className={compact ? "mb-2" : "mb-3"} aria-hidden>
-          <div className="flex items-center gap-1 px-2 py-1">
+        <div
+          key={groupIndex}
+          className={compact ? "mb-space-2" : "mb-space-3"}
+          aria-hidden
+        >
+          <div className="flex items-center gap-space-1 px-space-2 py-space-1">
             <Skeleton className="h-2 w-16 rounded-sm" />
           </div>
           {widths.map((width, rowIndex) => (
             <div
               key={rowIndex}
               className={cn(
-                "mb-0.5 flex items-center gap-2 px-2.5",
-                compact ? "h-7 gap-1.5" : "h-8"
+                "mb-0.5 flex items-center gap-space-2 px-space-2",
+                compact ? "h-7 gap-space-2" : "h-8"
               )}
             >
               <Skeleton className="size-3 shrink-0 rounded-full" />
@@ -1293,7 +1312,7 @@ function ThreadSourceError({
   onRetry: () => void
 }) {
   return (
-    <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-secondary">
+    <div className="flex items-center gap-space-2 px-space-2 py-space-2 text-xs text-secondary">
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <Button
         size="xs"
@@ -1346,7 +1365,7 @@ function LoadMoreThreadsOnScroll({
       onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="flex w-full items-center justify-center gap-1.5 py-2 text-xs text-tertiary"
+      className="flex w-full items-center justify-center gap-space-2 py-space-2 text-xs text-tertiary"
     >
       {loading ? (
         <Spinner size="xxs" />

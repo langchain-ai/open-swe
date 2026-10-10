@@ -1,3 +1,4 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import {
   memo,
   useCallback,
@@ -6,7 +7,6 @@ import {
   useRef,
   useState,
 } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { DiffView } from "./DiffView"
 import { SqlResultTable, parseSqlResult } from "./SqlResultTable"
 import { formatToolDisplay } from "./toolExecutionDisplay"
@@ -93,7 +93,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
         <button
           type="button"
           onClick={toggle}
-          className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
+          className="inline-flex items-center gap-space-2 text-left transition-colors hover:brightness-125"
         >
           <span className={isError ? "text-error-secondary" : "text-secondary"}>
             Edited <span className="text-brand-primary">{fileName}</span>
@@ -104,12 +104,12 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   }
 
   return (
-    <div className="my-1">
-      <div className="my-0.5 mb-1.5 text-xxs leading-5">
+    <div className="my-space-1">
+      <div className="my-0.5 mb-space-1 text-xxs leading-5">
         <button
           type="button"
           onClick={toggle}
-          className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
+          className="inline-flex items-center gap-space-2 text-left transition-colors hover:brightness-125"
         >
           <span className={isError ? "text-error-secondary" : "text-secondary"}>
             Edited file
@@ -203,7 +203,7 @@ export const ToolExecution = memo(function ToolExecution({
 
   if (isEditOp && status === "pending" && diffData) {
     return (
-      <div className="my-1 text-xxs leading-5">
+      <div className="my-space-1 text-xxs leading-5">
         <DiffView diffData={diffData} />
         <span className="text-tertiary">Waiting for approval...</span>
       </div>

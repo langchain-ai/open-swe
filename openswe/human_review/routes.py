@@ -20,7 +20,7 @@ from openswe.github.pull_request_status import (
 )
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.card import mention
-from openswe.human_review.lifecycle import dismiss_by
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import Origin, RequestResult, request_review
 from openswe.slack.client import GitHubPrRef
@@ -210,6 +210,6 @@ async def api_dismiss_human_review_request(
         raise HTTPException(404, "This pull request has no open review request")
     person = await User.for_login("github", login)
     by = mention(person) if person is not None else f"@{login}"
-    if not await dismiss_by(request, by, (body or HumanReviewDismissBody()).reason):
+    if not await ReviewCard(request).dismiss_by(by, (body or HumanReviewDismissBody()).reason):
         raise HTTPException(409, "This review request is already closed")
     return HumanReviewDismissResult(request_id=str(request.id))

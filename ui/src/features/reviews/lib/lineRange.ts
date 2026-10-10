@@ -1,11 +1,27 @@
 import type { SelectedLineRange, SelectionSide } from "@pierre/diffs"
 
 import type { ReviewCommentCreate } from "@/lib/api"
+import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
 
-function selectionSideToGithub(
-  side: SelectionSide | undefined
-): "LEFT" | "RIGHT" {
+export function toGithubSide(side: SelectionSide | undefined): DiffSide {
   return side === "deletions" ? "LEFT" : "RIGHT"
+}
+
+export function toPierreSide(side: DiffSide): SelectionSide {
+  return side === "LEFT" ? "deletions" : "additions"
+}
+
+/** A selection's lowest and highest line, on the side its end sits on. */
+export function rangeBounds(range: SelectedLineRange): {
+  lo: number
+  hi: number
+  side: DiffSide
+} {
+  return {
+    lo: Math.min(range.start, range.end),
+    hi: Math.max(range.start, range.end),
+    side: toGithubSide(range.endSide ?? range.side),
+  }
 }
 
 // Map a Pierre selection range to a GitHub inline-comment payload. GitHub
@@ -22,15 +38,13 @@ export function buildCommentPayload(
     return {
       path,
       line: range.end,
-      side: selectionSideToGithub(endSide),
+      side: toGithubSide(endSide),
       body,
       start_line: null,
       start_side: null,
     }
   }
-  const side = selectionSideToGithub(endSide)
-  const lo = Math.min(range.start, range.end)
-  const hi = Math.max(range.start, range.end)
+  const { lo, hi, side } = rangeBounds(range)
   return {
     path,
     line: hi,
@@ -41,9 +55,15 @@ export function buildCommentPayload(
   }
 }
 
+/** "line 8", "lines 20–24", with "old" for the deleted side. */
+export function readableRangeLabel(range: SelectedLineRange): string {
+  const { lo, hi, side } = rangeBounds(range)
+  const old = side === "LEFT" ? "old " : ""
+  return lo === hi ? `${old}line ${hi}` : `${old}lines ${lo}–${hi}`
+}
+
 export function commentRangeLabel(range: SelectedLineRange): string {
-  const side = (range.endSide ?? range.side) === "deletions" ? "L" : "R"
-  const lo = Math.min(range.start, range.end)
-  const hi = Math.max(range.start, range.end)
-  return lo === hi ? `${side}${hi}` : `${side}${lo}-${hi}`
+  const { lo, hi, side } = rangeBounds(range)
+  const letter = side === "LEFT" ? "L" : "R"
+  return lo === hi ? `${letter}${hi}` : `${letter}${lo}-${hi}`
 }
