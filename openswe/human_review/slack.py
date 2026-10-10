@@ -1,4 +1,4 @@
-"""Slack interactivity for human review cards and picks: I'll review, Accept, Decline, Snooze, and Dismiss."""
+"""Slack interactivity for human review cards and picks: I'll review, Accept, Decline, Snooze, Dismiss, Merge, and Undo auto-approve."""
 
 import logging
 from dataclasses import dataclass
@@ -14,7 +14,14 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import SNOOZE_DURATIONS, claim, decline, snooze
+from openswe.human_review.standard import (
+    SNOOZE_DURATIONS,
+    claim,
+    decline,
+    merge_now,
+    snooze,
+    undo_auto_approval,
+)
 from openswe.prompts import prompt
 from openswe.slack.blocks import (
     InputBlock,
@@ -23,11 +30,12 @@ from openswe.slack.blocks import (
     option,
     plain_text,
     static_select,
+    text_input,
     view_payload,
 )
 from openswe.slack.client import open_slack_modal
 from openswe.slack.dm import note_for_concierge
-from openswe.slack.payloads import SlackButtonValue, SlackInteraction
+from openswe.slack.payloads import SlackButtonValue, SlackInteraction, SlackViewState
 from openswe.slack.responses import FeedbackResponse, WebhookResponse, accepted, ignored
 from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
@@ -44,38 +52,61 @@ DECLINE_REASONS = (
     "Other",
 )
 _CHOICE = "choice"
+_ANSWER_MAX_CHARS = 1000
 
 
 @dataclass(frozen=True, slots=True)
-class PickModal:
-    """A pick's button that asks one required question in a modal before acting."""
+class ClickModal:
+    """A button that asks one required question in a modal before acting.
 
-    action: Literal["decline", "snooze"]
+    The answer is one of ``choices``, or free text when there are none.
+    """
+
+    action: Literal["decline", "snooze", "undo_auto_approve"]
     callback_id: str
     title: str
     question: str
     placeholder: str
     submit: str
-    choices: tuple[str, ...]
+    choices: tuple[str, ...] = ()
     initial: str | None = None
 
-    def view(self, context: PickModalContext) -> ModalView:
+    def _field(self) -> InputBlock:
+        if not self.choices:
+            return text_input(
+                block_id=_CHOICE,
+                label=self.question,
+                action_id=_CHOICE,
+                multiline=True,
+                max_length=_ANSWER_MAX_CHARS,
+                placeholder=self.placeholder,
+            )
         select = static_select(
             action_id=_CHOICE,
             options=[option(choice, choice) for choice in self.choices],
             initial=option(self.initial, self.initial) if self.initial else None,
             placeholder=self.placeholder,
         )
-        question: InputBlock = {
+        return {
             "type": "input",
             "block_id": _CHOICE,
             "label": plain_text(self.question),
             "element": select,
         }
+
+    def answer(self, state: SlackViewState) -> str | None:
+        """The submitted answer, or ``None`` when it is missing or not an offered choice."""
+        value = state.input(_CHOICE, _CHOICE)
+        if not self.choices:
+            return " ".join((value.value or "").split())[:_ANSWER_MAX_CHARS] or None
+        selected = value.selected_option
+        return selected.value if selected is not None and selected.value in self.choices else None
+
+    def view(self, context: ClickModalContext) -> ModalView:
         return modal(
             callback_id=self.callback_id,
             title=self.title,
-            blocks=[question],
+            blocks=[self._field()],
             submit=self.submit,
             close="Cancel",
             private_metadata=context.model_dump_json(),
@@ -89,7 +120,7 @@ _PENDING = {
 }
 
 
-class PickModalContext(BaseModel):
+class ClickModalContext(BaseModel):
     request_id: str
     channel_id: str
     thread_ts: str
@@ -97,10 +128,10 @@ class PickModalContext(BaseModel):
     message: PickMessage | None = None
 
 
-PICK_MODALS = {
-    pick_modal.callback_id: pick_modal
-    for pick_modal in (
-        PickModal(
+CLICK_MODALS = {
+    click_modal.callback_id: click_modal
+    for click_modal in (
+        ClickModal(
             action="decline",
             callback_id="human_review_decline",
             title="Decline review",
@@ -109,7 +140,7 @@ PICK_MODALS = {
             submit="Decline",
             choices=DECLINE_REASONS,
         ),
-        PickModal(
+        ClickModal(
             action="snooze",
             callback_id="human_review_snooze",
             title="Snooze review",
@@ -119,35 +150,39 @@ PICK_MODALS = {
             choices=tuple(SNOOZE_DURATIONS),
             initial="1 hour",
         ),
+        ClickModal(
+            action="undo_auto_approve",
+            callback_id="human_review_undo_auto_approve",
+            title="Undo auto-approve",
+            question="Why should this not be auto-approved?",
+            placeholder="Shown on the card and the GitHub dismissal",
+            submit="Undo",
+        ),
     )
 }
-_MODAL_FOR_BUTTON = {pick_modal.action: pick_modal for pick_modal in PICK_MODALS.values()}
+_MODAL_FOR_BUTTON = {click_modal.action: click_modal for click_modal in CLICK_MODALS.values()}
 
 
-async def handle_pick_modal_submission(
+async def handle_modal_submission(
     interaction: SlackInteraction, background_tasks: BackgroundTasks
 ) -> FeedbackResponse | WebhookResponse:
-    pick_modal = PICK_MODALS[interaction.view.callback_id]
+    click_modal = CLICK_MODALS[interaction.view.callback_id]
     try:
-        context = PickModalContext.model_validate_json(interaction.view.private_metadata)
+        context = ClickModalContext.model_validate_json(interaction.view.private_metadata)
     except ValidationError:
         logger.warning("Invalid reviewer pick modal context", exc_info=True)
         return ignored("Invalid pick modal context")
-    selected = interaction.view.state.input(_CHOICE, _CHOICE).selected_option
-    if (
-        context.user_id != interaction.user.id
-        or selected is None
-        or selected.value not in pick_modal.choices
-    ):
+    answer = click_modal.answer(interaction.view.state)
+    if context.user_id != interaction.user.id or answer is None:
         return ignored("Invalid pick modal submission")
     background_tasks.add_task(
         _process,
         context.request_id,
-        pick_modal.action,
+        click_modal.action,
         channel_id=context.channel_id,
         thread_ts=context.thread_ts,
         slack_user_id=interaction.user.id,
-        choice=selected.value,
+        choice=answer,
         message=context.message,
     )
     return {}
@@ -172,7 +207,11 @@ async def _process(
             outcome = await ReviewCard(request).dismiss(slack_user_id)
         else:
             user = await User.for_person({"id": f"slack:{slack_user_id}"})
-            if action == "decline":
+            if action == "merge":
+                outcome = await merge_now(request, user)
+            elif action == "undo_auto_approve":
+                outcome = await undo_auto_approval(request, user, choice)
+            elif action == "decline":
                 outcome = await decline(request, user, choice)
             elif action == "snooze":
                 outcome = await snooze(request, user, choice)
@@ -237,9 +276,9 @@ async def handle_button(
         and any(action.action_id in card.PICK_BUTTON_IDS for action in interaction.actions)
         else None
     )
-    if (pick_modal := _MODAL_FOR_BUTTON.get(button.action)) is not None:
-        view = pick_modal.view(
-            PickModalContext(
+    if (click_modal := _MODAL_FOR_BUTTON.get(button.action)) is not None:
+        view = click_modal.view(
+            ClickModalContext(
                 request_id=button.fingerprint,
                 channel_id=channel_id,
                 thread_ts=thread_ts,
@@ -253,7 +292,7 @@ async def handle_button(
             logger.warning("Could not open a reviewer pick modal", extra=extra)
             return ignored("Could not open pick modal")
         return accepted("Pick modal opened")
-    if button.action not in {"review", "dismiss"}:
+    if button.action not in {"review", "dismiss", "merge"}:
         logger.warning("Ignored an unknown human review click", extra=extra)
         return ignored("Unknown human review action")
     logger.info("Queued a human review click", extra=extra)

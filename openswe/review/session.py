@@ -11,6 +11,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ValidationError
 
+from openswe.github.labels import pr_label
 from openswe.thread_ids import review_chat_thread_id, review_scout_thread_id
 from openswe.threads.creation import create_thread
 from openswe.utils.thread_ops import langgraph_client
@@ -94,7 +95,7 @@ class ReviewSession(BaseModel):
         # TODO: reviewer assignment should call this for each assigned reviewer too.
         opened_at_ms = now_ms()
         client = langgraph_client()
-        thread_title = title or f"{self.owner}/{self.repo}#{self.pr_number}"
+        thread_title = title or pr_label(self.owner, self.repo, self.pr_number)
         await create_thread(
             client,
             self.thread_id,

@@ -17,6 +17,7 @@ from openswe.github.thread_token import (
     invalidate_cached_github_token,
     resolve_thread_github_token,
 )
+from openswe.human_review.requests import AutoApprovalUndo
 from openswe.review.approvals import approval_mode_for
 from openswe.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
 from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
@@ -444,6 +445,8 @@ async def _publish_review_async(
         and await approval_allowed_for_head(
             owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
         )
+        # Someone already withdrew an automatic approval of this PR; only a person approves it now.
+        and not await AutoApprovalUndo.exists_for(owner, repo, pr_number)
     )
     # GitHub forbids self-approval; publish the assessment as an advisory comment instead.
     for _ in range(2):

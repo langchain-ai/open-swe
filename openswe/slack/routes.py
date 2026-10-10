@@ -918,9 +918,9 @@ async def slack_interactivity(
         return expedited_review.handle_picker_submission(interaction, background_tasks)
     if (
         interaction.type == "view_submission"
-        and interaction.view.callback_id in human_review.PICK_MODALS
+        and interaction.view.callback_id in human_review.CLICK_MODALS
     ):
-        return await human_review.handle_pick_modal_submission(interaction, background_tasks)
+        return await human_review.handle_modal_submission(interaction, background_tasks)
     if interaction.type == "block_actions" and any(
         action.action_id == expedited_review.CHANNEL_SELECT_ACTION for action in interaction.actions
     ):

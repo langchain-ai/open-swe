@@ -23,6 +23,7 @@ from openswe.github.ci import (
 )
 from openswe.github.comments import post_github_comment
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
+from openswe.github.labels import pr_label
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.human_review.requests import HumanReviewRequest
@@ -655,7 +656,7 @@ async def _record_retry(
         await _notify_watch(
             watch,
             f"*Flaky CI detected:* `{_escape_slack(clean_name)}`\n"
-            f"• PR: <{watch.pr_url}|{watch.owner}/{watch.repo}#{watch.pr_number}>\n"
+            f"• PR: <{watch.pr_url}|{pr_label(watch.owner, watch.repo, watch.pr_number)}>\n"
             f"• Evidence: {_escape_slack(clean_evidence)}\n"
             f"• Rerun: {retries}/{MAX_RETRIES_PER_HEAD}\n"
             f"• {check_text}",

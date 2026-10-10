@@ -41,6 +41,7 @@ from openswe.github.http import (
     RepoClient,
     or_none,
 )
+from openswe.github.labels import pr_label
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
@@ -50,8 +51,14 @@ from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.requests import (
+    AutoApprovalUndo,
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+)
 from openswe.prompts import prompt
+from openswe.review.assessment_feedback import AutoApproval
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
 from openswe.slack.cards import origin_footer
@@ -534,7 +541,7 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     if isinstance(added, Outcome):
         return added
     pr = added.pull_request
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    label = f"<{pr.url}|{pr_label(pr.owner, pr.repo, pr.number)}>"
     if others := {pick.user_id for pick in added.picks}:
         await ReviewPicks(added).drop(
             others,
@@ -636,7 +643,7 @@ async def assign(
     if isinstance(reviewer, Outcome):
         return _failure(reviewer.message)
     pr = request.pull_request
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    label = f"<{pr.url}|{pr_label(pr.owner, pr.repo, pr.number)}>"
     theirs = coverage.of(github_login) if coverage is not None else []
     if replace and (
         others := {
@@ -985,6 +992,100 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     return True
 
 
+async def merge_now(request: HumanReviewRequest, user: User | None) -> Outcome:
+    """Merge an approved pull request for a teammate with write access who clicked Merge.
+
+    Open SWE's own wait for checks and threads does not apply; GitHub's branch protection does.
+    """
+    if request.kind != "standard" or request.state != "open":
+        return Outcome("This review request is already closed.")
+    writer = await resolve_writer(request, user)
+    if isinstance(writer, Outcome):
+        return writer
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            readiness = await Readiness.assess(pull)
+            if readiness is None:
+                return Outcome("Open SWE could not read the pull request from GitHub. Try again.")
+            snapshot = readiness.snapshot
+            if snapshot.merged or snapshot.state != "open":
+                return Outcome("This pull request is no longer open.")
+            if snapshot.changes_requested_by:
+                return Outcome(
+                    f"Changes were requested by {', '.join(snapshot.changes_requested_by)}."
+                )
+            if not snapshot.approved_review_ids:
+                return Outcome("It needs an approval on GitHub before it can merge.")
+            async with HumanReviewRequest.locked(request.id) as (_, row):
+                if row is None or row.state != "open":
+                    return Outcome("This review request is already closed.")
+                result = await merge_pull_request(
+                    row, snapshot.head_sha, snapshot.allowed_merge_methods, pull
+                )
+    except GitHubAppUnavailable:
+        return Outcome("Open SWE cannot reach this repository's GitHub App installation.")
+    logger.info(
+        "Merge clicked on a human review card",
+        extra={
+            "request_id": str(request.id),
+            "github_login": writer.github_login,
+            "merge_status": result.status,
+        },
+    )
+    if result.status == "merged":
+        await ReviewCard(request).mark_merged()
+    return Outcome(result.message)
+
+
+async def undo_auto_approval(
+    request: HumanReviewRequest, user: User | None, justification: str
+) -> Outcome:
+    """Withdraw Open SWE's automatic approval for a teammate with write access, recording why."""
+    if request.state != "open":
+        return Outcome("This review request is already closed.")
+    writer = await resolve_writer(request, user)
+    if isinstance(writer, Outcome):
+        return writer
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            reviews = await or_none(pull.reviews())
+            auto = await AutoApproval.standing(reviews) if reviews is not None else None
+            if auto is None:
+                return Outcome("Open SWE has no standing auto-approval on this pull request.")
+            await pull.dismiss_review(
+                auto.assessment.review_id,
+                f"Auto-approval undone by @{writer.github_login}: {justification}",
+            )
+    except GitHubAppUnavailable:
+        return Outcome("Open SWE cannot reach this repository's GitHub App installation.")
+    except GitHubError as refused:
+        return Outcome(f"GitHub refused to dismiss the approval: {refused.message}")
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is not None:
+            row.auto_approval_undos.append(
+                AutoApprovalUndo(
+                    pull_request_id=row.pull_request_id,
+                    github_review_id=auto.assessment.review_id,
+                    justification=justification,
+                    undone_by_user_id=writer.user.id,
+                    request_id=row.id,
+                )
+            )
+    logger.info(
+        "Auto-approval undone from a human review card",
+        extra={
+            "request_id": str(request.id),
+            "github_login": writer.github_login,
+            "github_review_id": auto.assessment.review_id,
+        },
+    )
+    if (current := await HumanReviewRequest.get(request.id)) is not None:
+        await ReviewCard(current).refresh()
+    return Outcome("Undid Open SWE's auto-approval.")
+
+
 async def settle_pull_request(owner: str, repo: str, number: int) -> None:
     request = await HumanReviewRequest.active_for(owner, repo, number)
     if request is not None:
@@ -1255,7 +1356,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         )
         sent = await send_dm(
             participant.user.slack_user_id,
-            f"Reminder: Open SWE picked you to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+            f"Reminder: Open SWE picked you to review <{pr.url}|{pr_label(pr.owner, pr.repo, pr.number)}> "
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
@@ -1338,7 +1439,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
             "next_waits_until": choice.until.isoformat() if isinstance(choice, Wait) else "",
         },
     )
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    label = f"<{pr.url}|{pr_label(pr.owner, pr.repo, pr.number)}>"
     await ReviewPicks(request).drop(
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
@@ -1400,7 +1501,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     )
     await ReviewPicks(request).drop(
         {pick.user_id for pick in request.picks},
-        f"You no longer need to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+        f"You no longer need to review <{pr.url}|{pr_label(pr.owner, pr.repo, pr.number)}> "
         f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
     )
     return "not_asked"

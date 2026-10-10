@@ -10,6 +10,7 @@ import pytest
 
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
@@ -21,6 +22,7 @@ from openswe.human_review.standard import (
     review_reminder_at,
     summary_line,
 )
+from openswe.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
 from openswe.slack.blocks import block_payload
 from openswe.users import User, UserIdentity
 
@@ -382,12 +384,54 @@ async def test_approved_card_collapses_without_closing_the_request(
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
         text, blocks = await ReviewCard(request).render(None)
-    assert ("Review request: approved" in text) is collapsed
-    assert (len(blocks) == 1) is collapsed
+    assert ("Review request: approved by @grace" in text) is collapsed
+    assert ("open_swe_option_select_merge" in str(block_payload(blocks))) is collapsed
     assert "<@U_ada>" in str(block_payload(blocks))
     if collapsed:
         assert "by <@U_ada>" in text
     assert request.state == "open"
+
+
+async def test_approved_card_says_open_swe_approved_it_automatically_and_why(
+    github_app: AsyncMock,
+) -> None:
+    pr = PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    assessment = PublishedAssessment(
+        head_sha="a" * 40,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Docs-only change under the docs rule.",
+        summary="Fixes a typo in the README.",
+        because="it only touches docs, which APPROVALS.md allows",
+        review_id=9,
+        owner="o",
+        repo="r",
+        pr_number=1,
+        approved=True,
+    )
+    reviews = [
+        {"id": 8, "state": "COMMENTED", "user": {"login": "open-swe[bot]", "type": "Bot"}},
+        {"id": 9, "state": "APPROVED", "user": {"login": "open-swe[bot]", "type": "Bot"}},
+    ]
+    with (
+        patch(
+            "openswe.human_review.lifecycle.latest_review_states",
+            AsyncMock(return_value={"open-swe[bot]": "APPROVED"}),
+        ),
+        patch.object(PullRequestClient, "reviews", AsyncMock(return_value=reviews)),
+        patch.object(ASSESSMENTS, "get", AsyncMock(return_value=assessment)) as stored,
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
+    ):
+        text, blocks = await ReviewCard(request).render(None)
+    rendered = str(block_payload(blocks))
+    stored.assert_awaited_once_with("9")
+    assert text.startswith("Review request: auto-approved by Open SWE")
+    assert "Fixes a typo in the README." in rendered
+    assert "Auto-approved because it only touches docs, which APPROVALS.md allows." in rendered
+    assert "open_swe_option_select_merge" in rendered
+    assert "open_swe_option_select_undo_auto_approve" in rendered
 
 
 def _response(status: int, text: str = "") -> httpx2.Response:
@@ -490,3 +534,66 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [row.number for row in result.pull_requests] == [1]
+
+
+async def test_merge_click_needs_write_access() -> None:
+    from openswe.human_review.people import Outcome
+    from openswe.human_review.standard import merge_now
+
+    pr = PullRequest(owner="o", repo="r", number=1, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    refused = Outcome("@eve does not have write access to o/r.")
+    with (
+        patch("openswe.human_review.standard.resolve_writer", AsyncMock(return_value=refused)),
+        patch("openswe.human_review.standard.merge_pull_request", AsyncMock()) as merge,
+    ):
+        assert await merge_now(request, User()) == refused
+    merge.assert_not_awaited()
+
+
+async def test_undoing_an_auto_approval_dismisses_it_records_who_and_blocks_another(
+    registry_db: None, github_app: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.human_review.people import Participant
+    from openswe.human_review.requests import AutoApprovalUndo
+    from openswe.human_review.standard import undo_auto_approval
+
+    pr = await PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada").save()
+    request = await HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard"
+    ).save()
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "grace")
+    grace = await User.sign_in("github", "2", login="grace")
+    await grace.link("slack", "U_GRACE", team_id="T1")
+    assessment = PublishedAssessment(
+        head_sha="a" * 40,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Docs only.",
+        review_id=9,
+        owner="o",
+        repo="r",
+        pr_number=1,
+        approved=True,
+    )
+    reviews = [{"id": 9, "state": "APPROVED", "user": {"login": "open-swe[bot]", "type": "Bot"}}]
+    with (
+        patch(
+            "openswe.human_review.standard.resolve_writer",
+            AsyncMock(return_value=Participant(grace, "grace")),
+        ),
+        patch.object(PullRequestClient, "reviews", AsyncMock(return_value=reviews)),
+        patch.object(PullRequestClient, "dismiss_review", AsyncMock()) as dismiss,
+        patch.object(ASSESSMENTS, "get", AsyncMock(return_value=assessment)),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
+    ):
+        outcome = await undo_auto_approval(request, grace, "Touches auth config.")
+    assert outcome.message == "Undid Open SWE's auto-approval."
+    dismiss.assert_awaited_once_with(9, "Auto-approval undone by @grace: Touches auth config.")
+    stored = await HumanReviewRequest.get(request.id)
+    assert stored is not None and stored.auto_approval_undo is not None
+    assert stored.auto_approval_undo.justification == "Touches auth config."
+    assert stored.auto_approval_undo.undone_by_mention == "<@U_GRACE>"
+    assert await AutoApprovalUndo.exists_for("O", "r", 1)
+    assert not await AutoApprovalUndo.exists_for("o", "r", 2)

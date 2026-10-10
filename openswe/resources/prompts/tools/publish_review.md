@@ -19,8 +19,10 @@ Args:
         returns ``expected_finding_ids`` so you can rank that exact set.
     assessment: Optional structured advisory approval assessment with the full
         ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high),
-        ``decision`` (``would_approve`` or ``needs_human_review``), and a short
-        ``explanation`` (up to 1500 characters). Include it after completing a
+        ``decision`` (``would_approve`` or ``needs_human_review``), a short
+        ``explanation`` (up to 1500 characters), a one-sentence ``summary``
+        of what the PR changes, and ``because``, a lowercase clause completing
+        "Auto-approved because …" (each up to 300 characters). Include it after completing a
         review only when the reviewer instructions include an approval policy,
         and assess against that policy. The commit must match the live
         reviewed head. Unresolved findings force ``needs_human_review``. A new

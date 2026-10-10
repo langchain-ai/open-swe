@@ -13,6 +13,7 @@ from openswe.baby_sit import handle_ci_webhook
 from openswe.database import postgres
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
+from openswe.github.labels import pr_label
 from openswe.github.notifications import notify_slack_review
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.human_review.lifecycle import close_for_pull_request
@@ -1255,7 +1256,7 @@ async def process_github_pr_comment(
             thread_id,
             reviewer=event_comment["author"],
             review_url=f"{pr_url}#pullrequestreview-{comment_id}",
-            pr_label=f"{repo_config['owner']}/{repo_config['name']}#{pr_number}",
+            pr_label=pr_label(repo_config["owner"], repo_config["name"], pr_number),
             review_state=str(event.get("state") or ""),
             edited_body=event_body if payload.get("action") == "edited" else None,
             edited_at=event_comment["event_at"],

@@ -30,6 +30,7 @@ from openswe.expedited_review.readiness import (
 )
 from openswe.expedited_review.reviews import dismiss_approval
 from openswe.github.http import GitHubAppUnavailable, or_none
+from openswe.github.labels import pr_label
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
@@ -43,6 +44,7 @@ from openswe.human_review.requests import (
     RequestState,
 )
 from openswe.prompts import prompt
+from openswe.review.assessment_feedback import AutoApproval
 from openswe.slack.blocks import Block, block_payload, context, escape, section
 from openswe.slack.cards import origin_footer, repost_thread_card
 from openswe.slack.channels import SlackChannel
@@ -185,7 +187,7 @@ class ReviewCard:
                 prompt(
                     "slack/expedited-review-requested",
                     pr_url=pr.url,
-                    label=f"{pr.owner}/{pr.repo}#{pr.number}",
+                    label=pr_label(pr.owner, pr.repo, pr.number),
                     title=escape(title),
                 )
             )
@@ -286,14 +288,38 @@ class ReviewCard:
             )
             return {}
 
+    async def _auto_approval(self, states: dict[str, str]) -> AutoApproval | None:
+        """Open SWE's standing automatic approval; only an App's approval can be one."""
+        if not any(
+            state == "APPROVED" and login.endswith("[bot]") for login, state in states.items()
+        ):
+            return None
+        pr = self.request.pull_request
+        try:
+            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+                reviews = await or_none(pull.reviews())
+        except GitHubAppUnavailable:
+            logger.warning(
+                "No GitHub App token to read automatic approvals",
+                extra={"request_id": str(self.request.id)},
+            )
+            return None
+        return await AutoApproval.standing(reviews) if reviews is not None else None
+
     async def _render_standard(self, outcome: str | None) -> tuple[str, list[Block]]:
         request = self.request
         pr = request.pull_request
         author = await request.author_mention()
         states = await self._review_states() if outcome in (None, "merged") else {}
+        auto_approval = await self._auto_approval(states)
         if outcome is not None:
             return standard_card.closed_card(
-                request, title=pr.title, author=author, outcome=outcome, review_states=states
+                request,
+                title=pr.title,
+                author=author,
+                outcome=outcome,
+                review_states=states,
+                auto_approval=auto_approval,
             )
         from openswe.human_review.standard import merge_wait
 
@@ -307,8 +333,12 @@ class ReviewCard:
             )
             is None
         ):
-            return standard_card.closed_card(
-                request, title=pr.title, author=author, outcome="approved", review_states=states
+            return standard_card.approved_card(
+                request,
+                title=pr.title,
+                author=author,
+                review_states=states,
+                auto_approval=auto_approval,
             )
         requester = request.requested_by
         return standard_card.open_card(
@@ -904,7 +934,7 @@ class ReviewPicks:
         current = await HumanReviewRequest.get(request.id) or request
         if current.state == "open":
             await ReviewCard(current).refresh()
-        label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+        label = f"<{pr.url}|{pr_label(pr.owner, pr.repo, pr.number)}>"
         for reviewer in released:
             logger.info(
                 "Released a reviewer Open SWE picked",

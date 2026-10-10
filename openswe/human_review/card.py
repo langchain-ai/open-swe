@@ -6,7 +6,9 @@ signed up to review it on GitHub and where each of them stands.
 
 import json
 
+from openswe.github.labels import pr_label
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
+from openswe.review.assessment_feedback import AutoApproval
 from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
 from openswe.users import User
 
@@ -29,7 +31,7 @@ def _button_value(action: str, request: HumanReviewRequest) -> str:
 
 def _label(request: HumanReviewRequest) -> str:
     pr = request.pull_request
-    return f"{pr.owner}/{pr.repo}#{pr.number}"
+    return pr_label(pr.owner, pr.repo, pr.number)
 
 
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
@@ -60,8 +62,12 @@ def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
     return f":white_check_mark: *Approved by {_approvers(request, states)}*  {link}"
 
 
-def _approvers(request: HumanReviewRequest, states: dict[str, str]) -> str:
+def _approvers(
+    request: HumanReviewRequest, states: dict[str, str], auto: AutoApproval | None = None
+) -> str:
     mentions = {r.github_login.lower(): r.slack_mention for r in request.reviewers}
+    if auto is not None:
+        mentions[auto.login.lower()] = "Open SWE"
     return ", ".join(
         mentions.get(login.lower(), f"@{login}")
         for login, state in states.items()
@@ -153,11 +159,43 @@ def open_card(
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
+    blocks.extend(_undo_note(request))
     blocks.extend(_reviewers(request, review_states))
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))
     blocks.append(actions(*_buttons(request)))
     return f"Review requested for {_label(request)}: {title}", blocks
+
+
+def _undo_note(request: HumanReviewRequest) -> list[Block]:
+    undo = request.auto_approval_undo
+    if undo is None:
+        return []
+    return [
+        context(
+            f":leftwards_arrow_with_hook: Auto-approval undone by {undo.undone_by_mention}: "
+            f"{escape(undo.justification)}"
+        )
+    ]
+
+
+def undo_auto_approve_button(request: HumanReviewRequest) -> ButtonElement:
+    """Opens a modal asking why, then withdraws Open SWE's approval on GitHub."""
+    return button(
+        "Undo auto-approve",
+        action_id="open_swe_option_select_undo_auto_approve",
+        value=_button_value("undo_auto_approve", request),
+        style="danger",
+    )
+
+
+def merge_button(request: HumanReviewRequest) -> ButtonElement:
+    return button(
+        "Merge",
+        action_id="open_swe_option_select_merge",
+        value=_button_value("merge", request),
+        style="primary",
+    )
 
 
 def closed_card(
@@ -167,13 +205,51 @@ def closed_card(
     author: str,
     outcome: str,
     review_states: dict[str, str],
+    auto_approval: AutoApproval | None = None,
 ) -> tuple[str, list[Block]]:
     """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
     pr = request.pull_request
-    if outcome == "merged" and (approvers := _approvers(request, review_states)):
+    if outcome == "merged" and (approvers := _approvers(request, review_states, auto_approval)):
         outcome = f"merged — approved by {approvers}"
     return f"Review request: {outcome} — {pr.url} — by {author}", [
         section(
             f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)} — by {author}"
         )
     ]
+
+
+def approved_card(
+    request: HumanReviewRequest,
+    *,
+    title: str,
+    author: str,
+    review_states: dict[str, str],
+    auto_approval: AutoApproval | None,
+) -> tuple[str, list[Block]]:
+    """An approved request waiting to merge: who approved, what it does, and a Merge button."""
+    approvers = {login.lower() for login, state in review_states.items() if state == "APPROVED"}
+    if auto_approval is not None and approvers == {auto_approval.login.lower()}:
+        outcome = "auto-approved by Open SWE"
+    else:
+        outcome = f"approved by {_approvers(request, review_states, auto_approval)}"
+    text, blocks = closed_card(
+        request, title=title, author=author, outcome=outcome, review_states=review_states
+    )
+    assessment = auto_approval.assessment if auto_approval is not None else None
+    summary = (assessment.summary if assessment is not None else "") or request.tldr
+    notes = [escape(summary)] if summary else []
+    if assessment is not None:
+        reason = assessment.because.strip().rstrip(".")
+        notes.append(
+            f"Auto-approved because {escape(reason)}."
+            if reason
+            else f"Auto-approved: {escape(assessment.explanation)}"
+        )
+    if notes:
+        blocks.append(context("\n".join(notes)))
+    blocks.extend(_undo_note(request))
+    buttons = [merge_button(request)]
+    if auto_approval is not None:
+        buttons.append(undo_auto_approve_button(request))
+    blocks.append(actions(*buttons))
+    return text, blocks

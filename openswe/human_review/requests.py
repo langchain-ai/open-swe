@@ -95,6 +95,45 @@ class HumanReviewParticipant(Base):
         return slack_mention(self.user, self.github_login)
 
 
+class AutoApprovalUndo(Base):
+    """Someone with write access withdrawing Open SWE's automatic approval of a pull request."""
+
+    __tablename__ = "auto_approval_undo"
+
+    pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
+    github_review_id: Mapped[int] = mapped_column(BigInteger)
+    justification: Mapped[str]
+    undone_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    request_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("human_review_request.id", ondelete="SET NULL"), default=None
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    undone_by: Mapped[User | None] = relationship(init=False)
+
+    @property
+    def undone_by_mention(self) -> str:
+        return slack_mention(
+            self.undone_by,
+            self.undone_by.login_for("github") if self.undone_by is not None else "someone",
+        )
+
+    @classmethod
+    async def exists_for(cls, owner: str, repo: str, number: int) -> bool:
+        """Whether anyone has undone an automatic approval of this pull request."""
+        async with postgres.session() as session:
+            found = await session.scalar(
+                select(cls.id)
+                .join(PullRequest, PullRequest.id == cls.pull_request_id)
+                .join(PullRequest.repository)
+                .where(Repository.key == f"{owner}/{repo}".lower(), PullRequest.number == number)
+                .limit(1)
+            )
+        return found is not None
+
+
 class HumanReviewRequest(Base):
     __tablename__ = "human_review_request"
 
@@ -140,6 +179,9 @@ class HumanReviewRequest(Base):
         cascade="all, delete-orphan",
         order_by=lambda: HumanReviewParticipant.joined_at,
     )
+    auto_approval_undos: Mapped[list[AutoApprovalUndo]] = relationship(
+        default_factory=list, order_by=lambda: AutoApprovalUndo.created_at
+    )
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     pull_request: Mapped[PullRequest] = relationship(init=False)
@@ -170,6 +212,11 @@ class HumanReviewRequest(Base):
     def approved(self) -> bool:
         """One approval from someone other than the author is enough."""
         return bool(self.approvals)
+
+    @property
+    def auto_approval_undo(self) -> AutoApprovalUndo | None:
+        """The latest withdrawal of Open SWE's automatic approval from this card."""
+        return self.auto_approval_undos[-1] if self.auto_approval_undos else None
 
     @property
     def reviewers(self) -> list[HumanReviewParticipant]:
@@ -242,6 +289,9 @@ class HumanReviewRequest(Base):
             .selectinload(User.identities),
             selectinload(cls.requested_by).selectinload(User.identities),
             selectinload(cls.pull_request),
+            selectinload(cls.auto_approval_undos)
+            .selectinload(AutoApprovalUndo.undone_by)
+            .selectinload(User.identities),
         )
 
     @classmethod

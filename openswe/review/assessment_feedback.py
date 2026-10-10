@@ -1,7 +1,9 @@
 """Published assessments and each reviewer's explicit feedback."""
 
 import logging
-from typing import Literal
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Literal, Self
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -35,6 +37,33 @@ class AssessmentFeedback(FeedbackSubmission):
 
 
 ASSESSMENTS = TypedStore(("review_assessments",), PublishedAssessment)
+
+
+@dataclass(frozen=True, slots=True)
+class AutoApproval:
+    """Open SWE's standing automatic approval of a pull request and the login it was submitted as."""
+
+    login: str
+    assessment: PublishedAssessment
+
+    @classmethod
+    async def standing(cls, reviews: Sequence[Mapping[str, object]]) -> Self | None:
+        """The newest approved review among GitHub's ``reviews`` that Open SWE submitted automatically."""
+        for review in reversed(reviews):
+            user = review.get("user")
+            review_id = review.get("id")
+            if (
+                review.get("state") != "APPROVED"
+                or not isinstance(user, Mapping)
+                or user.get("type") != "Bot"
+                or not isinstance(login := user.get("login"), str)
+                or not isinstance(review_id, int)
+            ):
+                continue
+            assessment = await ASSESSMENTS.get(str(review_id))
+            if assessment is not None and assessment.approved:
+                return cls(login=login, assessment=assessment)
+        return None
 
 
 def feedback_store(review_id: int) -> TypedStore[AssessmentFeedback]:
