@@ -1,9 +1,10 @@
-"""A pull request's changed lines, parsed from a zero-context diff of merge base to head.
+"""A pull request's changed lines, parsed from its diff of merge base to head.
 
-Added lines carry their head line number and deleted lines their merge-base
-line number: the numbers the plan's ranges use. A line's ``key`` is its path,
-sign and text, never its position, so a line a person approved is recognized
-again after a rebase or force-push.
+The diff keeps git's default context, so its hunks are the ones GitHub and the
+review page show, and a walkthrough step owns whole hunks. Added lines carry
+their head line number and deleted lines their merge-base line number. A line's
+``key`` is its path, sign and text, never its position, so a line a person
+approved is recognized again after a rebase or force-push.
 """
 
 import hashlib
@@ -26,8 +27,9 @@ class ChangedLine:
     sign: Sign
     lineno: int
     text: str
+    # The head line the hunk's ``@@ … +N`` header starts at, which names the hunk in its file.
     hunk: int
-    # Where the hunk sits in the head file, for context around deletions.
+    # The head line just above where this line sits, for context around deletions.
     anchor: int
 
     @property
@@ -57,8 +59,8 @@ class FileChange:
 def parse(diff: str) -> list[FileChange]:
     files: list[FileChange] = []
     header: list[str] = []
-    hunk_index = -1
-    old = new = anchor = 0
+    hunk = -1
+    old = new = 0
 
     def finish() -> None:
         if not header:
@@ -72,30 +74,29 @@ def parse(diff: str) -> list[FileChange]:
         if line.startswith("diff --git "):
             finish()
             header = [line]
-            hunk_index = -1
+            hunk = -1
             files.append(FileChange(path=line.rpartition(" b/")[2]))
             continue
         if not files:
             continue
         if match := _HUNK_RE.match(line):
-            hunk_index += 1
-            old, new = int(match[1]), int(match[3])
-            anchor = new
+            old, hunk = int(match[1]), int(match[3])
+            # A hunk that only deletes numbers its head side from the line before it.
+            new = hunk if match[4] != "0" else hunk + 1
             continue
-        if hunk_index < 0:
+        if hunk < 0:
             header.append(line)
             if line.startswith("+++ b/"):
                 files[-1].path = line[6:]
             continue
         if line.startswith("-"):
-            files[-1].lines.append(
-                ChangedLine(files[-1].path, "-", old, line[1:], hunk_index, anchor)
-            )
+            files[-1].lines.append(ChangedLine(files[-1].path, "-", old, line[1:], hunk, new - 1))
             old += 1
         elif line.startswith("+"):
-            files[-1].lines.append(
-                ChangedLine(files[-1].path, "+", new, line[1:], hunk_index, anchor)
-            )
+            files[-1].lines.append(ChangedLine(files[-1].path, "+", new, line[1:], hunk, new - 1))
+            new += 1
+        elif not line.startswith("\\"):
+            old += 1
             new += 1
     finish()
     return files

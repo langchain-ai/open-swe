@@ -60,6 +60,7 @@ from openswe.tools.plan_walkthrough import (
     walkthrough_describe_other,
     walkthrough_move_to_other,
     walkthrough_plan_chunk,
+    walkthrough_split_hunks,
 )
 from openswe.tools.record_human_input import record_human_input
 from openswe.ui_invalidations import Topic
@@ -300,6 +301,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
         tools=apply_tool_descriptions(
             [
                 walkthrough_plan_chunk,
+                walkthrough_split_hunks,
                 walkthrough_move_to_other,
                 walkthrough_describe_other,
                 record_human_input,

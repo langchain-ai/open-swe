@@ -46,7 +46,12 @@ def _runs(lines: list[ChangedLine]) -> list[list[ChangedLine]]:
     runs: list[list[ChangedLine]] = []
     for line in lines:
         last = runs[-1][-1] if runs else None
-        replacing = last is not None and last.sign == "-" and line.sign == "+"
+        replacing = (
+            last is not None
+            and last.sign == "-"
+            and line.sign == "+"
+            and line.lineno == last.anchor + 1
+        )
         contiguous = last is not None and last.sign == line.sign and line.lineno == last.lineno + 1
         if last is None or last.hunk != line.hunk or not (replacing or contiguous):
             runs.append([])

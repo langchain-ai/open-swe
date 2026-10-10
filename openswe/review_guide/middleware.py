@@ -87,7 +87,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 await set_view(
                     session.slack_channel_id,
                     "diff",
-                    content=await checkout.diff(zero=False),
+                    content=await checkout.diff(),
                     base_branch=head.base.ref,
                     head_branch=head.head.ref,
                 )
@@ -152,8 +152,10 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
         approved = (
             await approve_click(session, walk, self._approve_ts) if self._approve_ts else None
         )
-        unplanned = [LineRef.of(line) for line in workspace.plan.unplanned(workspace.changes)]
-        reader = Reader.of(walk, workspace.plan, await session.seen_lines(), unplanned)
+        unplanned = workspace.plan.unplanned(workspace.changes)
+        reader = Reader.of(
+            walk, workspace.plan, await session.seen_lines(), map(LineRef.of, unplanned)
+        )
         return {
             "review_guide_rules": rules,
             "messages": [
@@ -164,7 +166,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                         head_sha=head.head.sha,
                         clicked=bool(self._approve_ts),
                         approved=approved.title if approved else "",
-                        status=reader.status(unplanned).model_dump(),
+                        status=reader.status(unplanned, workspace.hunks).model_dump(),
                     )
                 )
             ],
