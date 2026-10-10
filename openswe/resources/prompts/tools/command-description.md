@@ -1,0 +1,1 @@
+Clear, concise description of what this command does, in active voice, shown to people following the run. Keep simple commands to 5-10 words (e.g. "Show working tree status", "Install package dependencies"); add context for piped commands or obscure flags (e.g. "Find and delete all .tmp files recursively"). Do not echo the command or its file paths.
