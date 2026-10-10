@@ -316,11 +316,14 @@ export function AgentTurn({
   const renderItemIndex = new Map(
     renderItems.map((item, index) => [item.key, index])
   )
-  const foldIndex = visibleItems.filter(
-    (item) =>
-      (renderItemIndex.get(item.key) ?? Number.POSITIVE_INFINITY) <
-      firstWorkIndex
-  ).length
+  // A live turn keeps its activity row last, below replies sent mid-run.
+  const foldIndex = isStreaming
+    ? visibleItems.length
+    : visibleItems.filter(
+        (item) =>
+          (renderItemIndex.get(item.key) ?? Number.POSITIVE_INFINITY) <
+          firstWorkIndex
+      ).length
 
   return (
     <div className="group/turn my-space-2 min-w-0 space-y-space-2">

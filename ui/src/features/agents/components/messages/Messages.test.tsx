@@ -196,6 +196,55 @@ describe("Messages", () => {
     ).toBeTruthy()
   })
 
+  it("keeps the live activity row below Slack replies sent mid-run", () => {
+    render(
+      <Messages
+        isStreaming
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "tool-execution",
+                toolCallId: "ack",
+                title: "Slack thread reply",
+                toolKind: "slack",
+                status: "completed",
+                input: { message: "On it!" },
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "shell",
+                title: "ls",
+                toolKind: "execute",
+                status: "completed",
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "progress",
+                title: "Slack thread reply",
+                toolKind: "slack",
+                status: "completed",
+                input: { message: "Found the cause" },
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const fold = screen.getByRole("button", { name: "Thinking… · 1 action" })
+    for (const text of ["On it!", "Found the cause"]) {
+      expect(
+        screen.getByText(text).compareDocumentPosition(fold) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    }
+  })
+
   it("renders unfinished grouped work after its fold row", () => {
     render(
       <Messages
