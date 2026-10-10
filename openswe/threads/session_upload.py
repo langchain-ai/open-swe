@@ -12,7 +12,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from openswe.claude_code.transcript import ClaudeTranscript, TranscriptError
-from openswe.dashboard.oauth import UPLOAD_TICKET_TTL_SECONDS, UploadTicket, issue_upload_ticket
+from openswe.dashboard.oauth import UploadTicket
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, GitHubError
@@ -322,15 +322,15 @@ async def reserve_session_upload(
         langgraph_client(), thread_id, title=title, metadata=metadata, if_exists="raise"
     )
     user = await User.for_login("github", login)
-    code = issue_upload_ticket(
-        login=login, email=email, user_id=str(user.id) if user else None, thread_id=thread_id
-    )
+    code = UploadTicket(
+        sub=login, email=email, user_id=str(user.id) if user else None, thread_id=thread_id
+    ).issue()
     return SessionReservation(
         thread_id=thread_id,
         url=dashboard_thread_url(thread_id),
         upload_url=f"{dashboard_api_base_url()}/dashboard/api/threads/uploads",
         upload_token=code,
-        expires_in_seconds=UPLOAD_TICKET_TTL_SECONDS,
+        expires_in_seconds=UploadTicket.ttl_seconds,
     )
 
 

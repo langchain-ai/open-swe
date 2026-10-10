@@ -1,1 +1,1 @@
-"""Reading what Claude Code writes on a person's machine."""
+"""Reading and writing the session transcripts Claude Code keeps on a person's machine."""

@@ -8,7 +8,7 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal, Self
 from urllib.parse import quote, urlparse
 from uuid import UUID
 
@@ -47,8 +47,6 @@ STATE_TTL_SECONDS = 600
 HANDOFF_TTL_SECONDS = 120
 TERMINAL_TICKET_TTL_SECONDS = 60
 TERMINAL_TICKET_AUDIENCE = "open-swe-cloud-terminal"
-UPLOAD_TICKET_TTL_SECONDS = 60 * 60
-UPLOAD_TICKET_AUDIENCE = "open-swe-session-upload"
 JWT_ALG = "HS256"
 
 
@@ -86,43 +84,59 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
     return {"sub": login, "email": email if isinstance(email, str) else None}
 
 
-class UploadTicket(BaseModel):
-    """Who may fill which reserved session-upload thread, as its upload URL carries it."""
+class SessionTicket(BaseModel):
+    """A signed, short-lived grant to move one session between a person's machine and a thread."""
+
+    audience: ClassVar[str]
+    ttl_seconds: ClassVar[int] = 60 * 60
+    label: ClassVar[str]
 
     sub: str = Field(min_length=1)
     email: str | None = None
-    user_id: str | None = None
     thread_id: str = Field(min_length=1)
 
+    def issue(self) -> str:
+        now = int(time.time())
+        payload = {
+            **self.model_dump(),
+            "aud": self.audience,
+            "iat": now,
+            "exp": now + self.ttl_seconds,
+        }
+        return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
-def issue_upload_ticket(
-    *, login: str, email: str | None, user_id: str | None, thread_id: str
-) -> str:
-    now = int(time.time())
-    payload = {
-        "aud": UPLOAD_TICKET_AUDIENCE,
-        "sub": login,
-        "email": email,
-        "user_id": user_id,
-        "thread_id": thread_id,
-        "iat": now,
-        "exp": now + UPLOAD_TICKET_TTL_SECONDS,
-    }
-    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+    @classmethod
+    def decode(cls, token: str) -> Self:
+        try:
+            payload = jwt.decode(
+                token,
+                _secret(),
+                algorithms=[JWT_ALG],
+                audience=cls.audience,
+                options={"require": ["aud", "sub", "thread_id", "iat", "exp"]},
+            )
+            return cls.model_validate(payload)
+        except (jwt.PyJWTError, ValidationError) as exc:
+            raise HTTPException(401, f"invalid or expired {cls.label}") from exc
 
 
-def decode_upload_ticket(token: str) -> UploadTicket:
-    try:
-        payload = jwt.decode(
-            token,
-            _secret(),
-            algorithms=[JWT_ALG],
-            audience=UPLOAD_TICKET_AUDIENCE,
-            options={"require": ["aud", "sub", "thread_id", "iat", "exp"]},
-        )
-        return UploadTicket.model_validate(payload)
-    except (jwt.PyJWTError, ValidationError) as exc:
-        raise HTTPException(401, "invalid or expired upload code") from exc
+class UploadTicket(SessionTicket):
+    """Who may fill which reserved session-upload thread."""
+
+    audience: ClassVar[str] = "open-swe-session-upload"
+    label: ClassVar[str] = "upload code"
+
+    user_id: str | None = None
+
+
+class DownloadTicket(SessionTicket):
+    """Who may read which thread as a local session, and where that session lives on their machine."""
+
+    audience: ClassVar[str] = "open-swe-session-download"
+    label: ClassVar[str] = "download token"
+
+    session_id: str = Field(min_length=1)
+    cwd: str = Field(min_length=1)
 
 
 GITHUB_APP_CLIENT_ID = ENV.GITHUB_APP_CLIENT_ID.get()
