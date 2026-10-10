@@ -927,12 +927,34 @@ class _GitHubPrOrIssue(BaseModel):
     pull_request: dict[str, object] | None = None
 
 
+class _GitHubReviewer(BaseModel):
+    id: int
+
+
+class _GitHubReview(BaseModel):
+    id: int
+    user: _GitHubReviewer | None = None
+
+
 class _UntaggedPrEvent(BaseModel):
     action: str
     sender: _GitHubAccount
     repository: _GitHubRepository
     pull_request: _GitHubPrOrIssue | None = None
     issue: _GitHubPrOrIssue | None = None
+    review: _GitHubReview | None = None
+
+    async def is_expedited_approval(self) -> bool:
+        """Whether this is the review a Slack vote on the PR's expedited card submitted."""
+        if self.pull_request is None or self.review is None or self.review.user is None:
+            return False
+        return await HumanReviewRequest.submitted_review(
+            self.repository.owner.login,
+            self.repository.name,
+            self.pull_request.number,
+            github_user_id=str(self.review.user.id),
+            review_id=self.review.id,
+        )
 
 
 class _AuthoredItem(BaseModel):
@@ -983,7 +1005,15 @@ async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) 
     pull_request = await PullRequest.get(
         event.repository.owner.login, event.repository.name, target.number
     )
-    return pull_request.agent_thread_id if pull_request is not None else None
+    if pull_request is None or pull_request.agent_thread_id is None:
+        return None
+    if await event.is_expedited_approval():
+        common.logger.info(
+            "Ignoring the GitHub review an expedited Slack approval submitted",
+            extra={"pr_number": target.number, "thread_id": pull_request.agent_thread_id},
+        )
+        return None
+    return pull_request.agent_thread_id
 
 
 async def process_github_pr_comment(

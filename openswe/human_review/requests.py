@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, or_, select
+from sqlalchemy import BigInteger, ForeignKey, Text, and_, desc, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -35,7 +35,7 @@ from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
 from openswe.slack.client import lookup_slack_thread_id
 from openswe.slack.dm import DmOrigin
-from openswe.users import User
+from openswe.users import User, UserIdentity
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client
 
@@ -289,6 +289,37 @@ class HumanReviewRequest(Base):
         if request is None or request.kind != "expedited":
             return False
         return login.lower() in {approver.lower() for approver in request.approvers}
+
+    @classmethod
+    async def submitted_review(
+        cls, owner: str, repo: str, number: int, *, github_user_id: str, review_id: int
+    ) -> bool:
+        """Match a Slack approval's review, including its in-flight submission."""
+        async with postgres.session() as session:
+            found = await session.scalar(
+                select(HumanReviewParticipant.request_id)
+                .join(cls, cls.id == HumanReviewParticipant.request_id)
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .join(UserIdentity, UserIdentity.user_id == HumanReviewParticipant.user_id)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    PullRequest.number == number,
+                    cls.kind == "expedited",
+                    UserIdentity.provider == "github",
+                    UserIdentity.external_id == github_user_id,
+                    HumanReviewParticipant.decision == "approve",
+                    or_(
+                        HumanReviewParticipant.github_review_id == review_id,
+                        and_(
+                            HumanReviewParticipant.github_review_id.is_(None),
+                            cls.state == "open",
+                        ),
+                    ),
+                )
+                .limit(1)
+            )
+        return found is not None
 
     @classmethod
     async def open_in_repository(

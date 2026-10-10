@@ -11,6 +11,7 @@ import pytest
 from openswe.github import routes as github_routes
 from openswe.github import webhook as github_webhooks
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.payloads import SlackChannelContext
 from openswe.users import User
@@ -302,6 +303,55 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     )
 
     assert response.status_code == 200
+    assert (response.json()["status"] == "accepted") is accepted
+    assert called == ({"agent_thread_id": "agent-thread"} if accepted else {})
+
+
+@pytest.mark.parametrize(
+    ("stored_review_id", "review_id", "accepted"),
+    [(None, 6, False), (6, 6, False), (6, 7, True)],
+    ids=["review-in-flight", "same-review", "later-review"],
+)
+async def test_github_webhook_ignores_review_an_expedited_approval_submitted(
+    monkeypatch, registry_db, stored_review_id: int | None, review_id: int, accepted: bool
+) -> None:
+    called: dict[str, object] = {}
+
+    async def fake_process_github_pr_comment(
+        payload: dict[str, object], event_type: str, *, agent_thread_id: str | None = None
+    ) -> None:
+        called["agent_thread_id"] = agent_thread_id
+
+    async def allow(payload: dict[str, object], event_type: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
+    )
+    monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", allow)
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
+    register_github_logins(monkeypatch, "octocat")
+    voter = await User.sign_in("github", "42", login="octocat")
+    pr = await PullRequest(
+        owner="langchain-ai",
+        repo="open-swe",
+        number=1244,
+        opening_head_sha="head-sha",
+        threads=[ThreadLink(thread_id="agent-thread", source=AGENT_OPENED_LINK_SOURCE)],
+    ).save()
+    await HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="head-sha",
+        kind="expedited",
+        thread_id="agent-thread",
+        participants=[HumanReviewParticipant(user_id=voter.id, github_review_id=stored_review_id)],
+    ).save()
+    event = _untagged_pr_event("pull_request_review", {"login": "octocat"})
+    event["review"] = {"id": review_id, "body": "Approved in Slack", "user": {"id": 42}}
+
+    response = await _post_github_webhook("pull_request_review", event)
+
     assert (response.json()["status"] == "accepted") is accepted
     assert called == ({"agent_thread_id": "agent-thread"} if accepted else {})
 
