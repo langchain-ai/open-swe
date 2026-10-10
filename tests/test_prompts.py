@@ -2,6 +2,7 @@ import pytest
 from jinja2 import UndefinedError
 from langchain_core.tools import StructuredTool
 
+from openswe.prompt import construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt
 
 
@@ -18,6 +19,13 @@ def test_jinja_prompt_requires_all_variables() -> None:
 def test_prompt_rejects_paths_outside_resources() -> None:
     with pytest.raises(ValueError):
         prompt("../default_prompt")
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_thread_creation_guidance_matches_tool_availability(available: bool) -> None:
+    rendered = construct_system_prompt("/workspace", start_thread_available=available)
+
+    assert ("`start_thread`" in rendered) is available
 
 
 def test_apply_tool_descriptions_copies_base_tools(monkeypatch: pytest.MonkeyPatch) -> None:
