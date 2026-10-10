@@ -122,6 +122,20 @@ def test_a_changed_line_renders_as_a_diff_with_unchanged_context(repo: Path) -> 
     )
 
 
+def test_context_separated_deletion_and_addition_render_separately(repo: Path) -> None:
+    base = _commit(repo, {"lines.txt": "one\ntwo\nthree\nfour\nsix\n"}, "lines")
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"lines.txt": "one\nthree\nfour\nFIVE\nsix\n"}, "edit lines")
+    changes = _changes(repo, base, head)
+
+    rendered = render_chunk(changes[0].lines, _head(repo, head, changes), _added(changes))
+
+    assert rendered == (
+        "`lines.txt`\n```diff\n@@ -1,4 +1,3 @@\n one\n-two\n three\n four\n```\n"
+        "`lines.txt` L4\n```txt\nFIVE\n```"
+    )
+
+
 def test_a_chunk_takes_whole_hunks_across_files_and_a_hunk_is_placed_once(repo: Path) -> None:
     base = _git(repo, "rev-parse", "HEAD").strip()
     _git(repo, "checkout", "-qb", "feature")
