@@ -1,5 +1,7 @@
 import { LoadingIndicator } from "@langchain/macaw-components/ThinkingState"
 
+import { ElapsedSeconds } from "./ElapsedSeconds"
+
 export function ThinkingSpinner({
   isActive,
   settingUpSandbox = false,
@@ -24,6 +26,7 @@ export function ThinkingSpinner({
           ? "Agent is setting up the environment…"
           : (label ?? "Working…")}
       </span>
+      <ElapsedSeconds />
     </div>
   )
 }
