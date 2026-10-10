@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
-from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
+from openswe.dashboard.oauth import DownloadTicket, UploadTicket, bind_audit_session
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
@@ -75,6 +75,7 @@ from openswe.threads.runs import (
     ThreadResolveBody,
     create_dashboard_session,
 )
+from openswe.threads.session_download import DOWNLOAD_RESPONSES, download_session
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.timing import server_timing_header
@@ -153,12 +154,25 @@ async def api_upload_session(request: Request) -> dict[str, Any] | Response:
     code = bearer_github_token(request)
     if code is None:
         raise HTTPException(401, "send the upload token as a bearer token")
-    ticket = decode_upload_ticket(code)
+    ticket = UploadTicket.decode(code)
     bind_audit_session(request, {"sub": ticket.sub, "user_id": ticket.user_id})
     summary = await upload_session(UploadStream(request), ticket)
     if summary is None:
         return Response(status_code=204)
     return summary
+
+
+@router.get(
+    "/threads/downloads", openapi_extra=DOWNLOAD_RESPONSES, response_class=StreamingResponse
+)
+@audit_endpoint
+async def api_download_session(request: Request) -> StreamingResponse:
+    token = bearer_github_token(request)
+    if token is None:
+        raise HTTPException(401, "send the download token as a bearer token")
+    ticket = DownloadTicket.decode(token)
+    bind_audit_session(request, {"sub": ticket.sub})
+    return StreamingResponse(await download_session(ticket), media_type="application/gzip")
 
 
 @router.post("/threads/resolve-all")

@@ -18,7 +18,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
+from openswe.input_messages import authored_text, dynamic_context_hash, message_sender_id
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
@@ -358,32 +358,6 @@ def _message_timestamp(message: Any) -> str | None:
     return None
 
 
-def _plain_message_text(content: Any) -> str | None:
-    structured = input_message_text(content)
-    if structured:
-        return structured
-    values = content if isinstance(content, list) else [content]
-    texts: list[str] = []
-    for value in values:
-        if isinstance(value, Mapping):
-            block_type = value.get("type")
-            if block_type not in {None, "text"}:
-                continue
-            text = value.get("text")
-        else:
-            text = value
-        if not isinstance(text, str):
-            continue
-        stripped = text.strip()
-        if not stripped or stripped.startswith(("<dynamic-context", "<system-instructions")):
-            continue
-        if stripped.startswith("<input-message"):
-            continue
-        texts.append(stripped)
-    combined = "\n\n".join(texts).strip()
-    return combined or None
-
-
 def _state_messages(state: Any) -> list[Any]:
     values = _value(state, "values")
     messages = values.get("messages") if isinstance(values, Mapping) else None
@@ -396,7 +370,7 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
         if not isinstance(message, (Mapping, BaseMessage)) or kind not in {"human", "user"}:
             continue
         content = _message_content(message)
-        text = _plain_message_text(content)
+        text = authored_text(content)
         if not text:
             continue
         truncated = len(text) > _MAX_DETAIL_MESSAGE_CHARS
@@ -425,7 +399,7 @@ def _transcript(state: Any) -> dict[str, Any]:
             omitted += 1
             continue
         content = _message_content(message)
-        text = _plain_message_text(content)
+        text = authored_text(content)
         if not text:
             omitted += 1
             continue

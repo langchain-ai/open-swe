@@ -17379,6 +17379,29 @@
         ]
       }
     },
+    "/dashboard/api/threads/downloads": {
+      "get": {
+        "operationId": "api_download_session_dashboard_api_threads_downloads_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The thread as a gzipped Claude Code session transcript (JSONL). Authorized by the download_token the download_session MCP tool returned, as a bearer token."
+          }
+        },
+        "summary": "Api Download Session",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/page": {
       "get": {
         "operationId": "api_list_threads_page_dashboard_api_threads_page_get",

@@ -201,6 +201,31 @@ def input_message_text(content: object) -> str | None:
     return "\n\n".join(texts) or None
 
 
+def authored_text(content: object) -> str | None:
+    """What a person or system wrote in a message, without the context Open SWE injects around it."""
+    structured = input_message_text(content)
+    if structured:
+        return structured
+    values = content if isinstance(content, list) else [content]
+    texts: list[str] = []
+    for value in values:
+        if isinstance(value, Mapping):
+            if value.get("type") not in {None, "text"}:
+                continue
+            text = value.get("text")
+        else:
+            text = value
+        if not isinstance(text, str):
+            continue
+        stripped = text.strip()
+        if not stripped or stripped.startswith(
+            ("<dynamic-context", "<system-instructions", "<input-message")
+        ):
+            continue
+        texts.append(stripped)
+    return "\n\n".join(texts).strip() or None
+
+
 def input_message_timestamps(content: object) -> set[str]:
     """Source-message timestamps the serialized envelopes in ``content`` carry."""
     return {
