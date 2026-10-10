@@ -17,7 +17,9 @@ import { cn } from "@/lib/utils"
 
 interface AppShellProps {
   user: SessionUser
-  title: string
+  title?: string
+  /** Hand the whole content area to the page, which renders its own header. */
+  fill?: boolean
   action?: ReactNode
   description?: string
   backTo?: { to: string; label: string }
@@ -32,8 +34,17 @@ export function AppShell({
   description,
   backTo,
   className,
+  fill,
   children,
 }: AppShellProps) {
+  if (fill) {
+    return (
+      <div className="flex h-svh overflow-hidden bg-surface-level-1 text-primary">
+        <AppSidebar user={user} />
+        <main className="relative flex min-w-0 flex-1">{children}</main>
+      </div>
+    )
+  }
   return (
     <div className="flex h-svh overflow-hidden bg-surface-level-1 text-primary">
       <AppSidebar user={user} />
