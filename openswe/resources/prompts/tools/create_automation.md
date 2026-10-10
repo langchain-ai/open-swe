@@ -2,7 +2,10 @@ Create a workspace automation.
 
 Args:
     prompt: Complete instructions for every run. Runs post nowhere on their own;
-        say in the prompt if a run should report to a Slack channel.
+        say in the prompt if a run should report to a Slack channel. Runs act
+        as the automation, not as you: they can read public threads, including
+        their own earlier runs, but cannot message threads, DM anyone, or see
+        private conversations, so name a channel for anything they report.
     workspace: Slug of the workspace every run launches in, with its settings,
         MCP connections, and sandbox image. Required; ask which workspace when
         it is not clear.
