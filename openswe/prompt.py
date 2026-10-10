@@ -135,15 +135,9 @@ def construct_system_prompt(
     local_checkout_client: BridgeClient = "cli",
     recent_thread_context: str | None = None,
     workspace_repos: list[str] | None = None,
+    start_thread_available: bool = False,
 ) -> str:
-    """Render the agent's system prompt.
-
-    ``local_checkout`` says the working directory already *is* the user's own
-    repository — a thread bridged to their machine — so the clone-or-sync and
-    git-identity steps a hosted sandbox needs would rewrite their checkout.
-    ``local_checkout_client`` is the app serving that machine: only the CLI
-    prints a result the run must hand it.
-    """
+    """Render the agent's system prompt for its tools, source, and checkout."""
     del linear_project_id, linear_issue_number
     return prompt(
         "system/main",
@@ -155,6 +149,7 @@ def construct_system_prompt(
         sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
         sandbox_file_downloads=sandbox_file_downloads,
+        start_thread_available=start_thread_available,
         default_repo=(
             f"{default_repo['owner']}/{default_repo['name']}"
             if default_repo and default_repo.get("owner") and default_repo.get("name")

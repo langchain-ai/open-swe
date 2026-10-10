@@ -52,6 +52,52 @@ async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.M
     assert actor == threads_tool._Actor(login="reviewer", email=None, name="reviewer")
 
 
+async def test_start_thread_uses_verified_dashboard_sender(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"source": "dashboard", "github_login": "trusted-user"}},
+    )
+    start = AsyncMock(return_value="new-thread")
+    monkeypatch.setattr(threads_tool, "start_dashboard_thread", start)
+    state = {
+        "messages": [
+            {
+                "type": "human",
+                "content": (
+                    '<input-message sender="github:reviewer" surface="web" kind="human">\n'
+                    "Start a separate task\n</input-message>"
+                ),
+            }
+        ]
+    }
+
+    result = await threads_tool.start_thread("Fix login", "Fix the login bug", state=state)
+
+    assert result["success"] is True
+    assert result["thread_id"] == "new-thread"
+    assert start.await_args is not None
+    assert start.await_args.args == ("reviewer", None)
+
+
+@pytest.mark.parametrize("login", [None, "external-user"])
+async def test_start_thread_refuses_unverified_automation_actor(
+    monkeypatch: pytest.MonkeyPatch, login: str | None
+) -> None:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"source": "schedule", "github_login": login}},
+    )
+    start = AsyncMock()
+    monkeypatch.setattr(threads_tool, "start_dashboard_thread", start)
+
+    result = await threads_tool.start_thread("Fix login", "Fix the login bug")
+
+    assert result == {"success": False, "error": "No verified triggering user is available"}
+    start.assert_not_awaited()
+
+
 async def test_list_threads_denies_actor_outside_allowed_org(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

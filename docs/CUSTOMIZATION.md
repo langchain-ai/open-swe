@@ -624,7 +624,7 @@ The system prompt is the template `openswe/resources/prompts/system/main.md.jinj
 |---|---|
 | `working-environment.md` | Sandbox paths and execution constraints (`working-environment-desktop.md` and `working-environment-local.md` for desktop and bridged runs) |
 | `repository-setup.md.jinja` | Cloning or syncing the repository, commit identity, and branch choice |
-| `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
+| `task-execution.md.jinja` | Workflow steps (understand → implement → verify → submit), PR review dispatch, and tool-aware task delegation |
 | `dependencies.md` | Installing, vetting, and managing project dependencies |
 | `commit-pr.md` | PR title/body format, lint/format steps, and commit conventions (plus `commit-pr-desktop.md` for desktop runs) |
 | `shared-base.md` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
