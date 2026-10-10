@@ -16,10 +16,17 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
+from anthropic.types import Message
+from deepagents import create_deep_agent
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_anthropic import ChatAnthropic
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_fireworks import ChatFireworks
+from langchain_openai import ChatOpenAI
 from langgraph.graph.state import RunnableConfig
+from pydantic import SecretStr
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
@@ -891,3 +898,109 @@ async def test_historical_personal_models_and_routing_do_not_override_workspace(
     )
     assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
     assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"
+
+
+async def test_anthropic_hour_cache_replaces_default_and_reaches_fork() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    caching = [
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, AnthropicPromptCachingMiddleware)
+    ]
+    model = ChatAnthropic(model_name="claude-sonnet-4-20250514", api_key=SecretStr("test"))
+    requests: list[dict[str, object]] = []
+
+    async def respond(**payload: object) -> SimpleNamespace:
+        requests.append(payload)
+        if len(requests) == 1:
+            content = [
+                {
+                    "type": "tool_use",
+                    "id": "delegate",
+                    "name": "task",
+                    "input": {"description": "Reply with done", "subagent_type": "general-purpose"},
+                }
+            ]
+            stop_reason = "tool_use"
+        else:
+            content = [{"type": "text", "text": "done"}]
+            stop_reason = "end_turn"
+        message = Message.model_validate(
+            {
+                "id": "response",
+                "type": "message",
+                "role": "assistant",
+                "model": model.model,
+                "content": content,
+                "stop_reason": stop_reason,
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 1},
+            }
+        )
+        return SimpleNamespace(parse=lambda: message)
+
+    subagent = cast(list[dict[str, object]], captured["subagents"])[0]
+    graph = create_deep_agent(
+        model=model,
+        middleware=caching,
+        subagents=[
+            {
+                "name": "general-purpose",
+                "description": "Delegated work",
+                "mode": cast(Literal["fork"], subagent["mode"]),
+                "model": model,
+            }
+        ],
+    )
+    with patch.object(
+        model._async_client.messages.with_raw_response, "create", side_effect=respond
+    ):
+        await graph.ainvoke({"messages": [HumanMessage("Delegate this task")]})
+    assert len(requests) == 3
+    assert all(
+        request["cache_control"] == {"type": "ephemeral", "ttl": "1h"} for request in requests
+    )
+
+
+@pytest.mark.parametrize("provider", ["openai", "fireworks"])
+async def test_anthropic_hour_cache_leaves_other_provider_requests_unchanged(provider: str) -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    caching = [
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, AnthropicPromptCachingMiddleware)
+    ]
+    if provider == "openai":
+        model = ChatOpenAI(model="gpt-4o", api_key=SecretStr("test"), use_responses_api=False)
+    else:
+        model = ChatFireworks(
+            model="accounts/fireworks/models/llama-v3p1-8b-instruct", api_key=SecretStr("test")
+        )
+    requests: list[dict[str, object]] = []
+    completion = {
+        "id": "response",
+        "model": model.model_name,
+        "object": "chat.completion",
+        "created": 0,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "done"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11},
+    }
+
+    async def respond(**payload: object) -> object:
+        requests.append(payload)
+        return SimpleNamespace(parse=lambda: completion) if provider == "openai" else completion
+
+    client = model.async_client.with_raw_response if provider == "openai" else model.async_client
+    with patch.object(client, "create", side_effect=respond):
+        for middleware in ([], caching):
+            graph = create_deep_agent(model=model, middleware=middleware)
+            await graph.ainvoke({"messages": [HumanMessage("Reply with done")]})
+    assert len(requests) == 2
+    assert requests[0] == requests[1]
+    assert "cache_control" not in requests[1]

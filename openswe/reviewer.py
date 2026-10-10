@@ -38,6 +38,7 @@ from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from openswe.dashboard.options import gate_fable_model
@@ -1064,7 +1065,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
-        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
+        return create_deep_agent(
+            system_prompt="",
+            tools=[],
+            middleware=[
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
+            ],
+        ).with_config(bindable_config(config))
 
     models = await resolve_reviewer_models(cfg)
     use_gateway = models.use_gateway
@@ -1093,6 +1100,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 PrepareReviewerRunMiddleware(
                     thread_id=thread_id,
                     config=config,
