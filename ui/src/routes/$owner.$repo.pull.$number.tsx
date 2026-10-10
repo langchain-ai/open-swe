@@ -60,7 +60,7 @@ function PullRequestReviewLinkPage() {
 
   if (session.isLoading) {
     return (
-      <main className="flex min-h-svh items-center justify-center p-6">
+      <main className="flex min-h-svh items-center justify-center p-space-5">
         <Skeleton className="h-52 w-full max-w-lg" />
       </main>
     )
@@ -152,7 +152,7 @@ function ReviewLinkCard({
   onRetry?: () => void
 }) {
   return (
-    <main className="flex min-h-svh items-center justify-center bg-surface-level-1 p-6 text-primary">
+    <main className="flex min-h-svh items-center justify-center bg-surface-level-1 p-space-5 text-primary">
       <Card className="flex w-full max-w-lg flex-col gap-space-4 p-space-5">
         <div className="flex flex-col gap-space-1">
           <Text
@@ -172,7 +172,7 @@ function ReviewLinkCard({
           </Text>
         </div>
         <div>
-          <div className="rounded-lg border border-default bg-surface-level-1 p-3 text-sm">
+          <div className="rounded-lg border border-default bg-surface-level-1 p-space-3 text-sm">
             <div className="font-medium">
               {owner}/{repo} #{number}
             </div>
@@ -180,12 +180,12 @@ function ReviewLinkCard({
               href={githubPrUrl}
               variant="sm"
               rightDecorator={ArrowSquareOutIcon}
-              className="mt-1"
+              className="mt-space-1"
             >
               View on GitHub
             </MacawLink>
           </div>
-          {loading && <Skeleton className="mt-4 h-2 w-full" />}
+          {loading && <Skeleton className="mt-space-4 h-2 w-full" />}
         </div>
         <div className="flex flex-wrap gap-space-2">
           {onRetry && <Button onClick={onRetry}>Try again</Button>}

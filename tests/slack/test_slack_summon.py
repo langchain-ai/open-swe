@@ -20,6 +20,12 @@ def _event(user_id: str) -> SlackEvent:
 @pytest.fixture
 def dispatched(monkeypatch: pytest.MonkeyPatch) -> list[SlackRequest]:
     requests: list[SlackRequest] = []
+    monkeypatch.setenv("OPENSWE_ENV", "production")
+
+    async def restore_status(channel_id: str, thread_ts: str) -> bool:
+        return True
+
+    monkeypatch.setattr(summon, "restore_slack_thinking_status", restore_status)
 
     async def fetch_message(channel_id: str, thread_ts: str, message_ts: str) -> dict[str, object]:
         return {
@@ -72,6 +78,24 @@ async def test_summon_reaction_tags_open_swe_for_the_reactor(
     assert request.original_message_ts == "3.000"
     assert request.trigger_system is not None
     assert request.explicit_mention
+
+
+@pytest.mark.parametrize("environment", ["preview", "staging"])
+async def test_summon_reactions_are_disabled_outside_production(
+    monkeypatch: pytest.MonkeyPatch,
+    dispatched: list[SlackRequest],
+    environment: str,
+) -> None:
+    monkeypatch.setenv("OPENSWE_ENV", environment)
+    await summon.process_slack_summon_reaction(
+        _event("UREACTOR"),
+        "Ev1",
+        channel_context=SlackChannelContext(id="C123"),
+        bot_user_id="UBOT",
+        team_id="T1",
+    )
+
+    assert dispatched == []
 
 
 async def test_later_summon_reactions_do_not_restart_the_run(

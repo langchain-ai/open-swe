@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@langchain/macaw-components/Button"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
@@ -42,7 +43,7 @@ function ReviewerEvalPage() {
   return (
     <AppShell
       user={session.data}
-      title="Reviewer eval"
+      title="Reviewer Eval"
       description="Runs the reviewer benchmark in a LangSmith sandbox against this deployment. Progress streams here live."
     >
       <ReviewerEvalRunConfigSection />
@@ -239,7 +240,7 @@ function ReviewerEvalStatusSection() {
   const status = useReviewerEvalStatus()
   return (
     <SettingsSection
-      title="Current run"
+      title="Current Run"
       description="Status and resolved configuration for the latest reviewer eval run."
     >
       <ReviewerEvalStatusView data={status.data ?? null} />
@@ -256,7 +257,7 @@ function progressLabel(data: ReviewerEvalStatus): string | null {
 function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
   if (!data) {
     return (
-      <div className="p-4 text-xs text-secondary">
+      <div className="p-space-4 text-xs text-secondary">
         Loading reviewer eval status…
       </div>
     )
@@ -264,7 +265,7 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
 
   const config = data.config_snapshot
   return (
-    <div className="grid gap-2 p-4 text-xs text-secondary sm:grid-cols-2">
+    <div className="grid gap-space-2 p-space-4 text-xs text-secondary sm:grid-cols-2">
       <StatusLine label="Status" value={data.status} strong />
       <StatusLine label="Progress" value={progressLabel(data)} />
       <StatusLine
@@ -296,14 +297,14 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
         />
       )}
       {data.experiment_url && (
-        <a
+        <MacawLink
           href={data.experiment_url}
           target="_blank"
           rel="noreferrer"
-          className="underline hover:text-primary"
+          variant="sm"
         >
           View experiment in LangSmith
-        </a>
+        </MacawLink>
       )}
       {data.error && <span className="text-error-secondary">{data.error}</span>}
     </div>

@@ -1,3 +1,4 @@
+import { Text } from "@langchain/macaw-components/Text"
 import type { ReactNode } from "react"
 
 interface EditorScreenProps {
@@ -20,24 +21,29 @@ export function EditorScreen({
 }: EditorScreenProps) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-level-1 text-primary">
-      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-default px-6 pt-12 pb-4">
+      <header className="flex flex-wrap items-end justify-between gap-space-4 border-b border-default px-space-5 pt-space-8 pb-space-4">
         <div className="min-w-0">
-          <h1 className="font-heading text-xl font-medium tracking-tight">
-            {title}
-          </h1>
+          <Text variant="h1">{title}</Text>
           {description && (
-            <p className="mt-1.5 max-w-3xl text-xs text-secondary">
+            <Text
+              as="p"
+              variant="sm"
+              color="secondary"
+              className="mt-space-1 max-w-3xl"
+            >
               {description}
-            </p>
+            </Text>
           )}
         </div>
         {actions && (
-          <div className="flex flex-wrap items-center gap-2">{actions}</div>
+          <div className="flex flex-wrap items-center gap-space-2">
+            {actions}
+          </div>
         )}
       </header>
       <div className="flex min-h-0 flex-1 max-md:flex-col">
         {sidebar && (
-          <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-r border-default p-4 max-md:max-h-64 max-md:w-full max-md:border-r-0 max-md:border-b">
+          <aside className="flex w-72 shrink-0 flex-col gap-space-4 overflow-y-auto border-r border-default p-space-4 max-md:max-h-64 max-md:w-full max-md:border-r-0 max-md:border-b">
             {sidebar}
           </aside>
         )}

@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { Avatar } from "@langchain/macaw-components/Avatar"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -73,7 +74,7 @@ export function SlackIntegrationSection({
 
   return (
     <SettingsSection
-      title="Slack integration"
+      title="Slack Integration"
       description="Configure Slack and choose which bots can start Open SWE runs."
     >
       <SettingsRow
@@ -93,8 +94,8 @@ export function SlackIntegrationSection({
           />
         }
       />
-      <div className="flex flex-col gap-space-3 px-space-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-        <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-space-3 px-space-4 py-space-3 sm:flex-row sm:items-center sm:justify-between sm:gap-space-6">
+        <div className="flex flex-col gap-space-1">
           <span className="text-sm/none font-medium text-primary">
             App manifest
           </span>
@@ -149,7 +150,7 @@ export function RunningAgentsSection() {
 
   return (
     <SettingsSection
-      title="Running agents"
+      title="Running Agents"
       description="Workspace-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
     >
       <div className="flex flex-col gap-space-3 p-space-4">
@@ -259,7 +260,7 @@ export function TriggerReviewSection() {
 
   return (
     <SettingsSection
-      title="Trigger a review"
+      title="Trigger a Review"
       description="Manually start an Open SWE Review run on a pull request. The repository must be enabled for review."
     >
       <div className="flex flex-col gap-space-2 p-space-4">
@@ -354,14 +355,15 @@ export function UsersSection({ enabled }: { enabled: boolean }) {
               />
             </div>
           ) : !items.length ? (
-            <p className="text-xs text-secondary">
-              {query ? "No users match your search." : "No users yet."}
-            </p>
+            <EmptyState
+              size="sm"
+              title={query ? "No users match your search" : "No users yet"}
+            />
           ) : (
             items.map((user: AdminUser) => (
               <div
                 key={user.user_id}
-                className="flex items-center justify-between gap-space-2 border-b border-default py-1.5 text-xs last:border-b-0"
+                className="flex items-center justify-between gap-space-2 border-b border-default py-space-1 text-xs last:border-b-0"
               >
                 <Avatar
                   size="sm"

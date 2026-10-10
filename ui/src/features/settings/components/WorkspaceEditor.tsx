@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { Input } from "@langchain/macaw-components/Input"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Switch } from "@langchain/macaw-components/Switch"
-import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { QuestionIcon } from "@phosphor-icons/react/dist/ssr/Question"
 
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
@@ -28,7 +28,7 @@ export function Chips({
 }) {
   if (values.length === 0) return null
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-space-2">
       {values.map((value) => {
         const href = hrefFor?.(value) ?? null
         const className =
@@ -64,15 +64,16 @@ export function HelpTooltip({
   children: ReactNode
 }) {
   return (
-    <Tooltip title={children} tooltipClassName="max-w-72">
-      <button
-        type="button"
-        aria-label={label}
-        className="rounded-full text-icon-secondary transition-colors hover:text-icon-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
-      >
-        <QuestionIcon size={15} weight="fill" />
-      </button>
-    </Tooltip>
+    <IconButton
+      icon={QuestionIcon}
+      iconWeight="fill"
+      label={label}
+      size="xs"
+      variant="plain"
+      color="secondary"
+      round
+      tooltipProps={{ title: children, tooltipClassName: "max-w-72" }}
+    />
   )
 }
 
@@ -123,7 +124,7 @@ function SlackChannelRows({
       {draft.slackChannelIds.map((id) => (
         <li
           key={id}
-          className="flex items-center justify-between gap-3 px-2.5 py-1.5"
+          className="flex items-center justify-between gap-space-3 px-space-2 py-space-1"
         >
           <a
             href={slackChannelHref(id)}
@@ -168,7 +169,7 @@ export function WorkspaceEditor({
   channelLabel: (id: string) => string
 }) {
   return (
-    <div className="space-y-3 border-t border-default px-space-4 py-3.5 text-primary">
+    <div className="space-y-space-3 border-t border-default px-space-4 py-space-3 text-primary">
       <Input
         label="Name"
         aria-label="Workspace name"
@@ -177,7 +178,7 @@ export function WorkspaceEditor({
         onChange={(name) => onChange({ ...draft, name })}
       />
       <div className="text-sm">
-        <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-space-2">
           Bound repositories
           <HelpTooltip label="About workspace repositories">
             Threads in any workspace can use any repository the GitHub App can
@@ -189,7 +190,7 @@ export function WorkspaceEditor({
         </span>
         <div
           role="group"
-          aria-label="Bound repositories"
+          aria-label="Bound Repositories"
           className="mt-space-1 flex flex-wrap items-center gap-space-2"
         >
           {draft.repos.length > 0 ? (
@@ -206,7 +207,7 @@ export function WorkspaceEditor({
         </div>
       </div>
       <div className="text-sm">
-        <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-space-2">
           Slack channels
           <HelpTooltip label="About kitchen channels">
             Mentions in these channels start runs in this workspace. Turn on

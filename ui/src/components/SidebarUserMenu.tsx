@@ -107,7 +107,7 @@ export function SidebarUserMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-surface-level-2-hover"
+        className="flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-left outline-none hover:bg-surface-level-2-hover focus-visible:ring-2 focus-visible:ring-focus"
       >
         <Avatar
           className="size-7 text-xs"
@@ -127,13 +127,13 @@ export function SidebarUserMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-default bg-elevated p-1 text-primary shadow-md"
+          className="absolute right-0 bottom-full left-0 mb-space-2 overflow-hidden rounded-md border border-default bg-elevated p-space-1 text-primary shadow-md"
         >
-          <div className="px-2 py-1.5">
+          <div className="px-space-2 py-space-1">
             <span className="text-xxs font-medium tracking-wide text-tertiary uppercase">
               Theme
             </span>
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
+            <div className="mt-space-1 grid grid-cols-3 gap-space-1">
               {THEME_OPTIONS.map((option) => {
                 const Icon = option.icon
                 const active = theme === option.value
@@ -144,7 +144,7 @@ export function SidebarUserMenu({
                     onClick={() => setTheme(option.value)}
                     aria-pressed={active}
                     className={cn(
-                      "flex flex-col items-center gap-space-1 rounded-sm border px-space-1 py-1.5 text-xxs transition-colors",
+                      "flex flex-col items-center gap-space-1 rounded-sm border px-space-1 py-space-1 text-xxs transition-colors",
                       active
                         ? "border-brand-subtle bg-brand-subtle text-brand-primary"
                         : "border-transparent text-secondary hover:bg-elevated-hover"
@@ -163,7 +163,7 @@ export function SidebarUserMenu({
               type="button"
               role="menuitem"
               onClick={() => void copyDatadogSessionLink()}
-              className="flex w-full items-center gap-space-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-elevated-hover"
+              className="flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-left text-xs/relaxed hover:bg-elevated-hover"
             >
               <CopyIcon size={14} weight="regular" />
               {datadogCopyStatus === "copied"
@@ -178,7 +178,7 @@ export function SidebarUserMenu({
               to="/my-settings"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-space-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-elevated-hover"
+              className="flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-xs/relaxed hover:bg-elevated-hover"
             >
               <GearRegularIcon size={14} />
               Settings
@@ -188,7 +188,7 @@ export function SidebarUserMenu({
             type="button"
             role="menuitem"
             onClick={() => void onLogout()}
-            className="flex w-full items-center gap-space-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-elevated-hover"
+            className="flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-left text-xs/relaxed hover:bg-elevated-hover"
           >
             <SignOutRegularIcon size={14} />
             Sign out

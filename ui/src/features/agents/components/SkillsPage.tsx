@@ -159,7 +159,7 @@ export function SkillsPage() {
               New skill
             </Button>
           )}
-          <div className="space-y-1">
+          <div className="space-y-space-1">
             {skills.isLoading && <Skeleton className="h-24" />}
             {(skills.data ?? []).map((skill) => (
               <button
@@ -167,7 +167,7 @@ export function SkillsPage() {
                 type="button"
                 onClick={() => select(skill)}
                 className={cn(
-                  "w-full rounded-md px-2.5 py-2 text-left transition-colors",
+                  "w-full rounded-md px-space-2 py-space-2 text-left transition-colors",
                   selectedName === skill.name
                     ? "bg-selected"
                     : "hover:bg-surface-level-1-hover"
@@ -176,13 +176,13 @@ export function SkillsPage() {
                 <span className="block truncate text-xs font-medium text-primary">
                   {skill.name}
                 </span>
-                <span className="mt-0.5 block truncate text-[10px] text-secondary">
+                <span className="mt-0.5 block truncate text-xxs text-secondary">
                   {skill.description}
                 </span>
               </button>
             ))}
             {skills.data?.length === 0 && (
-              <p className="px-2.5 py-4 text-xs text-secondary">
+              <p className="px-space-2 py-space-4 text-xs text-secondary">
                 No skills yet.
               </p>
             )}
@@ -191,12 +191,12 @@ export function SkillsPage() {
       }
     >
       {!canEdit && !selected ? (
-        <p className="m-auto p-6 text-xs text-secondary">
+        <p className="m-auto p-space-5 text-xs text-secondary">
           Select an organization skill to view it.
         </p>
       ) : (
         <>
-          <div className="grid gap-4 border-b border-default p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+          <div className="grid gap-space-4 border-b border-default p-space-4 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             <Input
               id="skill-name"
               label="Name"

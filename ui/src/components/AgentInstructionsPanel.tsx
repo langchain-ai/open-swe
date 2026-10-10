@@ -1,4 +1,5 @@
 import { Banner } from "@langchain/macaw-components/Banner"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Button } from "@langchain/macaw-components/Button"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -131,7 +132,7 @@ export function AgentInstructionsPanel() {
 
   return (
     <EditorScreen
-      title="Repository instructions"
+      title="Repository Instructions"
       description="Per-repository instructions added to the agent's system prompt for runs in that repository."
       actions={
         <>
@@ -188,14 +189,14 @@ export function AgentInstructionsPanel() {
           ) : (instructions.data ?? []).length === 0 ? (
             <p className="text-xs text-secondary">No repositories yet.</p>
           ) : (
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col gap-space-1">
               {(instructions.data ?? []).map((s) => (
                 <li key={s.full_name}>
                   <button
                     type="button"
                     aria-pressed={selected === s.full_name}
                     className={cn(
-                      "w-full truncate rounded-md px-2.5 py-2 text-left text-xs transition-colors",
+                      "w-full truncate rounded-md px-space-2 py-space-2 text-left text-xs transition-colors",
                       selected === s.full_name
                         ? "bg-selected font-medium"
                         : "hover:bg-surface-level-1-hover"
@@ -212,15 +213,12 @@ export function AgentInstructionsPanel() {
       }
     >
       {githubReauth && (
-        <Banner intent="error" className="m-4">
+        <Banner intent="error" className="m-space-4">
           <span className="text-xs text-error-secondary">
             Your GitHub connection expired.{" "}
-            <a
-              href={loginUrl()}
-              className="font-medium underline underline-offset-2"
-            >
+            <MacawLink href={loginUrl()} variant="sm">
               Sign in with GitHub again
-            </a>{" "}
+            </MacawLink>{" "}
             to list installed repos.
           </span>
         </Banner>
@@ -233,7 +231,7 @@ export function AgentInstructionsPanel() {
           placeholder="Write custom instructions for the coding agent on this repository (markdown)."
         />
       ) : (
-        <p className="m-auto p-6 text-xs text-secondary">
+        <p className="m-auto p-space-5 text-xs text-secondary">
           Select a repository to view or edit its custom agent instructions.
         </p>
       )}

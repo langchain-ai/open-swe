@@ -44,7 +44,7 @@ export function PullRequestActions({
   }
   const fixes = pullRequestFixes(pr)
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <div className="flex flex-wrap items-center gap-x-space-4 gap-y-space-2">
       {outcome && (
         <span className="text-xs text-secondary">
           {outcomeLabels[outcome]} · leaves the list on the next refresh
@@ -53,7 +53,7 @@ export function PullRequestActions({
       {/* Hidden rather than unmounted, so a rolled-back outcome keeps each control's state. */}
       <div
         hidden={Boolean(outcome)}
-        className="flex flex-wrap items-center gap-x-2 gap-y-2"
+        className="flex flex-wrap items-center gap-x-space-2 gap-y-space-2"
       >
         {fixes.length > 0 && (
           <PullRequestThreadAction pr={pr} login={login} actions={fixes} />

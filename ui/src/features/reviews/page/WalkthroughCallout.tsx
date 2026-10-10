@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
-import { CircleNotchIcon } from "@phosphor-icons/react/dist/ssr/CircleNotch"
 import { ListNumbersIcon } from "@phosphor-icons/react/dist/ssr/ListNumbers"
 import { toast } from "sonner"
 
 import { api, type ReviewDetail, type ScoutProgress } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@langchain/macaw-components/Button"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { plural } from "./text"
@@ -59,10 +59,13 @@ export function WalkthroughCallout({
   }, [failure, pr, detail.head_sha, detail.walkthrough_scout_thread_id])
 
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3">
-      <ListNumbersIcon className="mt-0.5 size-4 shrink-0 text-brand-primary" />
+    <div className="flex items-start gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3">
+      <ListNumbersIcon
+        className="mt-0.5 size-4 shrink-0 text-brand-primary"
+        weight="regular"
+      />
       <div className="min-w-0 flex-1 text-xs">
-        <p className="text-[13px] font-medium text-primary">
+        <p className="text-xs font-medium text-primary">
           {running ? "Building the walkthrough…" : "Read this PR step by step"}
         </p>
         <p className="mt-0.5 text-secondary">
@@ -74,7 +77,7 @@ export function WalkthroughCallout({
           <ScoutProgressPreview progress={detail.walkthrough_progress} />
         )}
         {failureSummary && (
-          <p className="mt-1.5 break-words text-error-secondary">
+          <p className="mt-space-1 break-words text-error-secondary">
             Last attempt failed: {failureSummary}
           </p>
         )}
@@ -82,7 +85,7 @@ export function WalkthroughCallout({
           <Link
             to="/agents/$threadId"
             params={{ threadId: detail.walkthrough_scout_thread_id }}
-            className="mt-1.5 inline-block text-secondary underline-offset-2 hover:text-primary hover:underline"
+            className="mt-space-1 inline-block text-secondary underline-offset-2 hover:text-primary hover:underline"
           >
             Open thread
           </Link>
@@ -106,20 +109,23 @@ export function WalkthroughCallout({
 function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   const { recent } = progress
   return (
-    <div className="mt-2 text-secondary">
+    <div className="mt-space-2 text-secondary">
       <p>{plural(progress.steps, "step")} committed</p>
       {recent.length > 0 && (
-        <ol className="mt-1 space-y-0.5 font-mono text-[11px]">
+        <ol className="mt-space-1 space-y-0.5 font-mono text-xxs">
           {recent.map((action, index) => {
             const current = progress.running && index === recent.length - 1
             return (
               <li
                 key={index}
-                className={cn("flex min-w-0 gap-2", current && "text-primary")}
+                className={cn(
+                  "flex min-w-0 gap-space-2",
+                  current && "text-primary"
+                )}
               >
                 <span className="shrink-0">
                   {current ? (
-                    <CircleNotchIcon className="inline size-3 animate-spin" />
+                    <Spinner size="xxs" className="inline-block" />
                   ) : (
                     "·"
                   )}

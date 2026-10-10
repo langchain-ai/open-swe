@@ -323,7 +323,7 @@ export function AgentTurn({
   ).length
 
   return (
-    <div className="group/turn my-space-2 min-w-0 space-y-1.5">
+    <div className="group/turn my-space-2 min-w-0 space-y-space-2">
       {visibleItems
         .slice(0, foldIndex)
         .map((item, index) => renderItem(item, index, visibleItems.length))}

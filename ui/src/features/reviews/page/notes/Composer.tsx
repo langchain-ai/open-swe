@@ -50,13 +50,13 @@ export function Composer({
   return (
     <NoteFrame>
       <form
-        className="rounded-lg border border-brand-subtle bg-surface-level-1 p-2.5 text-xs shadow-sm"
+        className="rounded-lg border border-brand-subtle bg-surface-level-1 p-space-2 text-xs shadow-sm"
         onSubmit={(event) => {
           event.preventDefault()
           ask()
         }}
       >
-        <p className="mb-1.5 text-secondary">
+        <p className="mb-space-1 text-secondary">
           Comment on {readableRangeLabel(range)}
         </p>
         <Textarea
@@ -82,7 +82,7 @@ export function Composer({
           }}
         />
         {pending.add.error && (
-          <p role="alert" className="mt-1.5 text-error-secondary">
+          <p role="alert" className="mt-space-1 text-error-secondary">
             {pending.add.error.message}
           </p>
         )}

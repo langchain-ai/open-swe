@@ -28,7 +28,7 @@ export function ChunkRenderer({
       return <span className="text-error-secondary">{chunk.text}</span>
     case "list":
       return (
-        <div className="ml-2 text-secondary">
+        <div className="ml-space-2 text-secondary">
           {chunk.lines.map((line, i) => (
             <div key={i}>- {line}</div>
           ))}

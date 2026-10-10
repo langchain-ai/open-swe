@@ -83,9 +83,9 @@ export function PersonalInstructionsSection() {
       }
     >
       {instructions.isLoading ? (
-        <Skeleton className="m-6 flex-1" />
+        <Skeleton className="m-space-5 flex-1" />
       ) : instructions.isError ? (
-        <div className="p-6">
+        <div className="p-space-5">
           <Banner
             intent="error"
             title="Could not load your instructions."

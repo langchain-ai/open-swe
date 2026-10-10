@@ -6,9 +6,11 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.agent_overrides import resolve_github_login
 from openswe.dashboard.personal_settings import SettingValue, patch_personal_settings
 from openswe.tools.access import Policy, access, ack
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.json_types import as_json_object
 
 
+@expose_mcp()
 @audit_tool()
 @access(Policy(trusted="private", actor="owner", sole=ack(), direct=True))
 async def save_user_settings(settings: dict[str, SettingValue]) -> dict[str, object]:

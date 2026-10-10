@@ -122,7 +122,7 @@ export function Byline({
 }) {
   const when = formatWhen(createdAt)
   return (
-    <span className="flex min-w-0 items-center gap-1.5 text-xs">
+    <span className="flex min-w-0 items-center gap-space-2 text-xs">
       <span className="truncate font-medium text-primary">
         {displayName(author)}
       </span>

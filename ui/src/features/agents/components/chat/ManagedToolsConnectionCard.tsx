@@ -31,7 +31,7 @@ export function ManagedToolsConnectionCard({
 
   if (offer.status === "langsmith_required") {
     return (
-      <Card title="Managed tools">
+      <Card title="Managed Tools">
         <p className="text-secondary">
           Managed tools run with your own LangSmith account. Connect LangSmith,
           then ask again to connect the services they need.

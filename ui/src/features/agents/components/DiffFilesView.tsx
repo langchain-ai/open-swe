@@ -205,13 +205,13 @@ export function DiffFilesView({
   return (
     <>
       {!hideHeader && (
-        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-default px-3 py-1">
+        <div className="@container flex min-h-9 flex-nowrap items-center gap-space-1 overflow-hidden border-b border-default px-space-3 py-space-1">
           <div className="min-w-0 flex-1">{leading}</div>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-space-2">
             <DiffWrapToggle />
             {actions}
             {files.length > 0 && (
-              <span className="flex shrink-0 items-center gap-2 text-[11px] whitespace-nowrap text-tertiary">
+              <span className="flex shrink-0 items-center gap-space-2 text-xxs whitespace-nowrap text-tertiary">
                 <span
                   className="@max-[620px]:hidden"
                   title={
@@ -257,7 +257,7 @@ export function DiffFilesView({
             </Virtualizer>
           </WorkerPoolContextProvider>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-tertiary">
+          <div className="min-h-0 flex-1 overflow-y-auto p-space-5 text-center text-xs text-tertiary">
             {emptyLabel}
           </div>
         )}
@@ -357,7 +357,7 @@ const FileDiffSection = memo(
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-surface-level-1 px-3 py-2 text-left text-xs transition-colors hover:bg-surface-level-1-hover"
+          className="flex w-full items-center gap-space-2 bg-surface-level-1 px-space-3 py-space-2 text-left text-xs transition-colors hover:bg-surface-level-1-hover"
         >
           <CaretDownIcon
             weight="regular"
@@ -370,7 +370,7 @@ const FileDiffSection = memo(
             {directory && <span className="text-secondary">{directory}</span>}
             <span className="font-medium text-primary">{fileName}</span>
           </span>
-          <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="ml-auto flex shrink-0 items-center gap-space-2">
             <span className="text-success-secondary">+{file.additions}</span>
             <span className="text-error-secondary">-{file.deletions}</span>
           </span>
@@ -378,11 +378,11 @@ const FileDiffSection = memo(
         {open &&
           (file.unrenderable ? (
             file.patch ? (
-              <pre className="overflow-x-auto bg-surface-level-1 p-4 font-mono text-xs leading-5 text-primary">
+              <pre className="overflow-x-auto bg-surface-level-1 p-space-4 font-mono text-xs leading-5 text-primary">
                 <code>{file.patch}</code>
               </pre>
             ) : (
-              <div className="bg-surface-level-1 p-4 text-center text-xs text-tertiary">
+              <div className="bg-surface-level-1 p-space-4 text-center text-xs text-tertiary">
                 Binary file — diff not available.
               </div>
             )
@@ -409,7 +409,7 @@ const FileDiffSection = memo(
           <DiffSelectionPopover
             selection={lineSelection}
             initialFocus={textareaRef}
-            className="w-80 p-2"
+            className="w-80 p-space-2"
           >
             <form
               className="flex flex-col gap-space-2"

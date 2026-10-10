@@ -8,11 +8,13 @@ from openswe.review.enabled_repos import list_enabled_review_repos, set_review_r
 from openswe.review.styles import normalize_repo_full_name
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable
+from openswe.tools.mcp_exposure import expose_mcp
 
 _READ = Policy(trusted="admin_surface", actor="admin")
 _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "enabled"))
 
 
+@expose_mcp(access="admin")
 @audit_tool(skip_read=True)
 @access(_WRITE, per_call=lambda args: _WRITE if args.get("action") == "set" else _READ)
 async def manage_review_repos(
