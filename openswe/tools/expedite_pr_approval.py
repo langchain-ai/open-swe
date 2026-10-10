@@ -5,11 +5,13 @@ from collections.abc import Mapping
 from typing import Any, Literal
 from uuid import UUID
 
+from fastapi import HTTPException
 from langgraph.config import get_config
 
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.models import ExpeditedExclusions
 from openswe.audit_logs.tools import audit_tool
+from openswe.dashboard import repo_access
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
@@ -33,8 +35,10 @@ from openswe.run_config import RunConfig
 from openswe.slack.cards import run_slack_location
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
+from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
 from openswe.tools.manage_baby_sit import dispatch_run_config
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 
 
@@ -42,8 +46,14 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
-def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool) -> str:
+def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool, over_mcp: bool) -> str:
     """What the agent should do once the card is up."""
+    if over_mcp:
+        return (
+            "This diff already has an open card; no new one was posted. "
+            if reused
+            else "The approval card is posted. "
+        ) + "Once someone approves, Open SWE starts a thread that merges it. Do not poll."
     if elsewhere:
         return (
             "This diff already has a card, so it stays in the Slack thread named here, not "
@@ -118,6 +128,7 @@ def _audit_pull_request(pull_request_id: UUID) -> None:
     entry.enrichments.resource_ids = [str(pull_request_id)]
 
 
+@expose_mcp()
 @audit_tool()
 async def expedite_pr_approval(
     pr_url: str,
@@ -132,8 +143,10 @@ async def expedite_pr_approval(
         return _failure("pr_url must be a canonical GitHub pull request URL")
     config = get_config()
     cfg = RunConfig.from_config(config)
-    thread_id = cfg.thread_id
-    if not thread_id:
+    thread_id = cfg.thread_id or ""
+    caller = cfg.mcp_caller
+    requester = await User.for_login("github", caller) if caller else None
+    if not thread_id and requester is None:
         return _failure("No executable agent thread is available")
     if not (await get_workspace_settings()).expedited_review_enabled:
         return _failure(
@@ -141,16 +154,21 @@ async def expedite_pr_approval(
             "An admin can enable it under Settings; ask for a normal review instead."
         )
 
+    def owned_elsewhere(approval: HumanReviewRequest) -> bool:
+        if requester is not None:
+            return approval.requested_by_user_id != requester.id
+        return bool(approval.thread_id) and approval.thread_id != thread_id
+
     if action == "cancel":
         approval = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
         if approval is None or approval.kind != "expedited":
             return {"success": True, "cancelled": False}
-        if approval.thread_id and approval.thread_id != thread_id:
-            return _failure("This expedited review belongs to another agent thread")
+        if owned_elsewhere(approval):
+            return _failure("This expedited review belongs to someone else")
         await ReviewCard(approval).retire("cancelled", "cancelled by the agent")
         return {"success": True, "cancelled": True}
 
-    own_channel, own_thread = await run_slack_location(cfg, thread_id)
+    own_channel, own_thread = await run_slack_location(cfg, thread_id) if thread_id else ("", "")
     channel_id, thread_ts = own_channel, own_thread
     target: SlackChannel | None = None
     if channel.strip():
@@ -171,9 +189,16 @@ async def expedite_pr_approval(
         )
 
     try:
-        token, _ = await resolve_github_token(
-            config if isinstance(config, Mapping) else {}, thread_id
-        )
+        if caller:
+            token = await repo_access.require_repo_access_for_user(
+                caller, f"{pr_ref.owner}/{pr_ref.repo}"
+            )
+        else:
+            token, _ = await resolve_github_token(
+                config if isinstance(config, Mapping) else {}, thread_id
+            )
+    except HTTPException as exc:
+        return _failure(f"You cannot access {pr_ref.owner}/{pr_ref.repo}: {exc.detail}")
     except Exception as exc:
         return _failure(f"GitHub authentication failed: {exc}")
     async with GitHubClient.connect(token=token) as github:
@@ -227,8 +252,8 @@ async def expedite_pr_approval(
     displaced: HumanReviewRequest | None = None
     if active is not None and active.kind != "expedited":
         displaced, active = active, None
-    if active is not None and active.thread_id and active.thread_id != thread_id:
-        return _failure("This pull request's expedited review belongs to another agent thread")
+    if active is not None and owned_elsewhere(active):
+        return _failure("This pull request's expedited review belongs to someone else")
     if (
         active is not None
         and fingerprint_matches(files, active.diff_fingerprint)
@@ -264,6 +289,7 @@ async def expedite_pr_approval(
                     reused=True,
                     elsewhere=active.slack_channel_id != channel_id,
                     in_thread=False,
+                    over_mcp=requester is not None,
                 )
             ),
         }
@@ -281,7 +307,8 @@ async def expedite_pr_approval(
     pull_request.author = payload.author
     pull_request.author_github_id = payload.author_id
     pull_request = await pull_request.save()
-    pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
+    if thread_id:
+        pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
     _audit_pull_request(pull_request.id)
     # One open request per PR, so the displaced one closes before this row is written;
     # it is reopened below if the expedited card cannot be posted.
@@ -301,7 +328,8 @@ async def expedite_pr_approval(
         awaiting_ready=payload.draft,
         slack_channel_id=channel_id,
         slack_thread_ts=thread_ts,
-        run_config=dispatch_run_config(cfg, thread_id, None),
+        run_config=dispatch_run_config(cfg, thread_id, None) if thread_id else {},
+        requested_by_user_id=requester.id if requester is not None else None,
     ).save()
     if approval.awaiting_ready:
         readiness_warning = await ReviewCard(approval).prompt_author_ready()
@@ -338,6 +366,22 @@ async def expedite_pr_approval(
     await card.broadcast_configured()
     await card.remove_superseded()
     readiness_warning = await card.prompt_author_ready()
+    next_step = _next_step(
+        reused=False,
+        elsewhere=False,
+        in_thread=bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread),
+        over_mcp=requester is not None,
+    )
+    if (
+        requester is not None
+        and requester.slack_user_id
+        and await send_dm(
+            requester.slack_user_id,
+            f"Expedited review requested for <{pr_ref.url}|{pr_ref.repo}#{pr_ref.number}> "
+            f"in <#{channel_id}>. Open SWE merges it once someone approves.",
+        )
+    ):
+        next_step = f"{next_step} The person was sent a Slack DM pointing to the card."
     return {
         "success": True,
         "readiness_warning": readiness_warning,
@@ -349,10 +393,5 @@ async def expedite_pr_approval(
         "generated_lines": verdict.generated_lines,
         "excluded_lines": verdict.excluded_lines,
         "slack_channel_id": channel_id,
-        "next": readiness_warning
-        or _next_step(
-            reused=False,
-            elsewhere=False,
-            in_thread=bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread),
-        ),
+        "next": readiness_warning or next_step,
     }

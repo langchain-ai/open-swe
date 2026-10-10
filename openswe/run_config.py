@@ -263,6 +263,17 @@ class RunConfig(BaseModel):
         return self.repo.full_name if self.repo else ""
 
     @property
+    def mcp_caller(self) -> str | None:
+        """The GitHub login of a person calling a tool over remote MCP, outside any thread.
+
+        Every graph run carries a thread id, so only the MCP server builds such a config;
+        the results go back to that person alone, as in a private thread they own.
+        """
+        if self.thread_id or self.source != "mcp" or not self.github_login:
+            return None
+        return self.github_login
+
+    @property
     def is_eval(self) -> bool:
         return self.eval is True or self.reviewer_eval is True
 

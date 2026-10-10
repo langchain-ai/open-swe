@@ -4,6 +4,7 @@ import {
 } from "@langchain/macaw-components/icons"
 import { LoadingIndicator } from "@langchain/macaw-components/ThinkingState"
 import { cn } from "@/lib/utils"
+import { ElapsedSeconds } from "@/features/agents/components/messages/ElapsedSeconds"
 
 /**
  * Collapses a settled turn's work log behind a single "Worked for …" line, so
@@ -37,6 +38,7 @@ export function TurnFoldRow({
       >
         {active && <LoadingIndicator className="mr-space-1 size-3" />}
         <span className={active ? "shimmer-text" : undefined}>{label}</span>
+        {active && <ElapsedSeconds />}
         <Caret size={12} weight="bold" aria-hidden />
       </button>
     </div>

@@ -2,6 +2,7 @@ import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useRef, useState } from "react"
 
 import { cn, formatElapsed } from "@/lib/utils"
+import { ElapsedSeconds } from "./ElapsedSeconds"
 
 function reasoningLabel(elapsedMs: number | null): string {
   if (elapsedMs === null) return "Thought"
@@ -56,7 +57,10 @@ export function ReasoningBlock({
         disabled={isLive}
       >
         {isLive ? (
-          <span className="shimmer-text">Thinking...</span>
+          <>
+            <span className="shimmer-text">Thinking...</span>
+            <ElapsedSeconds />
+          </>
         ) : (
           <>
             <CaretRightIcon

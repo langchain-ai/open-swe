@@ -23,6 +23,7 @@ from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
+from openswe.schedules import store as schedules
 from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.threads import plan_api, workflow_approval_api
@@ -42,7 +43,6 @@ from openswe.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from openswe.tools.access import external_caller_run
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_preference import sandbox_only
 from openswe.users import User
@@ -87,6 +87,11 @@ _MAX_RUNS = 25
 _MAX_INSPECTION_CONTENT_CHARS = 50_000
 _MAX_PLAN_COMMENTS = 100
 _MAX_PLAN_CHARS = 500_000
+_NO_ACTOR = "No verified triggering user is available"
+_NO_WRITER = (
+    f"{_NO_ACTOR}. Automation runs can read threads with list_threads and get_thread "
+    "but cannot message, manage, or start them."
+)
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,8 @@ class _Actor:
     login: str
     email: str | None
     name: str
+    # An automation reading threads on its own run; it has no participant threads.
+    automation: bool = False
 
     @property
     def session(self) -> dict[str, Any]:
@@ -132,6 +139,21 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     except HTTPException:
         return None
     return _Actor(login=login, email=email, name=login)
+
+
+async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
+    """Who reads threads: the triggering user, or else the automation whose run this is."""
+    if actor := await _actor(state):
+        return actor
+    record = await schedules.authorized_schedule_run(RunConfig.parse(_config().get("configurable")))
+    if record is None:
+        return None
+    return _Actor(
+        login=f"system:schedule:{record['id']}",
+        email=None,
+        name=record.get("name") or "Automation",
+        automation=True,
+    )
 
 
 async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
@@ -240,9 +262,9 @@ async def list_threads(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `list_threads` tool."""
-    actor = await _actor(state)
+    actor = await _reader(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_ACTOR)
     requested = (
         participant.strip() if isinstance(participant, str) and participant.strip() else None
     )
@@ -304,7 +326,8 @@ async def list_threads(
             email=actor.email,
             limit=limit,
             offset=offset,
-            include_all=all_users or (admin_threads is True and requested is None),
+            include_all=all_users
+            or (requested is None and (admin_threads is True or actor.automation)),
             resolved=resolved,
             viewed=viewed,
             source=source,
@@ -623,7 +646,7 @@ def _looks_uuid(value: str) -> bool:
 
 
 async def _private_thread_context(actor: _Actor) -> bool:
-    if external_caller_run(RunConfig.parse(_config().get("configurable"))):
+    if RunConfig.parse(_config().get("configurable")).mcp_caller:
         return True
     thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
@@ -747,9 +770,9 @@ async def get_thread(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `get_thread` tool."""
-    actor = await _actor(state)
+    actor = await _reader(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_ACTOR)
     locator = thread_id.strip()
     try:
         resolved = await _authorized_locator(locator, actor)
@@ -827,7 +850,9 @@ async def get_thread(
         "links": links,
         "langsmith": _langsmith_identifiers(summary.get("traceUrl"), locator),
         "slack": slack_locator and _slack_identifiers(locator),
-        "available_actions": _available_actions(
+        "available_actions": []
+        if actor.automation
+        else _available_actions(
             admin=actor.admin,
             admin_thread=summary.get("adminThread") is True,
             running=running,
@@ -977,7 +1002,7 @@ async def manage_thread(
     """Implement the `manage_thread` tool."""
     actor = await _actor(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_WRITER)
     thread_id = thread_id.strip()
     if not thread_id:
         return _failure("thread_id is required")
@@ -1109,7 +1134,7 @@ async def start_thread(
     """Implement the `start_thread` tool."""
     actor = await _actor(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_WRITER)
     title = title.strip()
     instructions = instructions.strip()
     if not title:

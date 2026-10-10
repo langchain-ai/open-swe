@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "oswe": {
-      "command": "sh",
-      "args": ["-c", "CI=true make -s cli/dist/oswe >&2 && exec ./cli/dist/oswe mcp"]
-    }
-  }
-}
