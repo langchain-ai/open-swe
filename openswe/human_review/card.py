@@ -215,7 +215,7 @@ def approved_card(
     summary = (assessment.summary if assessment is not None else "") or request.tldr
     notes = [escape(summary)] if summary else []
     if assessment is not None:
-        notes.append(f"*Why:* {escape(assessment.explanation)}")
+        notes.append(f"*Auto-approve justification:* {escape(assessment.explanation)}")
     if notes:
         blocks.append(context("\n".join(notes)))
     blocks.append(actions(merge_button(request)))
