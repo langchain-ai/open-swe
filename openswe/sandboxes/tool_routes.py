@@ -52,6 +52,8 @@ Access = Annotated[ToolAccess, Depends(require_tool_access)]
 class ToolList(BaseModel):
     tools: list[ToolDescription]
     total: int
+    truncated: bool
+    next_offset: int | None
 
 
 @router.get("", response_model=ToolList)
@@ -61,13 +63,21 @@ async def list_tools(
     access: Access,
     q: Annotated[str, Query(max_length=512)] = "",
     offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    limit: Annotated[int | None, Query(ge=1, le=100)] = None,
 ) -> ToolList:
     from openswe.sandboxes.tool_runtime import load_tool_surface
 
     surface, _, _ = await load_tool_surface(access.thread_id)
     tools = surface.catalog(q)
-    return ToolList(tools=tools[offset : offset + limit], total=len(tools))
+    total = len(tools)
+    end_offset = total if limit is None else min(offset + limit, total)
+    truncated = end_offset < total
+    return ToolList(
+        tools=tools[offset:end_offset],
+        total=total,
+        truncated=truncated,
+        next_offset=end_offset if truncated else None,
+    )
 
 
 TaskId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]{1,128}$")]

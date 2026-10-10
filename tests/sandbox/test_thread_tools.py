@@ -259,6 +259,10 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
     tools = surface()
     state: dict[str, object] = {"messages": []}
     await tools.prepare(state)
+    for index in range(104):
+        name = f"integration_echo_{index:03d}"
+        tools.tools[name] = StructuredTool.from_function(coroutine=integration_echo, name=name)
+    names = sorted(tools.tools)
     config: RunnableConfig = {"configurable": {"thread_id": "thread-a"}}
     monkeypatch.setattr(
         tool_runtime, "load_tool_surface", AsyncMock(return_value=(tools, config, state))
@@ -280,8 +284,38 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
         assert result.status_code == 200
         assert result.json()["tools"][0]["name"] == "integration_echo"
         assert result.headers["cache-control"] == "no-store"
-        listed = await http.get("/dashboard/api/sandbox-tools/list", headers=headers)
-        assert listed.json()["total"] == 1
+        for suffix in ("", "/list", "/search"):
+            url = f"/dashboard/api/sandbox-tools{suffix}"
+            listed = await http.get(url, headers=headers)
+            assert listed.status_code == 200
+            assert [tool["name"] for tool in listed.json()["tools"]] == names
+            assert listed.json()["total"] == len(names)
+            assert listed.json()["truncated"] is False
+            assert listed.json()["next_offset"] is None
+            first = await http.get(url, headers=headers, params={"q": "connected", "limit": 100})
+            page = first.json()
+            assert [tool["name"] for tool in page["tools"]] == names[:100]
+            assert page["total"] == len(names)
+            assert page["truncated"] is True
+            assert page["next_offset"] == 100
+            last = await http.get(
+                url,
+                headers=headers,
+                params={"q": "connected", "limit": 100, "offset": page["next_offset"]},
+            )
+            assert [tool["name"] for tool in last.json()["tools"]] == names[100:]
+            assert last.json()["total"] == len(names)
+            assert last.json()["truncated"] is False
+            assert last.json()["next_offset"] is None
+        found = await http.get(
+            "/dashboard/api/sandbox-tools/search",
+            headers=headers,
+            params={"q": "ECHO_103 CONNECTED"},
+        )
+        assert [tool["name"] for tool in found.json()["tools"]] == [names[-1]]
+        assert found.json()["total"] == 1
+        assert found.json()["truncated"] is False
+        assert found.json()["next_offset"] is None
         invoked = await http.post(
             "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
