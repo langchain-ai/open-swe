@@ -874,6 +874,17 @@ def _slack_concierge_run(cfg: RunConfig) -> bool:
     )
 
 
+def _start_thread_enabled(cfg: RunConfig) -> bool:
+    return (cfg.source or DASHBOARD_SOURCE) in {DASHBOARD_SOURCE, "slack"} and (
+        _slack_concierge_run(cfg)
+        or (
+            not cfg.background_task_completion
+            and not (cfg.slack_thread and cfg.slack_thread.triggering_bot_id)
+            and bool((cfg.github_login or "").strip() or (cfg.user_email or "").strip())
+        )
+    )
+
+
 def _model_routing_mode(thread_id: str) -> RoutingMode:
     digest = hashlib.sha256(thread_id.encode()).hexdigest()
     bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
@@ -919,7 +930,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         saved_requested_model: str | None = None,
         bridge_client: BridgeClient | None = None,
         prefer_tools_in_sandbox: bool = False,
+        start_thread_available: bool = False,
     ) -> None:
+        self._start_thread_available = start_thread_available
         self._bridge_client = bridge_client
         self._saved_requested_model = saved_requested_model
         self._prefer_tools_in_sandbox = prefer_tools_in_sandbox
@@ -1395,6 +1408,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
                 prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
+                start_thread_available=self._start_thread_available,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
                 local_checkout_client=self._bridge_client or "cli",
@@ -1754,7 +1768,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             else []
         ),
         *([task_status, message_task_thread, control_worker] if task_coordination else []),
-        *((start_thread,) if _slack_concierge_run(cfg) else ()),
+        *((start_thread,) if _start_thread_enabled(cfg) else ()),
         manage_baby_sit,
         switch_to_performance_model,
         expedite_pr_approval,
@@ -2126,6 +2140,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         saved_requested_model=thread_settings.get("requested_model"),
                         bridge_client=bridge_client,
                         prefer_tools_in_sandbox=prefer_tools_in_sandbox,
+                        start_thread_available=any(
+                            _registered_tool_name(tool) == "start_thread" for tool in static_tools
+                        ),
                     ),
                     *(
                         [
