@@ -3,6 +3,7 @@ import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Kbd } from "@langchain/macaw-components/Kbd"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { TrayIcon } from "@phosphor-icons/react/dist/ssr/Tray"
 import { useQueryClient } from "@tanstack/react-query"
@@ -26,6 +27,12 @@ import {
   type ReviewInboxItem,
 } from "@/features/agents/lib/inbox"
 import {
+  formatSnoozeTime,
+  SNOOZE_OPTIONS,
+  useInboxSnoozes,
+  useSetInboxSnooze,
+} from "@/features/agents/lib/inboxSnoozes"
+import {
   markAgentThreadViewed,
   useResolveAgentThread,
   useSidebarRecents,
@@ -44,6 +51,14 @@ export function InboxPage() {
   const chat = useChatRoutes()
   const queryClient = useQueryClient()
   const resolveThread = useResolveAgentThread().mutate
+  const snoozes = useInboxSnoozes()
+  const setSnooze = useSetInboxSnooze().mutate
+  const now = useWakeClock(
+    useMemo(
+      () => (snoozes.data ?? []).map((snooze) => snooze.until_ms),
+      [snoozes.data]
+    )
+  )
   const threads = useSidebarRecents({
     repoMode: false,
     owned: true,
@@ -63,6 +78,7 @@ export function InboxPage() {
   const [selection, setSelection] = useState<{ key?: string; index: number }>({
     index: 0,
   })
+  const [snoozing, setSnoozing] = useState<InboxItem | null>(null)
   const list = useRef<HTMLDivElement>(null)
 
   const reviewRows = useMemo(
@@ -73,7 +89,12 @@ export function InboxPage() {
     threads: withoutNestedWorkers(threads.items),
     reviews: reviewRows,
     done: doneReviews,
+    snoozes: snoozes.data ?? [],
+    now,
   })
+  const waitingCount = inbox.filter(
+    (item) => item.snoozedUntil === undefined
+  ).length
   const items = inbox.filter((item) => inSplit(item, split))
   const foundIndex = items.findIndex((item) => item.key === selection.key)
   const index =
@@ -115,15 +136,25 @@ export function InboxPage() {
           params: { threadId: item.thread.id },
         })
     }
+    const advance = () =>
+      setSelection(selectionAfter(latest.current.items, latest.current.index))
     const done = () => {
-      const { items: current, index: at } = latest.current
-      const item = current[at]
+      const item = latest.current.items[latest.current.index]
       if (!item) return
-      const neighbor = current[at + 1] ? at + 1 : at - 1
-      setSelection({ key: current[neighbor]?.key, index: Math.max(at, 0) })
+      advance()
       if (item.kind === "review")
         setDoneReviews((keys) => new Set([...keys, item.key]))
       else resolveThread({ threadId: item.thread.id, resolved: true })
+    }
+    const snooze = () => {
+      const item = latest.current.items[latest.current.index]
+      if (!item) return
+      if (item.snoozedUntil === undefined) {
+        setSnoozing(item)
+        return
+      }
+      advance()
+      setSnooze({ key: item.key, untilMs: null })
     }
     const cycleSplit = (step: 1 | -1) => {
       const at = INBOX_SPLITS.findIndex(
@@ -164,6 +195,14 @@ export function InboxPage() {
         run: done,
       },
       {
+        id: "inbox-snooze",
+        label: "Snooze, or move a snoozed item back to the inbox",
+        aliases: ["snooze", "remind me", "unsnooze"],
+        shortcuts: ["h"],
+        group: "Inbox",
+        run: snooze,
+      },
+      {
         id: "inbox-next-split",
         label: "Next inbox split",
         shortcuts: ["]"],
@@ -178,7 +217,7 @@ export function InboxPage() {
         run: () => cycleSplit(-1),
       },
     ]
-  }, [chat.thread, navigate, resolveThread])
+  }, [chat.thread, navigate, resolveThread, setSnooze])
   useRegisterAppCommands(commands)
 
   const run = (id: string) =>
@@ -207,13 +246,13 @@ export function InboxPage() {
   return (
     <div className="flex h-full min-w-0 flex-1">
       <aside className="flex w-[380px] shrink-0 flex-col border-r border-default">
-        <header className="flex flex-col gap-3 px-4 pt-5 pb-3">
-          <div className="flex items-center gap-2">
+        <header className="flex flex-col gap-space-3 px-space-4 pt-5 pb-space-3">
+          <div className="flex items-center gap-space-2">
             <TrayIcon size={18} weight="regular" />
             <h1 className="font-heading text-base font-medium text-primary">
               Inbox
             </h1>
-            <span className="text-xs text-tertiary">{inbox.length}</span>
+            <span className="text-xs text-tertiary">{waitingCount}</span>
           </div>
           <GroupedTabs<InboxSplit>
             size="xs"
@@ -232,17 +271,18 @@ export function InboxPage() {
           aria-label="Inbox"
           tabIndex={0}
           onKeyDown={onListKeyDown}
-          className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 outline-none"
+          className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2 outline-none"
         >
           {loading && items.length === 0 ? (
             <InboxSkeleton />
           ) : items.length === 0 ? (
-            <InboxZero />
+            <InboxZero split={split} />
           ) : (
             items.map((item, itemIndex) => (
               <InboxRow
                 key={item.key}
                 item={item}
+                now={now}
                 selected={item.key === selected?.key}
                 onSelect={() => {
                   setSelection({ key: item.key, index: itemIndex })
@@ -256,7 +296,7 @@ export function InboxPage() {
               size="xs"
               color="secondary"
               variant="plain"
-              className="mt-1 w-full"
+              className="mt-space-1 w-full"
               disabled={threads.isFetchingNextPage}
               onClick={threads.fetchNextPage}
             >
@@ -264,12 +304,15 @@ export function InboxPage() {
             </Button>
           )}
         </div>
-        <footer className="flex flex-wrap gap-x-3 gap-y-1 border-t border-default px-4 py-2 text-xxs text-tertiary">
+        <footer className="flex flex-wrap gap-x-space-3 gap-y-space-1 border-t border-default px-space-4 py-space-2 text-xxs text-tertiary">
           <span>
             <Kbd>J</Kbd>/<Kbd>K</Kbd> move
           </span>
           <span>
             <Kbd>E</Kbd> done
+          </span>
+          <span>
+            <Kbd>H</Kbd> {split === "snoozed" ? "unsnooze" : "snooze"}
           </span>
           <span>
             <Kbd>O</Kbd> open
@@ -288,9 +331,31 @@ export function InboxPage() {
         ) : selected?.kind === "review" ? (
           <ReviewPreview item={selected} />
         ) : null}
+        {snoozing && (
+          <SnoozePicker
+            item={snoozing}
+            onClose={() => setSnoozing(null)}
+            onPick={(untilMs) => {
+              setSnoozing(null)
+              const { items: current, index: at } = latest.current
+              if (current[at]?.key === snoozing.key)
+                setSelection(selectionAfter(current, at))
+              setSnooze({ key: snoozing.key, untilMs })
+            }}
+          />
+        )}
       </section>
     </div>
   )
+}
+
+/** The selection once the item at `at` leaves the list: the next item, or the last. */
+function selectionAfter(
+  items: ReadonlyArray<InboxItem>,
+  at: number
+): { key?: string; index: number } {
+  const neighbor = items[at + 1] ? at + 1 : at - 1
+  return { key: items[neighbor]?.key, index: Math.max(at, 0) }
 }
 
 const TONE_DOT: Record<InboxTone, string> = {
@@ -307,10 +372,12 @@ const TONE_TEXT: Record<InboxTone, string> = {
 
 function InboxRow({
   item,
+  now,
   selected,
   onSelect,
 }: {
   item: InboxItem
+  now: number
   selected: boolean
   onSelect: () => void
 }) {
@@ -323,7 +390,7 @@ function InboxRow({
       data-inbox-key={item.key}
       onClick={onSelect}
       className={cn(
-        "mb-0.5 flex cursor-default gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
+        "mb-0.5 flex cursor-default gap-2.5 rounded-lg px-2.5 py-space-2 transition-colors",
         selected ? "bg-selected" : "hover:bg-surface-level-2-hover"
       )}
     >
@@ -333,7 +400,7 @@ function InboxRow({
         className="mt-0.5 shrink-0 text-icon-secondary"
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-space-2">
           <span
             className={cn(
               "min-w-0 flex-1 truncate text-sm text-primary",
@@ -355,9 +422,22 @@ function InboxRow({
               )}
             />
           )}
-          <span className={cn("shrink-0", TONE_TEXT[item.tone])}>
-            {item.reason}
-          </span>
+          {item.snoozedUntil !== undefined ? (
+            <span className="flex shrink-0 items-center gap-space-1 text-secondary">
+              <ClockIcon size={12} weight="regular" />
+              Until{" "}
+              {formatSnoozeTime(new Date(item.snoozedUntil), new Date(now))}
+            </span>
+          ) : (
+            <span className={cn("shrink-0", TONE_TEXT[item.tone])}>
+              {item.reason}
+              {item.backFromSnooze === "activity"
+                ? " · changed while snoozed"
+                : item.backFromSnooze === "time"
+                  ? " · back from snooze"
+                  : ""}
+            </span>
+          )}
           <span className="min-w-0 truncate text-tertiary">
             · {item.subtitle}
           </span>
@@ -369,7 +449,7 @@ function InboxRow({
 
 function ReviewPreview({ item }: { item: ReviewInboxItem }) {
   return (
-    <div className="m-auto flex max-w-md flex-col items-center gap-3 p-6 text-center">
+    <div className="m-auto flex max-w-md flex-col items-center gap-space-3 p-space-5 text-center">
       <GitPullRequestIcon
         size={28}
         weight="regular"
@@ -389,15 +469,116 @@ function ReviewPreview({ item }: { item: ReviewInboxItem }) {
   )
 }
 
-function InboxZero() {
+function InboxZero({ split }: { split: InboxSplit }) {
+  if (split === "snoozed")
+    return (
+      <div className="flex flex-col items-center gap-space-2 px-space-5 py-space-9 text-center">
+        <ClockIcon size={28} weight="regular" className="text-icon-tertiary" />
+        <p className="text-sm font-medium text-primary">Nothing snoozed</p>
+        <p className="text-xs text-tertiary">
+          Press <Kbd>H</Kbd> on an item to hide it until later. It comes back
+          sooner if it changes.
+        </p>
+      </div>
+    )
   return (
-    <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+    <div className="flex flex-col items-center gap-space-2 px-space-5 py-space-9 text-center">
       <TrayIcon size={28} weight="regular" className="text-icon-tertiary" />
       <p className="text-sm font-medium text-primary">You're all caught up</p>
       <p className="text-xs text-tertiary">
         Threads land here when an agent stops and needs you, along with reviews
         assigned to you.
       </p>
+    </div>
+  )
+}
+
+// setTimeout overflows past ~24.8 days; a longer wait just re-arms when it fires.
+const MAX_TIMEOUT_MS = 2 ** 31 - 1
+
+/** The current time, refreshed the moment the next of `wakeTimes` passes. */
+function useWakeClock(wakeTimes: ReadonlyArray<number>): number {
+  const [now, setNow] = useState(() => Date.now())
+  const next = Math.min(...wakeTimes.filter((time) => time > now))
+  useEffect(() => {
+    if (!Number.isFinite(next)) return
+    const timer = window.setTimeout(
+      () => setNow(Date.now()),
+      Math.min(next - Date.now() + 50, MAX_TIMEOUT_MS)
+    )
+    return () => window.clearTimeout(timer)
+  }, [next])
+  return now
+}
+
+/**
+ * Picks when a snoozed item comes back. While open it owns the keyboard, so the
+ * number keys pick an option and the inbox shortcuts stay put.
+ */
+function SnoozePicker({
+  item,
+  onPick,
+  onClose,
+}: {
+  item: InboxItem
+  onPick: (untilMs: number) => void
+  onClose: () => void
+}) {
+  const [opened] = useState(() => new Date())
+  const latest = useRef({ onPick, onClose })
+  useEffect(() => {
+    latest.current = { onPick, onClose }
+  })
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (event.key === "Escape" || event.key.toLowerCase() === "h") {
+        latest.current.onClose()
+        return
+      }
+      const option = SNOOZE_OPTIONS.find(
+        (candidate) => candidate.shortcut === event.key
+      )
+      if (option) latest.current.onPick(option.until(new Date()).getTime())
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [])
+
+  return (
+    <div
+      className="absolute inset-0 z-popover flex items-start justify-center bg-black/20 pt-24"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-label="Snooze until"
+        className="w-72 rounded-xl border border-default bg-surface-level-1 p-space-2 shadow-lg"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <p className="truncate px-space-2 pt-space-1 pb-space-2 text-xs text-tertiary">
+          Snooze “{item.title}”
+        </p>
+        {SNOOZE_OPTIONS.map((option) => (
+          <button
+            key={option.shortcut}
+            type="button"
+            className="flex w-full items-center gap-space-2 rounded-lg px-space-2 py-1.5 text-left text-sm text-primary hover:bg-surface-level-2-hover"
+            onClick={() => onPick(option.until(new Date()).getTime())}
+          >
+            <Kbd>{option.shortcut}</Kbd>
+            <span className="flex-1">{option.label}</span>
+            <span className="text-xs text-tertiary">
+              {formatSnoozeTime(option.until(opened), opened)}
+            </span>
+          </button>
+        ))}
+        <p className="px-space-2 pt-space-2 text-xxs text-tertiary">
+          It comes back sooner if it changes. <Kbd>Esc</Kbd> to cancel.
+        </p>
+      </div>
     </div>
   )
 }

@@ -72,6 +72,17 @@ class UserRecords:
         async with postgres.session() as session:
             return await session.scalar(select(UserRecord.value).where(self._where(login, key)))
 
+    async def list(self, login: str) -> dict[str, JsonObject]:
+        """Every record of this kind for one person, by key."""
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(UserRecord.key, UserRecord.value).where(
+                    UserRecord.user_id == user_id_for_login(login),
+                    UserRecord.kind == self.kind,
+                )
+            )
+            return dict(rows.tuples().all())
+
     async def put(self, login: str, value: JsonObject, key: str = "") -> None:
         async with postgres.session() as session:
             user_id = await session.scalar(select(user_id_for_login(login)))

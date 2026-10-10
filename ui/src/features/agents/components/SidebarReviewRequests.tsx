@@ -47,7 +47,7 @@ export function SidebarReviewRequests({
   if (requests.length === 0) return null
 
   return (
-    <section className="mb-3">
+    <section className="mb-space-3">
       <SidebarSectionHeader
         label={`Review requests · ${requests.length}`}
         collapsed={collapsed}
