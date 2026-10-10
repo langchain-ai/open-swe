@@ -986,9 +986,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         requested_models: Mapping[str, ModelOption] | None = None,
         saved_requested_model: str | None = None,
         bridge_client: BridgeClient | None = None,
+        start_thread_available: bool = False,
     ) -> None:
         self._bridge_client = bridge_client
         self._saved_requested_model = saved_requested_model
+        self._start_thread_available = start_thread_available
         self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
@@ -1419,6 +1421,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 sole_writer=self._sole_writer,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
+                start_thread_available=self._start_thread_available,
                 slack_ask=_slack_ask_mode(cfg),
                 slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
@@ -1748,7 +1751,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         get_thread,
         manage_thread,
         *([task_status, message_task_thread, control_worker] if task_coordination else []),
-        *((start_thread,) if _slack_concierge_run(cfg) else ()),
+        *((start_thread,) if tool_access.direct and profile_login else ()),
         manage_baby_sit,
         switch_to_performance_model,
         expedite_pr_approval,
@@ -2022,6 +2025,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         requested_models=requested_models,
         saved_requested_model=thread_settings.get("requested_model"),
         bridge_client=bridge_client,
+        start_thread_available="start_thread"
+        in reserved_tool_names - excluded_tools - client_tool_names,
     )
     subagent_tools = [
         tool
