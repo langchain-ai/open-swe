@@ -168,14 +168,14 @@ export function InboxPage() {
       {
         id: "inbox-next",
         label: "Next inbox item",
-        shortcuts: ["j"],
+        shortcuts: ["j", "arrowdown"],
         group: "Inbox",
         run: () => move(1),
       },
       {
         id: "inbox-previous",
         label: "Previous inbox item",
-        shortcuts: ["k"],
+        shortcuts: ["k", "arrowup"],
         group: "Inbox",
         run: () => move(-1),
       },
@@ -306,7 +306,7 @@ export function InboxPage() {
         </div>
         <footer className="flex flex-wrap gap-x-space-3 gap-y-space-1 border-t border-default px-space-4 py-space-2 text-xxs text-tertiary">
           <span>
-            <Kbd>J</Kbd>/<Kbd>K</Kbd> move
+            <Kbd>J</Kbd>/<Kbd>K</Kbd> or <Kbd>↑</Kbd>/<Kbd>↓</Kbd> move
           </span>
           <span>
             <Kbd>E</Kbd> done
