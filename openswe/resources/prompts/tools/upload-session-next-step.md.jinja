@@ -1,7 +1,7 @@
 REQUIRED: upload the transcript now. The thread at `url` is empty and the link is invalid until the transcript is uploaded, so do not share `url` before the upload succeeds. POST the session's JSONL transcript:
 
 ```sh
-gzip -c <transcript_path> | curl -fsS -X POST -H 'Content-Type: application/x-ndjson' -H 'Content-Encoding: gzip' --data-binary @- '{{ upload_url }}'
+gzip -c <transcript_path> | curl -fsS -X POST -H 'Authorization: Bearer {{ upload_token }}' -H 'Content-Type: application/x-ndjson' -H 'Content-Encoding: gzip' --data-binary @- '{{ upload_url }}'
 ```
 
-If auto mode blocks that command, write it as a script that takes the transcript path and the upload URL as its two arguments, run the script, and suggest the user add the script to their allowlist (in Claude Code, `Bash(<absolute script path>:*)`).
+If auto mode blocks that command, write it as a script that takes the transcript path, the upload URL and the upload token as its three arguments, run the script, and suggest the user add the script to their allowlist (in Claude Code, `Bash(<absolute script path>:*)`).

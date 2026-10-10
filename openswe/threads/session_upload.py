@@ -80,7 +80,7 @@ UPLOAD_REQUEST_BODY: dict[str, object] = {
         "required": True,
         "description": (
             "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. "
-            "Authorized by the upload code in the upload_url the upload_session MCP tool returned."
+            "Authorized by the upload_token the upload_session MCP tool returned, as a bearer token."
         ),
         "content": {"application/x-ndjson": {"schema": {"type": "string"}}},
     }
@@ -262,11 +262,12 @@ def _upload_note(target: _Target) -> list[HumanMessage]:
 
 
 class SessionReservation(BaseModel):
-    """A thread waiting for its transcript, and the one-time URL the transcript is posted to."""
+    """A thread waiting for its transcript, and where and with which one-time token to post it."""
 
     thread_id: str
     url: str | None
     upload_url: str
+    upload_token: str
     expires_in_seconds: int
 
 
@@ -327,7 +328,8 @@ async def reserve_session_upload(
     return SessionReservation(
         thread_id=thread_id,
         url=dashboard_thread_url(thread_id),
-        upload_url=f"{dashboard_api_base_url()}/dashboard/api/threads/uploads/{code}",
+        upload_url=f"{dashboard_api_base_url()}/dashboard/api/threads/uploads",
+        upload_token=code,
         expires_in_seconds=UPLOAD_TICKET_TTL_SECONDS,
     )
 

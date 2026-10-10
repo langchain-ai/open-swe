@@ -17,6 +17,7 @@ from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
+from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
 from openswe.threads import terminal
 from openswe.threads.diffs import (
@@ -146,9 +147,12 @@ async def api_create_session(
     return {"thread_id": thread_id}
 
 
-@router.post("/threads/uploads/{code}", openapi_extra=UPLOAD_REQUEST_BODY, response_model=None)
+@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY, response_model=None)
 @audit_endpoint
-async def api_upload_session(code: str, request: Request) -> dict[str, Any] | Response:
+async def api_upload_session(request: Request) -> dict[str, Any] | Response:
+    code = bearer_github_token(request)
+    if code is None:
+        raise HTTPException(401, "send the upload token as a bearer token")
     ticket = decode_upload_ticket(code)
     bind_audit_session(request, {"sub": ticket.sub, "user_id": ticket.user_id})
     summary = await upload_session(UploadStream(request), ticket)

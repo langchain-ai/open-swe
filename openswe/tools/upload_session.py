@@ -35,5 +35,9 @@ async def upload_session(
     return {
         "ok": True,
         **reservation.model_dump(),
-        "next_step": prompt("tools/upload-session-next-step", upload_url=reservation.upload_url),
+        "next_step": prompt(
+            "tools/upload-session-next-step",
+            upload_url=reservation.upload_url,
+            upload_token=reservation.upload_token,
+        ),
     }

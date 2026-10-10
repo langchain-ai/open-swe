@@ -115,14 +115,22 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
       },
     });
     expect(reserved.ok(), await reserved.text()).toBeTruthy();
-    const { upload_url: uploadUrl, thread_id: reservedId } =
-      (await reserved.json()) as { upload_url: string; thread_id: string };
+    const {
+      upload_url: uploadUrl,
+      upload_token: token,
+      thread_id: reservedId,
+    } = (await reserved.json()) as {
+      upload_url: string;
+      upload_token: string;
+      thread_id: string;
+    };
     threadId = reservedId;
 
-    // What the agent curls: the transcript alone, authorized by the URL.
+    // What the agent curls: the transcript alone, authorized by the token, no Origin.
     const uploadTranscript = () =>
       api.post(new URL(uploadUrl).pathname, {
         headers: {
+          authorization: `Bearer ${token}`,
           "content-type": "application/x-ndjson",
           "content-encoding": "gzip",
         },
