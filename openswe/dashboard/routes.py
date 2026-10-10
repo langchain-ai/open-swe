@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from openswe.analytics.routes import router as analytics_router
 from openswe.api_keys.routes import router as api_keys_router
+from openswe.apps.routes import router as apps_router
 from openswe.audit_logs.routes import router as audit_logs_router
 from openswe.bridge.routes import router as bridge_router
 from openswe.dashboard.agent_instructions import router as agent_instructions_router
@@ -59,6 +60,7 @@ router.include_router(review_router)
 router.include_router(review_conversation_router)
 router.include_router(agent_instructions_router)
 router.include_router(skills_router)
+router.include_router(apps_router)
 router.include_router(analytics_router)
 router.include_router(audit_logs_router)
 router.include_router(schedules_router)

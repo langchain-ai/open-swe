@@ -232,6 +232,7 @@ from openswe.tools import (
     request_human_review,
     request_pr_review,
     request_rollout_check,
+    save_app,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -542,6 +543,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "background_execute",
         "background_task",
         "expose_port",
+        "save_app",
         "http_request",
         "expedite_pr_approval",
         "merge_expedited_pr",
@@ -1767,7 +1769,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         open_pull_request,
         link_pull_request,
         *(
-            (output_iframe, create_sandbox_file_download_url, expose_port)
+            (output_iframe, create_sandbox_file_download_url, expose_port, save_app)
             if sandbox_file_downloads
             else ()
         ),

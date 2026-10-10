@@ -753,6 +753,24 @@ export interface SkillInput {
   instructions: string
 }
 
+export interface SandboxApp {
+  id: string
+  name: string
+  description: string
+  thread_id: string
+  port: number
+  start_command: string
+  workdir: string
+  url: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface SandboxAppLaunch {
+  url: string
+  started: boolean
+}
+
 export interface SkillsPage {
   items: Array<Skill>
   next_offset: number | null
@@ -1519,6 +1537,13 @@ export const api = {
     request<void>(`/skills/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
+  listApps: () => request<{ items: Array<SandboxApp> }>("/apps"),
+  launchApp: (id: string) =>
+    request<SandboxAppLaunch>(`/apps/${encodeURIComponent(id)}/launch`, {
+      method: "POST",
+    }),
+  deleteApp: (id: string) =>
+    request<void>(`/apps/${encodeURIComponent(id)}`, { method: "DELETE" }),
   listOrganizationSkills: (cursor: string | null = null) =>
     request<OrganizationSkillsPage>(
       `/organization-skills?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`

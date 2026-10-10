@@ -346,6 +346,115 @@
         "title": "ApiKeyView",
         "type": "object"
       },
+      "AppLaunch": {
+        "properties": {
+          "started": {
+            "title": "Started",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "started"
+        ],
+        "title": "AppLaunch",
+        "type": "object"
+      },
+      "AppList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AppView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AppList",
+        "type": "object"
+      },
+      "AppView": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer"
+          },
+          "start_command": {
+            "title": "Start Command",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "workdir": {
+            "title": "Workdir",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "thread_id",
+          "port",
+          "start_command",
+          "workdir",
+          "url",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AppView",
+        "type": "object"
+      },
       "ApprovalsFileStatus": {
         "properties": {
           "found": {
@@ -9037,6 +9146,126 @@
         "tags": [
           "dashboard",
           "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/apps": {
+      "get": {
+        "operationId": "api_list_apps_dashboard_api_apps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Apps",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/apps/{app_id}": {
+      "delete": {
+        "operationId": "api_delete_app_dashboard_api_apps__app_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete App",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/apps/{app_id}/launch": {
+      "post": {
+        "operationId": "api_launch_app_dashboard_api_apps__app_id__launch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppLaunch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Launch App",
+        "tags": [
+          "dashboard"
         ]
       }
     },
