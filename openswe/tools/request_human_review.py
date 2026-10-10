@@ -39,16 +39,12 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
-def _over_mcp(cfg: RunConfig) -> bool:
-    return not cfg.thread_id and cfg.source == "mcp" and bool(cfg.github_login)
-
-
 async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None:
     """Why this caller may not act on the pull request's repository, judged by its own GitHub access."""
     repo = f"{pr_ref.owner}/{pr_ref.repo}"
-    if _over_mcp(cfg):
+    if caller := cfg.mcp_caller:
         try:
-            await repo_access.require_repo_access_for_user(cfg.github_login or "", repo)
+            await repo_access.require_repo_access_for_user(caller, repo)
         except HTTPException as exc:
             return f"You cannot access {repo}: {exc.detail}"
         return None
@@ -84,9 +80,9 @@ async def request_human_review(
     cfg = RunConfig.from_config(get_config())
     if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
+    if caller := cfg.mcp_caller:
+        return await _request_for_mcp_caller(pr_ref, caller, inline_summary, channel)
     login = cfg.github_login or ""
-    if _over_mcp(cfg):
-        return await _request_for_mcp_caller(pr_ref, login, inline_summary, channel)
     thread_id = cfg.thread_id or ""
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
     origin = Origin(
@@ -159,9 +155,9 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
     if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     by = "Open SWE"
-    if _over_mcp(cfg):
-        person = await User.for_login("github", cfg.github_login or "")
-        by = mention(person) if person is not None else f"@{cfg.github_login}"
+    if caller := cfg.mcp_caller:
+        person = await User.for_login("github", caller)
+        by = mention(person) if person is not None else f"@{caller}"
     if not await ReviewCard(request).dismiss_by(by, reason):
         return _failure("This review request is already closed.")
     return {
@@ -170,6 +166,7 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
     }
 
 
+@expose_mcp()
 @audit_tool()
 async def assign_human_reviewer(
     pr_url: str, github_login: str, reason: str = "", named_by_person: bool = False
@@ -184,7 +181,17 @@ async def assign_human_reviewer(
     cfg = RunConfig.from_config(get_config())
     thread_id = cfg.thread_id or ""
     login = github_login.strip().lstrip("@")
-    if named_by_person:
+    if caller := cfg.mcp_caller:
+        person = await User.for_login("github", caller)
+        if person is None or not (
+            request.is_author(person.id, caller) or request.requested_by_user_id == person.id
+        ):
+            return _failure(
+                "Only the pull request's author or whoever requested the review may name its "
+                "reviewer."
+            )
+        named_by_person = True
+    elif named_by_person:
         if not await _named_by_trigger(cfg, login):
             return _failure(
                 "named_by_person needs the Slack message that started this run to be a "

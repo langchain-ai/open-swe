@@ -7,3 +7,5 @@ When a person's Slack message to you names who should review ("assign @alice"), 
 The reviewer must be an Open SWE user with write access to the repository, must not be the pull request's author, and must not be someone who already let this pick expire; when someone is refused, pick the next best candidate.
 
 Never link to the card: Slack unfurls that link into a second copy of it.
+
+Over MCP, only the pull request's author or whoever requested the review may call this, and the reviewer they name replaces any current pick; `named_by_person` is ignored.

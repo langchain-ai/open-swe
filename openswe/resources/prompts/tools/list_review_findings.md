@@ -7,6 +7,8 @@ re-deriving issues from the diff.
 Args:
     status_filter: One of ``open``, ``resolved``, ``dismissed``. ``None``
         (default) returns findings of every status.
+    pr_url: The pull request's GitHub URL. Required over MCP; ignored in a
+        PR chat, which reads its own pull request's review.
 
 Returns:
     ``{findings, count}``; ``{findings: [], count: 0, error}`` on failure.
