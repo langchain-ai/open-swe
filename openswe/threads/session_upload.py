@@ -354,8 +354,11 @@ class _ReservedThread(BaseModel):
         )
 
 
-async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str, Any]:
-    """Seed a reserved thread with the session's history; no run starts until the person sends one."""
+async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str, Any] | None:
+    """Seed a reserved thread with the session's history once; ``None`` when it already was.
+
+    No run starts until the person sends one.
+    """
     client = langgraph_client()
     try:
         thread = await client.threads.get(ticket.thread_id)
@@ -365,8 +368,10 @@ async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str
         reserved = _ReservedThread.model_validate(thread_metadata(thread))
     except ValidationError as exc:
         raise HTTPException(409, "this thread was not reserved for a session upload") from exc
-    if reserved.owner_login.lower() != ticket.sub.lower() or not reserved.session_upload_pending:
-        raise HTTPException(409, "this upload code was already used")
+    if reserved.owner_login.lower() != ticket.sub.lower():
+        raise HTTPException(409, "this upload code is for another person's thread")
+    if not reserved.session_upload_pending:
+        return None
     transcript = ClaudeTranscript()
     async for line in stream.lines():
         transcript.add(line)

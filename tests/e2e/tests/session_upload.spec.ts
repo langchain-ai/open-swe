@@ -131,7 +131,7 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     const upload = await uploadTranscript();
     expect(upload.ok(), await upload.text()).toBeTruthy();
     expect((await upload.json()).id).toBe(threadId);
-    expect((await uploadTranscript()).status()).toBe(409);
+    expect((await uploadTranscript()).status()).toBe(204);
 
     const summary = await (
       await page.request.get(`/dashboard/api/threads/${threadId}`)
