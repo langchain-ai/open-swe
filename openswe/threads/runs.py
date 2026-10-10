@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
-from openswe.dashboard.agent_overrides import normalize_profile_overrides
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -160,9 +159,6 @@ async def _resolve_agent_model_choice(
     settings = await get_workspace_settings(workspace)
     resolved_model, resolved_effort = settings.default_model("agent")
     if model_id not in DEPRECATED_MODEL_IDS:
-        profile_model, profile_effort = normalize_profile_overrides(profile)
-        if profile_model and profile_effort:
-            resolved_model, resolved_effort = profile_model, profile_effort
         chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
         if chosen_model and chosen_effort:
             resolved_model, resolved_effort = chosen_model, chosen_effort
@@ -281,8 +277,8 @@ async def create_dashboard_thread_record(
     )
     _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
-    metadata_model = chosen_model or profile.get("default_model") or "Default"
-    metadata_effort = chosen_effort or profile.get("reasoning_effort")
+    metadata_model = chosen_model or "Default"
+    metadata_effort = chosen_effort
     if images and not model_supports_images(str(metadata_model)):
         metadata_model = resolved_model
         metadata_effort = resolved_effort
