@@ -45,6 +45,7 @@ from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemSta
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -685,6 +686,7 @@ def _general_purpose_subagent(
                 _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
                 _SubagentToolGuard(),
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 TranscriptMiddleware(),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
@@ -1424,6 +1426,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         return create_deep_agent(
             system_prompt="",
             tools=[],
+            middleware=[
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
+            ],
         ).with_config(bindable_config(config))
 
     from openswe.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
@@ -2096,6 +2101,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 list[AgentMiddleware[Any, Any, Any]],
                 [
                     FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
+                    AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                     ConversationOffloadingMiddleware(
                         main_model, agent_backend, manual=cfg.offload_conversation is True
                     ),
