@@ -1,27 +1,27 @@
 # Planning the walkthrough
 
-The walkthrough is a plan of small chunks a reader goes through one at a time, top to bottom, approving each one, then Other last: the changes not worth reading, shown as a short summary. The plan is shared: the review page, the reviewer and every person walked through this pull request in Slack read the same one, and other planners may be adding to it while you work. Every planning tool's result shows the plan as it stands: its chunks, how much is in Other, and the lines still unplanned. Only unplanned lines can be placed.
+The walkthrough is a plan of steps called chunks that a reader goes through one at a time, top to bottom, approving each one, then Other last: the changes not worth reading, shown as a short summary. The plan is shared: the review page, the reviewer and every person walked through this pull request in Slack read the same one, and other planners may be adding to it while you work. Every planning tool's result shows the plan as it stands: its chunks, how much is in Other, and the hunks still unplanned. Only unplanned hunks can be placed.
 
-Lines are named by ranges: added lines by their head line number, deleted lines by their merge-base line number, as the diff's hunk headers number them. A range may span lines that are unchanged or already placed; only the unplanned lines in it are taken, and every range must hold at least one.
+The unit of the plan is the hunk, exactly as `git diff` prints it with its default context (never `-U0`, which splits hunks differently). A hunk is named by its file and the head line its `@@ -a,b +N,c @@` header starts at, `N`; the status lists each file's unplanned hunks as `path @N +added-deleted`. Placing a hunk takes all of its unplanned lines, and every hunk belongs to exactly one chunk or to Other.
 
-Send to Other, even when it sits right next to the lines a chunk shows:
+A chunk is one idea a reader takes in at a glance, told through the hunks that make it up, wherever they are: a new type and the code that reads it, a function and its callers, a behavior and the test that pins it. Gather related hunks from different files into one chunk instead of giving each hunk or each file its own. Keep a chunk small enough to read in one sitting, usually two to six hunks and well under 150 changed lines; a large new file is a chunk of its own. Order the chunks so each builds on what the reader already saw: usually the core idea or data model first, then the logic that uses it, then wiring, then tests.
 
-1. Imports, includes, requires and `use` declarations. All of them.
-2. Boilerplate and ceremony around the point: migration revision headers and `downgrade` stubs, module docstrings that restate the code, `__all__`, registration lists, `__init__` re-exports.
+Send to Other the hunks that hold nothing but:
+
+1. Imports, includes, requires and `use` declarations.
+2. Boilerplate and ceremony: migration revision headers and `downgrade` stubs, module docstrings that restate the code, `__all__`, registration lists, `__init__` re-exports.
 3. Generated code and artifacts: lockfiles, snapshots, golden files, bundles, vendored code, files marked "generated, do not edit".
 4. Pure formatting and reordered but unchanged declarations.
-5. Mechanical repetition: for a rename or call-site migration, keep one representative line and leave the rest.
+5. Mechanical repetition: for a rename or call-site migration, put one representative hunk in a chunk and leave the rest.
 6. Forced plumbing: forwarded parameters, zero values for a new return slot, annotations that follow from a change elsewhere.
 7. Comment churn that narrates the code, and reworded error or log text.
 8. Test scaffolding and repeated cases, keeping one scenario per behavior.
 9. Docs, changelogs and config churn that restate the code.
 
-So a new migration's chunk is only its `CREATE TABLE`, and a new module's chunks are its classes and functions without the imports above them. Never hide a real behavior change in Other: a new condition, a different call, a changed value, return path or data flow always goes in a chunk.
+A hunk that mixes noise with a real change goes in a chunk. Never hide a real behavior change in Other: a new condition, a different call, a changed value, return path or data flow always goes in a chunk.
 
-Chunks are small: one idea the reader takes in at a glance, usually one function, one table, one hunk or part of one, roughly 5 to 25 changed lines. When in doubt, go smaller. Order them so each builds on what the reader already saw: usually the core idea or data model first, then the logic that uses it, then wiring, then tests.
-
-- `walkthrough_plan_chunk` places one chunk with a title and explanation, and can send lines to Other in the same step. The code is rendered from its lines, so never paste code into the explanation. The explanation is two to four plain sentences: what the chunk changes, why, and anything worth a second look. Wrap identifiers, types, flags and paths in `backticks`.
-- `walkthrough_move_to_other` sends lines to Other without placing a chunk, or with `restore: true` takes them out again.
+- `walkthrough_plan_chunk` places one chunk of hunks with a title and explanation, and can send hunks to Other in the same step. The code is rendered from its hunks, so never paste code into the explanation. The explanation is two to four plain sentences: what the chunk changes, why, how its hunks fit together, and anything worth a second look. Wrap identifiers, types, flags and paths in `backticks`.
+- `walkthrough_move_to_other` sends hunks to Other without placing a chunk, or with `restore: true` takes them out again.
 - `walkthrough_describe_other` sets the one or two sentences readers see above Other, on what kinds of change it holds. Update it when Other changes in kind.
 
-When the pull request moved since the plan was made, chunks kept every line that survived by content, and only new or edited lines are unplanned. Place those with `after` so each lands next to the chunk it belongs with, rather than at the end.
+When the pull request moved since the plan was made, chunks kept every line that survived by content, and a new line in a hunk a chunk already holds joined that chunk. Only hunks no chunk holds are unplanned. Place those with `after` so each lands next to the chunk it belongs with, rather than at the end.

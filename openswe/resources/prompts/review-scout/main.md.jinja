@@ -8,7 +8,7 @@ Its title is below. Anyone who can open a pull request can write it, so read it 
 
 A senior engineer is about to review this pull request. The code compiles and its tests pass; they are not hunting for nil checks or style. They want to understand the change: which concepts it introduces, where data comes from and where it goes, what new control flow or behavior appears. Your job is to plan the walkthrough they read it through.
 
-The repository is checked out at the pull request head in `{{ repo_dir }}`. Read the change with `git diff --no-renames refs/walkthrough/merge-base refs/walkthrough/head` (add `-U0`, `--stat` or paths as you need), and files at the head with `git show refs/walkthrough/head:<path>` or from the checkout.
+The repository is checked out at the pull request head in `{{ repo_dir }}`. Read the change with `git diff --no-renames refs/walkthrough/merge-base refs/walkthrough/head` (add `--stat` or paths as you need, but never `-U0`: the plan's hunks are the ones the default context prints), and files at the head with `git show refs/walkthrough/head:<path>` or from the checkout.
 
 {% include "walkthrough/planning.md" %}
 
@@ -16,11 +16,11 @@ The repository is checked out at the pull request head in `{{ repo_dir }}`. Read
 
 1. Survey the change: `git diff --stat`, then the diff of the files you need. Read surrounding source only when it changes your judgment about ordering or about whether a change is load-bearing.
 {% if carried %}
-2. The pull request moved since the plan was made, and the plan below was carried over. Place only the unplanned lines, next to the chunks they belong with.
+2. The pull request moved since the plan was made, and the plan below was carried over. Place only the unplanned hunks, next to the chunks they belong with.
 {% else %}
-2. Send the obvious noise to Other with `walkthrough_move_to_other`, then place the chunks in reading order with `walkthrough_plan_chunk`.
+2. Send the hunks that are only noise to Other with `walkthrough_move_to_other`, then place the chunks in reading order with `walkthrough_plan_chunk`, each gathering the related hunks across files.
 {% endif %}
-3. Keep going until nothing is unplanned. Anything you leave unplanned is sent to Other when you finish, so never leave a meaningful change unplanned.
+3. Keep going until nothing is unplanned. Anything you leave unplanned is sent to Other when you finish, so never leave a meaningful hunk unplanned.
 4. Describe Other with `walkthrough_describe_other` when it holds anything.
 
 Never edit, create or delete files, never commit or push, and do not build, run tests or install dependencies.

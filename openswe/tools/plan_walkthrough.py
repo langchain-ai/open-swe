@@ -7,7 +7,7 @@ from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
 from openswe.ui_invalidations import Topic
 from openswe.walkthrough.checkout import CheckoutError
-from openswe.walkthrough.plan import FileRanges, RangeError
+from openswe.walkthrough.plan import FileHunks, RangeError
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError
 
@@ -34,9 +34,9 @@ async def _planned(workspace: PlanWorkspace, **result: object) -> dict[str, Any]
 
 async def walkthrough_plan_chunk(
     title: str,
-    show: list[FileRanges],
+    show: list[FileHunks],
     explanation: str,
-    other: list[FileRanges] | None = None,
+    other: list[FileHunks] | None = None,
     after: int | None = None,
 ) -> dict[str, Any]:
     """Implement the `walkthrough_plan_chunk` tool."""
@@ -51,7 +51,7 @@ async def walkthrough_plan_chunk(
 
 
 async def walkthrough_move_to_other(
-    files: list[FileRanges], restore: bool = False
+    files: list[FileHunks], restore: bool = False
 ) -> dict[str, Any]:
     """Implement the `walkthrough_move_to_other` tool."""
     try:

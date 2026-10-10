@@ -1,11 +1,14 @@
 """A pull request's walkthrough plan: ordered chunks a reader goes through one at a time.
 
-Every changed line is in one chunk, in Other, or not yet planned. Lines are
-followed by content, so the plan carries over to a new head: chunks and Other
-keep the lines that survive, and new or edited lines come back unplanned for a
-planner to place.
+Planners place whole hunks, so a chunk can gather related hunks across files and
+no hunk is split between chunks. Every changed line is in one chunk, in Other,
+or not yet planned. Lines are followed by content, so the plan carries over to a
+new head: chunks and Other keep the lines that survive, a new line joins the
+chunk that holds the rest of its hunk, and the remaining new or edited lines
+come back unplanned for a planner to place.
 """
 
+from collections import Counter
 from collections.abc import Iterable
 from typing import Self
 from uuid import uuid7
@@ -87,9 +90,43 @@ class FileRanges(BaseModel):
     deleted: list[LineRange] = []
 
 
+class FileHunks(BaseModel):
+    """Hunks of one file, each named by the head line its ``@@ … +N`` header starts at."""
+
+    path: str
+    hunks: list[int]
+
+
 def summary(lines: list[ChangedLine]) -> str:
     files = {line.path for line in lines}
-    return f"{len(lines)} changed lines in {len(files)} file{'s' if len(files) != 1 else ''}"
+    hunks = {(line.path, line.hunk) for line in lines}
+    return (
+        f"{len(hunks)} hunk{'s' if len(hunks) != 1 else ''} ({len(lines)} changed lines) "
+        f"in {len(files)} file{'s' if len(files) != 1 else ''}"
+    )
+
+
+def hunk_spans(lines: Iterable[ChangedLine]) -> list[str]:
+    """One entry per file naming its hunks and their size, such as ``a.py @12 +3-1, @40 +5``."""
+    counts: dict[str, dict[int, Counter[Sign]]] = {}
+    for line in lines:
+        counts.setdefault(line.path, {}).setdefault(line.hunk, Counter())[line.sign] += 1
+    return [
+        f"{path} "
+        + ", ".join(
+            f"@{hunk} " + "".join(f"{sign}{signs[sign]}" for sign in ("+", "-") if signs[sign])
+            for hunk, signs in sorted(hunks.items())
+        )
+        for path, hunks in counts.items()
+    ]
+
+
+def _raise(errors: list[str]) -> None:
+    if errors:
+        more = len(errors) - _MAX_ERRORS
+        raise RangeError(
+            "\n".join(errors[:_MAX_ERRORS]) + (f"\n…and {more} more" if more > 0 else "")
+        )
 
 
 def claim(files: list[FileRanges], candidates: list[ChangedLine]) -> list[LineRef]:
@@ -115,12 +152,25 @@ def claim(files: list[FileRanges], candidates: list[ChangedLine]) -> list[LineRe
                 refs.update(hits)
     if not refs and not errors:
         errors.append("the ranges name no lines")
-    if errors:
-        more = len(errors) - _MAX_ERRORS
-        raise RangeError(
-            "\n".join(errors[:_MAX_ERRORS]) + (f"\n…and {more} more" if more > 0 else "")
-        )
+    _raise(errors)
     return sorted(refs, key=order.__getitem__)
+
+
+def claim_hunks(files: list[FileHunks], candidates: list[ChangedLine]) -> list[LineRef]:
+    """Every one of the ``candidates`` in the named hunks, in diff order."""
+    errors: list[str] = []
+    named: set[tuple[str, int]] = set()
+    available = {(line.path, line.hunk) for line in candidates}
+    for hunks in files:
+        for hunk in hunks.hunks:
+            if (hunks.path, hunk) in available:
+                named.add((hunks.path, hunk))
+            else:
+                errors.append(f"`{hunks.path}` has no available hunk @{hunk}")
+    if not named and not errors:
+        errors.append("no hunks are named")
+    _raise(errors)
+    return [LineRef.of(line) for line in candidates if (line.path, line.hunk) in named]
 
 
 class PlanChunk(BaseModel):
@@ -135,7 +185,7 @@ class PlanChunk(BaseModel):
 class PlannedChunk(BaseModel):
     number: int
     title: str
-    lines: list[str]
+    hunks: list[str]
 
 
 class PlanStatus(BaseModel):
@@ -144,7 +194,7 @@ class PlanStatus(BaseModel):
     chunks: list[PlannedChunk]
     other_lines: int
     unplanned: str
-    unplanned_lines: list[str]
+    unplanned_hunks: list[str]
     more_files_unplanned: int = 0
 
 
@@ -184,7 +234,23 @@ class Plan(BaseModel):
                 moved.chunks.append(chunk.model_copy(update={"lines": lines, "code": ""}))
         moved.other = take(self.other)
         moved.other_summary = self.other_summary
+        moved.gather_hunks(changes)
         return moved
+
+    def gather_hunks(self, changes: list[FileChange]) -> None:
+        """Move each unplanned line into the chunk that holds the rest of its hunk."""
+        owner: dict[tuple[str, int], PlanChunk] = {}
+        index = {LineRef.of(line): line for change in changes for line in change.lines}
+        for chunk in self.chunks:
+            for ref in chunk.lines:
+                if line := index.get(ref):
+                    owner.setdefault((line.path, line.hunk), chunk)
+        for line in self.unplanned(changes):
+            if chunk := owner.get((line.path, line.hunk)):
+                chunk.lines.append(LineRef.of(line))
+        order = {ref: i for i, ref in enumerate(index)}
+        for chunk in self.chunks:
+            chunk.lines.sort(key=order.__getitem__)
 
     def planned(self) -> set[LineRef]:
         return {ref for chunk in self.chunks for ref in chunk.lines} | set(self.other)
@@ -216,14 +282,19 @@ class Plan(BaseModel):
 
     def status(self, changes: list[FileChange]) -> PlanStatus:
         unplanned = self.unplanned(changes)
-        spans = LineRef.spans(LineRef.of(line) for line in unplanned)
+        spans = hunk_spans(unplanned)
+        index = {LineRef.of(line): line for change in changes for line in change.lines}
         return PlanStatus(
             chunks=[
-                PlannedChunk(number=i, title=c.title, lines=LineRef.spans(c.lines))
+                PlannedChunk(
+                    number=i,
+                    title=c.title,
+                    hunks=hunk_spans(index[ref] for ref in c.lines if ref in index),
+                )
                 for i, c in enumerate(self.chunks, start=1)
             ],
             other_lines=len(self.other),
             unplanned=summary(unplanned) if unplanned else "nothing",
-            unplanned_lines=spans[:_MAX_UNPLANNED_FILES],
+            unplanned_hunks=spans[:_MAX_UNPLANNED_FILES],
             more_files_unplanned=max(0, len(spans) - _MAX_UNPLANNED_FILES),
         )

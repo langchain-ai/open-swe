@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { walkthroughFileDiff } from "@/features/reviews/lib/walkthroughDiff"
-import type { ReviewDiffFile } from "@/lib/api"
+import {
+  walkthroughFileDiff,
+  walkthroughHunks,
+} from "@/features/reviews/lib/walkthroughDiff"
+import { buildEntries } from "@/features/reviews/page/diffEntries"
+import type { ReviewDiffFile, ReviewWalkthroughStep } from "@/lib/api"
 
 function file(): ReviewDiffFile {
   return {
@@ -17,43 +21,61 @@ function file(): ReviewDiffFile {
   }
 }
 
+function step(
+  index: number,
+  added: Array<[number, number]>,
+  other = false
+): ReviewWalkthroughStep {
+  return {
+    index,
+    title: `Step ${index}`,
+    summary: "",
+    other,
+    files: [{ path: "src/a.ts", added, deleted: [] }],
+  }
+}
+
 describe("walkthroughFileDiff", () => {
-  it("keeps only the hunks holding the step's lines, at their real line numbers", () => {
-    const diff = walkthroughFileDiff(file(), {
+  it("keeps only the step's hunks, at their real line numbers", () => {
+    const a = file()
+    const held = walkthroughHunks(a, {
       path: "src/a.ts",
-      added: [[35, 35]],
-      deleted: [],
+      added: [],
+      deleted: [[35, 35]],
     })
+    expect(held).toEqual([1])
+    const diff = walkthroughFileDiff(a, held ?? [])
     expect(diff?.hunks).toHaveLength(1)
-    const hunk = diff?.hunks[0]
-    expect(hunk?.additionStart).toBeLessThanOrEqual(35)
-    expect(
-      (hunk?.additionStart ?? 0) + (hunk?.additionCount ?? 0) - 1
-    ).toBeGreaterThanOrEqual(35)
+    expect(diff?.hunks[0]?.additionStart).toBe(35)
     expect(diff?.additionLines.join("")).toContain("line thirty-five")
     expect(diff?.additionLines.join("")).not.toContain("line three")
   })
+})
 
-  it("matches deleted lines against the original file's numbering", () => {
-    const diff = walkthroughFileDiff(file(), {
-      path: "src/a.ts",
-      added: [],
-      deleted: [[3, 3]],
-    })
-    expect(diff?.hunks).toHaveLength(1)
-    expect(diff?.deletionLines.join("")).toContain("line 3\n")
-  })
-
-  it("renders the whole file when the step owns every hunk", () => {
-    expect(
-      walkthroughFileDiff(file(), {
-        path: "src/a.ts",
-        added: [
-          [3, 3],
-          [35, 35],
+describe("buildEntries", () => {
+  it("shows each hunk once, in the first step that holds it", () => {
+    const entries = buildEntries(
+      [file()],
+      {
+        head_sha: "b".repeat(40),
+        human_input: "",
+        steps: [
+          step(1, [[35, 35]]),
+          step(2, [[3, 3]]),
+          step(3, [[35, 35]]),
+          step(4, [[3, 3]], true),
         ],
-        deleted: [],
-      })
-    ).toBeNull()
+      },
+      "guide"
+    )
+    expect(
+      entries.map((entry) => [
+        entry.step?.title,
+        entry.fileDiff.hunks.map((hunk) => hunk.additionStart),
+      ])
+    ).toEqual([
+      ["Step 1", [35]],
+      ["Step 2", [3]],
+    ])
   })
 })

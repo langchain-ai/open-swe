@@ -29,6 +29,7 @@ from openswe.tools.record_author_feedback import record_author_feedback
 from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
     MAX_TITLE_CHARS,
+    FileHunks,
     FileRanges,
     LineRef,
     claim,
@@ -79,7 +80,7 @@ class _State:
         return {
             "success": True,
             **result,
-            "walkthrough": self.reader.status(self.ctx.unplanned).model_dump(),
+            "walkthrough": self.reader.status(self.ctx.unplanned_lines).model_dump(),
         }
 
     def shown_this_turn(self) -> bool:
@@ -239,9 +240,9 @@ async def _plan(
 @_one_at_a_time
 async def walkthrough_plan_chunk(
     title: str,
-    show: list[FileRanges],
+    show: list[FileHunks],
     explanation: str,
-    other: list[FileRanges] | None = None,
+    other: list[FileHunks] | None = None,
     after: int | None = None,
 ) -> dict[str, Any]:
     """Implement the `walkthrough_plan_chunk` tool."""
@@ -254,7 +255,7 @@ async def walkthrough_plan_chunk(
 
 @_one_at_a_time
 async def walkthrough_move_to_other(
-    files: list[FileRanges], restore: bool = False
+    files: list[FileHunks], restore: bool = False
 ) -> dict[str, Any]:
     """Implement the `walkthrough_move_to_other` tool."""
     return await _plan(lambda ctx: ctx.workspace.move_to_other(files, restore=restore))
