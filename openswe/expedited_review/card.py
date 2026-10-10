@@ -14,7 +14,6 @@ from openswe.slack.blocks import (
     context,
     divider,
     escape,
-    image,
     option,
     section,
     static_select,
@@ -52,7 +51,10 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
 
 
 def _diff_sections(
-    approval: HumanReviewRequest, files: list[ChangedFile], diff_image_id: str | None
+    approval: HumanReviewRequest,
+    files: list[ChangedFile],
+    diff_page: bool,
+    thread_url: str | None = None,
 ) -> list[Block]:
     diff = ExpeditedDiff(files, approval.excluded_hunks)
     shown = diff.shown
@@ -62,14 +64,28 @@ def _diff_sections(
         *_diffstat("Generated", "generated files", diff.generated),
         *_excluded_summary(diff),
     ]
-    if diff_image_id:
-        names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
-        return [image(diff_image_id, f"Diff of {names}"), *trailer]
+    if diff_page:
+        return [*_page_summary(shown, thread_url), *trailer]
     sections: list[Block] = []
     for file in shown[:_MAX_FILE_SECTIONS]:
         sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
         sections.append(section(code_block(_clip(file.patch or ""))))
     return [*sections, *trailer]
+
+
+def _page_summary(files: list[ChangedFile], thread_url: str | None) -> list[Block]:
+    """One line per drawn file, pointing at the interactive diff page posted above the card."""
+    where = f"in <{thread_url}|the original thread>" if thread_url else "in the file just above"
+    heading = f"*Diff* (full interactive diff {where})\n"
+    budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
+    lines: list[str] = []
+    for file in files[:_MAX_FILE_SECTIONS]:
+        line = f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"
+        budget -= len(line) + 1
+        if budget < 0:
+            break
+        lines.append(line)
+    return [section(heading + "\n".join(lines))]
 
 
 def _clip(patch: str) -> str:
@@ -192,7 +208,7 @@ def readiness_prompt(
     title: str,
     author: str,
     files: list[ChangedFile],
-    diff_image_id: str | None = None,
+    diff_page: bool = False,
 ) -> tuple[str, list[Block]]:
     """The full author-only draft card."""
     pr = approval.pull_request
@@ -200,7 +216,7 @@ def readiness_prompt(
     return text, [
         *_header(approval, title, author),
         divider(),
-        *_voting_diff(approval, files, diff_image_id),
+        *_voting_diff(approval, files, diff_page),
         section(
             f"*Draft.* Review <{pr.url}|the pull request> carefully yourself before clicking *Mark ready for review* to request an approval in the thread."
         ),
@@ -217,12 +233,15 @@ def _dismiss_button(approval: HumanReviewRequest) -> ButtonElement:
 
 
 def _voting_diff(
-    approval: HumanReviewRequest, files: list[ChangedFile], diff_image_id: str | None
+    approval: HumanReviewRequest,
+    files: list[ChangedFile],
+    diff_page: bool,
+    thread_url: str | None = None,
 ) -> list[Block]:
     """The diff voters read; an approved card no longer needs it."""
     if approval.approved:
         return []
-    return [*_diff_sections(approval, files, diff_image_id), divider()]
+    return [*_diff_sections(approval, files, diff_page, thread_url), divider()]
 
 
 def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
@@ -244,7 +263,7 @@ def open_card(
     title: str,
     author: str,
     files: list[ChangedFile],
-    diff_image_id: str | None = None,
+    diff_page: bool = False,
     choices: list[ChannelChoice] | None = None,
     thread_url: str | None = None,
 ) -> tuple[str, list[Block]]:
@@ -267,7 +286,7 @@ def open_card(
     blocks: list[Block] = [
         *header,
         divider(),
-        *_voting_diff(approval, files, diff_image_id),
+        *_voting_diff(approval, files, diff_page, thread_url),
         *_status(approval, author, [] if thread_url is not None else choices or []),
     ]
     text = f"Expedited review requested for {pr.url}"
@@ -281,7 +300,7 @@ def closed_card(
     author: str,
     files: list[ChangedFile],
     outcome: str,
-    diff_image_id: str | None = None,
+    diff_page: bool = False,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for a card whose vote is over; ``outcome`` is our own mrkdwn.
 
@@ -296,7 +315,7 @@ def closed_card(
     blocks: list[Block] = [
         *_header(approval, title, author),
         divider(),
-        *_voting_diff(approval, files, diff_image_id),
+        *_voting_diff(approval, files, diff_page),
         section(f"*{outcome}*"),
         context(_vote_summary(approval, author)),
     ]

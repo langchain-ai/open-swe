@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Diff of {{ label }}</title>
+    <style>
+{{ css | safe }}
+{{ token_css | safe }}
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>{{ label }} {{ title }}</h1>
+      <div class="meta">
+        {{ files | length }} {{ "file" if files | length == 1 else "files" }}
+        · +{{ additions }} −{{ deletions }} · {{ url }}
+      </div>
+      <div class="toolbar">
+        <input id="filter" type="search" placeholder="Filter files" aria-label="Filter files">
+        <button id="expand" type="button">Expand all</button>
+        <button id="collapse" type="button">Collapse all</button>
+        <button id="wrap" type="button" aria-pressed="false">Wrap lines</button>
+        <button id="changes" type="button" aria-pressed="false">Changes only</button>
+      </div>
+    </header>
+    <div class="layout">
+      <nav aria-label="Changed files">
+        {% for file in files %}
+        <button type="button" data-target="file-{{ loop.index0 }}" data-path="{{ file.filename }}">
+          <span>{{ file.filename }}</span>
+          <span class="stat">+{{ file.additions }} −{{ file.deletions }}</span>
+        </button>
+        {% endfor %}
+      </nav>
+      <main>
+        {% for file in files %}
+        <details id="file-{{ loop.index0 }}" data-path="{{ file.filename }}" open>
+          <summary>
+            <span>{{ file.filename }}</span>
+            <span class="stat">+{{ file.additions }} −{{ file.deletions }}</span>
+          </summary>
+          <div class="scroll">
+            <table>
+              {% for row in file.rows %}
+              <tr class="{{ row.kind }}"><td class="num">{{ row.old_number or "" }}</td><td class="num">{{ row.new_number or "" }}</td><td class="sign">{{ row.sign }}</td><td class="code">
+                {%- for segment in row.segments -%}
+                {%- if segment.changed %}<mark>{% endif -%}
+                {%- if segment.css_class %}<span class="{{ segment.css_class }}">{{ segment.text }}</span>{% else %}{{ segment.text }}{% endif -%}
+                {%- if segment.changed %}</mark>{% endif -%}
+                {%- endfor -%}
+              </td></tr>
+              {% endfor %}
+            </table>
+          </div>
+        </details>
+        {% endfor %}
+      </main>
+    </div>
+    <script>
+{{ js | safe }}
+    </script>
+  </body>
+</html>
