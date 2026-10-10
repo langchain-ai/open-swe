@@ -25,6 +25,14 @@ postgres:
 migration:
 	uv run python scripts/new_migration.py "$(m)"
 
+schema:
+	uv run python scripts/schema.py
+
+schema-check:
+	uv run python scripts/schema.py --check
+
+.PHONY: schema schema-check
+
 # UI development in one terminal: Vite (`make web`) and the backend fronting it, so
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
 # run side by side under -j2; Ctrl-C stops both. Command-line variables reach both recipes.
