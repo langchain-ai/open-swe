@@ -53,7 +53,7 @@ dev = [
 ]
 # Third-party sandbox providers. The registry imports each provider lazily, so
 # these are only needed when SANDBOX_TYPE selects one; `uv sync` alone gives you
-# the langsmith (default) and local providers.
+# the langsmith (default), mainbrella and local providers.
 sandbox-daytona = ["langchain-daytona>=0.0.8"]
 sandbox-modal = ["langchain-modal>=0.0.6"]
 sandbox-runloop = ["langchain-runloop>=0.0.7"]
