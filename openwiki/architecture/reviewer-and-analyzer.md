@@ -1,166 +1,154 @@
 ---
 type: architecture
-title: Review and Style Analysis Graphs
-description: Architecture of the isolated reviewer and review-style analyzer graphs, including repository preparation, durable finding reconciliation and publication, per-repository style persistence, and continual analysis scheduling.
-tags: [reviewer, analyzer, code-review, findings, review-style, langgraph, sandbox, github]
+title: Review, scout, and findings architecture
+description: How Open SWE prepares and executes isolated pull-request reviews, builds a durable walkthrough with the review scout, persists and reconciles findings, publishes GitHub reviews, and optionally delegates the model loop to Managed Deep Agents.
+tags: [reviewer, review-scout, pull-request, findings, github, remote-runtime, langgraph]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-10T08:14:14.686Z
 sources:
-  - id: openwiki-source-63ebc853556c1b852ed80aff
-    resource: repo://agent/analyzer.py
-  - id: openwiki-source-8f8da8ebd37830cfae55d76c
-    resource: repo://agent/review/analyzer_cron.py
-  - id: openwiki-source-f2ef7b73c8002cd7b756ad30
-    resource: repo://agent/review/findings.py
-  - id: openwiki-source-70a93c845bc5a2d41669d55f
-    resource: repo://agent/review/groups.py
-  - id: openwiki-source-33d4d2e6efc682b86ebf1624
-    resource: repo://agent/review/publish.py
-  - id: openwiki-source-290b6c9567021d70bc012c7c
-    resource: repo://agent/review/reconcile.py
-  - id: openwiki-source-e0831f51028e19f266889975
-    resource: repo://agent/review/style_guidance.py
-  - id: openwiki-source-92590907348b7bf56e1762fa
-    resource: repo://agent/review/style_jobs.py
-  - id: openwiki-source-31ac80d273943055d537bae8
-    resource: repo://agent/review/styles.py
-  - id: openwiki-source-276ab38291eb5741b4c2141c
-    resource: repo://agent/reviewer.py
-  - id: openwiki-source-9950d0e32f48b63eef01b7e2
-    resource: repo://agent/skills/continual-learning/SKILL.md
-  - id: openwiki-source-f821cbba108557a41969274b
-    resource: repo://agent/tools/add_finding.py
-  - id: openwiki-source-c451a6086ffd6238062ba879
-    resource: repo://agent/tools/publish_review.py
-  - id: openwiki-source-7373bada04b526afa9becd11
-    resource: repo://agent/tools/save_review_style.py
-  - id: openwiki-source-ff16fde3cd496fd0b8de20da
-    resource: repo://agent/utils/analyzer_skills.py
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
-  - id: openwiki-source-065c69ba95cc740a2282dd3c
-    resource: repo://tests/reviewer/test_factory_config_isolation.py
-  - id: openwiki-source-c2a2305421bcb0df9ae61668
-    resource: repo://tests/reviewer/test_reviewer_findings.py
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+  - id: openwiki-source-9ad7888a549990068f28dbdc
+    resource: repo://openswe/github/webhook.py
+  - id: openwiki-source-910bd310d95376759fb76e36
+    resource: repo://openswe/remote_runtime/reviewer.py
+  - id: openwiki-source-b6cde78a9fc6267a59d48d65
+    resource: repo://openswe/remote_runtime/server.py
+  - id: openwiki-source-8813511c8e2188e838ca5502
+    resource: repo://openswe/remote_runtime/tokens.py
+  - id: openwiki-source-169564263f818f7bae30cd90
+    resource: repo://openswe/review_scout/graph.py
+  - id: openwiki-source-49793b56ebea74c92109819c
+    resource: repo://openswe/review_scout/launch.py
+  - id: openwiki-source-7a02c62499495310b04f21ef
+    resource: repo://openswe/review/chat.py
+  - id: openwiki-source-85f325a37c97d6000b6e6a23
+    resource: repo://openswe/review/findings.py
+  - id: openwiki-source-f47abef99c7b9c6cdca43421
+    resource: repo://openswe/review/reconcile.py
+  - id: openwiki-source-96bcad07b4fe7078402bc2b8
+    resource: repo://openswe/reviewer.py
+  - id: openwiki-source-96907ca866d8ca4c8369bc1b
+    resource: repo://openswe/tools/add_finding.py
+  - id: openwiki-source-7cec199cafafc864b85fba49
+    resource: repo://openswe/tools/publish_review.py
+  - id: openwiki-source-1266cbed91c88c5e7a8dcc6b
+    resource: repo://tests/reviewer/test_remote_runtime.py
+  - id: openwiki-source-b1bd20b7356e048369b421fa
+    resource: repo://tests/reviewer/test_review_chat.py
+  - id: openwiki-source-f41a6a24cc19b53c446ee2f0
+    resource: repo://tests/reviewer/test_reviewer_reconcile.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-10T08:14:14.686Z" }
 ---
 
-# Review and Style Analysis Graphs
+# Review, scout, and findings architecture
 
-Open SWE exposes two specialized deep-agent graphs: `reviewer` (`agent.graphs.reviewer:traced_reviewer_agent`) and `analyzer` (`agent.graphs.analyzer:traced_analyzer`). The reviewer evaluates a GitHub pull request using durable, per-PR findings; the analyzer learns a repository-specific supplement to that review policy. They share sandbox infrastructure but have deliberately different authority, state, and entry paths.
+Open SWE has two distinct PR-oriented deep-agent graphs: `reviewer` assesses and publishes a pull-request review, while `review-scout` creates a shared walkthrough of the change. They are registered independently in `langgraph.json`. The reviewer owns durable findings and GitHub review mutation; the scout owns a best-effort, per-head explanation and partition of the diff. They intentionally use separate deterministic threads and disposable checkouts.
 
-For trigger routing and webhook behavior, see [PR Review Workflow](../workflows/pr-review.md). For sandbox provider and recovery behavior, see [Sandbox Lifecycle](sandbox-lifecycle.md), and for the broader tool catalog, see [Tools](../concepts/tools.md).
+This page covers the review execution path. For webhook routing and user-facing trigger details, see [PR Review](../workflows/pr-review.md); for sandbox lifecycle, see [Sandbox Lifecycle](sandbox-lifecycle.md); and for the general tool model, see [Tools](../concepts/tools.md).
 
-## Reviewer: constrained PR assessment
+## Entry points and durable review identity
 
-### Authority boundary and construction
+A review may start from a Slack/manual PR request or an automatic GitHub PR event. The dispatcher fetches PR metadata, rejects draft PRs for manual requests, creates the deterministic reviewer thread if needed, writes `kind: "reviewer"` plus PR identity, current head, and watch metadata, and starts a `reviewer` durable run. Automatic first reviews also create a GitHub check run and a transient “in progress” PR comment.
 
-The reviewer is read-only with respect to the repository. Its system prompt prohibits commits, pushes, and direct `gh pr review` or review-API calls. It has no coding, commit, push, or PR-opening tools: repository changes cannot be an agent action. GitHub review mutation is centralized in `publish_review` and the finding-thread tools.
+A watched reviewer thread is the re-review boundary. On a head-branch push, the webhook ignores deleted branches, disabled repositories, PRs without a reviewer thread, unwatched threads, and an unchanged head. If the PR diff is unchanged since `last_reviewed_sha`, it carries the review association forward, advances that SHA, and completes a fresh check as “No new changes to review” without invoking the model. Otherwise it reconciles existing GitHub review threads, records the new head, opens a check for that head, and dispatches a re-review over the changed range.
 
-`get_reviewer_agent(config)` creates the graph per run. It shallow-copies the outer config and its `configurable` mapping before supplying a default recursion limit, preserving the caller's configuration. If the run has no `thread_id`, or the graph is not loaded for execution, it deliberately returns an empty deep agent rather than provisioning a sandbox.
+Reviewer thread metadata is intentionally small and durable: it identifies the PR, holds `head_sha`, `last_reviewed_sha`, watch state, optional Slack origin, and operational IDs such as the active check. The `kind` tag lets the UI and background code distinguish reviewer threads. Findings themselves are PostgreSQL records associated with the pull request; legacy findings in thread metadata are migrated on first access.
 
-For an executable run, the factory selects reviewer and subagent models from explicit configuration or team defaults, applies the Fable model gate, and attaches a cached sandbox backend with a reconnect closure. Its explicit tools are:
+## Reviewer graph: constrained assessment
 
-- review lifecycle: `fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`, `publish_review`, `resolve_finding_thread`, and `reply_to_finding_thread`;
-- read-only external helpers: `web_search`, `fetch_url`, and `http_request`.
+`get_reviewer_agent` makes a deep agent per executable run, copying the caller config and its `configurable` mapping before applying the default recursion limit. Without a `thread_id`, or when graph execution is disabled, it returns an empty agent and does not provision a sandbox. An executable graph receives review-specific tools—diff fetch, finding create/update/list, publish, resolve/reply thread—and read-only web helpers. It has no coding, commit, push, or PR-opening tool. A single `reviewer` subagent may investigate a partition, but it has no finding or publication tools; the parent records and publishes the result.
 
-It permits one `reviewer` subagent. The parent assigns a disjoint file partition; the subagent returns only candidate defects and has neither finding nor publication tools. The parent remains responsible for validation, persistence, and publication.
+The factory resolves main and subagent models from per-run settings or workspace defaults, applies the Fable gate, caches a reconnectable sandbox backend, and installs model-call limits, tool-error handling, token-proxy refresh, message-queue handling, response sanitizers, retries/timeouts, and an exit hook that settles the review check.
 
-### Run preparation, GitHub access, and context
+### Isolated preparation before model calls
 
-`PrepareReviewerRunMiddleware` performs deterministic setup before the first model call. For a configured source repository it mints a repository-scoped GitHub App installation token, caches it as the thread's bot token, and supplies it to the sandbox GitHub proxy. It then ensures a sandbox with `allow_replacement=True`, clones or fetches the repository, force-checks out the PR head, and materializes trusted repository skills from the base revision.
+`PrepareReviewerRunMiddleware` makes review setup deterministic before the first model call:
 
-The middleware computes the review range and its unified diff, including delta-only re-review ranges, then derives the changed `(file, side, line)` set. It puts `diff_text` and `diff_line_set` in run state. This lets `add_finding` reject invalid anchors at creation time rather than waiting for GitHub to reject a batch.
+1. It mints a repository-scoped GitHub App installation token, caches it as a bot token for the reviewer thread, and creates/reconnects the sandbox with a repository-limited GitHub proxy.
+2. The sandbox is allowed to be replaced: it contains only a checkout that `prepare_review_repo` rebuilds on every run. If replacement still fails, the system posts an unreachable-sandbox notification and fails rather than silently leaving the PR unreviewed.
+3. It clones or fetches and checks out the PR head, then materializes trusted repository skills from the base revision. A remote execution path instead declares its remote working directory already ready and performs no local sandbox checkout.
+4. It computes a full or incremental re-review diff and a `(file, side, line)` membership map. Both are carried in graph state so finding creation can reject invalid anchors before GitHub publication.
 
-In parallel, preparation fetches PR title and body, existing GitHub review threads, saved repository style, organization guidelines, root and scoped `AGENTS.md`/`CLAUDE.md` from the base SHA, an API standards skill, and optional author trace context. Existing threads are reconciled before their prompt block is rendered. Once the diff is available, scoped instructions are selected for changed files. The rendered prompt then selects first-review, re-review, or finding-reply guidance. Diff grouping is started as a background best-effort task and never blocks the review.
+Preparation fetches independent context concurrently: PR title/body, review threads, repository style guidance, root and scoped `AGENTS.md`, organizational guidelines, an approval policy read from the base commit, and API standards. It reconciles fetched review threads before rendering them into context. The reviewer also waits—up to ten minutes—for the optional scout walkthrough, but continues without one on timeout or scout failure.
+
+Author-controlled PR fields, review comments, and finding replies are rendered as XML data blocks. Wrapper closing tags are neutralized and login attributes are grammar-checked, preventing content from escaping its data wrapper into the instruction context.
 
 ```mermaid
-flowchart TD
-    Trigger["Reviewer run"] --> Prep["PrepareReviewerRunMiddleware"]
-    Prep --> Auth["App token and sandbox proxy"]
-    Prep --> Checkout["Checkout PR head and trusted skills"]
-    Prep --> Diff["Review diff and changed-line set"]
-    Prep --> Context["PR, threads, guidance, conventions"]
-    Context --> Reconcile["Reconcile GitHub review threads"]
-    Diff --> Agent["Reviewer agent"]
-    Reconcile --> Agent
-    Agent --> Finding["add_finding or update_finding"]
-    Finding --> Publish["publish_review"]
-    Publish --> GitHub["PR review and thread resolution"]
-    Publish --> Metadata["Findings and reviewed SHA"]
+sequenceDiagram
+    participant Hook as GitHub webhook
+    participant Thread as Reviewer thread
+    participant Scout as Review scout
+    participant Prep as Reviewer preparation
+    participant Agent as Reviewer graph
+    participant Store as Findings store
+    participant GitHub as GitHub PR
+    Hook->>Thread: create or update metadata and head
+    Hook->>GitHub: create check and status comment
+    Prep->>Prep: token, checkout, diff, context
+    Prep->>GitHub: fetch review threads
+    Prep->>Store: reconcile findings
+    Prep->>Scout: await walkthrough
+    Scout-->>Prep: walkthrough or timeout
+    Prep->>Agent: prompt, diff text, changed lines
+    Agent->>Store: add or update finding
+    Agent->>GitHub: publish review
+    GitHub-->>Store: comment and thread identities
+    Agent->>Thread: advance last reviewed SHA
 ```
 
-Reviewer setup and publication flow. Context retrieval is concurrent during preparation; reconciliation runs while loading the existing-thread context.
+Review execution uses a canonical reviewer thread, while scout completion is optional and does not block a review indefinitely.
 
-If sandbox replacement itself fails with `SandboxUnreachableError`, preparation posts a typed unreachable-sandbox notification on the PR and fails the run instead of silently leaving it unreviewed. This replacement policy is safe because the checkout is re-derived each run and findings are not sandbox state.
+## Review scout: a separate shared walkthrough
 
-### Prompt and input-safety constraints
+The `review-scout` graph plans an explanation of the PR in its own deterministic thread. Its invariant is coverage: every changed line is placed in an explicit chunk or in **Other**. A chunk describes a logical portion of the change; it is not a finding and it cannot publish GitHub review comments. If a plan carried forward to a new head already covers all remaining lines, the scout exits before a model call.
 
-The prompt requires a concrete, changed-line-anchored failure mode and rejects speculation, ordinary style or naming nits, pre-existing defects, and duplicate fan-out for one defect across files. Explicit repository convention violations remain reviewable when they are anchored in the diff and have a concrete failure mode. Suggestions are restricted to small, obvious fixes.
+Its preparation mints a scoped App token, creates a replaceable sandbox, checks out and pins the base/head revision, and locates a `PlanWorkspace`. A stale scout head yields no work rather than overwriting a newer plan. The scout receives planning tools (`walkthrough_plan_chunk`, `walkthrough_move_to_other`, and `walkthrough_describe_other`), plus `record_human_input` only if stored author steering exists. Its finish middleware settles any unplanned lines into Other, saves a supplied human-input summary, and invalidates the PR UI record.
 
-PR title/body, existing review-thread comments, and finding replies are attacker-controlled GitHub content. The renderer places them in XML data blocks, treats their contents as data rather than instructions, validates login attributes against the GitHub login grammar, and neutralizes wrapper closing tags with `_escape_for_data_block`. Author trace context is also explicitly untrusted and must not be published.
+`ReviewScoutTarget.await_walkthrough()` first returns a completed walkthrough for the requested head. Otherwise it joins an active scout for the same head or launches a durable `review-scout` run, polls it for at most `SCOUT_WAIT_SECONDS` (600), and returns `None` when unavailable or late. A newer head supersedes an older scout run so only the latest walkthrough is written. The review page can also explicitly launch the scout and inspect its progress or latest error.
 
-### Durable finding lifecycle
+## Findings: lifecycle, storage, and reconciliation
 
-Findings are stored in LangGraph metadata on the deterministic reviewer thread, rather than in the sandbox. `reviewer_thread_id(owner, repo, pr_number)` uses UUID5, allowing webhooks, dashboard code, and runs to retrieve the same one-per-PR thread across pushes. `set_reviewer_thread_metadata` writes `kind: "reviewer"`; that tag supports cross-thread lookup for the UI and usage aggregation.
+A finding records location and diff side, severity/confidence/category, title and description, optional short suggestion and diff hunk, status, seen SHAs, publication IDs, surface state, reply/reconciliation fields, a fingerprint, interactions, and optional rank. Open findings deduplicate by their normalized content fingerprint. Surface state is monotonic (`not_surfaced` → `surfaced` → `resolve_pending` → `resolved`); normalization of legacy records resolves contradictions by retaining the most advanced state.
 
-A `Finding` records its location and side, severity and confidence, title/description/suggestion, diff membership and hunk, status, first and last-confirmed SHAs, publication identities, surface state, human-reply/reconciliation fields, fingerprint, and interaction history. Legacy persisted shapes are normalized on read. Surface state is monotonic: normalization resolves contradictory legacy data by retaining the furthest state.
+`add_finding` validates title, severity, confidence, side, and ordered range. It obtains diff context from injected state first, then configuration, and finally a freshly fetched authenticated PR diff. An anchor outside the reviewed diff yields `success: false` and `in_diff: false` with an explicit do-not-retry message. A valid finding receives the current live head SHA, an extracted diff hunk when available, and a suggestion capped at four lines. If the durable reviewer thread is missing, tools return a structured do-not-retry result rather than looping on a condition retry cannot repair.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NotSurfaced: add in-diff finding
-    NotSurfaced --> Surfaced: GitHub inline comment posted
-    Surfaced --> ResolvePending: finding resolved or dismissed
-    ResolvePending --> ResolvedSurface: GitHub thread resolved
-    ResolvedSurface --> [*]
+    [*] --> OpenUnsurfaced: add in-diff finding
+    OpenUnsurfaced --> Surfaced: publish inline comment
+    Surfaced --> OpenUnsurfaced: no transition
+    Surfaced --> ResolvePending: agent resolves or dismisses
+    ResolvePending --> Resolved: GitHub thread resolved
+    Surfaced --> Resolved: reconciliation sees resolved thread
+    Resolved --> [*]
 ```
 
-Surface state moves forward independently of the finding's `open`, `resolved`, or `dismissed` status.
+The surface-state progression is independent from a finding’s business `status`; reconciliation and publish record GitHub-facing progress without rolling it backward.
 
-`add_finding` validates title, severity, confidence, side, and ordered line range. It resolves diff context from injected run state first, then `configurable`, then a fresh authenticated PR diff. A line-anchored range absent from the relevant diff side returns `success: false` and `in_diff: false`; the prompt tells the model not to re-anchor or retry. File-level findings are accepted but do not render inline. Successful findings retain an extracted diff hunk when diff text is available, clip suggestions beyond four lines, and deduplicate through their content fingerprint.
+Each inline comment includes an `open-swe-review-comment` JSON marker containing the finding ID and anchor. Reconciliation trusts markers only on `open-swe` or `open-swe[bot]` comments, then falls back to recorded thread and comment IDs. It backfills identities and marks a matching finding surfaced. It records the newest human reply after the bot comment, truncates it for storage, and appends a `human_reply` interaction that requires reassessment. A finding is marked resolved only when all matching threads are terminal **and** all are actually resolved: outdated threads alone do not resolve it.
 
-Before every normal run, `reconcile_findings_with_review_threads` matches findings to GitHub threads first by embedded marker, then recorded thread or comment identity. It backfills comment/thread IDs and marks matched findings surfaced. A finding becomes resolved only when all matched threads are resolved; outdated-but-not-resolved threads do not resolve it. The latest non-bot reply after the bot comment is retained as a `human_reply` interaction with `needs_reassessment`, giving a subsequent re-review a durable reason to reconsider.
+GitHub reply webhooks take a faster path for a known reviewer thread: they reconcile, locate the finding by parent comment ID, append a reassessment interaction, and dispatch a finding-reply reviewer run with the relevant reply context. This lets the reviewer explain, revise, dismiss, or resolve a finding using the same durable state.
 
-### Publication and failure semantics
+## Publication and completion semantics
 
-`publish_review` filters unpublished, in-diff, open findings at or above its severity threshold (default `medium`) and caps the batch at `REVIEW_FINDING_CAP` (6). A call posts one GitHub PR Review containing a fixed host-generated summary and one inline comment per renderable finding; a suggestion becomes a fenced `suggestion` block. Each comment includes an `open-swe-review-comment` JSON marker with finding identity and anchor metadata, which supports reconciliation and recovery of lost IDs.
+`publish_review` must be the only tool call in its model turn and requires a complete, unique best-first ranking of the findings it would publish. It filters open, in-diff findings at or above the requested severity threshold (default `medium`) and sorts by that rank before severity and location. Re-reviews only consider unposted findings first seen at the live head, preventing duplicate inline comments.
 
-On successful publication, the tool records review/comment/thread identities, resolves threads for resolved findings through GraphQL `resolveReviewThread`, advances `last_reviewed_sha`, records usage, clears the started-review comment, and settles the GitHub review check. On re-review, already published findings are not posted again, and a run with no new inline comments can intentionally skip a duplicate empty review while still resolving threads and advancing state.
+The tool posts one GitHub PR review with its summary and inline comments. It embeds the marker in every inline body and renders a fenced `suggestion` block only for a retained suggestion. After a successful post it records the review and comment IDs, backfills thread IDs if necessary, resolves eligible already-resolved finding threads via GitHub GraphQL, links the PR to the reviewer thread, advances `last_reviewed_sha`, clears the transient status comment, records usage, and settles the GitHub check.
 
-Callers must inspect the structured result: `success: true` with `review_id: null` and `skipped_empty_re_review: true` is a valid no-post outcome; `dry_run: true` is evaluation simulation. A numeric `review_id` confirms a real review. If GitHub reports an unresolved anchor, the tool filters invalid findings and retries once with valid anchors when possible; otherwise it returns `unresolvable_findings` and a remediation hint, avoiding blind retries. Missing durable thread state is similarly a structured do-not-retry result.
+A re-review with no new inline comments and an existing Open SWE summary intentionally skips a duplicate empty review, but still resolves completed threads and advances the reviewed SHA. Evaluation runs instead simulate publication, save the selected IDs in reviewer metadata, and return `dry_run: true`. A GitHub unresolved-anchor response causes one filtered retry with valid findings when possible; otherwise the structured result names `unresolvable_findings` and tells the model to resolve or correct them rather than retrying blindly.
 
-## Analyzer: repository review-style learning
+## Optional Managed Deep Agents reviewer path
 
-### Graph and sandbox model
+A manual PR request can opt into Managed Deep Agents (MDA), but only for public repositories and only when a remote reviewer client is configured. MDA moves the model loop, checkpoints, and sandbox checkout to a remote deployment; this backend continues to own preparation, persistent findings, GitHub App access, follow-up queue draining, check settlement, and all non-sandbox reviewer tools.
 
-The analyzer creates a repository-specific review-style prompt for the reviewer. Its preparation resolves the repository identity and mode, ensures a sandbox, and configures the LangSmith GitHub proxy with either the dashboard-provided OAuth token or a GitHub App installation token. The analyzer has just two domain tools: `read_finding_outcomes` and `save_review_style_prompt`. It has an 80-model-call limit plus input sanitization, tool-error, timeout, and response-sanitization middleware.
+The remote reviewer calls this backend’s stateless MCP server for tools and POST hooks for preparation, queue drain, and settlement. Preparation produces a credential-free prompt and checkout specification and stores the per-invocation diff/approval context in the backend store so any replica can execute a later tool call. `fetch_review_diff` stays remote because it uses the remote sandbox; the rest of the reviewer tool catalog is served over MCP. The service verifies an HMAC-signed, expiring bearer token on every request and derives the thread, assistant, and configuration from its claims—not from model-controlled tool arguments.
 
-Like the reviewer, `get_analyzer` returns an empty agent when no `thread_id` is supplied or graph execution is disabled. Unlike the reviewer factory, it writes the default recursion limit directly into its incoming config; callers that need configuration isolation should not assume the reviewer behavior applies here.
+## Review page and chat boundary
 
-`analyzer_mode` selects a virtual playbook:
-
-- **`bootstrap`** uses `bootstrap-repo-analysis`. It is a cold-start procedure: collect and extend historical merged-PR feedback using `gh`, seek substantive human comments and reviewer norms, then synthesize an initial prompt.
-- **`continual`** uses `continual-learning`. It reads confirmed and dismissed reviewer outcomes, promotes recurring confirmed patterns, demotes recurring false-positive patterns, and refines rather than replaces the current prompt.
-
-The base prompt directs the model to the mode playbook and supplies `REVIEWER_STYLE_THEMES`, so learned advice stays bounded by the reviewer's high-signal, diff-anchored policy. The playbook, not the short base prompt, defines the operational procedure.
-
-Both playbooks are packaged as virtual files. Launchers seed `build_skill_files()` into the input `files` channel; `get_analyzer` mounts a `StateBackend` at `/skills/` in a `CompositeBackend`. The agent reads `/skills/<name>/SKILL.md`, while the backend receives prefix-stripped paths. This avoids writing bundled procedural content into the execution sandbox.
-
-### Style store and launch paths
-
-`REVIEW_STYLES`, a typed store in the `review_styles` namespace keyed by `owner/repo`, owns a `ReviewStyle` record: analysis status, saved prompt and summary, sampled-reviewer/count metadata, analysis thread/run IDs, cron ID, error, and audit timestamps. The reviewer retrieves `custom_prompt` fail-soft during preparation: a store failure omits style guidance rather than failing a PR review. When available, it is appended under **Repository-specific review style**, and applies only when consistent with the global review bar.
-
-`start_bootstrap_analysis` first collects review samples with the caller's GitHub token, marks the record running, then creates a durable analyzer run on `review_style_thread_id(owner, repo)`. It passes samples, counts, reviewers, OAuth token, bootstrap mode, and virtual skill files. Collection or durable-run startup failures mark the style record failed. `start_continual_run` creates an immediate outcome-driven durable run using the same deterministic style thread.
-
-The terminal tool, `save_review_style_prompt`, requires a nonempty `custom_prompt` and `review_style_full_name`; it persists the trimmed prompt, summary, reviewers, and sample counts as a completed record. Empty output marks the record failed. After saving, it attempts cron registration but does not undo the saved style if registration fails.
-
-### Continual cron operations
-
-A successful save calls `ensure_continual_cron`. If the style record already has a cron ID, registration is idempotent. Otherwise it creates a daily LangGraph cron targeting `analyzer`, with `kind: "analyzer_continual"` metadata and a stable SHA-256-derived time between 05:00 and 08:59 UTC, then stores the returned cron ID. `remove_continual_cron` deletes a registered remote cron best-effort and clears the stored ID.
-
-The cron itself is threadless, but its configurable explicitly provides the deterministic `review_style_thread_id` because the analyzer otherwise creates an empty graph. Its input contains no accumulating message history, while the shared thread still keys sandbox and metadata by repository. The scheduled configurable selects `continual`, and because it supplies no fresh user token, analyzer preparation obtains an App installation token. The same input seeds the bundled skills required by the playbook.
+The review API requires repository access for review data, diffs, files, labels, manual re-review, and scout launch. Review chat is deliberately not the reviewer thread: opening chat creates or reuses a main `agent` thread associated with the PR and returns that thread plus `assistant_id: "agent"`. Every command, state, history, and event-stream proxy checks that the requested chat thread belongs to the requesting login’s PR threads before forwarding it to the dashboard-thread proxy.
 
 ## Focused tests
 
-The reviewer suite covers config isolation, diff and tool validation (including LEFT-side anchors), durable finding behavior, publishing and marker rendering, reconciliation, background diff groups, trace context, trigger/watch behavior, and review API/chat paths. In particular, `test_factory_config_isolation.py` protects the reviewer config-copy invariant; `test_reviewer_tools.py` exercises validation and persistence decisions; `test_reviewer_reconcile.py` covers marker backfill and terminal-thread rules; and `test_reviewer_publish.py` covers rendered markers and suggestions. `tests/analyzer/test_analyzer_cron.py` verifies cron creation, idempotence, removal, seeded continual skill files, explicit thread configuration, and the deterministic schedule window.
+The reviewer tests cover config-copy isolation, PR-ready and watched-push decisions, diff anchoring (including left-side ranges), finding persistence and outcomes, publication/retry/marker rendering, reconciliation terminal-state rules, reviewer API behavior, review chat access, and MDA token/server boundaries. Particularly useful change guards are `test_reviewer_reconcile.py` for marker trust and resolved-vs-outdated behavior, `test_remote_runtime.py` for signed-token rejection and generated remote tool specification parity, and `test_review_conversation.py` / `test_review_chat.py` for the review-page interaction boundary.

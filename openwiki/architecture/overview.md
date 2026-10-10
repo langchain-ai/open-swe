@@ -1,145 +1,139 @@
 ---
 type: architecture overview
-title: Runtime and Product Architecture
-description: LangGraph deployment, graph entrypoints, FastAPI ingress, durable dispatch, sandbox ownership, and the dashboard and desktop product surfaces.
-tags: [architecture, langgraph, fastapi, dashboard, runtime]
+title: System architecture and runtime boundaries
+description: How Open SWE composes LangGraph graphs, FastAPI service surfaces, durable runs, sandboxes, scheduling, and cloud or desktop user interfaces.
+tags: [architecture, langgraph, fastapi, runtime, dashboard]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-10T08:14:14.686Z
 sources:
-  - id: openwiki-source-63ebc853556c1b852ed80aff
-    resource: repo://agent/analyzer.py
-  - id: openwiki-source-328bde9e94017848bb09ba23
-    resource: repo://agent/api/app.py
-  - id: openwiki-source-921ec88ab63280d28b3dddb5
-    resource: repo://agent/chat.py
-  - id: openwiki-source-412c2c84023da365b8201b9f
-    resource: repo://agent/dashboard/__init__.py
-  - id: openwiki-source-61ace7d4952db9ddb8316aeb
-    resource: repo://agent/dashboard/routes.py
-  - id: openwiki-source-8c60a9544ea26006748dd7a3
-    resource: repo://agent/desktop.py
-  - id: openwiki-source-c48b309c5ca416cf623f0866
-    resource: repo://agent/dispatch.py
-  - id: openwiki-source-ba064e884edcde6097165df2
-    resource: repo://agent/github/webhook.py
-  - id: openwiki-source-f8665996049065d2172f68e2
-    resource: repo://agent/graphs/agent.py
-  - id: openwiki-source-73db7609f2a24f4a0ff5c32c
-    resource: repo://agent/graphs/reviewer.py
-  - id: openwiki-source-1116ea2d477f08cf0f5b2ef0
-    resource: repo://agent/graphs/scheduler.py
-  - id: openwiki-source-2d78b3dc0a340eaacb9e53e2
-    resource: repo://agent/linear/webhook.py
-  - id: openwiki-source-276ab38291eb5741b4c2141c
-    resource: repo://agent/reviewer.py
-  - id: openwiki-source-6fd11c8bb15f5eb94b765440
-    resource: repo://agent/sandboxes/lifecycle.py
-  - id: openwiki-source-3e15117ace082a39e1f130d8
-    resource: repo://agent/scheduler.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-e0785b4f2497c26e024d92fc
-    resource: repo://agent/slack/routes.py
-  - id: openwiki-source-3096620cfd0eb1bae6d9e78c
-    resource: repo://agent/webapp.py
   - id: openwiki-source-b76f79b6cfae139d1784a43a
     resource: repo://langgraph.desktop.json
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
-  - id: openwiki-source-4eb06f8c7641cb7107e39ca8
-    resource: repo://ui/src/router.tsx
+  - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
+    resource: repo://openswe/api/app.py
+  - id: openwiki-source-70b814b26d317c2b15c4a4fb
+    resource: repo://openswe/chat.py
+  - id: openwiki-source-e4bce0ee35cec33ca72293f7
+    resource: repo://openswe/dashboard/__init__.py
+  - id: openwiki-source-7fc33e4789861923a6f12e78
+    resource: repo://openswe/dashboard/routes.py
+  - id: openwiki-source-3e4d955c2e907c017e3302d0
+    resource: repo://openswe/desktop.py
+  - id: openwiki-source-1685d34aae8025be9332f45a
+    resource: repo://openswe/dispatch.py
+  - id: openwiki-source-813c25f6bac2408de322a1f5
+    resource: repo://openswe/graphs/agent.py
+  - id: openwiki-source-3bfcac4339fc43029fdaee09
+    resource: repo://openswe/graphs/chat.py
+  - id: openwiki-source-a9562865a4bff791686b49dd
+    resource: repo://openswe/graphs/review_scout.py
+  - id: openwiki-source-90b15fd6117126ebfe5b6b22
+    resource: repo://openswe/graphs/reviewer.py
+  - id: openwiki-source-169564263f818f7bae30cd90
+    resource: repo://openswe/review_scout/graph.py
+  - id: openwiki-source-96bcad07b4fe7078402bc2b8
+    resource: repo://openswe/reviewer.py
+  - id: openwiki-source-1b32e9f41fa7e64702b380f6
+    resource: repo://openswe/sandboxes/lifecycle.py
+  - id: openwiki-source-685dc33e7199aa1f6e402f7a
+    resource: repo://openswe/scheduler.py
+  - id: openwiki-source-3bd49e1c2bb74350a7519268
+    resource: repo://openswe/webapp.py
   - id: openwiki-source-c7a3ad58e4b4017484c1e326
     resource: repo://ui/src/routes/agents.tsx
   - id: openwiki-source-767ef8a0f66938a5c0710041
     resource: repo://ui/src/routeTree.gen.ts
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-10T08:14:14.686Z" }
 ---
 
-# Runtime and Product Architecture
+# System architecture and runtime boundaries
 
-Open SWE is a LangGraph deployment with a custom FastAPI application. The HTTP layer accepts browser and integration traffic, while durable LangGraph runs execute coding or review work against thread-scoped state and—except for PR chat—a backend. Five registered graph entrypoints separate the primary agent, reviewer, review-style analyzer, read-only PR chat, and time-triggered work.
+Open SWE is a LangGraph deployment whose custom FastAPI application is the integration and product boundary. Durable LangGraph runs perform coding and pull-request work; the API serves the dashboard and receives external events; PostgreSQL-backed application services own operational records and startup migrations; and a thread-scoped sandbox (or local backend) supplies execution state. The graph factory itself is deliberately short-lived—checkpointed graph state and thread metadata survive it.
 
-## Runtime map
+## Deployment map
 
-`langgraph.json` is the cloud deployment manifest. It registers thin `agent/graphs/` re-export modules as stable dotted entrypoints, mounts `agent.webapp:app`, configures checkpointer retention, loads `.env`, and builds the dashboard into the deployment image.
+`langgraph.json` is the cloud manifest. It registers five stable graph entrypoints through thin `openswe/graphs/` modules, mounts `openswe.webapp:app`, loads `.env`, and configures checkpoint deletion after the configured retention period. Its image build attempts to bundle the dashboard but intentionally leaves the backend deployable if the UI build fails.
 
-| Graph | Registered entrypoint | Responsibility |
+| Graph | Entrypoint | Runtime responsibility |
 |---|---|---|
-| `agent` | `agent.graphs.agent:traced_agent` | Per-run coding-agent factory: backend, models, tools, skills, and middleware. |
-| `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | PR review and findings publication workflow. |
-| `analyzer` | `agent.graphs.analyzer:traced_analyzer` | Repository-specific review-style learning. |
-| `chat` | `agent.graphs.chat:traced_chat_agent` | Read-only discussion of one PR, without a sandbox. |
-| `scheduler` | `agent.graphs.scheduler:get_scheduler` | A cron-tick dispatcher for maintenance and scheduled work. |
+| `agent` | `openswe.graphs.agent:traced_agent` | Coding-agent factory for a runnable thread. |
+| `reviewer` | `openswe.graphs.reviewer:traced_reviewer_agent` | Pull-request review findings and publication. |
+| `review-scout` | `openswe.graphs.review_scout:traced_review_scout` | Background walkthrough planning for a PR. |
+| `chat` | `openswe.graphs.chat:traced_chat_agent` | Read-only discussion of a PR. |
+| `scheduler` | `openswe.graphs.scheduler:get_scheduler` | Cron-tick dispatch and maintenance. |
 
 ```mermaid
 flowchart TD
-  Slack["Slack"] --> Webhooks["Webhook routers"]
-  Linear["Linear"] --> Webhooks
-  GitHub["GitHub"] --> Webhooks
-  Browser["Web dashboard"] --> Dashboard["Dashboard router"]
-  Cron["Cron tick"] --> Scheduler["scheduler graph"]
-
-  subgraph App["FastAPI app"]
-    Webhooks
-    Dashboard
-  end
-
-  Webhooks --> Dispatch["dispatch_agent_run"]
-  Dashboard --> Dispatch
+  Browser["Dashboard browser"] --> API["FastAPI application"]
+  Slack["Slack"] --> API
+  Linear["Linear"] --> API
+  GitHub["GitHub"] --> API
+  Cron["LangGraph cron tick"] --> Scheduler["scheduler graph"]
+  API --> Dispatch["durable dispatch"]
   Scheduler --> Dispatch
   Dispatch --> Agent["agent graph"]
   Dispatch --> Reviewer["reviewer graph"]
-  Agent --> Backend["Thread sandbox or desktop backend"]
-  Reviewer --> Backend
-  Analyzer["analyzer graph"] --> Backend
-  Browser --> Chat["chat graph"]
+  API --> Chat["chat graph"]
+  Agent --> Sandbox["thread sandbox or desktop backend"]
+  Reviewer --> Sandbox
+  Scout["review scout graph"] --> Sandbox
+  Agent --> Checkpoints["LangGraph thread checkpoints"]
+  Reviewer --> Checkpoints
+  API --> Database["application database"]
 ```
 
-This shows the principal paths. `dispatch_agent_run` is the shared creation boundary for `agent` and `reviewer` runs; chat, analysis, and scheduler invocations use their own graph entrypoints.
+This is the principal control plane: external or browser-originated work enters FastAPI, while agent and reviewer work is created through durable dispatch. Chat is a distinct read-only graph; the scheduler decides whether a tick is maintenance or a scheduled agent launch.
 
-## Graph and execution boundaries
+## Graph boundaries and execution context
 
-`agent.server:get_agent` produces a fresh deep-agent graph for an executable thread. It uses the thread ID to acquire a cached or reconnected backend (or a desktop `LocalShellBackend`), starts it, resolves thread/team/profile model settings, persists normalized thread settings when needed, and assembles a composite backend, tools, skills, subagents, and middleware. If no thread ID is supplied or the graph is being loaded rather than executed, it returns a deliberately empty deep agent without provisioning a backend. This is important for graph discovery and other non-execution loads. See [Agent Graph & get_agent Factory](./agent-graph.md) and [Middleware Stack](./middleware-stack.md) for its detailed composition.
+The agent entrypoint delegates to `openswe.server:get_agent`, which builds a fresh graph for each invocation and wraps per-thread factory work in tracing. The complete factory resolves the invocation configuration, model and tool surface, and thread execution backend; see [Agent Graph & get_agent Factory](./agent-graph.md) for that composition. This separation matters operationally: do not use the in-memory factory result as a state store.
 
-The reviewer follows the sandbox lifecycle but deliberately has a review-only toolset: `add_finding`, `update_finding`, `list_findings`, and `publish_review`; it does not receive commit, push, or PR-opening tools. Its preparation computes an in-diff line set so finding validation occurs when a finding is created, rather than failing only during GitHub publication. The analyzer uses the reviewer-style sandbox and authenticated `gh` access to mine historical human review feedback and finding outcomes, then saves a per-repository prompt through `save_review_style_prompt`. See [Reviewer & Review-Style Analyzer Graphs](./reviewer-and-analyzer.md).
+The reviewer uses a sandboxed checkout but has a review-focused tool surface: it prepares the repository and computes valid diff locations before model work, then works with findings tools rather than coding tools. The `review-scout` is another isolated PR workflow: it plans a shared walkthrough and human-input summary, has its own PR thread, and may avoid a model call when an unchanged head has no uncovered lines. Both review-oriented sandboxes may be replaced when unreachable because their checkout is re-derived.
 
-The chat graph is intentionally sandbox-less and read-only. The dashboard review-chat proxy seeds the PR diff, findings, and overview as virtual `/pr/` files in the graph's `files` state channel. Filesystem tools can read that context, while `execute`, writes, edits, and deletion are excluded; GitHub-backed tools use a repository-scoped GitHub App token rather than a user credential.
+PR chat intentionally has no sandbox. The review UI proxy supplies diff, findings, and overview as virtual `/pr/` files in graph state; read-oriented filesystem tools use those files, while shell and file mutation tools are excluded. It resolves a repository-scoped GitHub App installation token rather than exposing a user credential.
 
-The scheduler is a compiled, single-node `StateGraph`. Its `task` selects stale-run reconciliation, watch evaluation, background-task monitoring, session-cost or agent-cost refresh, or `launch_scheduled_agent_run`. Missing a watch key, thread ID, or schedule ID yields a structured status instead of launching ambiguous work. Scheduled agent runs ultimately use durable dispatch.
+### Sandbox lifecycle and persistence
 
-## HTTP composition and ingress
+LangGraph checkpointing holds graph state. Thread metadata holds the sandbox identifier and related execution configuration; process-local connections only speed up reuse. `ensure_sandbox_for_thread` reconnects a recorded ID when necessary, creates and records an ID only after initialization succeeds, and refreshes the managed sandbox's GitHub proxy and git identity.
 
-`agent/webapp.py` is a compatibility re-export of the application assembled by `agent/api/app.py:create_app`. At import time the API pins one event loop before queue workers are built. The app factory configures credentialed CORS from `DASHBOARD_ALLOWED_ORIGINS` and rejects `*`, then mounts dashboard, plan, workflow-approval, Linear, Slack, GitHub, and health routers plus the bundled dashboard UI. Its lifespan repeats event-loop pinning, validates sandbox and local-development LLM configuration at startup, and closes cached models on shutdown.
+An existing but unreachable coding sandbox fails the run rather than silently becoming an empty replacement, protecting uncommitted work. A deleted sandbox is replaced because its recorded ID can no longer be recovered. Task-worker threads attach to their coordinator's sandbox and must not create one. These distinctions are part of the recovery contract; see [Sandbox Lifecycle](./sandbox-lifecycle.md).
 
-The dashboard router is rooted at `/dashboard/api` and applies a same-origin dependency to mutations. It is the browser-facing boundary for OAuth, profiles, team defaults, administration, repository and review-style configuration, and thread APIs. Importing `agent.dashboard` does not eagerly load this large surface: a PEP 562 `__getattr__` imports and caches `routes.router` only when the web application mounts it.
+## Service composition and ingress
 
-Slack, Linear, and GitHub webhook routes validate and normalize external events before scheduling their service work. They derive or resolve stable thread identities—for example, Linear uses the issue ID and reviewer runs use repository and PR coordinates—so later activity can recover the corresponding thread state rather than starting an unrelated session. GitHub rejects invalid webhook signatures; Slack rejects conflicting mapping rather than guessing an agent thread.
+`openswe.webapp:app` is a compatibility import of the FastAPI application assembled in `openswe.api.app`. The module pins an event loop before queue workers are created. `create_app` configures credentialed CORS from `DASHBOARD_ALLOWED_ORIGINS` (and rejects `*`), request IDs, audit logging, tracing, GitHub error mapping, and an `UnknownUser` conflict response. It then mounts dashboard, plan and approval, integration/webhook, sandbox tool and OpenAI-compatible, remote-runtime, and optional MCP surfaces before mounting static dashboard assets.
 
-## Durable dispatch and state ownership
+The lifespan is also an operations boundary. It validates GitHub login, sandbox, local-model, and database configuration; runs database migrations; performs best-effort legacy imports; starts analytics and cross-process notification listeners; and enters remote runtime/MCP lifespans. Shutdown cancels the blob import and stops listeners, workers, and the database. Several optional imports/listeners log and continue on failure, so their degraded behavior is narrower than an application-start failure.
 
-`dispatch_agent_run` is the common run-creation contract used by Slack, Linear, GitHub, dashboard, and scheduled agent/reviewer triggers. `assistant_id` selects `agent` or `reviewer`; `source` determines input identity and is retained for metadata/logging, not graph selection. The dispatcher also rejects ambiguous combinations of a prebuilt input with content or identity arguments.
+The dashboard aggregate router is mounted at `/dashboard/api` with same-origin protection for mutations. It aggregates browser APIs for identity, profiles, workspaces, repositories and PRs, reviews, threads and transcripts, schedules, skills, integrations, audit/analytics, MCP, and UI invalidation. It is lazy-loaded through `openswe.dashboard.__getattr__`, so importing a small dashboard helper does not eagerly load the full FastAPI route and job surface.
 
-The durable defaults are intentional: `multitask_strategy="interrupt"` interrupts an active run so the follow-up resumes with prior history; `durability="sync"` checkpoints before steps; streams are resumable and include subgraphs; and a private event-streaming v2 configurable marker and compatible stream modes make externally initiated runs observable in the dashboard. Background follow-ups may explicitly choose another multitask strategy such as `enqueue`.
+Webhook route handling is intentionally separate from the dashboard API. Slack, Linear, and GitHub routes turn external events into thread-targeted work; related calls use stable thread identities and then use the shared dispatch boundary rather than each integration constructing incompatible LangGraph run parameters.
 
-Completion notification is best effort. The dispatcher attaches a webhook only when `RUN_COMPLETE_WEBHOOK_SECRET` is configured and `COMPLETION_WEBHOOK_URL` is absolute and non-loopback. Otherwise it logs the condition and creates the run without a webhook, avoiding a configuration error that would poison all run creation.
+## Durable dispatch and scheduling
 
-A graph factory is ephemeral, but thread execution context is durable: LangGraph checkpointing retains graph state, while LangGraph thread metadata holds the sandbox ID and related thread settings. The sandbox cache is in process and keyed by thread ID; another worker reconnects using the persisted ID. A deleted sandbox is replaced, but an existing unreachable coding sandbox raises by default because silent replacement can discard uncommitted work. Reviewer callers can allow replacement because their checkout is re-derived. The sandbox is published to the cache only after initialization and metadata binding succeed. See [Sandbox Lifecycle](./sandbox-lifecycle.md) and [Invocation](../workflows/invocation.md).
+`dispatch_agent_run` is the common adapter for Slack, Linear, GitHub, dashboard, scheduled, and internal agent/reviewer triggers. It constructs normalized input and source identity unless the caller supplies a prebuilt input, rejecting mixes of the two. `assistant_id` chooses the target graph; `source` feeds metadata and input provenance rather than graph selection.
+
+`create_durable_run` creates or titles the LangGraph thread when requested, assigns invocation metadata, and uses durable defaults: `interrupt` multitasking, synchronous checkpoint durability, resumable streams, subgraph streaming, and the v3-compatible stream modes/configuration marker. Thus a follow-up can interrupt a live run and resume from a checkpoint, and a dashboard can attach to a run created by an integration. A caller can opt into another strategy such as queued work.
+
+Completion notification is fail-safe rather than required for creation. Dispatch attaches a completion webhook only when `RUN_COMPLETE_WEBHOOK_SECRET` exists and `COMPLETION_WEBHOOK_URL` is an absolute non-loopback URL; invalid or absent completion settings omit the webhook rather than causing every run creation to fail. A managed deep-agent option sends the run to a configured remote runtime while retaining the local thread as the dashboard/webhook index.
+
+The scheduler is a compiled one-node `StateGraph`. Based on its task/state it reconciles stale runs, evaluates watches, monitors background tasks, refreshes workspace/session/agent cost data, prompts for thread feedback, runs human-review deadlines, or launches a scheduled agent run. Missing required keys return structured status results. Transient sandbox errors are retried for a bounded period; exhausted transient errors become `sandbox_unavailable`, while unrelated errors propagate.
 
 ## Cloud and desktop product surfaces
 
-The cloud manifest currently pins Python 3.14 and LangGraph API version 0.13.3. Its checkpointer TTL uses `delete`, sweeps every 60 minutes, and defaults to 43,200 minutes. The Dockerfile instructions attempt to build and install the dashboard static assets but allow a backend-only deployment if that build fails.
+The cloud manifest uses Python 3.14, a release-candidate-compatible LangGraph API constraint, checkpointer TTL deletion with a 60-minute sweep and a 43,200-minute default, plus a separately swept store TTL. `langgraph.desktop.json` is intentionally smaller: it exposes only the agent graph, provides local auth with Studio auth disabled, uses a local checkpointer, and disables the bundled UI.
 
-`langgraph.desktop.json` intentionally registers only the main agent graph, uses `agent.local_auth:auth` with Studio authentication disabled, and disables the bundled UI. A desktop run is identified by `configurable.source == "desktop"`. Its requested `local_project_path` must resolve to an existing directory that is either in `OPEN_SWE_LOCAL_PROJECTS_FILE` or beneath `OPEN_SWE_LOCAL_WORKTREES_DIR`; otherwise it is rejected. The local backend inherits only a small shell environment allowlist. Desktop scratch routes put large tool results and conversation history outside the project so they are not swept into `git add -A`.
+A run with `source == "desktop"` uses `LocalShellBackend` rather than a managed sandbox. Its requested project must resolve to an existing directory explicitly listed in `OPEN_SWE_LOCAL_PROJECTS_FILE` or underneath `OPEN_SWE_LOCAL_WORKTREES_DIR`; its child shell receives only a small environment allowlist. Desktop artifact routes put offloaded tool output, evicted history, and blobs outside the project so normal `git add -A` does not capture agent scratch data.
 
-The `ui/` application is a TanStack Router React client with routes for agent sessions and threads, local sessions, plans, automations, skills, reviews and styles, administration, integrations, usage, settings, environments, instructions, and sandbox views. The `/agents` layout requires a session except for enabled desktop-local routes and selects `cloud` or `local` streaming transport from the active route. Router `basepath` follows Vite's build base, allowing the bundle to run below a configured mount prefix.
+The `ui/` dashboard is a TanStack Router React application. It exposes agent/thread and local-session routes alongside reviews, workspaces, integrations, incidents, administration, usage, settings, skills, instructions, and automations. The agents layout requires a browser session, recognizes desktop-local threads, and may redirect ordinary agent routes to the experimental assistant UI; the backend remains the authority for API authorization and mutation-origin checks.
 
-## Operations and safe changes
+## Safe extension points
 
-- Add a deployable graph by exporting a stable factory through `agent/graphs/` and registering it in the appropriate manifest. Do not assume it becomes eligible for `dispatch_agent_run`; that contract selects only `agent` and `reviewer`.
-- Add browser APIs through `create_app`, preserving session and mutation-origin protections rather than bypassing the dashboard boundary.
-- Treat a coding sandbox that is unreachable as a recovery decision, not a cache miss. Replacing it changes the thread working tree.
-- When changing dispatch defaults or stream fields, test durable run creation and cross-surface event attachment: dashboard observability relies on replayable v2-compatible streams for runs created outside the browser.
-- When changing desktop path handling, retain real-path validation, the allowlist/worktree boundary, and artifact routing; each prevents a distinct local safety or repository-hygiene failure.
+- Register a new deployable graph through `openswe/graphs/` and `langgraph.json`; registration alone does not make it a supported `dispatch_agent_run` target.
+- Add browser-facing APIs to the app/router composition rather than bypassing request IDs, audit/tracing middleware, same-origin mutation protection, or dashboard static mounting.
+- Treat sandbox replacement as a data-recovery choice. Coding sandboxes retain working-tree state; reviewer and scout replacement is safe only because their repository checkout is re-derived.
+- Preserve durable dispatch stream settings when changing integration triggers. They are what let the dashboard observe work it did not create.
+- Preserve desktop real-path and artifact-routing checks when changing local execution; they define the local filesystem trust boundary.
 
-Related pages: [Agent Graph & get_agent Factory](./agent-graph.md), [Reviewer & Review-Style Analyzer Graphs](./reviewer-and-analyzer.md), [Sandbox Lifecycle](./sandbox-lifecycle.md), [Dashboard UI](../integrations/dashboard-ui.md), and [Invocation](../workflows/invocation.md).
+Related pages: [Agent Graph & get_agent Factory](./agent-graph.md), [Persistence, Workspaces, and Tasks](./persistence-workspaces-and-tasks.md), [Dashboard UI](../integrations/dashboard-ui.md), and [Invocation](../workflows/invocation.md).

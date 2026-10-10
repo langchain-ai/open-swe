@@ -1,138 +1,137 @@
 ---
 type: architecture lifecycle
-title: Thread Sandbox Lifecycle
-description: How a thread acquires, persists, reconnects to, and deliberately replaces its sandbox. Covers provider selection, proxy-backed credentials, recovery safety, and operational lifecycle controls.
-tags: [sandbox, lifecycle, threads, providers, github-proxy, recovery]
+title: Sandbox and backend lifecycle
+description: How Open SWE acquires, reconnects, publishes, recovers, and replaces a thread's sandbox or local bridge. Covers workspace snapshots, credential proxying, checkout handoff, task sharing, and local alternatives.
+tags: [sandbox, lifecycle, backend, providers, bridge, recovery]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-10T08:14:14.686Z
 sources:
-  - id: openwiki-source-8c60a9544ea26006748dd7a3
-    resource: repo://agent/desktop.py
-  - id: openwiki-source-5ec5369df7ad45c41aa9c1a5
-    resource: repo://agent/github/proxy.py
-  - id: openwiki-source-9d5775155057d8f8c3a08e3e
-    resource: repo://agent/middleware/refresh_github_proxy.py
-  - id: openwiki-source-276ab38291eb5741b4c2141c
-    resource: repo://agent/reviewer.py
-  - id: openwiki-source-6fd11c8bb15f5eb94b765440
-    resource: repo://agent/sandboxes/lifecycle.py
-  - id: openwiki-source-31cdc3533d50e7ed84c89652
-    resource: repo://agent/sandboxes/paths.py
-  - id: openwiki-source-2dedcea02c5aa03c54d81c32
-    resource: repo://agent/sandboxes/providers/langsmith.py
-  - id: openwiki-source-0746ff3f107493deffefb33b
-    resource: repo://agent/sandboxes/providers/local.py
-  - id: openwiki-source-49bfbb811c25e99235121924
-    resource: repo://agent/sandboxes/providers/registry.py
-  - id: openwiki-source-c2e0c61bef110853a29c63a8
-    resource: repo://agent/sandboxes/repo_prep.py
-  - id: openwiki-source-267a662990890ab782a8bf32
-    resource: repo://agent/sandboxes/retry.py
-  - id: openwiki-source-3f4feeeb872e0d43c9b850c8
-    resource: repo://agent/sandboxes/state.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-8df2adb4d3d3b703aed3451b
-    resource: repo://tests/sandbox/test_sandbox_publish_ordering.py
+  - id: openwiki-source-3436762fd1bce7c774640399
+    resource: repo://openswe/bridge/backend.py
+  - id: openwiki-source-6d39d9926d1a43e773b42f66
+    resource: repo://openswe/bridge/store.py
+  - id: openwiki-source-3e4d955c2e907c017e3302d0
+    resource: repo://openswe/desktop.py
+  - id: openwiki-source-462a6a5f9e0baaed3998747c
+    resource: repo://openswe/sandboxes/connect.py
+  - id: openwiki-source-66ebe3fff3f7b8a4f5567806
+    resource: repo://openswe/sandboxes/handoff.py
+  - id: openwiki-source-1b32e9f41fa7e64702b380f6
+    resource: repo://openswe/sandboxes/lifecycle.py
+  - id: openwiki-source-c1e3814c4caa0f4227587d10
+    resource: repo://openswe/sandboxes/paths.py
+  - id: openwiki-source-d16a45e9fc6aa80a3708c88c
+    resource: repo://openswe/sandboxes/providers/langsmith.py
+  - id: openwiki-source-5b3f60be6fd7ddbdf61f37ad
+    resource: repo://openswe/sandboxes/providers/local.py
+  - id: openwiki-source-a4c632cb1c0a9a7a637ab9fe
+    resource: repo://openswe/sandboxes/providers/registry.py
+  - id: openwiki-source-c5766699cee46f671b69bf81
+    resource: repo://openswe/sandboxes/repo_prep.py
+  - id: openwiki-source-2dbb6fddd1531095bb57d08e
+    resource: repo://openswe/sandboxes/state.py
+  - id: openwiki-source-ba248e578c15d3e2f953116e
+    resource: repo://tests/sandbox/test_sandbox_create_config.py
+  - id: openwiki-source-8c26669ded2641051623e3de
+    resource: repo://tests/sandbox/test_sandbox_handoff.py
   - id: openwiki-source-71e56ad3da996973b32520ab
     resource: repo://tests/sandbox/test_sandbox_recreation.py
-  - id: openwiki-source-46397d5eb777a7a1eefb168d
-    resource: repo://tests/sandbox/test_sandbox_reset.py
   - id: openwiki-source-f05d7497d4c60c3b322628eb
     resource: repo://tests/sandbox/test_sandbox_state.py
   - id: openwiki-source-1a0d5f0c064da60b08174a51
     resource: repo://tests/sandbox/test_stale_sandbox_creating.py
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+  - id: openwiki-source-bdfb68a46b8d136ffaed9cd9
+    resource: repo://tests/sandbox/test_task_worker_sandbox.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-10T08:14:14.686Z" }
 ---
 
-# Thread Sandbox Lifecycle
+# Sandbox and backend lifecycle
 
-A normal agent thread has one durable sandbox binding: the sandbox contains its checkout and uncommitted working tree across runs. The binding is deliberately split between durable thread metadata and a worker-local handle. This distinction lets a later run on another worker reconnect, while avoiding exposing a partially initialized sandbox to tools.
+A thread normally has one durable sandbox binding. It holds the checkout and uncommitted working tree between runs, so lifecycle code treats accidental replacement as data loss rather than routine availability recovery. The durable binding is thread metadata; live backend objects are deliberately process-local.
 
-Desktop runs are different: the agent factory supplies a `LocalShellBackend` rooted in an allowlisted project or a desktop-created worktree, rather than invoking the thread sandbox lifecycle. Desktop artifact routes put internal large-result and conversation-history files outside the project so they cannot be accidentally included in `git add -A`.
+Related: [Agent graph](agent-graph.md), [Persistence, workspaces, and tasks](persistence-workspaces-and-tasks.md), [Local bridge and remote runtime](../integrations/local-bridge-and-remote-runtime.md), and [Sandbox providers](../integrations/sandbox-providers.md).
 
-Related: [Agent graph](agent-graph.md), [Middleware stack](middleware-stack.md), [Threads and state](../concepts/threads-and-state.md), [Auth and security](../concepts/auth-and-security.md), and [Sandbox providers](../integrations/sandbox-providers.md).
+## Identity, cache, and stable handles
 
-## Binding and handles
+`thread.metadata["sandbox_id"]` is authoritative and is always read from the live thread, not a queued run configuration: a queued run can name the sandbox that a later rebind left. A metadata lookup failure propagates rather than being interpreted as an unbound thread, avoiding an overwrite of a real binding.
 
-`thread.metadata["sandbox_id"]` is the durable identity of a sandbox. `get_sandbox_metadata` first uses metadata supplied in the run configuration and otherwise reads the live LangGraph thread; a lookup failure returns `{}`, hence no ID. That fail-open behavior is safe for reading but is why provider interfaces intentionally have no delete operation keyed from this metadata: an unreliable lookup must not delete a live working tree.
+Two in-memory maps complement that durable ID:
 
-`SANDBOX_BACKENDS` is an in-process dictionary from thread ID to a stable `SandboxBackendProxy`. It is a cache, not persistence, and therefore disappears with a worker restart. `set_sandbox_backend` retains the existing proxy and swaps its target when possible, so middleware and tools holding the proxy see a replacement backend instead of retaining a stale object.
+- `SANDBOX_CONNECTIONS` maps sandbox ID to a live provider connection. It is keyed by sandbox rather than thread, so a thread rebound elsewhere cannot receive the connection it left behind.
+- `SANDBOX_BACKENDS` maps thread ID to a stable `SandboxBackendProxy`. Publishing a replacement swaps the proxy's target and removes a prior connection when its ID differs, so tools and middleware retaining the proxy do not retain an obsolete backend.
 
-The proxy is asynchronous. Synchronous backend methods fail with `NotImplementedError`; its `a*` methods resolve the current backend before delegating. If it has no target, resolution uses a registered reconnect callback, or falls back to the metadata ID and `create_sandbox`. A lock and shared startup task collapse concurrent first operations to one reconnect; `asyncio.shield` means cancellation of one waiter does not cancel shared startup. The proxy subclasses `BaseSandbox` so filesystem tooling recognizes capture-at-source support and can preserve the in-sandbox output cap. If an underlying backend lacks execute-offload support, the proxy explicitly falls back to ordinary execution.
+The proxy is async-only and subclasses `BaseSandbox`, preserving capture-at-source behavior for filesystem tooling. Every async operation resolves its current target. A missing target invokes a registered reconnect callback, or obtains the metadata ID and calls `connect_sandbox`; a lock and one shared startup task collapse concurrent callers to one reconnect. Awaiters shield that task, so cancelling one waiter does not cancel startup for the others. A failed startup is cleared and can be retried. `aexecute_with_offload` delegates when available and otherwise returns an ordinary-execution result.
 
-## Provider selection and provisioning
+## Provisioning inputs and provider boundary
 
-`create_sandbox` is the provider-neutral creation and reconnection boundary. `SANDBOX_TYPE` selects a factory at runtime; the supported values are `langsmith` (default), `daytona`, `modal`, `runloop`, `e2b`, and `local`. The registry lazily imports only the selected factory and rejects an unknown value. LangSmith receives snapshot, VM resource, and raw create-body overrides; other providers receive only the optional existing ID. Native async factories are awaited, while synchronous factories are moved to `asyncio.to_thread`.
+`create_sandbox` is the provider-neutral create-or-reconnect boundary, selected by `SANDBOX_TYPE`. The registry lazily imports `langsmith`, `daytona`, `modal`, `runloop`, `e2b`, or `local`; optional providers produce an actionable missing-extra error. LangSmith alone receives snapshot, resource, and arbitrary create-body options. Native async factories are awaited and synchronous wrappers run in `asyncio.to_thread`. Startup validation eagerly checks optional extras and LangSmith configuration so deployment errors appear at server boot.
 
-At server startup, `validate_sandbox_startup_config` validates the active LangSmith configuration rather than deferring errors until the first sandbox. It checks numeric size and retention settings, rejects negative TTLs, and validates `SANDBOX_CREATE_EXTRA_JSON` when present.
+`SandboxCreateConfig.resolve` loads the requested workspace (or, for `source="base"`, deliberately skips workspace lookup). A workspace that inherits the default sandbox uses the default workspace's ready snapshot, resources, and create parameters. Without a ready workspace snapshot, the provider uses its base snapshot. An owner preference can add `preserve_memory_on_stop`; a preference-read failure only logs a warning and does not block boot. After each boot, an asynchronous workspace-update trigger may start; when requested, lifecycle records that a stale workspace snapshot was used so the caller can report it.
 
-For a new thread sandbox, `SandboxCreateConfig.resolve` chooses an environment's ready snapshot when available, otherwise the admin base snapshot. It carries environment resource settings and create parameters into `create_sandbox`. The LangSmith provider also applies configurable idle and delete-after-stop retention to new boxes. Its creation path retries configured transient create failures; command retry is more conservative: only `SandboxRetryableConnectionError`, which guarantees the WebSocket upgrade failed before the command frame was sent, may be retried. Retries are bounded at four attempts with exponential jittered backoff, preventing a potentially executed command from being double-run.
+For a new managed sandbox, initialization overlaps the bot `git config --global` write with LangSmith proxy configuration: both need the box, but identity does not need proxy credentials. Identity is reapplied on reuse because global configuration can disappear. For the local provider, commands run directly on the host without isolation; it scopes global Git configuration to `.gitconfig-sandbox` and removes model and provider API keys from the child environment.
 
-The local provider is development-only: it runs commands directly on the host without isolation. It creates a project-local `.gitconfig-sandbox` that includes the developer's normal Git configuration, preventing per-run bot identity writes from overwriting the host identity. It also constructs an explicit environment excluding model and provider API keys.
+## Acquisition and publication
 
-## Get, reconnect, or create
-
-`ensure_sandbox_for_thread` is the lifecycle entrypoint used by normal agent runs. The agent factory creates and starts a per-thread proxy early, with this function as its reconnect callback. Thread dispatch uses `multitask_strategy="interrupt"`, so one thread does not provision two sandboxes concurrently and no cross-process `__creating__` sentinel is used.
+`ensure_sandbox_for_thread` is the normal entrypoint. Dispatch uses `multitask_strategy="interrupt"`, so one thread does not provision twice concurrently and the lifecycle does not use a cross-process creation sentinel. It narrows any requested GitHub repository list to the immutable per-thread scope before obtaining credentials.
 
 ```mermaid
-flowchart TD
-  Start["ensure_sandbox_for_thread"] --> Cached{"Live cached backend"}
-  Cached -->|"yes"| Refresh["Reapply identity and refresh proxy"]
-  Cached -->|"no"| Bound{"Metadata sandbox ID"}
-  Bound -->|"yes"| Reconnect["Reconnect using provider"]
-  Bound -->|"no"| Create["Boot and initialize new sandbox"]
-  Reconnect --> Refresh
-  Refresh -->|"ready"| Publish
-  Refresh -->|"gone"| Replace["Boot replacement"]
-  Refresh -->|"unreachable"| Permit{"Replacement permitted"}
-  Permit -->|"yes"| Replace
-  Permit -->|"no"| Fail["Raise unreachable error"]
-  Create --> Bind["Persist new metadata ID"]
-  Replace --> Bind
-  Bind --> Publish["Publish stable proxy"]
+stateDiagram-v2
+  [*] --> ReadMetadata
+  ReadMetadata --> AttachWorker: task worker binding
+  ReadMetadata --> ConnectBridge: bridge ID
+  ReadMetadata --> BootNew: no sandbox ID
+  ReadMetadata --> Reconnect: sandbox ID
+  Reconnect --> Initialize: connected
+  Reconnect --> Replace: sandbox gone
+  Reconnect --> Unreachable: cannot connect or configure
+  Unreachable --> Replace: replacement allowed
+  Unreachable --> Failed: replacement not allowed
+  ConnectBridge --> Handoff: bridge live
+  ConnectBridge --> Failed: bridge unavailable
+  BootNew --> Initialize: booted
+  Replace --> Initialize: replacement booted
+  Initialize --> PersistBinding: newly created
+  Initialize --> Handoff: existing binding
+  PersistBinding --> Handoff: metadata saved
+  Handoff --> Publish: complete
+  Publish --> Ready
+  AttachWorker --> Ready: host verified and attached
+  Replace --> Failed: replacement boot fails
+  Ready --> [*]
+  Failed --> [*]
 ```
 
-*Thread sandbox selection, recovery decision, durable binding, and final publication.*
+*Source-grounded lifecycle for creation, attachment, recreation, and failure handling.*
 
-The flow has three normal cases: reuse a live cached backend; reconnect using the durable ID; or boot a new backend when neither is available. Reconnect has no separate ping: for LangSmith, refreshing proxy configuration necessarily reaches the box, so that real operation is the reachability check. Git identity is re-applied every run because a reused box can lose its global config and commit authors must remain valid for downstream preview deployments. Identity configuration starts concurrently with proxy configuration because it requires the box but not proxy credentials.
+For a normal remote ID, the entrypoint uses a cached connection for that exact ID or reconnects via the provider, then refreshes proxy credentials. A new or replacement sandbox is created and fully initialized before its `sandbox_id` and recorded base proxy configuration are persisted. Handoff and tool-URL provisioning occur before `set_sandbox_backend` publishes the target. Consequently a creation, initialization, or metadata-write failure does not expose the new box through the thread proxy.
 
-Creation initializes the sandbox before writing `sandbox_id` to metadata. It writes the ID and persisted base proxy configuration before calling `set_sandbox_backend`; thus a creation or metadata failure leaves no new backend exposed through the proxy and a later run will create rather than adopt a half-initialized box.
+A `bridge:` ID is different: it is the user machine, not a provider resource. Lifecycle connects a live `BridgeSandboxBackend`, completes any pending checkout handoff, and publishes it without booting a cloud sandbox, proxying GitHub, or rewriting the user's global Git identity. The bridge backend turns execute and file operations into queued CLI requests and checks liveness while awaiting a response; a disconnected bridge is unreachable and is never silently replaced.
 
-## Gone is not unreachable
+## Recovery policy and explicit recreation
 
-Recovery is intentionally data-preserving:
+`SandboxGoneError` means the provider confirms that the bound resource no longer exists, so lifecycle always creates and binds a replacement. `SandboxUnreachableError` means this run cannot connect or configure the existing box; it may recover next run and may contain the only uncommitted work. The default is therefore to fail the run with the old binding intact. If a permitted replacement itself fails, its failure is normalized to `SandboxUnreachableError`.
 
-- `SandboxGoneError` means the provider confirms the bound box no longer exists. It cannot contain the working tree, while its stale metadata ID would make every future run reconnect to the same missing resource. `ensure_sandbox_for_thread` always creates and binds a replacement.
-- `SandboxUnreachableError` means this run could not connect or reconfigure a box. The next run may succeed against the same ID. The default behavior is to raise rather than replace: silently switching to an empty filesystem could discard uncommitted work while the agent still believes that work exists. A failure while creating a chosen replacement is normalized to `SandboxUnreachableError`, preserving the caller's recovery contract.
-- `allow_replacement=True` is reserved for the reviewer. Reviewer sandboxes hold only a checkout that `prepare_review_repo` clone-or-fetches and force-checks out to the PR head on every run, so an unreachable box can safely be replaced. Review threads persist per PR across pushes; refusing that replacement would permanently block subsequent reviews.
+`allow_replacement=True` is for the read-only reviewer, whose checkout is re-derived each run. `prepare_review_repo` clones or fetches, fetches PR/base references, force-checks out the requested PR head, and verifies `HEAD`; a prep failure returns `False` rather than making the sandbox unusable. Reviewer skills are extracted from a trusted base reference to `.review-skills` outside the PR checkout, never from attacker-controlled PR-head content.
 
-A command-level failure is not automatically a sandbox failure. The tool error path distinguishes pre-command transient gateway failures, which tell the model to retry, and command error frames, which remain normal tool errors. A non-transient connection failure notifies the user once and terminates the run rather than repeatedly executing against a dead backend.
+`recreate_sandbox_for_thread` is the deliberate replacement operation. It refuses task-worker and bridge bindings, attempts to stop the old LangSmith sandbox with a ten-second bound, then creates a distinct new sandbox. It configures identity, persists the new ID and proxy base configuration, and only then swaps the stable proxy target and provisions its tool URL. Metadata failure retains the old target. A stop failure does not undo a successful rebind: the operation raises `SandboxRecreationStopError` containing both IDs so an operator can address the old resource.
 
-## LangSmith credential proxy
+## Shared task sandboxes and checkout handoff
 
-The GitHub proxy is LangSmith-only. On sandbox creation and reuse, lifecycle code resolves either a supplied GitHub token or a GitHub App installation token, then configures the LangSmith proxy. GitHub credentials are injected as opaque request headers: `api.github.com` receives `Authorization: Bearer`, while `github.com` and `*.github.com` receive Basic authentication for `x-access-token:<token>`. The sandbox sees only the `GH_TOKEN=proxy-injected` placeholder required by `gh`; the real GitHub token is not written into its environment or filesystem.
+A task worker never creates or replaces its own sandbox. It validates that its recorded host is the task coordinator and that task, owner, workspace, admin/visibility properties, and repository authorization are compatible. It then ensures the coordinator's existing sandbox, verifies that its binding did not change during attachment, records the host ID in worker metadata, and publishes that same backend under the worker's proxy. Workers cannot attach when their allowed repository scope would be narrower than the host's scope.
 
-Environment-provided proxy configuration is retained as a base configuration. It is persisted in thread metadata as `sandbox_base_proxy_config` after successful creation, so reconnects and token rotations preserve custom rules. The configuration procedure replaces its managed user-LangSmith rule, preserves other custom rules, and may add opaque Stagehand model credentials. A proxy PATCH retries retryable transport/status errors. If it receives the special not-ready response, it best-effort starts the stopped sandbox and retries; a stopped box retains its filesystem and is not equivalent to a deleted one.
+Changing a thread between cloud and local workspaces can set `sandbox_handoff_from`. Before publishing a new target, `complete_handoff` connects to that source and moves the checkout once. It packs the source branch, unpushed commits, and uncommitted index/worktree changes into a temporary Git bundle while leaving the source tree unchanged; the target fetches `origin`, restores the branch and changes, and then the marker is cleared. A missing repository metadata record simply clears the marker without transfer.
 
-GitHub App tokens expire after one hour. `record_proxy_token_expiry` keeps worker-local expiry, recorded time, repository scope, permission scope, and base proxy configuration per thread. The before-model `refresh_github_proxy_before_model` invokes `maybe_refresh_proxy_token`; it refreshes within five minutes of known expiry or after 50 minutes when expiry is unknown. Refresh remints with the original recorded scope unless a caller supplies a scope, so ordinary rotation does not broaden repository access or permissions. The middleware logs refresh failures rather than preventing a model call.
+## Credentials and repository locations
 
-## Deliberate replacement operations
+GitHub proxy configuration is LangSmith-only. Lifecycle obtains a workspace token scoped to the narrowed repository list and configures opaque proxy rules: `api.github.com` gets a Bearer header, while `github.com` and `*.github.com` get Basic authentication for `x-access-token:<token>`. `GH_TOKEN` inside the sandbox is only a placeholder needed by `gh`; the real token is not placed in its environment.
 
-Both replacement operations require an existing bound sandbox and ensure the provider returns a distinct ID. Neither deletes the old sandbox; it remains preserved but detached from the thread.
+The provider starts with a workspace base proxy configuration, replaces managed GitHub and tool rules, and preserves unrelated custom rules. Proxy PATCH calls retry transport and selected status failures; a not-ready response triggers a best-effort sandbox start before retrying. Token expiry, repository scope, workspace, and base configuration are recorded per thread for future refreshes.
 
-- `recreate_sandbox` is the ordinary tool: it creates a fresh sandbox using the resolved environment configuration, configures it, persists the new ID, and only then replaces the cached backend. The fresh box has no prior files or worktree state.
-- `sandbox_reset` is admin-gated and LangSmith-only. It accepts a raw LangSmith create-body request, configures GitHub proxy and git identity on the new box, persists both its ID and its base proxy configuration, then hands the proxy over. The tool warns callers never to put secrets or tokens in raw create options.
+Sandbox filesystem roots vary by provider. `resolve_sandbox_work_dir` tries provider work-directory methods, shell `pwd`, provider home/root methods, and shell `$HOME`, accepting only a writable directory and caching the winner. Repository resolution appends a repository name except on a bridge, where the bridged work directory is already the user's checkout; checkout lookup also supports legacy `$HOME/<repo>` locations.
 
-If metadata persistence fails in either operation, the existing cached proxy retains the old backend. This ordering makes an explicit replacement atomic from the thread's perspective even though the newly created provider resource may remain detached.
+## Desktop alternative and focused verification
 
-## Repository paths and reviewer preparation
+A desktop run bypasses this remote lifecycle and uses a `LocalShellBackend` rooted in either an allowlisted project or a desktop-created worktree. Desktop artifact routes put large results, conversation history, and blobs outside that project so they are not collected by `git add -A`.
 
-Provider filesystems do not share a universal root. `resolve_sandbox_work_dir` first tries provider-exposed work-directory methods, then shell `pwd`, provider home/root methods, and finally `$HOME`; each candidate must exist and be writable. The resolved path is cached on the backend, and `resolve_repo_dir` appends a validated repository name. This keeps repository operations portable across provider wrappers.
-
-The reviewer prepares its repo before the first model call: it clones once or fetches an existing checkout, fetches the PR head and base as needed, force-checks out the requested head SHA, and verifies `HEAD`. Preparation is best-effort, returning `False` on failure so the review can proceed from its fetched diff. Reviewer skills are treated separately: skill directories are extracted from the trusted base reference into `.review-skills` outside the PR checkout, never loaded from attacker-controlled PR-head content.
-
-## Focused verification
-
-The sandbox test suite exercises provider registry routing, startup settings, LangSmith proxy payloads and retries, thread binding order, gone/unreachable recovery, reset and recreate handoff ordering, proxy token refresh scope, paths, reviewer preparation, and local-provider behavior. In particular, tests assert concurrent proxy callers reconnect only once, initialization failures publish no backend, metadata update failures retain the old target, and retryable gateway errors are retried only when the SDK guarantees no command ran.
+Focused sandbox tests cover lazy reconnection and cancellation, no publication before successful initialization, stale metadata/cache safety, gone-versus-unreachable recovery, recreation ordering, shared-task authorization, checkout handoff including unpushed and uncommitted changes, provider routing, workspace snapshot selection, proxy behavior, portable paths, and reviewer checkout/skill isolation.
