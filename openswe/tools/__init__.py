@@ -57,6 +57,7 @@ _TOOL_MODULES = {
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
     "publish_workspace": ".workspaces",
+    "save_app": ".save_app",
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
@@ -141,6 +142,7 @@ __all__ = [
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
+    "save_app",
     "save_organization_skill",
     "delete_organization_skill",
     "save_plan",
@@ -236,6 +238,7 @@ if TYPE_CHECKING:
     )
     from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
+    from openswe.tools.save_app import save_app
     from openswe.tools.save_plan import save_plan
     from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
