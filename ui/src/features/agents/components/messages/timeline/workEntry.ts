@@ -116,7 +116,10 @@ function expandedTextForChunk(
   const command =
     typeof chunk.input?.command === "string" ? chunk.input.command.trim() : ""
   if (command) blocks.push(command)
-  const textArguments = toolTextArguments(chunk.input)
+  // A shell row already shows its description as the preview.
+  const textArguments = toolTextArguments(chunk.input).filter(
+    ([key]) => !(command && key === "description")
+  )
   for (const [key, value] of textArguments) {
     blocks.push(`${key.replace(/_/g, " ")}:\n${value}`)
   }

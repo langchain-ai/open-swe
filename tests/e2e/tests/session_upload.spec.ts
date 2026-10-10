@@ -19,7 +19,7 @@ interface Block {
   text?: string;
   id?: string;
   name?: string;
-  input?: { command?: string };
+  input?: { command?: string; description?: string };
   tool_use_id?: string;
   content?: unknown;
 }
@@ -210,10 +210,10 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
       label.replace(/^Shell\s*/, "").replace(/\.\.\.$/, ""),
     );
     for (const [index, use] of toolUses.entries()) {
-      expect(shown[index].length).toBeGreaterThan(20);
-      expect(normalized(use.input?.command ?? "")).toContain(
-        normalized(shown[index]),
-      );
+      expect(shown[index].length).toBeGreaterThan(0);
+      expect(
+        normalized(use.input?.description || use.input?.command || ""),
+      ).toContain(normalized(shown[index]));
     }
 
     const firstOutput = toolResults.get(toolUses[0].id ?? "") ?? "";

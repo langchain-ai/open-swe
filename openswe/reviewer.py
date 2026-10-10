@@ -46,6 +46,7 @@ from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
+    DescribeCommandsMiddleware,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
@@ -1100,6 +1101,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 ),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
+                DescribeCommandsMiddleware(),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
                 SanitizeFireworksMessagesMiddleware(),

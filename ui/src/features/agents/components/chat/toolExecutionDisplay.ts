@@ -139,6 +139,13 @@ export function formatToolDisplayParts(
       return plain(humanizeToolTitle(title))
     }
     case "execute": {
+      const description = firstStringArg(input, ["description"])
+      if (command && description)
+        return {
+          heading: "Shell",
+          preview: truncateMiddle(description, 60),
+          previewTooltip: command,
+        }
       if (command)
         return { heading: "Shell", preview: truncateMiddle(command, 60) }
       return plain(humanizeToolTitle(title))
