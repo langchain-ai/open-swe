@@ -44,10 +44,16 @@ const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "iframe-item",
 ])
 
-export function splitWorkAndReply(items: Array<RenderItem>): {
-  workItems: Array<RenderItem>
-  replyItems: Array<RenderItem>
-} {
+/** A run of work that folds behind one row, or a reply shown between such runs. */
+export type TurnSegment =
+  | { type: "reply"; item: RenderItem }
+  | { type: "work"; key: string; items: Array<RenderItem> }
+
+/**
+ * Splits a turn at every reply so each stretch of work folds on its own, in the
+ * order it happened. Trailing prose is the turn's answer, so it stays a reply.
+ */
+export function segmentTurn(items: Array<RenderItem>): Array<TurnSegment> {
   let trailingReplyIndex = items.length
   while (trailingReplyIndex > 0) {
     const prev = items[trailingReplyIndex - 1]
@@ -55,21 +61,20 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
     trailingReplyIndex -= 1
   }
 
-  const workItems: Array<RenderItem> = []
-  const replyItems: Array<RenderItem> = []
+  const segments: Array<TurnSegment> = []
   items.forEach((item, index) => {
     if (
-      item.type === "reply-item" ||
-      item.type === "managed-tools-item" ||
-      item.type === "iframe-item" ||
-      index >= trailingReplyIndex
+      index >= trailingReplyIndex ||
+      (item.type !== "text-chunk" && REPLY_ITEM_TYPES.has(item.type))
     ) {
-      replyItems.push(item)
-    } else {
-      workItems.push(item)
+      segments.push({ type: "reply", item })
+      return
     }
+    const last = segments.at(-1)
+    if (last?.type === "work") last.items.push(item)
+    else segments.push({ type: "work", key: `work-${item.key}`, items: [item] })
   })
-  return { workItems, replyItems }
+  return segments
 }
 
 function toolNeedsAttention(
@@ -111,16 +116,12 @@ function attentionItems(
   return []
 }
 
-export function selectCollapsedTurnItems(
+/** The entries of a folded stretch of work that stay visible: approvals, errors, and optionally unfinished calls. */
+export function collapsedWorkItems(
   items: Array<RenderItem>,
   includeUnfinished = false
 ): Array<RenderItem> {
-  const { replyItems } = splitWorkAndReply(items)
-  const replyKeys = new Set(replyItems.map((item) => item.key))
-
-  return items.flatMap((item) =>
-    replyKeys.has(item.key) ? [item] : attentionItems(item, includeUnfinished)
-  )
+  return items.flatMap((item) => attentionItems(item, includeUnfinished))
 }
 
 export function countWorkActions(items: Array<RenderItem>): number {

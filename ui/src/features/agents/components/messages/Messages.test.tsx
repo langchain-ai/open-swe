@@ -196,7 +196,7 @@ describe("Messages", () => {
     ).toBeTruthy()
   })
 
-  it("keeps the live activity row below Slack replies sent mid-run", () => {
+  it("folds each stretch of work between the Slack replies around it", () => {
     render(
       <Messages
         isStreaming
@@ -236,13 +236,18 @@ describe("Messages", () => {
       { wrapper }
     )
 
-    const fold = screen.getByRole("button", { name: "Thinking… · 1 action" })
-    for (const text of ["On it!", "Found the cause"]) {
+    const inOrder = [
+      screen.getByText("On it!"),
+      screen.getByRole("button", { name: "Worked · 1 action" }),
+      screen.getByText("Found the cause"),
+      screen.getByRole("button", { name: "Thinking…" }),
+    ]
+    inOrder.slice(1).forEach((later, index) => {
       expect(
-        screen.getByText(text).compareDocumentPosition(fold) &
+        inOrder[index]!.compareDocumentPosition(later) &
           Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy()
-    }
+    })
   })
 
   it("renders unfinished grouped work after its fold row", () => {
