@@ -103,6 +103,9 @@ class Topic(BaseTopic):
     THREAD_QUEUES: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
 
+    THREADS: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: that thread's summary, such as its pending wakeup."""
+
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
 
@@ -189,7 +192,7 @@ async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
     for thread_id, thread in zip(ordered, threads, strict=True):
         if isinstance(thread, BaseException):
             logger.warning(
-                "Could not read thread for queue invalidations",
+                "Could not read thread for invalidations",
                 exc_info=thread,
                 extra={"agent_thread_id": thread_id},
             )
@@ -205,3 +208,4 @@ Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
+Topic.THREADS = KeyedTopic("threads", authorize_keys=_readable_threads)

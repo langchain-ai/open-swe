@@ -35,6 +35,7 @@ from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.thread_feedback import schedule_answer_feedback
+from openswe.tools.schedule_thread_wakeup import sync_next_wakeup
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
@@ -530,6 +531,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
+    if isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup":
+        await sync_next_wakeup(langgraph_client(), thread_id)
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
     if status == "success" and not (

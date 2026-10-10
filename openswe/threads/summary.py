@@ -518,6 +518,11 @@ async def _thread_summary(
         ),
         "resolved": _is_thread_resolved(metadata),
         "attentionReason": _metadata_string(metadata, "attention_reason"),
+        "nextWakeupAt": (
+            int(metadata["next_wakeup_at_ms"])
+            if isinstance(metadata.get("next_wakeup_at_ms"), (int, float))
+            else None
+        ),
         "resolvedAt": (
             int(metadata["resolved_at_ms"])
             if isinstance(metadata.get("resolved_at_ms"), (int, float))

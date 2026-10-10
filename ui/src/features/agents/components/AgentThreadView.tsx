@@ -19,6 +19,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Icon } from "@langchain/macaw-components/Icon"
 import { Link } from "@langchain/macaw-components/Link"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
@@ -125,6 +126,28 @@ function CodeChannelLink({ url }: { url?: string | null }) {
     >
       Open in Slack
     </Button>
+  )
+}
+
+function ScheduledWakeup({ at }: { at?: number | null }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!at || at <= now) return
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      Math.min(30_000, at - now)
+    )
+    return () => clearTimeout(timer)
+  }, [at, now])
+  if (!at || at <= now) return null
+  return (
+    <div
+      className="mb-space-2 flex w-fit items-center gap-1.5 px-2 py-1 text-xs text-secondary"
+      title={`Scheduled for ${new Date(at).toLocaleString()}`}
+    >
+      <ClockIcon size={14} weight="regular" aria-hidden />
+      Agent wakes up {formatRelativeTime(at)}
+    </div>
   )
 }
 
@@ -968,6 +991,7 @@ export function AgentThreadView({
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
+              {!isStreaming && <ScheduledWakeup at={thread.nextWakeupAt} />}
               {!reviewChat && (
                 <ThreadPullRequests
                   pullRequests={

@@ -23,6 +23,7 @@ import { BookOpenTextIcon } from "@phosphor-icons/react/dist/ssr/BookOpenText"
 import { CalendarBlankIcon } from "@phosphor-icons/react/dist/ssr/CalendarBlank"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
@@ -59,7 +60,7 @@ import {
   reviewPageRoute,
 } from "@/features/reviews/lib/reviewEntry"
 import { useQueryClient } from "@tanstack/react-query"
-import { cn } from "@/lib/utils"
+import { cn, formatRelativeTime } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 import { reportError } from "@/lib/errorReporting"
 
@@ -529,6 +530,14 @@ export function SidebarThreadRow({
             {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
           </>
         )}
+        {pendingWakeupAt(item) && (
+          <ClockIcon
+            size={ICON_SIZE}
+            weight="regular"
+            className="shrink-0 text-icon-tertiary"
+            aria-label="Wakeup scheduled"
+          />
+        )}
         {item.status === "running" ? (
           <RunningIndicator label="Thread running" />
         ) : unread ? (
@@ -758,6 +767,12 @@ function SidebarSubagentRow({
   )
 }
 
+function pendingWakeupAt(item: SidebarThreadItem): number | null {
+  if (item.location !== "cloud" || item.status === "running") return null
+  const at = item.thread.nextWakeupAt
+  return at && at > Date.now() ? at : null
+}
+
 /** Rich preview beside a row; it is a hover card so its links stay clickable. */
 function RowHoverCard({
   trigger,
@@ -791,6 +806,7 @@ function ThreadHoverCard({
   const onAMac = item.location === "local" || runsOnAMac(item.thread)
   const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
+  const wakeupAt = pendingWakeupAt(item)
 
   return (
     <div className="flex min-w-0 flex-col gap-space-2">
@@ -820,6 +836,18 @@ function ThreadHoverCard({
         <div className="flex min-w-0 items-center gap-space-2 text-secondary">
           <FolderIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
           <span className="min-w-0 truncate text-xxs">{item.repoLabel}</span>
+        </div>
+      )}
+      {wakeupAt && (
+        <div className="flex min-w-0 items-center gap-1.5 text-secondary">
+          <ClockIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
+          <span className="min-w-0 truncate text-xxs">
+            Wakes up {formatRelativeTime(wakeupAt)} ·{" "}
+            {new Date(wakeupAt).toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            })}
+          </span>
         </div>
       )}
       {item.pr && (
