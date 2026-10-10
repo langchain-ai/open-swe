@@ -58,17 +58,19 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     source: str,
 ) -> None:
     requester["source"] = source
-    profile = {
+    legacy_model_settings = {
         "default_model": "openai:gpt-6.1-sol",
         "reasoning_effort": "high",
         "default_subagent_model": "anthropic:claude-haiku-4-5",
         "subagent_reasoning_effort": "none",
+        "model_routing_enabled": True,
+    }
+    profile = {
         "default_repo": "org/private",
         "branch_prefix": "alice/",
         "base_branch": "develop",
         "draft_prs": False,
         "review_draft_prs": True,
-        "model_routing_enabled": True,
         "recent_thread_context_enabled": True,
         "email": "alice@example.com",
     }
@@ -77,7 +79,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "local_tracing_project": "keep-project",
         "default_workspace": "keep-workspace",
     }
-    user_records.seed("profile", "Alice", profile)
+    user_records.seed("profile", "Alice", {**profile, **legacy_model_settings})
     user_records.seed("profile", "bob", {"draft_prs": True})
     user_records.seed("dashboard_preferences", "Alice", prefs)
     user_records.seed("github_oauth_token", "Alice", {"encrypted_gh_token": "secret"})
@@ -89,6 +91,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     }
     saved = user_records.get("profile", "Alice")
     assert {key: saved[key] for key in profile} == profile
+    assert not legacy_model_settings.keys() & saved.keys()
     assert saved["auto_fix_ci"] is False
     assert user_records.get("profile", "bob") == {"draft_prs": True}
     assert user_records.get("github_oauth_token", "Alice") == {"encrypted_gh_token": "secret"}
