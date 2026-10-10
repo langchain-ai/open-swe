@@ -281,6 +281,7 @@ class ReviewAssessment(BaseModel):
     decision: Literal["would_approve", "needs_human_review"]
     explanation: str = Field(min_length=1, max_length=1500)
     summary: str = Field(default="", max_length=300)
+    because: str = Field(default="", max_length=300)
 
 
 def render_review_body(

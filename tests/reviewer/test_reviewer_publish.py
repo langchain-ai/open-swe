@@ -103,6 +103,10 @@ def _isolate_publish_review_pr_state(fake_store: FakeStore) -> Iterator[None]:
             AsyncMock(return_value=WorkspaceSettings({})),
         ),
         patch("openswe.tools.publish_review.PullRequest.link_review", AsyncMock()),
+        patch(
+            "openswe.tools.publish_review.AutoApprovalUndo.exists_for",
+            AsyncMock(return_value=False),
+        ),
         patch("openswe.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),
         patch("openswe.tools.publish_review.replace_findings", AsyncMock()),
         patch("openswe.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
@@ -1060,15 +1064,16 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
 
 
 @pytest.mark.parametrize(
-    "prepared_policy,mode,current_head,expected_event,has_assessment",
+    "prepared_policy,mode,current_head,expected_event,has_assessment,undone",
     [
-        (None, "approve", True, "COMMENT", False),
-        ("Docs only", "off", True, "COMMENT", False),
-        ("Docs only", "dry_run", True, "COMMENT", True),
-        ("Docs only", "approve", False, "COMMENT", True),
-        ("Docs only", "approve", True, "APPROVE", True),
+        (None, "approve", True, "COMMENT", False, False),
+        ("Docs only", "off", True, "COMMENT", False, False),
+        ("Docs only", "dry_run", True, "COMMENT", True, False),
+        ("Docs only", "approve", False, "COMMENT", True, False),
+        ("Docs only", "approve", True, "APPROVE", True, False),
+        ("Docs only", "approve", True, "COMMENT", True, True),
     ],
-    ids=["no-policy", "switched-off", "dry-run", "head-moved", "approve"],
+    ids=["no-policy", "switched-off", "dry-run", "head-moved", "approve", "undone-before"],
 )
 async def test_publication_respects_the_base_policy_and_current_mode(
     prepared_policy: str | None,
@@ -1076,6 +1081,7 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     current_head: bool,
     expected_event: str,
     has_assessment: bool,
+    undone: bool,
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
 
@@ -1085,6 +1091,10 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         patch(
             "openswe.tools.publish_review.approval_allowed_for_head",
             AsyncMock(return_value=current_head),
+        ),
+        patch(
+            "openswe.tools.publish_review.AutoApprovalUndo.exists_for",
+            AsyncMock(return_value=undone),
         ),
         patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(

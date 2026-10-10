@@ -12,5 +12,6 @@ Include an `assessment` in `publish_review` for the exact full `head_sha` you in
 - `decision`: `would_approve` only when the applicable approval criteria are satisfied; otherwise `needs_human_review`.
 - `explanation`: one or two sentences naming the applicable approval criteria, evidence, and any uncertainty. Do not claim checks passed unless you verified them. On a re-review, include outstanding findings and earlier changes, not just the latest diff.
 - `summary`: one short plain sentence on what the PR changes, for a reader who has not opened it. Shown in Slack beside an automatic approval.
+- `because`: a short lowercase clause that completes "Auto-approved because …" in plain language, e.g. `it only deletes an unused config file, which APPROVALS.md allows`. Shown in Slack when the assessment approves.
 
 The host decides whether the assessment is posted as a comment or an approval. Never submit approvals through other tools, and never merge the PR.

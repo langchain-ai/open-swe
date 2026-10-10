@@ -159,11 +159,34 @@ def open_card(
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
+    blocks.extend(_undo_note(request))
     blocks.extend(_reviewers(request, review_states))
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))
     blocks.append(actions(*_buttons(request)))
     return f"Review requested for {_label(request)}: {title}", blocks
+
+
+def _undo_note(request: HumanReviewRequest) -> list[Block]:
+    undo = request.auto_approval_undo
+    if undo is None:
+        return []
+    return [
+        context(
+            f":leftwards_arrow_with_hook: Auto-approval undone by {undo.undone_by_mention}: "
+            f"{escape(undo.justification)}"
+        )
+    ]
+
+
+def undo_auto_approve_button(request: HumanReviewRequest) -> ButtonElement:
+    """Opens a modal asking why, then withdraws Open SWE's approval on GitHub."""
+    return button(
+        "Undo auto-approve",
+        action_id="open_swe_option_select_undo_auto_approve",
+        value=_button_value("undo_auto_approve", request),
+        style="danger",
+    )
 
 
 def merge_button(request: HumanReviewRequest) -> ButtonElement:
@@ -216,8 +239,17 @@ def approved_card(
     summary = (assessment.summary if assessment is not None else "") or request.tldr
     notes = [escape(summary)] if summary else []
     if assessment is not None:
-        notes.append(f"*Auto-approve justification:* {escape(assessment.explanation)}")
+        reason = assessment.because.strip().rstrip(".")
+        notes.append(
+            f"Auto-approved because {escape(reason)}."
+            if reason
+            else f"Auto-approved: {escape(assessment.explanation)}"
+        )
     if notes:
         blocks.append(context("\n".join(notes)))
-    blocks.append(actions(merge_button(request)))
+    blocks.extend(_undo_note(request))
+    buttons = [merge_button(request)]
+    if auto_approval is not None:
+        buttons.append(undo_auto_approve_button(request))
+    blocks.append(actions(*buttons))
     return text, blocks

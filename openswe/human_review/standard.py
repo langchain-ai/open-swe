@@ -51,8 +51,14 @@ from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.requests import (
+    AutoApprovalUndo,
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+)
 from openswe.prompts import prompt
+from openswe.review.assessment_feedback import AutoApproval
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
 from openswe.slack.cards import origin_footer
@@ -1030,6 +1036,54 @@ async def merge_now(request: HumanReviewRequest, user: User | None) -> Outcome:
     if result.status == "merged":
         await ReviewCard(request).mark_merged()
     return Outcome(result.message)
+
+
+async def undo_auto_approval(
+    request: HumanReviewRequest, user: User | None, justification: str
+) -> Outcome:
+    """Withdraw Open SWE's automatic approval for a teammate with write access, recording why."""
+    if request.state != "open":
+        return Outcome("This review request is already closed.")
+    writer = await resolve_writer(request, user)
+    if isinstance(writer, Outcome):
+        return writer
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            reviews = await or_none(pull.reviews())
+            auto = await AutoApproval.standing(reviews) if reviews is not None else None
+            if auto is None:
+                return Outcome("Open SWE has no standing auto-approval on this pull request.")
+            await pull.dismiss_review(
+                auto.assessment.review_id,
+                f"Auto-approval undone by @{writer.github_login}: {justification}",
+            )
+    except GitHubAppUnavailable:
+        return Outcome("Open SWE cannot reach this repository's GitHub App installation.")
+    except GitHubError as refused:
+        return Outcome(f"GitHub refused to dismiss the approval: {refused.message}")
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is not None:
+            row.auto_approval_undos.append(
+                AutoApprovalUndo(
+                    pull_request_id=row.pull_request_id,
+                    github_review_id=auto.assessment.review_id,
+                    justification=justification,
+                    undone_by_user_id=writer.user.id,
+                    request_id=row.id,
+                )
+            )
+    logger.info(
+        "Auto-approval undone from a human review card",
+        extra={
+            "request_id": str(request.id),
+            "github_login": writer.github_login,
+            "github_review_id": auto.assessment.review_id,
+        },
+    )
+    if (current := await HumanReviewRequest.get(request.id)) is not None:
+        await ReviewCard(current).refresh()
+    return Outcome("Undid Open SWE's auto-approval.")
 
 
 async def settle_pull_request(owner: str, repo: str, number: int) -> None:
