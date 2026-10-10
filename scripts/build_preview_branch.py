@@ -60,6 +60,10 @@ class PreviewError(Exception):
     """A step the preview build depends on failed."""
 
 
+class TypecheckUnavailable(PreviewError):
+    """Docker could not start the dashboard typecheck."""
+
+
 def _env(name: str, default: str) -> str:
     return os.environ.get(name) or default
 
@@ -370,13 +374,18 @@ async def resolve_with_agent(
 
 
 async def typecheck() -> str | None:
-    """Errors from typechecking the dashboard at HEAD, or None when it is clean.
+    """Dashboard errors at HEAD, None when clean, or TypecheckUnavailable when Docker fails."""
+    for attempt in range(3):
+        result = await run("docker", "pull", TYPECHECK_IMAGE, check=False)
+        if result.code == 0:
+            break
+        if attempt == 2:
+            raise TypecheckUnavailable(
+                f"{result.stderr}{result.stdout}".strip() or f"docker pull exited {result.code}"
+            )
+        await asyncio.sleep(2**attempt)
 
-    The Docker build installs and bundles the UI the same way but swallows failures, so this
-    is the only place a broken UI stops the preview instead of shipping without a dashboard.
-    The check runs the PRs' own toolchain, so it gets an exported copy of the tree in a
-    container: no ``.git`` credentials, no runner environment, no view of this process.
-    """
+    # Export untrusted PR toolchains without .git credentials or the runner environment.
     with tempfile.TemporaryDirectory() as scratch:
         archive = Path(scratch) / "tree.tar"
         source = Path(scratch) / "src"
@@ -407,6 +416,15 @@ async def typecheck() -> str | None:
         )
     if result.code == 0:
         return None
+    output = f"{result.stderr}{result.stdout}"
+    if result.code == 125 or re.search(
+        r"^(?:docker:|Error response from daemon:|Cannot connect to the Docker daemon"
+        r"|error during connect:|Unable to find image |permission denied while trying to connect"
+        r"|failed to connect to the docker API)",
+        output,
+        re.IGNORECASE | re.MULTILINE,
+    ):
+        raise TypecheckUnavailable(output.strip() or f"docker run exited {result.code}")
     return f"$ {TYPECHECK_SCRIPT}\n{result.stdout}{result.stderr}"[-TYPECHECK_OUTPUT_LIMIT:]
 
 
@@ -746,7 +764,19 @@ The preview resets to plain `main` every Sunday, in the
             await self.reuse_fixup()
         errors = None
         if self.settings.force or await rev_parse("HEAD^{tree}") != published:
-            errors = await self.verify(prompt, rerere)
+            try:
+                errors = await self.verify(prompt, rerere)
+            except TypecheckUnavailable as exc:
+                self.write_summary(base_sha)
+                summary(
+                    "",
+                    "### Typecheck unavailable — nothing published",
+                    "",
+                    str(exc).splitlines()[0],
+                    "",
+                    "The dashboard typecheck could not run. A later cron run can retry.",
+                )
+                raise
         await rerere.save()
         self.write_summary(base_sha)
         if errors:
