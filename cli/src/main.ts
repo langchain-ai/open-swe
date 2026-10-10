@@ -23,7 +23,6 @@ import {
   type CliResult,
   type RunOutcome,
 } from "./stream.ts"
-import { uploadTranscript } from "./upload.ts"
 
 const USAGE = `oswe — run a cloud Open SWE agent against this directory
 
@@ -32,9 +31,6 @@ Usage:
   oswe logout                       Forget the session for the current backend
   oswe auth status                  Show which credential is in use and check it
   oswe run [options] [prompt...]    Start an agent bridged to this directory
-  oswe upload [--backend <url>] CODE TRANSCRIPT_PATH
-                                    Fill the thread the upload_session MCP tool
-                                    reserved with a local session transcript
   oswe --help | --version
 
 Run options:
@@ -379,17 +375,6 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await authStatusCommand()
       fail("usage: oswe auth status")
       return 2
-    case "upload": {
-      const [code, transcriptPath] = positionals.slice(1)
-      if (!code || !transcriptPath || positionals.length !== 3) {
-        fail("usage: oswe upload [--backend <url>] CODE TRANSCRIPT_PATH")
-        return 2
-      }
-      const backend = values.backend ?? (await readBackend())
-      const threadId = await uploadTranscript(backend, code, transcriptPath)
-      out(`${normalizeBackend(backend)}/agents/${encodeURIComponent(threadId)}`)
-      return 0
-    }
     case "run":
       return await runCommand({
         thread: values.thread,

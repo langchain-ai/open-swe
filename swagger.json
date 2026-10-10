@@ -17893,18 +17893,14 @@
               }
             }
           },
-          "description": "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. Authorized by the upload code the upload_session MCP tool returned, as a bearer token.",
+          "description": "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. Authorized by the upload_token the upload_session MCP tool returned, as a bearer token.",
           "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Upload Session Dashboard Api Threads Uploads Post",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"

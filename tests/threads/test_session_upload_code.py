@@ -54,7 +54,7 @@ def reserved(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     return metadata
 
 
-async def _upload(code: str) -> dict[str, object]:
+async def _upload(code: str) -> dict[str, object] | None:
     ticket = decode_upload_ticket(code)
     return await session_upload.upload_session(session_upload.UploadStream(_request()), ticket)
 
@@ -68,12 +68,15 @@ async def test_an_upload_code_fills_its_own_thread_once(reserved: dict[str, obje
         assert_thread_postable(reserved, "alice")
     assert early.value.status_code == 409
 
-    assert (await _upload(_code("alice")))["id"] == "t1"
+    uploaded = await _upload(_code("alice"))
+    assert uploaded is not None
+    assert uploaded["id"] == "t1"
     assert reserved["session_upload_pending"] is False
     assert_thread_postable(reserved, "alice")
-    with pytest.raises(HTTPException) as reused:
-        await _upload(_code("alice"))
-    assert reused.value.status_code == 409
+    seeded = session_upload.langgraph_client().threads.update_state
+    seeds = seeded.await_count
+    assert await _upload(_code("alice")) is None
+    assert seeded.await_count == seeds
 
 
 @pytest.mark.parametrize(("login", "suffix", "status"), [("bob", "", 409), ("alice", "x", 401)])

@@ -147,15 +147,18 @@ async def api_create_session(
     return {"thread_id": thread_id}
 
 
-@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
+@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY, response_model=None)
 @audit_endpoint
-async def api_upload_session(request: Request) -> dict[str, Any]:
+async def api_upload_session(request: Request) -> dict[str, Any] | Response:
     code = bearer_github_token(request)
     if code is None:
-        raise HTTPException(401, "send the upload code as a bearer token")
+        raise HTTPException(401, "send the upload token as a bearer token")
     ticket = decode_upload_ticket(code)
     bind_audit_session(request, {"sub": ticket.sub, "user_id": ticket.user_id})
-    return await upload_session(UploadStream(request), ticket)
+    summary = await upload_session(UploadStream(request), ticket)
+    if summary is None:
+        return Response(status_code=204)
+    return summary
 
 
 @router.post("/threads/resolve-all")
