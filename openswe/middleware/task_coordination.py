@@ -5,7 +5,7 @@ from typing import Self
 import langgraph_sdk
 from langchain.agents.middleware import AgentState
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 from openswe.database import postgres
@@ -86,18 +86,16 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
             self.context = await TaskMembership.context_for_thread(self.thread_id)
         blocks = list(request.system_message.content_blocks) if request.system_message else []
         blocks.append({"type": "text", "text": self.instructions})
-        messages = list(request.messages)
         if self.context is not None:
-            messages.append(
-                HumanMessage(
-                    content=prompt(
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": prompt(
                         "tasks/context",
                         task_id=str(self.context.task.id),
                         title=self.context.task.title,
                         coordinator_thread_id=self.context.task.coordinator_thread_id,
-                    )
-                )
+                    ),
+                }
             )
-        return await handler(
-            request.override(system_message=SystemMessage(content_blocks=blocks), messages=messages)
-        )
+        return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
