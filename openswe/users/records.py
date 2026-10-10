@@ -73,19 +73,6 @@ class UserRecords:
             return await session.scalar(select(UserRecord.value).where(self._where(login, key)))
 
     async def put(self, login: str, value: JsonObject, key: str = "") -> None:
-        if self.kind == "profile":
-            value = {
-                field: setting
-                for field, setting in value.items()
-                if field
-                not in {
-                    "default_model",
-                    "reasoning_effort",
-                    "default_subagent_model",
-                    "subagent_reasoning_effort",
-                    "model_routing_enabled",
-                }
-            }
         async with postgres.session() as session:
             user_id = await session.scalar(select(user_id_for_login(login)))
             if user_id is None:

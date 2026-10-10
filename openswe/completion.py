@@ -28,8 +28,6 @@ from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.publish import settle_review_check_run
-from openswe.review.style_jobs import settle_review_style_run
-from openswe.review_guide.advance import top_up_after_run
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import post_slack_thread_reply
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
@@ -481,19 +479,6 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
         )
 
 
-async def _top_up_review_guide(thread_id: str, metadata: object) -> None:
-    """After a review guide's turn, prepare its next chunks in the background."""
-    kind = metadata.get("kind") if isinstance(metadata, dict) else None
-    try:
-        await top_up_after_run(thread_id, kind if isinstance(kind, str) else "")
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Could not start preparing a review guide's next chunks",
-            exc_info=True,
-            extra={"run_completion": {"thread_id": thread_id}},
-        )
-
-
 def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: object) -> None:
     # The platform serializes the exception (class name, and the message when its
     # type is allowlisted) — there is no traceback to attach on this side.
@@ -543,7 +528,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             raise
     payload_metadata = payload.get("metadata")
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
-        await settle_review_style_run(payload_metadata)
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
     # A run that failed, or a pickup run that left the store as it found it,
@@ -568,7 +552,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         await TaskMessage.deliver_to(thread_id)
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
-        await _top_up_review_guide(thread_id, payload_metadata)
         return await _handle_successful_run(thread_id, run_id, payload)
     if (
         status in _TERMINAL_FAILURE_STATUSES

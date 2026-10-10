@@ -20,7 +20,10 @@ import type { RenderItem } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
-import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
+import {
+  ReplyCard,
+  replyBody,
+} from "@/features/agents/components/chat/ReplyCard"
 import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
@@ -170,11 +173,12 @@ export function AgentTurn({
   const replyText = useMemo(
     () =>
       replyItems
-        .map((item) =>
-          item.type === "text-chunk" && item.chunk.kind === "text"
+        .map((item) => {
+          if (item.type === "reply-item") return `${replyBody(item.chunk)}\n\n`
+          return item.type === "text-chunk" && item.chunk.kind === "text"
             ? item.chunk.text
             : ""
-        )
+        })
         .join("")
         .trim(),
     [replyItems]
@@ -319,7 +323,7 @@ export function AgentTurn({
   ).length
 
   return (
-    <div className="group/turn my-space-2 min-w-0 space-y-1.5">
+    <div className="group/turn my-space-2 min-w-0 space-y-space-2">
       {visibleItems
         .slice(0, foldIndex)
         .map((item, index) => renderItem(item, index, visibleItems.length))}

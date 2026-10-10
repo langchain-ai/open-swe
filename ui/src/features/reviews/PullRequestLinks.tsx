@@ -1,20 +1,15 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@langchain/macaw-components/DropdownMenu"
+import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { useMutation } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { SplitButton } from "@/components/SplitButton"
 import { api } from "@/lib/api"
 
 export function PullRequestLinks({
@@ -67,35 +62,22 @@ export function PullRequestLinks({
   return (
     <div className="text-xs">
       <span className="flex flex-wrap items-center gap-0.5">
-        <span className="inline-flex items-center">
-          <Button
-            size="xs"
-            color="secondary"
-            variant="plain"
-            disabled={thread.isPending || thread.isSuccess}
-            aria-live="polite"
-            onClick={() => thread.mutate()}
-          >
-            {thread.isPending ? "Opening thread…" : "Agent"}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton
-                icon={CaretDownIcon}
-                label="Agent options"
-                size="xs"
-                color="secondary"
-                variant="plain"
-                tooltipProps={{ disabled: true }}
-              />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onSelect={() => setMessageOpen(true)}>
-                Send a message…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </span>
+        <SplitButton
+          size="xs"
+          variant="plain"
+          disabled={thread.isPending || thread.isSuccess}
+          onClick={() => thread.mutate()}
+          menuLabel="Agent options"
+          menuDisabled={false}
+          menuAlign="start"
+          menu={
+            <DropdownMenuItem onSelect={() => setMessageOpen(true)}>
+              Send a message…
+            </DropdownMenuItem>
+          }
+        >
+          {thread.isPending ? "Opening thread…" : "Agent"}
+        </SplitButton>
         <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
           <DialogContent
             title="Send a message to the agent"

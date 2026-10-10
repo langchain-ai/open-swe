@@ -4,7 +4,7 @@ import json
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-import httpx
+import httpx2
 import pytest
 from cryptography.fernet import Fernet
 
@@ -24,7 +24,7 @@ def oauth_remote(monkeypatch):
         if request.headers["host"] == "auth.example":
             state["tokens"].append(request)
             await asyncio.sleep(0)
-            return httpx.Response(
+            return httpx2.Response(
                 state["token_status"],
                 json=state.get(
                     "token_payload",
@@ -44,9 +44,9 @@ def oauth_remote(monkeypatch):
         )
         if accepted and not state["reject"] and "reply" in state:
             return state["reply"](request)
-        return httpx.Response(200 if accepted and not state["reject"] else 401, json={})
+        return httpx2.Response(200 if accepted and not state["reject"] else 401, json={})
 
-    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda **kwargs: httpx.MockTransport(remote))
+    monkeypatch.setattr(httpx2, "AsyncHTTPTransport", lambda **kwargs: httpx2.MockTransport(remote))
     monkeypatch.setattr(
         mcp_transport,
         "resolve_and_validate",
@@ -79,10 +79,10 @@ async def oauth_record(method="client_secret_post"):
 
 
 def client_for(record, namespace=("workspace_mcps", "default")):
-    connection = runtime._connection(record, namespace)
-    factory = connection["httpx_client_factory"]
+    transport = runtime._client(record, namespace).transport
+    factory = transport.httpx_client_factory
     assert factory is not None
-    return factory(headers=connection["headers"], auth=connection.get("auth"))
+    return factory(headers=transport.headers, auth=transport.auth)
 
 
 @pytest.mark.parametrize("method", ["client_secret_post", "client_secret_basic"])
@@ -210,7 +210,7 @@ async def test_oauth_works_through_real_mcp_discovery_and_execution(fake_store, 
     def reply(request):
         payload = json.loads(request.content) if request.content else {}
         if "id" not in payload:
-            return httpx.Response(202)
+            return httpx2.Response(202)
         method = payload["method"]
         result = {
             "initialize": {
@@ -224,8 +224,13 @@ async def test_oauth_works_through_real_mcp_discovery_and_execution(fake_store, 
                 ]
             },
             "tools/call": {"content": [{"type": "text", "text": "found"}], "isError": False},
-        }[method]
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": payload["id"], "result": result})
+        }.get(method)
+        if result is None:
+            error = {"code": -32601, "message": "Method not found"}
+            return httpx2.Response(
+                200, json={"jsonrpc": "2.0", "id": payload["id"], "error": error}
+            )
+        return httpx2.Response(200, json={"jsonrpc": "2.0", "id": payload["id"], "result": result})
 
     oauth_remote["reply"] = reply
     record = await oauth_record()

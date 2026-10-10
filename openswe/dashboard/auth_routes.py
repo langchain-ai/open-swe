@@ -15,6 +15,8 @@ from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.dev_login import GhUnavailable, dev_login_enabled, gh_credentials
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
+    GITHUB_CALLBACK_PATH,
+    MCP_SIGN_IN_CALLBACK_PATH,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
     GithubUser,
@@ -28,12 +30,15 @@ from openswe.dashboard.oauth import (
     fetch_github_user,
     frontend_base_url,
     hash_state_nonce,
+    is_dashboard_state,
     issue_desktop_handoff,
     issue_session,
     issue_state,
     new_state_nonce,
+    rebind_session,
     redeem_desktop_handoff,
     sanitize_redirect_to,
+    session_user_id,
     set_session_cookie,
     set_state_cookie,
     valid_handoff_challenge,
@@ -91,7 +96,7 @@ async def auth_login(
         forwarded_proto = request.headers.get("x-forwarded-proto", "").partition(",")[0].strip()
         scheme = forwarded_proto if forwarded_proto in {"http", "https"} else request.url.scheme
         api_base_url = str(request.base_url.replace(scheme=scheme)).rstrip("/")
-    redirect_uri = f"{api_base_url}/dashboard/api/auth/callback"
+    redirect_uri = f"{api_base_url}{GITHUB_CALLBACK_PATH}"
     query = urlencode(
         {
             "client_id": client_id,
@@ -143,7 +148,12 @@ async def auth_dev_login(redirect_to: str | None = None) -> Response:
 
 
 @router.get("/auth/callback")
-async def auth_callback(request: Request, code: str, state: str) -> Response:
+async def auth_callback(request: Request, state: str, code: str | None = None) -> Response:
+    if not is_dashboard_state(state):
+        # The GitHub App has this one callback, so MCP sign-ins return here too.
+        return RedirectResponse(f"{MCP_SIGN_IN_CALLBACK_PATH}?{request.url.query}", 302)
+    if code is None:
+        raise HTTPException(400, "GitHub sign-in was cancelled — please retry login")
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
@@ -233,26 +243,31 @@ async def auth_logout() -> Response:
 
 
 @router.get("/me")
-async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
-    # By login rather than the session's user_id claim, so a session minted before
-    # that claim existed still sees its own row. Best-effort: this endpoint is what
-    # the dashboard boots on, and it must answer from the session alone when the
-    # database is unreachable.
+async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
+    # Best-effort: this endpoint is what the dashboard boots on, and it must
+    # answer from the session alone when the database is unreachable.
     user = None
     try:
-        user = await User.for_login("github", session["sub"])
+        user = await User.for_session(session_user_id(session), session["sub"])
     except Exception:
         logger.warning(
             "Could not read the signed-in user's row",
             extra={"github_login": session["sub"]},
             exc_info=True,
         )
+    if user is not None and session_user_id(session) != user.id:
+        # The dashboard boots here, so every stale cookie is repaired on its next load.
+        set_session_cookie(response, rebind_session(session, str(user.id)))
+        logger.info(
+            "Rebound a stale session to its user",
+            extra={"github_login": session["sub"], "user_id": str(user.id)},
+        )
     preferences = await get_user_preferences(session["sub"])
     return {
         "login": session["sub"],
         "email": session.get("email") or (user.email or None if user else None),
         "avatar_url": session.get("avatar_url"),
-        "user_id": session.get("user_id") or (str(user.id) if user else None),
+        "user_id": str(user.id) if user else session.get("user_id"),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),
         "follow_up_behavior": preferences["follow_up_behavior"],

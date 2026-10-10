@@ -30,10 +30,37 @@ from openswe.encryption import decrypt_token, encrypt_token
 from openswe.store import now_iso
 from openswe.users import User, UserPreferences, UserPreferencesPatch
 from openswe.users.records import UserRecords
+from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-PROFILES = UserRecords("profile")
+RETIRED_PROFILE_KEYS = frozenset(
+    {
+        "create_prs",
+        "dm_session_enabled",
+        "default_model",
+        "reasoning_effort",
+        "default_subagent_model",
+        "subagent_reasoning_effort",
+        "model_routing_enabled",
+    }
+)
+
+
+class ProfileRecords(UserRecords):
+    async def put(self, login: str, value: JsonObject, key: str = "") -> None:
+        await super().put(
+            login,
+            {
+                field: setting
+                for field, setting in value.items()
+                if field not in RETIRED_PROFILE_KEYS
+            },
+            key,
+        )
+
+
+PROFILES = ProfileRecords("profile")
 GITHUB_OAUTH_TOKENS = UserRecords("github_oauth_token")
 
 
@@ -66,15 +93,7 @@ class ProfileUpdate(BaseModel):
 
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
-    for field in (
-        "create_prs",
-        "dm_session_enabled",
-        "default_model",
-        "reasoning_effort",
-        "default_subagent_model",
-        "subagent_reasoning_effort",
-        "model_routing_enabled",
-    ):
+    for field in RETIRED_PROFILE_KEYS:
         value.pop(field, None)
     return value
 

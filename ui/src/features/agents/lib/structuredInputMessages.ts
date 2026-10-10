@@ -105,8 +105,9 @@ function parseAttributes(source: string): Record<string, string> | null {
   return source.slice(cursor).trim() ? null : attributes
 }
 
-// A real envelope carries the context's data fields — `<timestamp>`, `<comment_id>`,
-// nested dicts and lists — as elements beside its text. Consume them so their text
+// A real envelope carries structured data as elements beside its text: one tag of
+// `field: value` lines, such as `<issue>` or `<replying_to>`; messages stored earlier
+// nest a tag per field. Consume them so their text
 // never reaches the transcript, and refuse anything that is not a balanced element
 // so unrecognized markup still falls back to legacy rendering.
 function consumeDataElements(source: string): boolean {

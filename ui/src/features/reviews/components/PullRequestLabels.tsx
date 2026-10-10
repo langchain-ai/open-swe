@@ -1,3 +1,7 @@
+import {
+  MagnifyingGlassRegularIcon,
+  TagRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { Input } from "@langchain/macaw-components/Input"
@@ -6,26 +10,39 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { api } from "@/lib/api"
 
+interface Label {
+  name: string
+  color: string | null
+  description?: string | null
+}
+
+/**
+ * The PR's labels, editable in place. The PR's own labels come with the page;
+ * the repository's catalog loads only when the picker is about to open.
+ */
 export function PullRequestLabels({
   owner,
   repo,
   number,
+  labels: initial,
 }: {
   owner: string
   repo: string
   number: number
+  labels: ReadonlyArray<Label>
 }) {
   const queryClient = useQueryClient()
   const queryKey = ["pullRequestLabels", owner, repo, number]
-  const labels = useQuery({
+  const [wanted, setWanted] = useState(false)
+  const catalog = useQuery({
     queryKey,
     queryFn: () => api.getPullRequestLabels(owner, repo, number),
+    enabled: wanted,
   })
   const [search, setSearch] = useState("")
   const change = useMutation({
@@ -33,7 +50,7 @@ export function PullRequestLabels({
       api.changePullRequestLabel(owner, repo, number, name, selected),
     onMutate: async ({ name, selected }) => {
       await queryClient.cancelQueries({ queryKey })
-      const previous = queryClient.getQueryData<typeof labels.data>(queryKey)
+      const previous = queryClient.getQueryData<typeof catalog.data>(queryKey)
       if (previous) {
         const label = previous.available.find((item) => item.name === name)
         queryClient.setQueryData(queryKey, {
@@ -52,51 +69,60 @@ export function PullRequestLabels({
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey }),
   })
+  const shown: ReadonlyArray<Label> = catalog.data?.selected ?? initial
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5">
-      {labels.data?.selected.map((label) => (
+    <div className="flex flex-wrap items-center gap-space-1">
+      {shown.map((label) => (
         <span
           key={label.name}
-          className="inline-flex items-center gap-1 rounded-full border border-default px-2 py-0.5 text-xs"
+          className="inline-flex h-5 items-center gap-space-1 rounded-full border border-default px-space-1 text-xxs"
           title={label.description ?? undefined}
         >
           <span
             className="size-2 rounded-full"
-            style={{ backgroundColor: `#${label.color}` }}
+            style={{ backgroundColor: `#${label.color ?? "888888"}` }}
           />
           {label.name}
         </span>
       ))}
-      <Popover>
+      <Popover onOpenChange={(open) => open && setWanted(true)}>
         <PopoverTrigger asChild>
-          <Button size="xs" color="secondary" variant="plain">
-            Labels
+          <Button
+            size="xs"
+            color="secondary"
+            variant="plain"
+            leftDecorator={TagRegularIcon}
+            aria-label="Labels"
+            onPointerEnter={() => setWanted(true)}
+            onFocus={() => setWanted(true)}
+          >
+            {shown.length === 0 ? "Add labels" : ""}
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-72 p-space-2">
+        <PopoverContent align="end" className="w-72 p-space-2">
           <Input
             size="sm"
-            leftIcon={MagnifyingGlassIcon}
+            leftIcon={MagnifyingGlassRegularIcon}
             aria-label="Search labels"
             placeholder="Search labels…"
             value={search}
             onChange={setSearch}
           />
-          {labels.isPending && (
-            <p className="p-2 text-xs text-secondary">Loading labels…</p>
+          {catalog.isPending && (
+            <p className="p-space-2 text-xs text-secondary">Loading labels…</p>
           )}
-          {labels.error && (
-            <p role="alert" className="p-2 text-xs text-error-secondary">
-              {labels.error.message}
+          {catalog.error && (
+            <p role="alert" className="p-space-2 text-xs text-error-secondary">
+              {catalog.error.message}
             </p>
           )}
-          <div className="mt-2 max-h-64 overflow-y-auto">
-            {labels.data?.available
+          <div className="mt-space-2 max-h-64 overflow-y-auto">
+            {catalog.data?.available
               .filter((label) =>
                 label.name.toLowerCase().includes(search.toLowerCase())
               )
               .map((label) => {
-                const selected = labels.data.selected.some(
+                const selected = catalog.data.selected.some(
                   (item) => item.name === label.name
                 )
                 return (
@@ -121,8 +147,8 @@ export function PullRequestLabels({
                   />
                 )
               })}
-            {labels.data?.available.length === 0 && (
-              <p className="p-2 text-xs text-secondary">
+            {catalog.data?.available.length === 0 && (
+              <p className="p-space-2 text-xs text-secondary">
                 No repository labels.
               </p>
             )}

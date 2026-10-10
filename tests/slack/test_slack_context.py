@@ -980,6 +980,26 @@ def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
     assert "/breakout" not in inputs[1][0]["text"]
 
 
+def test_background_event_is_not_attributed_to_the_person_it_acts_for() -> None:
+    run_input = slack_webhooks._slack_context_input(
+        [],
+        {"U123": "Mukil"},
+        {},
+        channel={"id": "slack:C123", "platform": "slack"},
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        trigger_user_id="U123",
+        request_text="Pick a reviewer",
+        request_blocks=[{"type": "text", "text": "Pick a reviewer"}],
+        trigger_system={"id": "system:background-event", "display_name": "Open SWE"},
+    )
+    request = str(run_input["messages"][-1]["content"])
+
+    assert 'kind="system"' in request
+    assert "system:background-event" in request
+    assert "slack:U123" not in request
+
+
 def test_slack_context_never_replays_open_swes_own_replies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1183,14 +1203,23 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
 
 
 @pytest.mark.parametrize("first_message", [True, False])
-@pytest.mark.parametrize("quoted,concierge", [(True, False), (False, False), (False, True)])
-async def test_performance_directive_switches_only_when_unquoted(
+@pytest.mark.parametrize(
+    "text,concierge,switches",
+    [
+        ("<@UBOT> /model:perf please continue", False, True),
+        ("<@UBOT> `/model:perf` please continue", False, False),
+        ("<@UBOT> please continue /model:perf", False, True),
+        ("<@UBOT> /model:perf please continue", True, False),
+    ],
+)
+async def test_performance_directive_switches_unless_quoted(
     monkeypatch: pytest.MonkeyPatch,
     fake_store,
     registry_db,
     first_message: bool,
-    quoted: bool,
+    text: str,
     concierge: bool,
+    switches: bool,
 ) -> None:
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -1213,7 +1242,6 @@ async def test_performance_directive_switches_only_when_unquoted(
     monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
     dispatch = AsyncMock(return_value={"run_id": "run-perf"})
     monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
-    directive = "`/model:perf`" if quoted else "/model:perf"
     await slack_webhooks.process_slack_mention(
         SlackRequest(
             channel_id="C123",
@@ -1221,14 +1249,14 @@ async def test_performance_directive_switches_only_when_unquoted(
             event_ts="1700000000.000100" if first_message else "1700000000.000200",
             thread_id="mapped-thread",
             user_id="U123",
-            text=f"<@UBOT> please {directive} continue",
+            text=text,
             bot_user_id="UBOT",
             concierge_mode=concierge,
         ),
         repo=None,
     )
     configurable = dispatch.call_args.args[3]
-    if quoted or concierge:
+    if not switches:
         assert "agent_model_id" not in configurable
         notice.assert_not_awaited()
         feedback.assert_not_awaited()

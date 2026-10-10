@@ -59,11 +59,11 @@ export function WorkspaceRepositoriesSection({
 
   return (
     <SettingsSection
-      title="Repository permissions"
+      title="Repository Permissions"
       description="What each of this workspace's repositories may do on its own. A repository allowed to start threads can do so from a GitHub Actions workflow, using the token the workflow issues itself, with no stored secret. Threads it starts belong to this workspace and to no person."
     >
       {rows.length === 0 ? (
-        <p className="px-4 py-3.5 text-xs text-secondary">
+        <p className="px-space-4 py-space-3 text-xs text-secondary">
           {repositories.isPending
             ? "Loading…"
             : "Bind a repository to this workspace first."}
@@ -73,7 +73,7 @@ export function WorkspaceRepositoriesSection({
           {rows.map((row) => (
             <li
               key={row.repo}
-              className="flex items-center justify-between gap-4 px-4 py-3"
+              className="flex items-center justify-between gap-space-4 px-space-4 py-space-3"
             >
               <span className="font-mono text-xs text-primary">{row.repo}</span>
               <label className="flex items-center gap-space-2 text-xs text-secondary">

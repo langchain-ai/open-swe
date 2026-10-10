@@ -24,14 +24,7 @@ from openswe.github.http import (
 )
 from openswe.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from openswe.human_review.clicks import answer_click
-from openswe.human_review.lifecycle import (
-    broadcast_card,
-    copy_card,
-    dismiss_request,
-    notify_agent,
-    refresh_card,
-    refresh_card_in_thread,
-)
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import (
     Outcome,
     Participant,
@@ -41,8 +34,12 @@ from openswe.human_review.people import (
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.prompts import prompt
+from openswe.slack.blocks import block_payload, context
+from openswe.slack.client import update_slack_message
 from openswe.slack.dm import note_for_concierge
+from openswe.slack.http import SlackRequestError
 from openswe.users import User
+from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +93,9 @@ async def handle_vote(
     current = await HumanReviewRequest.get(approval.id)
     if current is None:
         return Outcome("This expedited review vanished.")
+    await ReviewCard(current).refresh_in_thread()
     problem = await _submit_review(current, voter.user.id) if added else None
-    await refresh_card_in_thread(current)
-    if first_approval and not await notify_agent(
-        current,
+    if first_approval and not await ReviewCard(current).notify_agent(
         prompt(
             "runs/expedited-review-approved",
             pr_url=current.pull_request.url,
@@ -170,7 +166,7 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
     current = await HumanReviewRequest.get(approval.id)
     if current is None:
         return Outcome(marked, dm_card_success=True)
-    await refresh_card(current)
+    await ReviewCard(current).refresh()
     return Outcome(marked, dm_card_success=True)
 
 
@@ -183,7 +179,7 @@ async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
     choices = approval.slack_channel_choices
     if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
         return await request_copy(approval, choices[0]["id"], None, configured=True)
-    if not await broadcast_card(approval):
+    if not await ReviewCard(approval).broadcast():
         return Outcome("Open SWE could not send this expedited review to the channel.")
     return Outcome("Sent to the channel.")
 
@@ -211,7 +207,7 @@ async def request_copy(
             "Open SWE only sends expedited reviews to public channels that are not shared "
             "outside the workspace."
         )
-    if (problem := await copy_card(approval, channel)) is not None:
+    if (problem := await ReviewCard(approval).copy_to(channel)) is not None:
         return Outcome(
             f"Open SWE could not send this expedited review to <#{channel.id}>. {problem}"
         )
@@ -226,6 +222,9 @@ async def process_vote(
     channel_id: str,
     thread_ts: str,
     target_channel: str = "",
+    message_ts: str = "",
+    message_text: str = "",
+    message_blocks: list[JsonObject] | None = None,
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally.
 
@@ -234,6 +233,51 @@ async def process_vote(
     slack_user_id = split_person_id(person)[1]
 
     async def handle(approval: HumanReviewRequest) -> Outcome:
+        if message_ts and message_blocks:
+            pending = [block for block in message_blocks if block.get("type") != "actions"]
+            pending.extend(block_payload([context("Working on your click…")]))
+            try:
+                await update_slack_message(channel_id, message_ts, message_text, blocks=pending)
+            except SlackRequestError:
+                logger.warning("Could not acknowledge expedited review click", exc_info=True)
+        original = (
+            approval.state,
+            approval.awaiting_ready,
+            approval.approved,
+            approval.sent_elsewhere,
+        )
+        completed = False
+        try:
+            outcome = await apply(approval)
+            completed = True
+            return outcome
+        finally:
+            if message_ts and message_blocks:
+                try:
+                    current = await HumanReviewRequest.get(approval.id)
+                    if current is not None and (
+                        (
+                            current.state,
+                            current.awaiting_ready,
+                            current.approved,
+                            current.sent_elsewhere,
+                        )
+                        == original
+                        or (current.awaiting_ready and current.state == "open")
+                    ):
+                        await update_slack_message(
+                            channel_id, message_ts, message_text, blocks=message_blocks
+                        )
+                    elif current is not None and not completed:
+                        await ReviewCard(current).refresh(
+                            outcome=current.detail or current.state
+                            if current.state != "open"
+                            else None,
+                        )
+                except Exception:
+                    logger.warning("Could not restore expedited review click", exc_info=True)
+
+    async def apply(approval: HumanReviewRequest) -> Outcome:
         if channel_id == approval.slack_dm_channel_id:
             await note_for_concierge(
                 slack_user_id,
@@ -242,7 +286,7 @@ async def process_vote(
             )
         match decision:
             case "dismiss":
-                return await dismiss_request(approval, slack_user_id)
+                return await ReviewCard(approval).dismiss(slack_user_id)
             case "broadcast":
                 return await request_broadcast(approval)
             case "send":

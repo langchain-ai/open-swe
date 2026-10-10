@@ -1,3 +1,5 @@
+import { XIcon } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import {
   Dialog,
   DialogClose,
@@ -7,7 +9,6 @@ import {
 } from "@langchain/macaw-components/Dialog"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Kbd } from "@langchain/macaw-components/Kbd"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
 import type { AppCommand } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
@@ -63,9 +64,15 @@ export function AppShortcutReference({
           <div className="overflow-y-auto p-space-5">
             {[...groups].map(([group, groupCommands]) => (
               <section className="mb-space-5 last:mb-0" key={group}>
-                <h3 className="mb-space-2 text-xxs font-semibold tracking-wide text-tertiary uppercase">
+                <Text
+                  as="h3"
+                  variant="xs"
+                  weight="semibold"
+                  color="tertiary"
+                  className="mb-space-2 tracking-wide uppercase"
+                >
                   {group}
-                </h3>
+                </Text>
                 <div className="divide-y divide-subtle rounded-lg border border-default">
                   {groupCommands.map((command) => (
                     <div

@@ -29,6 +29,7 @@ from openswe.github.comments import fence_github_comment_body
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.input_messages import Fields
 from openswe.prompts import prompt
 from openswe.webhooks.event_log import LoggedEvent, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
@@ -150,16 +151,10 @@ class EventSummary(BaseModel):
     @property
     def details(self) -> str:
         """Every field the sender controls, for fencing as one block."""
-        lines = [
-            f"{label}: {value}"
-            for label, value in (
-                ("On", self.target),
-                ("From", self.sender),
-                ("Status", self.status),
-                ("Link", self.link),
-            )
-            if value
-        ]
+        fields = Fields(
+            {"On": self.target, "From": self.sender, "Status": self.status, "Link": self.link}
+        ).text()
+        lines = [fields] if fields else []
         if self.body:
             lines.extend(("", self.body[:_MAX_BODY_CHARS]))
         return "\n".join(lines)

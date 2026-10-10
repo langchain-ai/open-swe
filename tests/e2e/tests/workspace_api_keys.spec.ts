@@ -6,7 +6,7 @@ test("workspace admins create and revoke a key without retaining its secret", as
 }) => {
   await loginAs(page, SAME_USER);
   await page.goto("/workspaces/default");
-  const heading = page.getByRole("heading", { name: "API keys", exact: true });
+  const heading = page.getByRole("heading", { name: "API Keys", exact: true });
   await expect(heading).toBeVisible();
   await heading.scrollIntoViewIfNeeded();
   await page.getByLabel("Key name").fill("Release automation");

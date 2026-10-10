@@ -1,3 +1,10 @@
+import {
+  ArrowLeftIcon,
+  ArrowUpIcon,
+  CheckIcon,
+  FileMagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
@@ -17,13 +24,9 @@ import {
 import { Text } from "@langchain/macaw-components/Text"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
-import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { ChecksIcon } from "@phosphor-icons/react/dist/ssr/Checks"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
-import { FileMagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/FileMagnifyingGlass"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import { PauseIcon } from "@phosphor-icons/react/dist/ssr/Pause"
 import { PlayIcon } from "@phosphor-icons/react/dist/ssr/Play"
@@ -94,11 +97,13 @@ function Section({
 }) {
   return (
     <section className="rounded-xl border border-default bg-surface-level-1">
-      <div className="flex items-center justify-between gap-3 border-b border-default px-5 py-4">
-        <h2 className="text-sm font-medium text-primary">{title}</h2>
+      <div className="flex items-center justify-between gap-space-3 border-b border-default px-space-4 py-space-4">
+        <Text as="h2" variant="h5" weight="medium" color="primary">
+          {title}
+        </Text>
         {aside}
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-space-4">{children}</div>
     </section>
   )
 }
@@ -153,7 +158,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
   if (detail.isPending) return <LoadingState />
   if (detail.error && (!detail.data || !isReadUnavailable(detail.error)))
     return (
-      <div className="mx-auto w-full max-w-5xl p-6">
+      <div className="mx-auto w-full max-w-5xl p-space-5">
         <ErrorState error={detail.error} retry={() => void detail.refetch()} />
       </div>
     )
@@ -170,16 +175,16 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
     !appliedStates[notice]?.includes(incident.status)
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-7 sm:px-10">
+    <div className="mx-auto w-full max-w-6xl px-space-4 py-space-5 sm:px-space-7">
       <Link
         to="/incidents"
-        className="mb-6 inline-flex items-center gap-1.5 text-xs text-secondary hover:text-primary"
+        className="mb-space-5 inline-flex items-center gap-space-2 text-xs text-secondary hover:text-primary"
       >
         <ArrowLeftIcon size={14} weight="regular" />
         All incidents
       </Link>
-      <header className="mb-6">
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-secondary">
+      <header className="mb-space-5">
+        <div className="mb-space-3 flex flex-wrap items-center gap-space-2 text-xs text-secondary">
           <HashIcon size={14} weight="regular" />
           {incident.channel_name}
           <span>·</span>
@@ -187,24 +192,30 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             {incident.is_archived ? "Channel archived" : "Channel open"}
           </span>
         </div>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <h1 className="max-w-3xl text-2xl font-semibold tracking-tight text-primary">
+        <div className="flex flex-wrap items-start justify-between gap-space-4">
+          <Text
+            as="h1"
+            variant="h1"
+            weight="semibold"
+            color="primary"
+            className="max-w-3xl tracking-tight"
+          >
             {incident.title || incident.channel_name}
-          </h1>
-          <div className="flex items-center gap-2">
+          </Text>
+          <div className="flex items-center gap-space-2">
             <span className="text-xs text-secondary">Agent</span>
             <StatusBadge status={incident.status} />
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-secondary">
+        <div className="mt-space-3 flex flex-wrap gap-x-space-4 gap-y-space-2 text-xs text-secondary">
           <span>Updated {formatTime(incident.updated_at)}</span>
         </div>
         {incident.reason && (
-          <p className="mt-3 text-sm text-warning-secondary">
+          <p className="mt-space-3 text-sm text-warning-secondary">
             {humanize(incident.reason)}
           </p>
         )}
-        <div className="mt-6 flex flex-wrap items-center gap-2">
+        <div className="mt-space-5 flex flex-wrap items-center gap-space-2">
           {actions
             .filter(({ action }) => allowed_actions.includes(action))
             .map(({ action, label, icon }) => (
@@ -239,12 +250,12 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         </div>
       </header>
       {detail.error && (
-        <div role="alert" className="mb-5">
+        <div role="alert" className="mb-space-4">
           <Banner intent="warning">{detail.error.message}</Banner>
         </div>
       )}
       {notice && (
-        <div role="status" className="mb-5">
+        <div role="status" className="mb-space-4">
           <Banner intent="info">
             {pendingTransition || !appliedStates[notice]
               ? notices[notice]
@@ -260,8 +271,8 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         </TabList>
         <TabPanels>
           <TabPanel unmount={false}>
-            <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-              <div className="min-w-0 space-y-5">
+            <div className="grid items-start gap-space-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+              <div className="min-w-0 space-y-space-5">
                 <Section
                   title="Latest finding"
                   aside={
@@ -291,10 +302,16 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                       ).map(
                         ([label, value]) =>
                           value && (
-                            <div key={label} className="mt-4">
-                              <h3 className="mb-1 text-xs font-medium text-secondary">
+                            <div key={label} className="mt-space-4">
+                              <Text
+                                as="h3"
+                                variant="sm"
+                                weight="medium"
+                                color="secondary"
+                                className="mb-space-1"
+                              >
                                 {label}
-                              </h3>
+                              </Text>
                               <p className="text-sm leading-relaxed whitespace-pre-wrap">
                                 <CitedText
                                   text={value}
@@ -305,11 +322,16 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                           )
                       )}
                       {Boolean(report.next_steps?.length) && (
-                        <div className="mt-5 rounded-lg border border-brand bg-brand-subtle p-4">
-                          <h3 className="mb-2 text-xs font-medium">
+                        <div className="mt-space-4 rounded-lg border border-brand bg-brand-subtle p-space-4">
+                          <Text
+                            as="h3"
+                            variant="sm"
+                            weight="medium"
+                            className="mb-space-2"
+                          >
                             Steps to solve
-                          </h3>
-                          <ul className="space-y-2 text-sm leading-relaxed">
+                          </Text>
+                          <ul className="space-y-space-2 text-sm leading-relaxed">
                             {report.next_steps!.map((step, index) => (
                               <li key={index}>
                                 <CitedText
@@ -319,19 +341,19 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                               </li>
                             ))}
                           </ul>
-                          <p className="mt-3 text-xxs text-secondary">
+                          <p className="mt-space-3 text-xxs text-secondary">
                             Recommendations for the responder
                           </p>
                         </div>
                       )}
-                      <p className="mt-4 text-xxs text-secondary">
+                      <p className="mt-space-4 text-xxs text-secondary">
                         Report updated {formatTime(report.created_at)}
                       </p>
                     </>
                   ) : (
                     <EmptyState
                       size="sm"
-                      icon={FileMagnifyingGlassIcon}
+                      icon={FileMagnifyingGlassRegularIcon}
                       title="No findings yet"
                       description="Findings appear here after the first pass."
                     />
@@ -351,15 +373,15 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                         No linked evidence has been collected.
                       </p>
                     ) : (
-                      <ol className="space-y-3">
+                      <ol className="space-y-space-3">
                         {report.evidence.map((evidence, index) => (
                           <li
                             key={evidence.id}
                             id={`evidence-${encodeURIComponent(evidence.id)}`}
-                            className="scroll-mt-6 rounded-lg border border-default p-3"
+                            className="scroll-mt-6 rounded-lg border border-default p-space-3"
                           >
-                            <div className="mb-2 flex items-center gap-2 text-xxs text-secondary">
-                              <span className="flex size-5 items-center justify-center rounded border border-default">
+                            <div className="mb-space-2 flex items-center gap-space-2 text-xxs text-secondary">
+                              <span className="flex size-5 items-center justify-center rounded-sm border border-default">
                                 {index + 1}
                               </span>
                               <span className="font-medium">
@@ -382,11 +404,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                               )}
                             </ExternalLink>
                             {evidence.query && (
-                              <details className="mt-2 text-xs text-secondary">
+                              <details className="mt-space-2 text-xs text-secondary">
                                 <summary className="cursor-pointer">
                                   View query
                                 </summary>
-                                <pre className="mt-2 overflow-x-auto rounded-md bg-surface-level-2 p-3 font-mono break-all whitespace-pre-wrap">
+                                <pre className="mt-space-2 overflow-x-auto rounded-md bg-surface-level-2 p-space-3 font-mono break-all whitespace-pre-wrap">
                                   {evidence.query}
                                 </pre>
                               </details>
@@ -398,14 +420,14 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                   </Section>
                 )}
                 {report && report.hypotheses.length > 0 && (
-                  <Section title="Working hypotheses">
-                    <div className="space-y-5">
+                  <Section title="Working Hypotheses">
+                    <div className="space-y-space-5">
                       {report.hypotheses.map((hypothesis, index) => (
                         <div key={`${index}-${hypothesis.title}`}>
-                          <div className="flex items-start justify-between gap-3">
-                            <h3 className="text-sm font-medium">
+                          <div className="flex items-start justify-between gap-space-3">
+                            <Text as="h3" variant="h5" weight="medium">
                               {hypothesis.title}
-                            </h3>
+                            </Text>
                             <Badge
                               size="xs"
                               rounded="xs"
@@ -414,19 +436,19 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                               {humanize(hypothesis.assessment)}
                             </Badge>
                           </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
+                          <div className="mt-space-2 flex flex-wrap gap-space-2">
                             {hypothesis.evidence_ids.map((id) => {
                               const evidenceIndex = report.evidence.findIndex(
                                 (evidence) => evidence.id === id
                               )
                               return evidenceIndex >= 0 ? (
-                                <a
+                                <MacawLink
                                   key={id}
                                   href={`#evidence-${encodeURIComponent(id)}`}
-                                  className="text-xs text-brand-primary hover:underline"
+                                  variant="sm"
                                 >
                                   Evidence {evidenceIndex + 1}
-                                </a>
+                                </MacawLink>
                               ) : (
                                 <span
                                   key={id}
@@ -443,9 +465,9 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                   </Section>
                 )}
               </div>
-              <aside className="min-w-0 space-y-5">
+              <aside className="min-w-0 space-y-space-5">
                 {report?.impact && (
-                  <Section title="Observed impact">
+                  <Section title="Observed Impact">
                     <p className="text-sm leading-relaxed text-secondary">
                       <CitedText
                         text={report.impact}
@@ -454,13 +476,13 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                     </p>
                   </Section>
                 )}
-                <Section title="Coverage & access">
+                <Section title="Coverage & Access">
                   {gaps.length > 0 ? (
-                    <ul className="space-y-3">
+                    <ul className="space-y-space-3">
                       {gaps.map((gap) => (
                         <li
                           key={gap}
-                          className="flex min-w-0 gap-2 text-xs leading-relaxed [overflow-wrap:anywhere] text-warning-secondary"
+                          className="flex min-w-0 gap-space-2 text-xs leading-relaxed [overflow-wrap:anywhere] text-warning-secondary"
                         >
                           <QuestionIcon
                             size={14}
@@ -480,12 +502,12 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                   )}
                 </Section>
                 {report && report.checked.length > 0 && (
-                  <Section title="Checks performed">
-                    <ul className="space-y-3">
+                  <Section title="Checks Performed">
+                    <ul className="space-y-space-3">
                       {report.checked.map((check) => (
                         <li
                           key={check}
-                          className="flex gap-2 text-xs leading-relaxed text-secondary"
+                          className="flex gap-space-2 text-xs leading-relaxed text-secondary"
                         >
                           <CheckIcon
                             size={14}
@@ -499,8 +521,8 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                   </Section>
                 )}
                 {report && report.questions.length > 0 && (
-                  <Section title="Open questions">
-                    <ul className="list-disc space-y-3 pl-3 text-xs leading-relaxed text-secondary">
+                  <Section title="Open Questions">
+                    <ul className="list-disc space-y-space-3 pl-space-3 text-xs leading-relaxed text-secondary">
                       {report.questions.map((openQuestion) => (
                         <li key={openQuestion}>{openQuestion}</li>
                       ))}
@@ -510,7 +532,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
               </aside>
             </div>
           </TabPanel>
-          <TabPanel unmount={false} className="space-y-5">
+          <TabPanel unmount={false} className="space-y-space-5">
             <IncidentDocuments incidentId={incidentId} />
           </TabPanel>
           <TabPanel unmount={false}>
@@ -539,20 +561,25 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                     .map((item) => (
                       <li
                         key={item.id}
-                        className="relative grid gap-2 border-b border-default py-5 last:border-0 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-6"
+                        className="relative grid gap-space-2 border-b border-default py-space-4 last:border-0 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-space-5"
                       >
                         <time className="text-xs text-secondary">
                           {formatTime(item.at)}
                         </time>
                         <div className="min-w-0">
-                          <h3 className="mb-2 flex items-center gap-2 text-xs font-medium">
+                          <Text
+                            as="h3"
+                            variant="sm"
+                            weight="medium"
+                            className="mb-space-2 flex items-center gap-space-2"
+                          >
                             <ClockIcon
                               size={14}
                               weight="regular"
                               className="text-icon-secondary"
                             />
                             {humanize(item.type)}
-                          </h3>
+                          </Text>
                           <p className="text-sm leading-relaxed whitespace-pre-wrap">
                             <CitedText
                               text={item.summary || humanize(item.type)}
@@ -575,7 +602,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             if (question.trim() && !command.isPending)
               command.mutate({ action: "ask", text: question.trim() })
           }}
-          className="mt-6 rounded-xl border border-default bg-surface-level-1 p-4"
+          className="mt-space-5 rounded-xl border border-default bg-surface-level-1 p-space-4"
         >
           <Text
             as="label"
@@ -598,7 +625,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             maxLength={8000}
             placeholder="Ask about a hypothesis, share context, or request a next step…"
           />
-          <div className="mt-3 flex items-center justify-between gap-4">
+          <div className="mt-space-3 flex items-center justify-between gap-space-4">
             <span className="text-xs text-secondary">
               Shared with this incident
             </span>

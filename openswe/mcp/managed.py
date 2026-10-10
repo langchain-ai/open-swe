@@ -16,12 +16,11 @@ from typing import Literal
 from urllib.parse import quote
 from uuid import UUID
 
-import httpx
-from langchain_mcp_adapters.sessions import StreamableHttpConnection, create_session
+import httpx2
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from pydantic import BaseModel, Field
 
-from mcp import ClientSession
-from mcp.types import PaginatedRequestParams
 from openswe.config import ENV
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.langsmith_oauth import (
@@ -131,8 +130,8 @@ async def _headers(login: str) -> dict[str, str]:
     return headers
 
 
-def _client() -> httpx.AsyncClient:
-    return mcp_http_client(langsmith_issuer(), timeout=httpx.Timeout(_TIMEOUT_SECONDS))
+def _client() -> httpx2.AsyncClient:
+    return mcp_http_client(langsmith_issuer(), timeout=httpx2.Timeout(_TIMEOUT_SECONDS))
 
 
 def _credentials_required(body: object) -> GatewayCredentialsRequired:
@@ -158,7 +157,7 @@ def _credentials_required(body: object) -> GatewayCredentialsRequired:
     return GatewayCredentialsRequired(missing, links)
 
 
-def _failure(response: httpx.Response) -> ManagedToolsError:
+def _failure(response: httpx2.Response) -> ManagedToolsError:
     if response.status_code == 428:
         try:
             body = response.json()
@@ -227,29 +226,26 @@ def _mcp_url(gateway: str) -> str:
     return f"{langsmith_issuer()}{GATEWAYS_PATH}/{gateway_id(gateway)}/mcp"
 
 
-def _session_connection(headers: dict[str, str], gateway: str) -> StreamableHttpConnection:
-    async def check(response: httpx.Response) -> None:
+def _gateway_client(headers: dict[str, str], gateway: str) -> Client[StreamableHttpTransport]:
+    async def check(response: httpx2.Response) -> None:
         if response.status_code >= 300:
             await response.aread()
             raise _failure(response)
 
     def factory(
         headers: dict[str, str] | None = None,
-        timeout: httpx.Timeout | None = None,
-        auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient:
-        client = mcp_http_client(_mcp_url(gateway), headers, timeout, auth)
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
+        follow_redirects: bool = False,
+    ) -> httpx2.AsyncClient:
+        client = mcp_http_client(_mcp_url(gateway), headers, timeout, auth, follow_redirects)
         client.event_hooks["response"].append(check)
         return client
 
-    return {
-        "transport": "streamable_http",
-        "url": _mcp_url(gateway),
-        "headers": headers,
-        "timeout": _TIMEOUT_SECONDS,
-        "sse_read_timeout": _TIMEOUT_SECONDS,
-        "httpx_client_factory": factory,
-    }
+    transport = StreamableHttpTransport(
+        _mcp_url(gateway), headers=headers, httpx_client_factory=factory
+    )
+    return Client(transport, timeout=_TIMEOUT_SECONDS)
 
 
 def _wrapped[E: BaseException](error: BaseException, kind: type[E]) -> E | None:
@@ -264,32 +260,21 @@ def _wrapped[E: BaseException](error: BaseException, kind: type[E]) -> E | None:
 
 
 async def _with_session[T](
-    login: str, gateway: str, use: Callable[[ClientSession], Awaitable[T]]
+    login: str, gateway: str, use: Callable[[Client[StreamableHttpTransport]], Awaitable[T]]
 ) -> T:
     headers = await _headers(login)
     try:
         async with asyncio.timeout(_TIMEOUT_SECONDS):
-            async with create_session(_session_connection(headers, gateway)) as session:
-                await session.initialize()
-                return await use(session)
+            async with _gateway_client(headers, gateway) as client:
+                return await use(client)
     except Exception as exc:
         if (found := _wrapped(exc, ManagedToolsError)) is not None:
             raise found from None
         raise ManagedToolsError("Could not reach the managed tools gateway; retry later") from None
 
 
-async def _tool_count(session: ClientSession) -> int:
-    count = 0
-    cursor: str | None = None
-    for _ in range(_MAX_PAGES):
-        page = await session.list_tools(
-            params=PaginatedRequestParams(cursor=cursor) if cursor else None
-        )
-        count += len(page.tools)
-        if not page.nextCursor or page.nextCursor == cursor:
-            break
-        cursor = page.nextCursor
-    return count
+async def _tool_count(client: Client[StreamableHttpTransport]) -> int:
+    return len(await client.list_tools(max_pages=_MAX_PAGES))
 
 
 async def gateway_status(login: str, gateway: str, workspaces: list[str]) -> GatewayStatus:
@@ -324,7 +309,7 @@ async def consent_outcome(login: str, auth_id: str) -> ConsentOutcome:
     """Wait for the person to finish (or abandon) one consent link."""
     headers = await _headers(login)
     url = f"{langsmith_issuer()}{CONSENT_SESSIONS_PATH}/{quote(auth_id, safe='')}"
-    timeout = httpx.Timeout(_TIMEOUT_SECONDS + _CONSENT_WAIT_SECONDS)
+    timeout = httpx2.Timeout(_TIMEOUT_SECONDS + _CONSENT_WAIT_SECONDS)
     async with asyncio.timeout(_CONSENT_DEADLINE_SECONDS):
         async with mcp_http_client(langsmith_issuer(), timeout=timeout) as client:
             while True:
