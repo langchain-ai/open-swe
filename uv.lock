@@ -2540,9 +2540,13 @@ sandbox-providers = [
     { name = "langchain-e2b" },
     { name = "langchain-modal" },
     { name = "langchain-runloop" },
+    { name = "smolmachines" },
 ]
 sandbox-runloop = [
     { name = "langchain-runloop" },
+]
+sandbox-smol = [
+    { name = "smolmachines" },
 ]
 
 [package.metadata]
@@ -2590,12 +2594,14 @@ requires-dist = [
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.4" },
     { name = "slack-sdk", specifier = ">=3.44.1,<4.0.0" },
+    { name = "smolmachines", marker = "extra == 'sandbox-providers'", specifier = ">=1.26.1,<2" },
+    { name = "smolmachines", marker = "extra == 'sandbox-smol'", specifier = ">=1.26.1,<2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.1.1" },
     { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.84" },
     { name = "uvicorn", specifier = ">=0.52.4" },
     { name = "websockets", specifier = ">=16.1.1" },
 ]
-provides-extras = ["dev", "sandbox-daytona", "sandbox-modal", "sandbox-runloop", "sandbox-e2b", "sandbox-providers"]
+provides-extras = ["dev", "sandbox-daytona", "sandbox-modal", "sandbox-runloop", "sandbox-e2b", "sandbox-smol", "sandbox-providers"]
 
 [[package]]
 name = "openai"
@@ -3666,6 +3672,16 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/6e/4e/371068dd7281139307e60cd18553b96b9c8c391a4c3040617192713a3cc4/slack_sdk-3.44.1.tar.gz", hash = "sha256:ca19505423789fa2a3189ff486f989f02e49289f008d0a5813df7255b3fb93ea", size = 256661, upload-time = "2026-09-03T14:21:13.879Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ab/fc/67352b742fc6fa520a550581b0284f5757e4e31a32327c2a00276747fd30/slack_sdk-3.44.1-py2.py3-none-any.whl", hash = "sha256:d6f20a0fbe3fecf9cac955c99d686301b48a645b7045472c3a0cdd186d7c42b2", size = 319865, upload-time = "2026-09-03T14:21:12.405Z" },
+]
+
+[[package]]
+name = "smolmachines"
+version = "1.26.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/24/73597ccc553ad413d670eb8ad808e3d041f791449d8c3f6581269b8e9705/smolmachines-1.26.1-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:143e7ac3e853f9d5fa46f92bb6be9343900e2350fe53feaf3efda657c500e5f5", size = 52118858, upload-time = "2026-10-10T13:18:03.359Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/1a/7faeaf2ff37048899a8176477361b8aef38cdc6f88477d9e617fbb8c7fca/smolmachines-1.26.1-cp39-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:f36e73caa5c32810159e6810a32f008de4f36b6217940809941b938e9610e5ff", size = 63427928, upload-time = "2026-10-10T13:18:08.037Z" },
+    { url = "https://files.pythonhosted.org/packages/00/31/f8f35a27f78e8540bd0560f04271fb42ffdbfb5cd3b15190e701fc7e2f0c/smolmachines-1.26.1-cp39-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:b40e3aa6bd105b14770b6580ca83f7cf4dc4d619cc81809b861dedf6263b7bf6", size = 65220669, upload-time = "2026-10-10T13:18:13.002Z" },
 ]
 
 [[package]]

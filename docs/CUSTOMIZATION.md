@@ -62,11 +62,34 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `runloop` | `openswe/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `e2b` | `openswe/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
 | `modal` | `openswe/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `smol` | `openswe/sandboxes/providers/smol.py` | `SMOL_SANDBOX_IMAGE`, optional `SMOL_SANDBOX_TARGET=cloud` and Smol Cloud credentials |
 | `local` | `openswe/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
+The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`, `smol`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
+
+For an isolated Smol Machines sandbox, install `uv sync --extra sandbox-smol` and set
+`SANDBOX_TYPE=smol` and `SMOL_SANDBOX_IMAGE` to a Linux image with `sh`, `git`,
+`gh`, `python3`, and GNU `grep` (used by Deep Agents file search). For a ready-to-use image, build and publish one with these tools:
+
+```dockerfile
+FROM python:3.12-alpine
+RUN apk add --no-cache git github-cli grep
+```
+
+Alternatively set `SMOL_SANDBOX_IMAGE=python:3.12-alpine` and
+`SMOL_SANDBOX_SETUP_COMMAND="apk add --no-cache git github-cli grep"` to install
+missing tools once when creating a VM; reconnecting keeps the installed tools.
+
+The default `SMOL_SANDBOX_TARGET=local` runs the VM on the deployment host and
+requires SmolVM's supported local hypervisor. Use `SMOL_SANDBOX_TARGET=cloud`
+with `SMOL_CLOUD_TOKEN` (or `smol auth login`) to run on Smol Cloud. Open SWE
+keeps the VM when a thread reconnects, including files changed by earlier runs.
+The GitHub credential proxy configured for LangSmith sandboxes is not installed
+in other providers. For private repositories, arrange `gh`/git authentication
+at runtime using short-lived credentials scoped to the repository;
+the sandbox image alone provides the tools, not credentials.
 
 For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
