@@ -12,6 +12,7 @@ from pydantic.alias_generators import to_camel
 
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.dispatch import dispatch_agent_run
+from openswe.github.labels import pr_label
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.pull_requests import PullRequest
 from openswe.prompts import prompt
@@ -65,7 +66,7 @@ class _PullRequestIntentBase(BaseModel):
     def prompt(self, url: str) -> str:
         raise NotImplementedError
 
-    def thread_title(self, full_name: str, number: int) -> str:
+    def thread_title(self, label: str) -> str:
         raise NotImplementedError
 
 
@@ -78,7 +79,7 @@ class OpenThreadIntent(_PullRequestIntentBase):
     def prompt(self, url: str) -> str:
         return prompt("runs/pull-request-thread", url=url)
 
-    def thread_title(self, full_name: str, number: int) -> str:
+    def thread_title(self, label: str) -> str:
         return self.title
 
 
@@ -93,7 +94,7 @@ class MessageIntent(_PullRequestIntentBase):
     def prompt(self, url: str) -> str:
         return prompt("runs/pull-request-message", url=url, message=self.message)
 
-    def thread_title(self, full_name: str, number: int) -> str:
+    def thread_title(self, label: str) -> str:
         return self.title
 
 
@@ -124,8 +125,8 @@ class FixIntent(_PullRequestIntentBase):
         )
         return f"{text}\n\n{snapshot}"
 
-    def thread_title(self, full_name: str, number: int) -> str:
-        return f"Fix {self.scope} on {full_name}#{number}"
+    def thread_title(self, label: str) -> str:
+        return f"Fix {self.scope} on {label}"
 
 
 class AddressCommentsIntent(_PullRequestIntentBase):
@@ -136,8 +137,8 @@ class AddressCommentsIntent(_PullRequestIntentBase):
     def prompt(self, url: str) -> str:
         return prompt("runs/pull-request-comments", url=url, comment_url="")
 
-    def thread_title(self, full_name: str, number: int) -> str:
-        return f"Address comments on {full_name}#{number}"
+    def thread_title(self, label: str) -> str:
+        return f"Address comments on {label}"
 
 
 class AddressCommentIntent(_PullRequestIntentBase):
@@ -157,8 +158,8 @@ class AddressCommentIntent(_PullRequestIntentBase):
         extra = prompt("runs/pull-request-comment-instructions", instructions=instructions)
         return f"{text}\n\n{extra}"
 
-    def thread_title(self, full_name: str, number: int) -> str:
-        return f"Address comment on {full_name}#{number}"
+    def thread_title(self, label: str) -> str:
+        return f"Address comment on {label}"
 
 
 class LineComment(BaseModel):
@@ -210,8 +211,8 @@ class CommentBatchIntent(_PullRequestIntentBase):
             lines=[c.prompt_values() for c in self.comments if isinstance(c, LineComment)],
         )
 
-    def thread_title(self, full_name: str, number: int) -> str:
-        return f"Address comments on {full_name}#{number}"
+    def thread_title(self, label: str) -> str:
+        return f"Address comments on {label}"
 
 
 PullRequestThreadIntent = Annotated[
@@ -370,7 +371,7 @@ async def start_pull_request_thread(
             login,
             email,
             prompt=prompt,
-            title=intent.thread_title(full_name, number),
+            title=intent.thread_title(pr_label(owner, repo, number)),
             review_chat=isinstance(intent, (OpenThreadIntent, MessageIntent)),
         )
         current = await client.threads.get(thread_id)

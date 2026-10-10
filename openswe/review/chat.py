@@ -6,6 +6,7 @@ from typing import TypedDict
 
 from fastapi import HTTPException
 
+from openswe.github.labels import pr_label
 from openswe.threads import pr_fixes
 from openswe.threads.handlers import get_dashboard_thread_state
 from openswe.threads.proxy import (
@@ -32,7 +33,7 @@ async def get_review_chat(
         login,
         email,
         intent=pr_fixes.OpenThreadIntent(
-            intent="open", title=f"Discuss {owner}/{repo}#{pr_number}"
+            intent="open", title=f"Discuss {pr_label(owner, repo, pr_number)}"
         ),
     )
     return {"available": True, "assistant_id": "agent", "thread_id": thread.thread_id}

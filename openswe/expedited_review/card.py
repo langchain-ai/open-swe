@@ -3,6 +3,7 @@
 import json
 
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
+from openswe.github.labels import pr_label
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
 from openswe.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
@@ -44,7 +45,7 @@ def _vote_summary(approval: HumanReviewRequest, author: str) -> str:
 
 def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
-    label = f"{pr.owner}/{pr.repo}#{pr.number}"
+    label = pr_label(pr.owner, pr.repo, pr.number)
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
@@ -256,7 +257,7 @@ def open_card(
     """
     pr = approval.pull_request
     if approval.approved and not approval.awaiting_ready:
-        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        label = pr_label(pr.owner, pr.repo, pr.number)
         heading = f"Expedited review: {_vote_summary(approval, author)}"
         return f"{heading} — {pr.url}", [
             section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
@@ -289,7 +290,7 @@ def closed_card(
     """
     pr = approval.pull_request
     if approval.state in {"merged", "cancelled"}:
-        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        label = pr_label(pr.owner, pr.repo, pr.number)
         return f"Expedited review: {outcome} — {pr.url}", [
             section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
         ]
@@ -312,7 +313,7 @@ def author_status(
     blocks: list[Block] = [
         section(
             f"*Expedited review: {outcome}*\n"
-            f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> {escape(pr.title)}"
+            f"<{pr.url}|{pr_label(pr.owner, pr.repo, pr.number)}> {escape(pr.title)}"
         )
     ]
     if origin_url:

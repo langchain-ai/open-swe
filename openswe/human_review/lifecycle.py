@@ -30,6 +30,7 @@ from openswe.expedited_review.readiness import (
 )
 from openswe.expedited_review.reviews import dismiss_approval
 from openswe.github.http import GitHubAppUnavailable, or_none
+from openswe.github.labels import pr_label
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
@@ -186,7 +187,7 @@ class ReviewCard:
                 prompt(
                     "slack/expedited-review-requested",
                     pr_url=pr.url,
-                    label=f"{pr.owner}/{pr.repo}#{pr.number}",
+                    label=pr_label(pr.owner, pr.repo, pr.number),
                     title=escape(title),
                 )
             )
@@ -933,7 +934,7 @@ class ReviewPicks:
         current = await HumanReviewRequest.get(request.id) or request
         if current.state == "open":
             await ReviewCard(current).refresh()
-        label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+        label = f"<{pr.url}|{pr_label(pr.owner, pr.repo, pr.number)}>"
         for reviewer in released:
             logger.info(
                 "Released a reviewer Open SWE picked",
