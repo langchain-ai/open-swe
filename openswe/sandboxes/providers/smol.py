@@ -14,6 +14,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from smol import AsyncMachine, ConnectOptions, ExecOptions, MachineConfig, ResourceSpec, SmolError
 
 from openswe.config import ENV
+from openswe.sandboxes.paths import WORKSPACE_DIR
 from openswe.sandboxes.providers.registry import SandboxGoneError
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,8 @@ class SmolSandbox(BaseSandbox):
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         result = await self._machine.exec(
-            ["sh", "-c", command], ExecOptions(timeout=timeout if timeout is not None else 300)
+            ["sh", "-c", command],
+            ExecOptions(timeout=timeout if timeout is not None else 300, workdir=WORKSPACE_DIR),
         )
         stdout = result.stdout_bytes.decode("utf-8", errors="replace")
         stderr = result.stderr_bytes.decode("utf-8", errors="replace")

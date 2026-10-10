@@ -86,6 +86,7 @@ The default `SMOL_SANDBOX_TARGET=local` runs the VM on the deployment host and
 requires SmolVM's supported local hypervisor. Use `SMOL_SANDBOX_TARGET=cloud`
 with `SMOL_CLOUD_TOKEN` (or `smol auth login`) to run on Smol Cloud. Open SWE
 keeps the VM when a thread reconnects, including files changed by earlier runs.
+Commands run in `/workspace`, so repository edits survive reconnection.
 The GitHub credential proxy configured for LangSmith sandboxes is not installed
 in other providers. For private repositories, arrange `gh`/git authentication
 at runtime using short-lived credentials scoped to the repository;
