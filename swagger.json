@@ -1720,6 +1720,29 @@
         "title": "FeedbackResponse",
         "type": "object"
       },
+      "FeedbackSubmission": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "maxLength": 3000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "rating": {
+            "enum": [
+              "helpful",
+              "unhelpful"
+            ],
+            "title": "Rating",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rating"
+        ],
+        "title": "FeedbackSubmission",
+        "type": "object"
+      },
       "FileChangeKind": {
         "enum": [
           "added",
@@ -6343,46 +6366,6 @@
         "title": "ThreadComment",
         "type": "object"
       },
-      "ThreadFeedbackResponse": {
-        "properties": {
-          "comment": {
-            "default": "",
-            "title": "Comment",
-            "type": "string"
-          },
-          "rating": {
-            "anyOf": [
-              {
-                "enum": [
-                  "bad",
-                  "good",
-                  "other"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rating"
-          },
-          "status": {
-            "enum": [
-              "unavailable",
-              "ready",
-              "completed",
-              "dismissed"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "ThreadFeedbackResponse",
-        "type": "object"
-      },
       "ThreadRenameBody": {
         "properties": {
           "title": {
@@ -8057,66 +8040,6 @@
           }
         },
         "title": "WorkspaceUpdate",
-        "type": "object"
-      },
-      "openswe__review__assessment_feedback__FeedbackSubmission": {
-        "properties": {
-          "comment": {
-            "default": "",
-            "maxLength": 3000,
-            "title": "Comment",
-            "type": "string"
-          },
-          "rating": {
-            "enum": [
-              "helpful",
-              "unhelpful"
-            ],
-            "title": "Rating",
-            "type": "string"
-          }
-        },
-        "required": [
-          "rating"
-        ],
-        "title": "FeedbackSubmission",
-        "type": "object"
-      },
-      "openswe__threads__feedback__FeedbackSubmission": {
-        "properties": {
-          "action": {
-            "default": "submit",
-            "enum": [
-              "submit",
-              "comment",
-              "dismiss"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
-          "comment": {
-            "default": "",
-            "maxLength": 3000,
-            "title": "Comment",
-            "type": "string"
-          },
-          "rating": {
-            "anyOf": [
-              {
-                "enum": [
-                  "bad",
-                  "good"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rating"
-          }
-        },
-        "title": "FeedbackSubmission",
         "type": "object"
       },
       "openswe__transcript__events__JsonObject": {
@@ -14439,7 +14362,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/openswe__review__assessment_feedback__FeedbackSubmission"
+                "$ref": "#/components/schemas/FeedbackSubmission"
               }
             }
           },
@@ -18205,112 +18128,6 @@
         "tags": [
           "dashboard",
           "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/feedback": {
-      "get": {
-        "operationId": "get_thread_feedback_dashboard_api_threads__thread_id__feedback_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadFeedbackResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get Thread Feedback",
-        "tags": [
-          "dashboard",
-          "threads",
-          "thread-feedback"
-        ]
-      },
-      "post": {
-        "operationId": "submit_thread_feedback_dashboard_api_threads__thread_id__feedback_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/openswe__threads__feedback__FeedbackSubmission"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadFeedbackResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Submit Thread Feedback",
-        "tags": [
-          "dashboard",
-          "threads",
-          "thread-feedback"
         ]
       }
     },

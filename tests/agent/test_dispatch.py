@@ -7,7 +7,6 @@ from xml.etree import ElementTree
 
 import pytest
 
-from openswe import thread_feedback
 from openswe.slack import thinking as slack_thinking
 from openswe.users import User
 
@@ -19,13 +18,9 @@ _ABSOLUTE = "https://open-swe-v3-abc.us.langgraph.app/webhooks/run-complete"
 class _FakeRuns:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
-        self.fail_next = False
 
     async def create(self, thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, str]:
         self.created.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
-        if self.fail_next:
-            self.fail_next = False
-            raise RuntimeError("dispatch failed")
         return {"run_id": "run-1"}
 
 
@@ -214,27 +209,6 @@ def test_prepare_run_config_rejects_conflicting_invocation_ids() -> None:
             },
             None,
         )
-
-
-@pytest.mark.asyncio
-async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _FakeClient()
-    client.runs.fail_next = True
-    monkeypatch.setattr(thread_feedback, "now_ms", lambda: 123000)
-
-    with pytest.raises(RuntimeError, match="dispatch failed"):
-        await dispatch.dispatch_agent_run(
-            "thread-1",
-            "Please revise the plan.",
-            {},
-            source="dashboard",
-            thread_title=None,
-            client=client,
-        )
-
-    assert client.threads.metadata[thread_feedback.ACTIVITY_KEY] == 123000
 
 
 @pytest.mark.usefixtures("registry_db")

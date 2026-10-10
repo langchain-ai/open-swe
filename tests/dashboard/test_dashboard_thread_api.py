@@ -1402,7 +1402,6 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "append", fake_append)
     monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr("openswe.thread_feedback.note_feedback_activity", AsyncMock())
 
     result = await thread_runs.steer_running_thread(
         "tid",

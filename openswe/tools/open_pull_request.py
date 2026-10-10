@@ -529,17 +529,6 @@ def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[s
     repo = record.get("repo_full_name")
     number = record.get("number")
     url = record.get("url")
-    for item in existing:
-        if (
-            isinstance(item, dict)
-            and (
-                (item.get("repo_full_name") == repo and item.get("number") == number)
-                or item.get("url") == url
-            )
-            and isinstance(item.get("slack_feedback"), dict)
-        ):
-            record = {**record, "slack_feedback": item["slack_feedback"]}
-            break
     return [
         item
         for item in existing
@@ -767,11 +756,6 @@ async def _record_pr_telemetry(
                 "resolves_thread": resolves_thread,
             }
             run_id = config.get("run_id") or cfg.run_id
-            if run_id and cfg.slack_thread and cfg.slack_thread.channel_id:
-                record["slack_feedback"] = {
-                    "run_id": str(run_id),
-                    "channel_id": cfg.slack_thread.channel_id,
-                }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",

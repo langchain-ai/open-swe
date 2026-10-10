@@ -59,9 +59,6 @@ async def queue_message_for_thread(thread_id: str, message_content: QueuedConten
         await QueuedMessage.put(
             thread_id, message_content, queue_id=queue_id if isinstance(queue_id, str) else None
         )
-        from openswe.thread_feedback import note_feedback_activity
-
-        await note_feedback_activity(thread_id, client=langgraph_client())
         logger.info("Queued message for thread %s", thread_id)
         return True
     except Exception:

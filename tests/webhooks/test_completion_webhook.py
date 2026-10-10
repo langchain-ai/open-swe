@@ -146,7 +146,6 @@ async def test_leftover_follow_ups_get_one_pickup_run(
         return {"run_id": "pickup-run"}
 
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
     monkeypatch.setattr(events, "worker_finished", AsyncMock(return_value=worker))
     monkeypatch.setattr(
         store.TaskDelegation, "get", AsyncMock(return_value=SimpleNamespace(cancelled=cancelled))
@@ -183,7 +182,6 @@ async def test_success_status_deduplicates_cost_refresh(
     metadata["session_cost_refresh_scheduled_run_ids"] = ["run-1"]
     client = _FakeClient(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
     schedule = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "schedule_session_cost_refresh", schedule)
 

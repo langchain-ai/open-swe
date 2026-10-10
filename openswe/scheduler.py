@@ -24,7 +24,6 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
-from openswe.thread_feedback import run_feedback_prompt
 from openswe.workspaces.refresh import LEGACY_REFRESH_TASK, run_workspace_refresh_tick
 from openswe.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH_TASK
 
@@ -52,7 +51,6 @@ class SchedulerState(BaseModel):
     channel_id: str | None = None
     thread_ts: str | None = None
     attempt: int | None = None
-    feedback: dict[str, Any] | None = None
     request_id: str | None = None
     step: str | None = None
     result: dict[str, Any] | None = None
@@ -86,7 +84,7 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         if task == "session_cost":
             return {"result": await run_session_cost_refresh(state.model_dump(exclude_none=True))}
         if task == "thread_feedback":
-            return {"result": await run_feedback_prompt(state.model_dump(exclude_none=True))}
+            return {"result": {"status": "skipped"}}
         if task == "agent_cost":
             return {"result": await run_agent_cost_refresh(state.model_dump(exclude_none=True))}
         if task == HUMAN_REVIEW_TASK:

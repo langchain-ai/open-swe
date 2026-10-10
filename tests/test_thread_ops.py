@@ -1,5 +1,3 @@
-from unittest.mock import AsyncMock
-
 import pytest
 
 from openswe.message_queue import QueuedMessage
@@ -8,8 +6,7 @@ from openswe.utils import thread_ops
 
 
 @pytest.mark.asyncio
-async def test_queue_message_for_thread_deduplicates_queue_id(monkeypatch, registry_db) -> None:
-    monkeypatch.setattr("openswe.thread_feedback.note_feedback_activity", AsyncMock())
+async def test_queue_message_for_thread_deduplicates_queue_id(registry_db) -> None:
     message = {"queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777001", "text": "follow up"}
 
     assert await thread_ops.queue_message_for_thread("thread-1", message) is True
@@ -19,10 +16,7 @@ async def test_queue_message_for_thread_deduplicates_queue_id(monkeypatch, regis
 
 
 @pytest.mark.asyncio
-async def test_queued_messages_show_who_sent_what_and_refresh_their_thread(
-    monkeypatch, registry_db
-) -> None:
-    monkeypatch.setattr("openswe.thread_feedback.note_feedback_activity", AsyncMock())
+async def test_queued_messages_show_who_sent_what_and_refresh_their_thread(registry_db) -> None:
     dashboard = {"id": "github:alice", "github_login": "alice", "platform": "github"}
     slack = {"id": "slack:U1", "display_name": "<@U1>", "platform": "slack"}
     incident = 'INCIDENT_CONTEXT {"evidence_id": "slack:1.0"}\nDB is down'
