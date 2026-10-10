@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
+from openswe.expedited_review.eligibility import MAX_LISTED_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
     Readiness,
@@ -838,7 +838,7 @@ async def _settle_posted(
             files = await ChangedFile.of_pull(pull)
             approved = (
                 files is not None
-                and len(files) < MAX_FILES
+                and len(files) < MAX_LISTED_FILES
                 and await codeowners.approved_by([file.filename for file in files], approvers)
             )
     if approved:

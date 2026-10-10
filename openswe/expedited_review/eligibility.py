@@ -1,4 +1,4 @@
-"""Which pull requests may be approved from Slack: tiny and fully visible.
+"""Which pull requests may be approved from Slack: small and fully visible.
 
 The gates are size and visibility: every file the two voters have to read has
 to arrive as a readable text diff, and those files together have to fit in
@@ -22,12 +22,14 @@ from openswe.github.pull_request_status import PullRequestClient
 
 logger = logging.getLogger(__name__)
 
-MAX_CHANGED_LINES = 20
+MAX_CHANGED_LINES = 150
 # What is actually enforced. A change that lands a few lines over is no harder to
 # read than one that lands under, and bouncing it costs the asker more than the
-# slack costs the voters; the agent is told 20 so it aims there.
-ACCEPTED_CHANGED_LINES = 25
-MAX_FILES = 100
+# slack costs the voters; the agent is told 150 so it aims there.
+ACCEPTED_CHANGED_LINES = 160
+# GitHub lists at most 3000 files of a pull request, so past that the card cannot
+# account for every change. This is the API's ceiling, not a policy limit.
+MAX_LISTED_FILES = 3000
 
 # Kinds of change that must be read, so no APPROVALS.md guideline can hide them.
 _UNEXCLUDABLE_PATH = re.compile(
@@ -161,9 +163,11 @@ class ChangedFile(BaseModel):
 
     @classmethod
     async def of_pull(cls, pull: PullRequestClient) -> list[ChangedFile] | None:
-        """The PR's first ``MAX_FILES`` changed files, or ``None`` when GitHub could not say."""
+        """The PR's changed files, up to ``MAX_LISTED_FILES``; ``None`` when GitHub could not say."""
         try:
-            return _CHANGED_FILES.validate_python(await pull.files())
+            return _CHANGED_FILES.validate_python(
+                await pull.files(max_pages=MAX_LISTED_FILES // 100)
+            )
         except httpx2.HTTPError, ValueError, ValidationError:
             logger.warning(
                 "Could not read the pull request's changed files",
@@ -336,8 +340,11 @@ def assess_eligibility(
 ) -> EligibleDiff | Ineligible:
     if not files:
         return Ineligible("the pull request changes no files")
-    if len(files) >= MAX_FILES:
-        return Ineligible("the pull request changes too many files")
+    if len(files) >= MAX_LISTED_FILES:
+        return Ineligible(
+            f"GitHub lists at most {MAX_LISTED_FILES} changed files, so the card could not "
+            "account for every change"
+        )
     diff = ExpeditedDiff(files, exclusions)
     for file in diff.shown:
         if file.patch is None:
