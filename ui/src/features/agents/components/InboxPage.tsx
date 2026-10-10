@@ -80,6 +80,8 @@ export function InboxPage() {
   })
   const [snoozing, setSnoozing] = useState<InboxItem | null>(null)
   const list = useRef<HTMLDivElement>(null)
+  const end = useRef<HTMLDivElement>(null)
+  const endInView = useInView(end, list)
 
   const reviewRows = useMemo(
     () => reviews.data?.pages.flatMap((page) => page.pullRequests) ?? [],
@@ -107,6 +109,22 @@ export function InboxPage() {
     if (selected?.kind === "thread" && !selected.thread.viewed)
       markAgentThreadViewed(queryClient, selected.thread.id)
   }, [selected, queryClient])
+
+  // Like Superhuman, the list has no end you can see: the next page loads before
+  // scrolling or J/K reach the last row. Most threads never wait on you, so a
+  // page can add few rows and the effect keeps going until the list is full.
+  const wantMore = endInView || items.length - index <= PREFETCH_ROWS
+  const moreThreads =
+    split !== "reviews" && threads.hasMore && !threads.isFetchingNextPage
+  const moreReviews =
+    split !== "agents" && reviews.hasNextPage && !reviews.isFetchingNextPage
+  const fetchThreads = threads.fetchNextPage
+  const fetchReviews = reviews.fetchNextPage
+  useEffect(() => {
+    if (!wantMore) return
+    if (moreThreads) fetchThreads()
+    if (moreReviews) void fetchReviews()
+  }, [wantMore, moreThreads, moreReviews, fetchThreads, fetchReviews])
 
   useEffect(() => {
     list.current
@@ -291,18 +309,11 @@ export function InboxPage() {
               />
             ))
           )}
-          {threads.hasMore && split !== "reviews" && (
-            <Button
-              size="xs"
-              color="secondary"
-              variant="plain"
-              className="mt-space-1 w-full"
-              disabled={threads.isFetchingNextPage}
-              onClick={threads.fetchNextPage}
-            >
-              {threads.isFetchingNextPage ? "Loading…" : "Load more"}
-            </Button>
-          )}
+          {items.length > 0 &&
+            (threads.isFetchingNextPage || reviews.isFetchingNextPage) && (
+              <InboxSkeleton rows={2} />
+            )}
+          <div ref={end} aria-hidden className="h-px" />
         </div>
         <footer className="flex flex-wrap gap-x-space-3 gap-y-space-1 border-t border-default px-space-4 py-space-2 text-xxs text-tertiary">
           <span>
@@ -493,6 +504,28 @@ function InboxZero({ split }: { split: InboxSplit }) {
   )
 }
 
+/** Rows from the end at which J/K start loading the next page. */
+const PREFETCH_ROWS = 10
+
+/** Whether `target` is within a screen of `root`'s visible area. */
+function useInView(
+  target: React.RefObject<HTMLElement | null>,
+  root: React.RefObject<HTMLElement | null>
+): boolean {
+  const [inView, setInView] = useState(false)
+  useEffect(() => {
+    const element = target.current
+    if (!element || !root.current) return
+    const observer = new IntersectionObserver(
+      ([entry]) => setInView(Boolean(entry?.isIntersecting)),
+      { root: root.current, rootMargin: "0px 0px 100% 0px" }
+    )
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [target, root])
+  return inView
+}
+
 // setTimeout overflows past ~24.8 days; a longer wait just re-arms when it fires.
 const MAX_TIMEOUT_MS = 2 ** 31 - 1
 
@@ -583,10 +616,10 @@ function SnoozePicker({
   )
 }
 
-function InboxSkeleton() {
+function InboxSkeleton({ rows = 4 }: { rows?: number }) {
   return (
     <div aria-hidden>
-      {[80, 64, 72, 58].map((width) => (
+      {[80, 64, 72, 58].slice(0, rows).map((width) => (
         <div key={width} className="mb-0.5 flex flex-col gap-1.5 px-2.5 py-2.5">
           <Skeleton className="h-2.5" style={{ width: `${width}%` }} />
           <Skeleton className="h-2 w-1/3" />
