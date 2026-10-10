@@ -32,7 +32,12 @@ export function usePullRequestAction({
     meta: { errorTitle: failed(pullRequestKey(pr)) },
     onMutate: () => ({ undo: apply?.() }),
     onError: (_error, _reason, context) => context?.undo?.(),
-    onSuccess: () => {
+    onSuccess: (result, _reason, context) => {
+      if (result?.auto_merge) {
+        context?.undo?.()
+        toast.success(`Auto-merge enabled for ${pullRequestKey(pr)}`)
+        return
+      }
       toast.success(succeeded(pullRequestKey(pr)))
       onDone?.()
     },

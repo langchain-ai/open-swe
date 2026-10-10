@@ -338,6 +338,29 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
+  it("keeps a queued auto-merge open instead of marking it merged", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { ci: "pending", pendingChecks: ["build"] })],
+    })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+      auto_merge: true,
+    })
+    mount()
+    await screen.findByText("Change 1")
+    await chooseMergeMethod(1, "Merge commit")
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Auto-merge enabled" })
+    ).toBeTruthy()
+    expect(screen.queryByText(/^Merged ·/)).toBeNull()
+    expect(toast.success).toHaveBeenCalledWith(
+      "Auto-merge enabled for acme/app#1"
+    )
+  })
+
   it("rolls a rejected merge back to a retry action", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
@@ -593,7 +616,7 @@ describe("My PRs", () => {
     expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
-  it("names a required check that never reported instead of offering the merge", async () => {
+  it("names a required check that never reported and offers auto-merge", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -608,7 +631,7 @@ describe("My PRs", () => {
     expect(
       within(card).getByText("Merge blocked: Lint Final Results never reported")
     ).toBeTruthy()
-    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
+    expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
     expect(
       within(card).getByRole("button", { name: "Update branch" })
     ).toBeTruthy()

@@ -3,6 +3,7 @@ import {
   type MergeMethod,
   type OpenPullRequest,
   type PullRequestActionName,
+  type PullRequestActionResult,
 } from "@/lib/api"
 
 export interface ActionLabels {
@@ -22,7 +23,7 @@ export interface GithubAction {
     pr: OpenPullRequest,
     method?: MergeMethod,
     reason?: string
-  ) => Promise<void>
+  ) => Promise<PullRequestActionResult | void>
 }
 
 export const githubActions: Record<PullRequestActionName, GithubAction> = {
@@ -37,7 +38,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     failed: (subject) => `Could not merge ${subject}`,
     run: async (pr, method) => {
       if (!method) throw new Error("Choose a merge method.")
-      await api.mergePullRequest(pr, method)
+      return api.mergePullRequest(pr, method)
     },
   },
   close: {
