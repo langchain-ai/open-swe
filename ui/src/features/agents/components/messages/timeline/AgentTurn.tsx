@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 
 import { DiffView } from "../../chat/DiffView"
@@ -7,16 +14,16 @@ import { MessageTimestamp } from "../MessageTimestamp"
 import { ReasoningBlock } from "../ReasoningBlock"
 import {
   buildRenderItems,
+  collapsedWorkItems,
   countWorkActions,
-  selectCollapsedTurnItems,
-  splitWorkAndReply,
+  segmentTurn,
 } from "../renderItems"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
 import { ShellEntryBody } from "./entryBodies"
 import type { ReactNode } from "react"
-import type { RenderItem } from "../renderItems"
+import type { RenderItem, TurnSegment } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
@@ -146,34 +153,29 @@ export function AgentTurn({
     }
   }, [isStreaming])
 
-  const workDurationMs = useMemo(() => {
-    if (measuredDurationMs !== null) return measuredDurationMs
-    if (!message.startedAt || message.timestampIsFallback) return null
-    const start = Date.parse(message.startedAt)
-    const end = Date.parse(message.timestamp)
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return null
-    const delta = end - start
-    return delta > 0 ? delta : null
-  }, [
-    measuredDurationMs,
-    message.startedAt,
-    message.timestamp,
-    message.timestampIsFallback,
-  ])
+  const segments = useMemo(() => {
+    const split = segmentTurn(renderItems)
+    if (isStreaming && split.at(-1)?.type !== "work") {
+      split.push({ type: "work", key: "work-live", items: [] })
+    }
+    return split
+  }, [isStreaming, renderItems])
+  const workSegmentCount = segments.filter((s) => s.type === "work").length
+  const liveItemKey = isStreaming ? renderItems.at(-1)?.key : undefined
 
-  const { workItems, replyItems } = useMemo(
-    () => splitWorkAndReply(renderItems),
-    [renderItems]
+  const [expandedFolds, setExpandedFolds] = useState<Record<string, boolean>>(
+    {}
   )
-  const collapsedItems = useMemo(
-    () => selectCollapsedTurnItems(renderItems, !isStreaming),
-    [isStreaming, renderItems]
-  )
-  const actionCount = useMemo(() => countWorkActions(workItems), [workItems])
+  const toggleFold = useCallback((key: string) => {
+    setExpandedFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
+  }, [])
+
   const replyText = useMemo(
     () =>
-      replyItems
-        .map((item) => {
+      segments
+        .map((segment) => {
+          if (segment.type !== "reply") return ""
+          const { item } = segment
           if (item.type === "reply-item") return `${replyBody(item.chunk)}\n\n`
           return item.type === "text-chunk" && item.chunk.kind === "text"
             ? item.chunk.text
@@ -181,20 +183,22 @@ export function AgentTurn({
         })
         .join("")
         .trim(),
-    [replyItems]
-  )
-  const canFoldWork = !!isStreaming || workItems.length > 0
-  const [workFoldExpanded, setWorkFoldExpanded] = useState(false)
-  const toggleWorkFold = useCallback(
-    () => setWorkFoldExpanded((value) => !value),
-    []
+    [segments]
   )
 
-  const renderItem = (
-    item: RenderItem,
-    index: number,
-    total: number
-  ): ReactNode => {
+  const turnStart = message.timestampIsFallback ? undefined : message.startedAt
+  const turnEnd = message.timestampIsFallback ? undefined : message.timestamp
+  const segmentDurationMs = (index: number): number | null => {
+    if (workSegmentCount === 1 && measuredDurationMs !== null) {
+      return measuredDurationMs
+    }
+    return elapsedMs(
+      replyTimestamp(segments[index - 1]) ?? turnStart,
+      replyTimestamp(segments[index + 1]) ?? turnEnd
+    )
+  }
+
+  const renderItem = (item: RenderItem): ReactNode => {
     switch (item.type) {
       case "reasoning-item": {
         const reasoningChunk =
@@ -203,7 +207,7 @@ export function AgentTurn({
           <div key={item.key} className="min-w-0 flex-1">
             <ReasoningBlock
               text={reasoningChunk?.text ?? ""}
-              isLive={!!isStreaming && index === total - 1}
+              isLive={item.key === liveItemKey}
             />
           </div>
         )
@@ -294,52 +298,47 @@ export function AgentTurn({
     }
   }
 
-  const workLabel =
-    workDurationMs && workDurationMs >= 1000
-      ? `Worked for ${formatElapsed(workDurationMs)}`
-      : "Worked"
-  const foldLabel = isStreaming ? (activityLabel ?? "Working…") : workLabel
-  const foldLabelWithCount =
-    actionCount > 0
-      ? `${foldLabel} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
-      : foldLabel
-  const visibleItems =
-    canFoldWork && workFoldExpanded
-      ? renderItems
-      : isStreaming || canFoldWork
-        ? collapsedItems
-        : renderItems
-  const workItemKeys = new Set(workItems.map((item) => item.key))
-  const firstWorkIndex = renderItems.findIndex((item) =>
-    workItemKeys.has(item.key)
-  )
-  const renderItemIndex = new Map(
-    renderItems.map((item, index) => [item.key, index])
-  )
-  const foldIndex = visibleItems.filter(
-    (item) =>
-      (renderItemIndex.get(item.key) ?? Number.POSITIVE_INFINITY) <
-      firstWorkIndex
-  ).length
+  const renderWorkSegment = (
+    segment: Extract<TurnSegment, { type: "work" }>,
+    index: number
+  ): ReactNode => {
+    const live = !!isStreaming && index === segments.length - 1
+    const expanded = expandedFolds[segment.key] ?? false
+    const durationMs = live ? null : segmentDurationMs(index)
+    const label = live
+      ? (activityLabel ?? "Working…")
+      : durationMs && durationMs >= 1000
+        ? `Worked for ${formatElapsed(durationMs)}`
+        : "Worked"
+    const actionCount = countWorkActions(segment.items)
+    const visible = expanded
+      ? segment.items
+      : collapsedWorkItems(segment.items, !isStreaming)
+
+    return (
+      <Fragment key={segment.key}>
+        <TurnFoldRow
+          label={
+            actionCount > 0
+              ? `${label} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
+              : label
+          }
+          active={live}
+          expanded={expanded}
+          onToggle={() => toggleFold(segment.key)}
+        />
+        {visible.map(renderItem)}
+      </Fragment>
+    )
+  }
 
   return (
     <div className="group/turn my-space-2 min-w-0 space-y-space-2">
-      {visibleItems
-        .slice(0, foldIndex)
-        .map((item, index) => renderItem(item, index, visibleItems.length))}
-      {canFoldWork && (
-        <TurnFoldRow
-          label={foldLabelWithCount}
-          active={!!isStreaming}
-          expanded={workFoldExpanded}
-          onToggle={toggleWorkFold}
-        />
+      {segments.map((segment, index) =>
+        segment.type === "reply"
+          ? renderItem(segment.item)
+          : renderWorkSegment(segment, index)
       )}
-      {visibleItems
-        .slice(foldIndex)
-        .map((item, index) =>
-          renderItem(item, foldIndex + index, visibleItems.length)
-        )}
 
       <div className="mt-space-1 flex items-center gap-space-1">
         {replyText && !isStreaming && (
@@ -360,6 +359,20 @@ export function AgentTurn({
       </div>
     </div>
   )
+}
+
+function replyTimestamp(segment?: TurnSegment): string | undefined {
+  if (segment?.type !== "reply") return undefined
+  const { item } = segment
+  return "chunk" in item && item.chunk.kind === "tool-execution"
+    ? item.chunk.timestamp
+    : undefined
+}
+
+function elapsedMs(start?: string, end?: string): number | null {
+  if (!start || !end) return null
+  const delta = Date.parse(end) - Date.parse(start)
+  return Number.isFinite(delta) && delta > 0 ? delta : null
 }
 
 /**
