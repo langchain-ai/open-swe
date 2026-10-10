@@ -13,7 +13,9 @@ from openswe.dashboard.personal_settings import PROFILE_SETTING_KEYS
 from openswe.dashboard.profiles import get_profile, normalize_profile_for_response
 from openswe.dashboard.user_instructions import get_user_instructions
 from openswe.dashboard.user_preferences import get_user_preferences
+from openswe.run_config import RunConfig
 from openswe.tools.access import Policy, access
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User, UserPreferencesPatch
 from openswe.utils.thread_participants import resolve_thread_participant_logins
 
@@ -56,6 +58,7 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
     }
 
 
+@expose_mcp()
 @access(Policy(trusted="private", actor="owner"))
 async def read_user_settings() -> dict[str, Any]:
     """Implement the `read_user_settings` tool."""
@@ -63,7 +66,7 @@ async def read_user_settings() -> dict[str, Any]:
     if not isinstance(config, Mapping):
         return {"success": False, "error": "Missing run config"}
     try:
-        login = await private_credential_login(config)
+        login = RunConfig.from_config(config).mcp_caller or await private_credential_login(config)
     except Exception:
         logger.exception("Could not authorize personal settings read")
         return {"success": False, "error": "Could not verify the active thread requester"}
