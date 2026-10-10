@@ -8,7 +8,7 @@ from pygments.formatters.html import HtmlFormatter
 from pygments.lexer import Lexer
 from pygments.token import STANDARD_TYPES, _TokenType
 
-from openswe.expedited_review.diff_image import DiffFile, DiffLine, lexer_for, line_tokens
+from openswe.expedited_review.diff_lines import DiffFile, DiffLine, lexer_for, line_tokens
 from openswe.expedited_review.eligibility import ChangedFile
 
 _LIGHT_STYLE = "default"
