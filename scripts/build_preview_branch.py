@@ -60,6 +60,10 @@ class PreviewError(Exception):
     """A step the preview build depends on failed."""
 
 
+class TypecheckUnavailable(PreviewError):
+    """Docker could not start the dashboard typecheck."""
+
+
 def _env(name: str, default: str) -> str:
     return os.environ.get(name) or default
 
@@ -377,6 +381,13 @@ async def typecheck() -> str | None:
     The check runs the PRs' own toolchain, so it gets an exported copy of the tree in a
     container: no ``.git`` credentials, no runner environment, no view of this process.
     """
+    for attempt in range(3):
+        pulled = await run("docker", "pull", TYPECHECK_IMAGE, check=False)
+        if pulled.code == 0:
+            break
+        if attempt == 2:
+            raise TypecheckUnavailable(pulled.stderr or pulled.stdout)
+        await asyncio.sleep(2**attempt)
     with tempfile.TemporaryDirectory() as scratch:
         archive = Path(scratch) / "tree.tar"
         source = Path(scratch) / "src"
@@ -407,7 +418,22 @@ async def typecheck() -> str | None:
         )
     if result.code == 0:
         return None
-    return f"$ {TYPECHECK_SCRIPT}\n{result.stdout}{result.stderr}"[-TYPECHECK_OUTPUT_LIMIT:]
+    output = f"{result.stdout}{result.stderr}"
+    if result.code == 125 or any(
+        message in output.lower()
+        for message in (
+            "docker: error response from daemon",
+            "error response from daemon:",
+            "cannot connect to the docker daemon",
+            "is the docker daemon running",
+            "error during connect:",
+            "unable to find image",
+            "no such image:",
+            "pull access denied",
+        )
+    ):
+        raise TypecheckUnavailable(result.stderr or result.stdout)
+    return f"$ {TYPECHECK_SCRIPT}\n{output}"[-TYPECHECK_OUTPUT_LIMIT:]
 
 
 async def fix_with_agent(prompt: str, errors: str, timeout: float) -> None:
@@ -746,7 +772,20 @@ The preview resets to plain `main` every Sunday, in the
             await self.reuse_fixup()
         errors = None
         if self.settings.force or await rev_parse("HEAD^{tree}") != published:
-            errors = await self.verify(prompt, rerere)
+            try:
+                errors = await self.verify(prompt, rerere)
+            except TypecheckUnavailable as exc:
+                first_line = str(exc).strip().splitlines()
+                summary(
+                    "## Typecheck unavailable — nothing published",
+                    "",
+                    "Docker could not run the dashboard typecheck. A later cron run can retry.",
+                    "",
+                    "```",
+                    first_line[0] if first_line else "Docker failed without output.",
+                    "```",
+                )
+                raise
         await rerere.save()
         self.write_summary(base_sha)
         if errors:
