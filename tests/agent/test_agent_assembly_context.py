@@ -891,3 +891,51 @@ async def test_historical_personal_models_and_routing_do_not_override_workspace(
     )
     assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
     assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "login", "concierge", "available"),
+    [
+        ("dashboard", "octocat", False, True),
+        ("slack", "octocat", False, True),
+        ("slack", "octocat", True, True),
+        ("dashboard", None, False, False),
+        ("schedule", "octocat", False, False),
+    ],
+)
+async def test_thread_creation_guidance_matches_bound_tools(
+    source: str, login: str | None, concierge: bool, available: bool
+) -> None:
+    from openswe.prompt import construct_system_prompt
+    from openswe.server import PrepareAgentRunMiddleware
+
+    config = _base_config()
+    configurable = config["configurable"]
+    configurable.update({"source": source, "github_login": login})
+    if source == "slack":
+        from openswe.slack.dm import CONCIERGE_TS
+
+        configurable["slack_thread"] = {
+            "channel_id": "D123" if concierge else "C123",
+            "thread_ts": CONCIERGE_TS if concierge else "1700000000.000100",
+            "triggering_user_id": "U123",
+            "channel_context": {"is_im": concierge},
+        }
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert (
+        any(
+            (getattr(tool, "name", None) or getattr(tool, "__name__", None)) == "start_thread"
+            for tool in tools
+        )
+        is available
+    )
+    middleware = captured["middleware"]
+    assert isinstance(middleware, list)
+    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+    rendered = construct_system_prompt(
+        "/workspace", source=source, start_thread_available=prepare._start_thread_available
+    )
+    assert ("`start_thread`" in rendered) is available
