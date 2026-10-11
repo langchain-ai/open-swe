@@ -129,6 +129,7 @@ def construct_system_prompt(
     slack_by_the_way: bool = False,
     slack_follow_up_suggestions: bool = False,
     sandbox_file_downloads: bool = False,
+    start_thread_available: bool = False,
     prefer_tools_in_sandbox: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
@@ -155,6 +156,7 @@ def construct_system_prompt(
         sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
         sandbox_file_downloads=sandbox_file_downloads,
+        start_thread_available=start_thread_available,
         default_repo=(
             f"{default_repo['owner']}/{default_repo['name']}"
             if default_repo and default_repo.get("owner") and default_repo.get("name")

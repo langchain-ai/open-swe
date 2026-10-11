@@ -413,3 +413,36 @@ def test_agent_factory_is_accepted_by_langgraph() -> None:
         classify_factory(traced_agent, graph_id)
     finally:
         FACTORY_KWARGS.pop(graph_id, None)
+
+
+@pytest.mark.asyncio
+async def test_actorless_automation_cannot_start_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.tools import threads
+
+    monkeypatch.setattr(threads, "_config", lambda: {"configurable": {"source": "schedule"}})
+    monkeypatch.setattr(threads.User, "login_for_email", AsyncMock(return_value=None))
+    create = AsyncMock()
+    monkeypatch.setattr(threads, "start_dashboard_thread", create)
+    result = await threads.start_thread(title="Separate task", instructions="Do the task")
+    assert result == {"success": False, "error": "No verified triggering user is available"}
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_actor_can_start_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.tools import threads
+
+    monkeypatch.setattr(
+        threads,
+        "_config",
+        lambda: {"configurable": {"source": "dashboard", "github_login": "alice"}},
+    )
+    gate = AsyncMock()
+    monkeypatch.setattr(threads, "enforce_github_login_gate", gate)
+    create = AsyncMock(return_value="new-task")
+    monkeypatch.setattr(threads, "start_dashboard_thread", create)
+    result = await threads.start_thread(title="Separate task", instructions="Do the task")
+    assert result["success"] is True
+    assert result["thread_id"] == "new-task"
+    gate.assert_awaited_once_with("alice")
+    assert create.await_args.args == ("alice", None)
