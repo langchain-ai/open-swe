@@ -22,8 +22,11 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SANDBOX_BACKENDS
-from openswe.server import _registered_tool_name, get_agent
+from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, get_agent
+from openswe.slack.payloads import SlackChannelContext
+from openswe.source_context import SlackThreadRef
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -255,6 +258,59 @@ async def _capture_create_deep_agent_kwargs(
     SANDBOX_BACKENDS.pop(thread_id, None)
     captured["make_model_calls"] = make_model_calls
     return captured
+
+
+@pytest.mark.parametrize(
+    ("run_config", "available"),
+    [
+        (RunConfig(github_login="octocat"), False),
+        (RunConfig(source="dashboard", github_login="octocat"), True),
+        (
+            RunConfig(
+                source="slack",
+                github_login="octocat",
+                slack_thread=SlackThreadRef(channel_id="C1", thread_ts="123.456"),
+            ),
+            True,
+        ),
+        (
+            RunConfig(
+                source="slack",
+                github_login="octocat",
+                slack_thread=SlackThreadRef(
+                    channel_id="D1",
+                    thread_ts="0",
+                    channel_context=SlackChannelContext(is_im=True),
+                ),
+            ),
+            True,
+        ),
+        (RunConfig(source="dashboard"), False),
+        (RunConfig(source="schedule", github_login="octocat"), False),
+        (RunConfig(source="automation"), False),
+        (RunConfig(source="dashboard", github_login="octocat", stop_summary=True), False),
+        (
+            RunConfig(source="dashboard", github_login="octocat", background_task_completion=True),
+            False,
+        ),
+    ],
+)
+async def test_start_thread_is_bound_for_direct_user_runs(
+    run_config: RunConfig, available: bool
+) -> None:
+    config = _base_config()
+    config["configurable"].pop("github_login")
+    config["configurable"].update(run_config.dump())
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert ("start_thread" in {_registered_tool_name(tool) for tool in tools}) is available
+    middleware = captured["middleware"]
+    assert isinstance(middleware, list)
+    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+    assert prepare._start_thread_available is available
 
 
 @pytest.mark.asyncio
