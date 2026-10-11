@@ -341,6 +341,8 @@ async def _choose_reviewer(
     for login, user in zip(logins, users, strict=True):
         if user is None:
             skipped[login] = "no_open_swe_account"
+        elif not user.typed_preferences.auto_review_picks:
+            skipped[login] = "opted_out"
         elif _is_bot(login):
             skipped[login] = "bot"
         elif request.is_author(user.id, login):

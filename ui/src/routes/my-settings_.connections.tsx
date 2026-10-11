@@ -24,6 +24,12 @@ function ConnectionsPage() {
           <ManagedToolsSection />
           <SettingsSection title="Slack">
             <ProfileSwitchRow
+              field="auto_review_picks"
+              label="Automatic review picks"
+              description="Let Open SWE automatically pick you for human reviews. Turning this off still allows people to assign you explicitly."
+              fallback
+            />
+            <ProfileSwitchRow
               field="concierge_mode"
               label="Concierge mode"
               description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."

@@ -283,6 +283,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "profile": {
                 **ordinary,
                 "concierge_mode": False,
+                "auto_review_picks": True,
                 "preserve_sandbox_memory": True,
                 "pr_review_links": False,
                 "pr_failure_reactions": False,
@@ -327,3 +328,19 @@ async def test_sole_writer_save_does_not_publish_stored_settings(
     result = await save_user_settings({"branch_prefix": "alice/"})
     assert result == {"ok": True}
     assert user_records.get("profile", "Alice")["branch_prefix"] == "alice/"
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_auto_review_preference_is_durable_and_readable(
+    requester: dict[str, object], saved_scope: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.users import User
+
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "Alice")
+    await User.sign_in("github", "123", login="Alice")
+    result = await save_user_settings({"auto_review_picks": False})
+    assert result["updated"] == {"auto_review_picks": False}
+    user = await User.for_login("github", "Alice")
+    assert user is not None and not user.typed_preferences.auto_review_picks
+    read = await read_user_settings()
+    assert read["participants"][0]["profile"]["auto_review_picks"] is False

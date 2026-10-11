@@ -87,3 +87,40 @@ def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
     friday_evening = datetime(2026, 10, 2, 23, tzinfo=UTC)
     assert not hours.on_shift(friday_evening)
     assert hours.next_start(friday_evening) == datetime(2026, 10, 5, 13, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("owners", ["* @ada @grace", ""])
+async def test_opted_out_owners_and_recent_authors_are_skipped(
+    owners: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from collections import Counter
+
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.github.pull_requests import PullRequest
+    from openswe.human_review import picking
+    from openswe.human_review.requests import HumanReviewRequest
+    from openswe.users import User
+
+    ada = User(display_name="ada", preferences={"auto_review_picks": False})
+    grace = User(display_name="grace")
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    pull = MagicMock()
+    pull.repo.can_write = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="a.py")])
+    )
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse(owners)))
+    monkeypatch.setattr(
+        picking, "_touched", AsyncMock(return_value=Counter({"ada": 5, "grace": 1}))
+    )
+    monkeypatch.setattr(User, "for_login", AsyncMock(side_effect=[ada, grace]))
+    monkeypatch.setattr(
+        HumanReviewRequest, "open_review_counts", AsyncMock(return_value={grace.id: 0})
+    )
+    with caplog.at_level("INFO", logger=picking.__name__):
+        result = await picking._choose_reviewer(request, pull, None, {})
+    assert isinstance(result, picking.Pick) and result.login == "grace"
+    filtered = next(r for r in caplog.records if r.message == "Filtered reviewer candidates")
+    assert filtered.skipped == {"ada": "opted_out"}

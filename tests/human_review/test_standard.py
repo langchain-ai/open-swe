@@ -506,3 +506,27 @@ async def test_review_blockers_refuse_authors_without_an_open_swe_account(
     ):
         blockers = await review_blockers(MagicMock())
     assert blockers == (["its author is not an Open SWE user"] if blocked else [])
+
+
+async def test_explicit_assignment_accepts_an_opted_out_reviewer() -> None:
+    from openswe.human_review import standard
+    from openswe.human_review.people import Participant
+
+    user = User(display_name="grace", preferences={"auto_review_picks": False})
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    with (
+        patch.object(standard, "_github_approvers", AsyncMock(return_value=[])),
+        patch.object(standard.Coverage, "load", AsyncMock(return_value=None)),
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(
+            standard, "resolve_writer", AsyncMock(return_value=Participant(user, "grace"))
+        ),
+        patch.object(standard, "_add_reviewer", AsyncMock(return_value=request)),
+        patch.object(standard, "_request_github_review", AsyncMock()),
+        patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)),
+        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+    ):
+        assert (await standard.assign(request, "grace", "Named by developer")).success

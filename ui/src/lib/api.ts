@@ -308,6 +308,7 @@ export interface Profile {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  auto_review_picks?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
@@ -330,6 +331,7 @@ export interface ProfileUpdate {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  auto_review_picks?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
