@@ -63,7 +63,7 @@ async def test_gate_blocks_non_member_on_public_pr_comment(
                     "url": "https://api.github.com/repos/langchain-ai/open-swe/pulls/7"
                 },
             },
-            "comment": {"body": "@open-swe review"},
+            "comment": {"body": "@jarvis-aeteq review"},
             "repository": {
                 "owner": {"login": "langchain-ai"},
                 "name": "open-swe",
@@ -107,7 +107,7 @@ async def test_gate_allows_org_member_on_public_pr_comment(
                     "url": "https://api.github.com/repos/langchain-ai/open-swe/pulls/7"
                 },
             },
-            "comment": {"body": "@open-swe review"},
+            "comment": {"body": "@jarvis-aeteq review"},
             "repository": {
                 "owner": {"login": "langchain-ai"},
                 "name": "open-swe",
@@ -147,7 +147,7 @@ async def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch, regist
                     "url": "https://api.github.com/repos/langchain-ai/open-swe/pulls/7"
                 },
             },
-            "comment": {"body": "@open-swe please look at this"},
+            "comment": {"body": "@jarvis-aeteq please look at this"},
             "repository": {
                 "owner": {"login": "langchain-ai"},
                 "name": "open-swe",
@@ -188,7 +188,7 @@ async def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch, regist
                     "url": "https://api.github.com/repos/langchain-ai/open-swe/pulls/7"
                 },
             },
-            "comment": {"body": "@open-swe please look at this"},
+            "comment": {"body": "@jarvis-aeteq please look at this"},
             "repository": {
                 "owner": {"login": "langchain-ai"},
                 "name": "open-swe",
@@ -222,7 +222,7 @@ async def test_gate_blocks_non_member_on_public_issue(
             "issue": {
                 "id": 1,
                 "number": 7,
-                "title": "@openswe please help",
+                "title": "@jarvis-aeteq please help",
                 "body": "x",
             },
             "repository": {
@@ -250,7 +250,7 @@ async def test_review_requested_is_unsupported_before_public_repo_gate(
         "pull_request",
         {
             "action": "review_requested",
-            "requested_reviewer": {"login": "open-swe[bot]"},
+            "requested_reviewer": {"login": "jarvis-aeteq[bot]"},
             "pull_request": {
                 "number": 1244,
                 "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
@@ -301,13 +301,13 @@ async def test_internal_bot_comment_never_prompts_the_agent(
                     "url": "https://api.github.com/repos/langchain-ai/open-swe/pulls/7"
                 },
             },
-            "comment": {"body": "@open-swe please look at this"},
+            "comment": {"body": "@jarvis-aeteq please look at this"},
             "repository": {
                 "owner": {"login": "langchain-ai"},
                 "name": "open-swe",
                 "private": False,
             },
-            "sender": {"login": "open-swe[bot]", "type": "Bot"},
+            "sender": {"login": "jarvis-aeteq[bot]", "type": "Bot"},
         },
     )
 

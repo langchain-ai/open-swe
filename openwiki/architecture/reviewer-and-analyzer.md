@@ -3,47 +3,43 @@ type: architecture
 title: Review and Style Analysis Graphs
 description: Architecture of the isolated reviewer and review-style analyzer graphs, including repository preparation, durable finding reconciliation and publication, per-repository style persistence, and continual analysis scheduling.
 tags: [reviewer, analyzer, code-review, findings, review-style, langgraph, sandbox, github]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
 sources:
-  - id: openwiki-source-63ebc853556c1b852ed80aff
-    resource: repo://agent/analyzer.py
-  - id: openwiki-source-8f8da8ebd37830cfae55d76c
-    resource: repo://agent/review/analyzer_cron.py
-  - id: openwiki-source-f2ef7b73c8002cd7b756ad30
-    resource: repo://agent/review/findings.py
-  - id: openwiki-source-70a93c845bc5a2d41669d55f
-    resource: repo://agent/review/groups.py
-  - id: openwiki-source-33d4d2e6efc682b86ebf1624
-    resource: repo://agent/review/publish.py
-  - id: openwiki-source-290b6c9567021d70bc012c7c
-    resource: repo://agent/review/reconcile.py
-  - id: openwiki-source-e0831f51028e19f266889975
-    resource: repo://agent/review/style_guidance.py
-  - id: openwiki-source-92590907348b7bf56e1762fa
-    resource: repo://agent/review/style_jobs.py
-  - id: openwiki-source-31ac80d273943055d537bae8
-    resource: repo://agent/review/styles.py
-  - id: openwiki-source-276ab38291eb5741b4c2141c
-    resource: repo://agent/reviewer.py
-  - id: openwiki-source-9950d0e32f48b63eef01b7e2
-    resource: repo://agent/skills/continual-learning/SKILL.md
-  - id: openwiki-source-f821cbba108557a41969274b
-    resource: repo://agent/tools/add_finding.py
-  - id: openwiki-source-c451a6086ffd6238062ba879
-    resource: repo://agent/tools/publish_review.py
-  - id: openwiki-source-7373bada04b526afa9becd11
-    resource: repo://agent/tools/save_review_style.py
-  - id: openwiki-source-ff16fde3cd496fd0b8de20da
-    resource: repo://agent/utils/analyzer_skills.py
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
+  - id: openwiki-source-9b527e24b573880a306ac5b0
+    resource: repo://openswe/analyzer.py
+  - id: openwiki-source-812ee034de9635574394bbde
+    resource: repo://openswe/review/analyzer_cron.py
+  - id: openwiki-source-85f325a37c97d6000b6e6a23
+    resource: repo://openswe/review/findings.py
+  - id: openwiki-source-77c518a8a4572e59e2d374ee
+    resource: repo://openswe/review/publish.py
+  - id: openwiki-source-f47abef99c7b9c6cdca43421
+    resource: repo://openswe/review/reconcile.py
+  - id: openwiki-source-0d97385e1ec5efadd37c04fc
+    resource: repo://openswe/review/style_guidance.py
+  - id: openwiki-source-405a5dc41768d5a8086f4621
+    resource: repo://openswe/review/style_jobs.py
+  - id: openwiki-source-eb9e695bef31bca8f88b0c2b
+    resource: repo://openswe/review/styles.py
+  - id: openwiki-source-96bcad07b4fe7078402bc2b8
+    resource: repo://openswe/reviewer.py
+  - id: openwiki-source-96907ca866d8ca4c8369bc1b
+    resource: repo://openswe/tools/add_finding.py
+  - id: openwiki-source-7cec199cafafc864b85fba49
+    resource: repo://openswe/tools/publish_review.py
+  - id: openwiki-source-4e31dc31e6a9e482478928fb
+    resource: repo://openswe/tools/read_finding_outcomes.py
+  - id: openwiki-source-4e57d630bcf4183c2e7c14e3
+    resource: repo://openswe/tools/save_review_style.py
+  - id: openwiki-source-6c0778eb47df8418c590e93e
+    resource: repo://openswe/utils/analyzer_skills.py
   - id: openwiki-source-065c69ba95cc740a2282dd3c
     resource: repo://tests/reviewer/test_factory_config_isolation.py
-  - id: openwiki-source-c2a2305421bcb0df9ae61668
-    resource: repo://tests/reviewer/test_reviewer_findings.py
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-09-28T16:33:19.776Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-08T15:19:10.971Z
 ---
 
 # Review and Style Analysis Graphs
@@ -73,7 +69,7 @@ It permits one `reviewer` subagent. The parent assigns a disjoint file partition
 
 The middleware computes the review range and its unified diff, including delta-only re-review ranges, then derives the changed `(file, side, line)` set. It puts `diff_text` and `diff_line_set` in run state. This lets `add_finding` reject invalid anchors at creation time rather than waiting for GitHub to reject a batch.
 
-In parallel, preparation fetches PR title and body, existing GitHub review threads, saved repository style, organization guidelines, root and scoped `AGENTS.md`/`CLAUDE.md` from the base SHA, an API standards skill, and optional author trace context. Existing threads are reconciled before their prompt block is rendered. Once the diff is available, scoped instructions are selected for changed files. The rendered prompt then selects first-review, re-review, or finding-reply guidance. Diff grouping is started as a background best-effort task and never blocks the review.
+In parallel, preparation fetches PR title and body, existing GitHub review threads, saved repository style, organization guidelines, root and scoped `AGENTS.md`/`CLAUDE.md` from the base SHA, an API standards skill, and optional author trace context. Existing threads are reconciled before their prompt block is rendered. Once the diff is available, scoped instructions are selected for changed files. The rendered prompt then selects first-review, re-review, or finding-reply guidance.
 
 ```mermaid
 flowchart TD
@@ -149,7 +145,7 @@ Both playbooks are packaged as virtual files. Launchers seed `build_skill_files(
 
 ### Style store and launch paths
 
-`REVIEW_STYLES`, a typed store in the `review_styles` namespace keyed by `owner/repo`, owns a `ReviewStyle` record: analysis status, saved prompt and summary, sampled-reviewer/count metadata, analysis thread/run IDs, cron ID, error, and audit timestamps. The reviewer retrieves `custom_prompt` fail-soft during preparation: a store failure omits style guidance rather than failing a PR review. When available, it is appended under **Repository-specific review style**, and applies only when consistent with the global review bar.
+`REVIEW_STYLES`, a typed store in the `review_styles` namespace keyed by `owner/repo`, owns a `ReviewStyle` record: analysis status, saved prompt and summary, sampled-reviewer/count metadata, analysis thread/run IDs, cron ID, error, and audit timestamps. The reviewer retrieves `custom_prompt` fail-soft during preparation: a store failure omits style guidance rather than failing a PR review. When available, it is appended to the reviewer prompt, and applies only when consistent with the global review bar.
 
 `start_bootstrap_analysis` first collects review samples with the caller's GitHub token, marks the record running, then creates a durable analyzer run on `review_style_thread_id(owner, repo)`. It passes samples, counts, reviewers, OAuth token, bootstrap mode, and virtual skill files. Collection or durable-run startup failures mark the style record failed. `start_continual_run` creates an immediate outcome-driven durable run using the same deterministic style thread.
 
@@ -163,4 +159,4 @@ The cron itself is threadless, but its configurable explicitly provides the dete
 
 ## Focused tests
 
-The reviewer suite covers config isolation, diff and tool validation (including LEFT-side anchors), durable finding behavior, publishing and marker rendering, reconciliation, background diff groups, trace context, trigger/watch behavior, and review API/chat paths. In particular, `test_factory_config_isolation.py` protects the reviewer config-copy invariant; `test_reviewer_tools.py` exercises validation and persistence decisions; `test_reviewer_reconcile.py` covers marker backfill and terminal-thread rules; and `test_reviewer_publish.py` covers rendered markers and suggestions. `tests/analyzer/test_analyzer_cron.py` verifies cron creation, idempotence, removal, seeded continual skill files, explicit thread configuration, and the deterministic schedule window.
+The reviewer suite covers config isolation, diff and tool validation (including LEFT-side anchors), durable finding behavior, publishing and marker rendering, reconciliation, trace context, trigger/watch behavior, and review API/chat paths. In particular, `test_factory_config_isolation.py` protects the reviewer config-copy invariant; `test_reviewer_tools.py` exercises validation and persistence decisions; `test_reviewer_reconcile.py` covers marker backfill and terminal-thread rules; and `test_reviewer_publish.py` covers rendered markers and suggestions. `tests/analyzer/test_analyzer_cron.py` verifies cron creation, idempotence, removal, seeded continual skill files, explicit thread configuration, and the deterministic schedule window.

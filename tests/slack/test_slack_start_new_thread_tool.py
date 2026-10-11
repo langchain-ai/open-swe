@@ -327,7 +327,7 @@ async def test_slack_breakout_thread_success(
     assert dispatch["configurable"]["github_login"] == "alice"
     assert dispatch["configurable"]["agent_model_id"] == "anthropic:claude-sonnet-4-5"
     assert "Breakout Instructions" in dispatch["content"]
-    assert "## Open SWE Links" in dispatch["content"]
+    assert "## Jarvis Links" in dispatch["content"]
     assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
     assert "- Trace: https://smith/x" in dispatch["content"]
     assert dispatch["content"].endswith(

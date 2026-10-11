@@ -104,7 +104,7 @@ async def _dispatch_input(
 ) -> RunInput:
     surface: Surface = (
         source
-        if source in {"slack", "linear", "github", "web", "desktop", "eval"}
+        if source in {"slack", "linear", "notion", "github", "web", "desktop", "eval"}
         else "automation"
     )  # type: ignore[assignment]
     channels: list[ChannelIdentity] = []
@@ -147,8 +147,8 @@ async def _dispatch_input(
         sender = {"id": sender_id, "github_login": login}
         if email:
             sender["email"] = email
-    if not sender_id and surface == "linear" and email:
-        sender_id = f"linear:{email.lower()}"
+    if not sender_id and surface in ("linear", "notion") and email:
+        sender_id = f"{surface}:{email.lower()}"
         sender = {"id": sender_id, "email": email}
     if sender is not None:
         sender_id = (await User.canonical_person(sender))["id"]

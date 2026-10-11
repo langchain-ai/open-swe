@@ -62,6 +62,7 @@ class EntryPoint(StrEnum):
     DESKTOP = "desktop"
     API = "api"
     LINEAR = "linear"
+    NOTION = "notion"
     UNKNOWN = "unknown"
 
 

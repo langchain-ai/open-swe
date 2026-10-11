@@ -49,7 +49,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
 ) -> dict[str, str]:
     """Handle Linear webhooks.
 
-    Triggers a new LangGraph run when an issue gets the 'open-swe' label added.
+    Triggers a LangGraph run when a new comment on an issue mentions Open SWE.
     """
     common.logger.info("Received Linear webhook")
     body = await request.body()

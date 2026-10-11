@@ -71,6 +71,23 @@ class LinearIssueRef(BaseModel):
     url: str = ""
 
 
+class NotionPageRef(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = ""
+    identifier: str = ""
+    url: str = ""
+    title: str = ""
+    # "mention" for a question asked in a comment; a task run leaves it empty.
+    kind: str = ""
+    # The comment discussion this run answers in, when a comment started it.
+    discussion_id: str = ""
+
+    @property
+    def is_mention(self) -> bool:
+        return self.kind == "mention"
+
+
 class GitHubIssueRef(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -88,6 +105,7 @@ class SourceContext(BaseModel):
     slack_by_the_way_thread_ts: str | None = None
     slack_by_the_way_message_ts: str | None = None
     linear_issue: LinearIssueRef | None = None
+    notion_page: NotionPageRef | None = None
     github_issue: GitHubIssueRef | None = None
     pr_number: int | None = None
 

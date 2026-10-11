@@ -296,6 +296,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         "source",
         "slack_thread",
         "linear_issue",
+        "notion_page",
         "github_login",
         "user_email",
         "schedule_id",

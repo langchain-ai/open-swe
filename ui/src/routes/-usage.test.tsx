@@ -1044,7 +1044,7 @@ it("distinguishes unavailable usage from empty usage and recovers without duplic
       "Usage analytics is unavailable on this deployment."
     )
   ).toBeTruthy()
-  expect(screen.queryByText(/No Open SWE Agent usage/)).toBeNull()
+  expect(screen.queryByText(/No Jarvis Agent usage/)).toBeNull()
   expect(screen.queryByText("Reviewed PRs")).toBeNull()
   expect(screen.queryByLabelText("Analytics coverage")).toBeNull()
 
@@ -1053,7 +1053,7 @@ it("distinguishes unavailable usage from empty usage and recovers without duplic
     has_pending_events: true,
   })
   fireEvent.click(screen.getByRole("button", { name: "Retry usage analytics" }))
-  expect(await screen.findByText(/No Open SWE Agent usage/)).toBeTruthy()
+  expect(await screen.findByText(/No Jarvis Agent usage/)).toBeTruthy()
   expect(screen.getByLabelText("Analytics coverage")).toBeTruthy()
   expect(screen.getByText("Analytics are updating")).toBeTruthy()
   fireEvent.click(screen.getByText("Details"))

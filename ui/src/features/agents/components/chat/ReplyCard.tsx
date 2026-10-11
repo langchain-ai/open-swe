@@ -33,12 +33,25 @@ function SlackIcon() {
 }
 
 function headerLabel(
-  isLinear: boolean,
+  toolKind: ToolExecutionChunk["toolKind"],
   status: ToolExecutionChunk["status"]
 ): string {
   const pending = status === "in_progress" || status === "pending"
-  if (isLinear) return pending ? "Commenting on Linear…" : "Commented on Linear"
-  return pending ? "Sending to Slack…" : "Sent to Slack"
+  if (toolKind === "linear")
+    return pending ? "Commenting on Linear…" : "Commented on Linear"
+  if (toolKind === "notion")
+    return pending ? "Commenting on Notion…" : "Commented on Notion"
+  return pending ? "Replying in Slack…" : "Replied in Slack"
+}
+
+function replyBody(chunk: ToolExecutionChunk): string {
+  const value =
+    chunk.toolKind === "linear"
+      ? chunk.input?.comment_body
+      : chunk.toolKind === "notion"
+        ? chunk.input?.text
+        : chunk.input?.message
+  return typeof value === "string" ? value : ""
 }
 
 type SlackTextObject = { type?: string; text?: string }
@@ -149,7 +162,7 @@ function SlackReply({ chunk }: ReplyCardProps) {
 }
 
 export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
-  const isLinear = chunk.toolKind === "linear"
+  const isLinear = chunk.toolKind === "linear" || chunk.toolKind === "notion"
   return (
     <div className="min-w-0 px-space-1 py-0.5">
       <div className="mb-space-1 flex items-center gap-space-2 text-xxs text-secondary">

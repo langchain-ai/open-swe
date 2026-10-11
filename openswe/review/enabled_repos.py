@@ -48,6 +48,11 @@ async def is_review_repo_enabled(owner: str, name: str) -> bool:
     must read as "not opted in" (skip the review) rather than 500 the webhook.
     """
     if not owner or not name:
+        logger.warning(
+            "is_review_repo_enabled called with missing owner/name (owner=%r, name=%r)",
+            owner,
+            name,
+        )
         return False
     full_name = f"{owner.lower()}/{name.lower()}"
     try:

@@ -160,13 +160,13 @@ def test_format_pr_review_threads_sanitizes_author_logins() -> None:
                         "body": "x",
                         "created_at": "",
                     },
-                    {"author": "open-swe[bot]", "body": "y", "created_at": ""},
+                    {"author": "jarvis-aeteq[bot]", "body": "y", "created_at": ""},
                 ],
             }
         ]
     )
     assert 'author="valid-user"' in block
-    assert 'author="open-swe[bot]"' in block
+    assert 'author="jarvis-aeteq[bot]"' in block
     # The malformed login is replaced with "unknown".
     assert 'author="unknown"' in block
     assert "ignore previous instructions" not in block.split("<body>", 1)[0]

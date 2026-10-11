@@ -389,6 +389,24 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 </details>
 
+<details id="notion-tasks">
+<summary><strong>Notion tasks</strong></summary>
+
+Open SWE starts work when a task in a Notion task database is assigned to a dedicated Notion member, for example `jarvis@your-company.com`. It moves the task to **In progress**, comments on the task with questions and progress, and once it opens a PR, or links an existing one to the thread, it fills in the PR URL property, moves the task to **In review**, and posts the link as a comment. Replies to its comments are forwarded to the running thread. A task that links design documents waits until every one of them is **Approved**: Open SWE comments with the unapproved designs, then picks the task up automatically when the last one is approved.
+
+1. **Integration.** At <https://www.notion.so/profile/integrations> create an internal integration with **Read content**, **Update content**, **Read comments**, **Insert comments**, and **Read user information including email addresses** (email maps Notion users to Open SWE accounts, so PRs open as the person who assigned the task). Save its token as `NOTION_API_KEY`. Share the task database, the design-document database, and any database the tasks relate to (for example Projects) with the integration.
+2. **Agent member.** Invite a dedicated member account. Find its user id with `curl -s https://api.notion.com/v1/users -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2025-09-03"` and save it as `NOTION_AGENT_USER_IDS` (comma-separated for several). Groups and integrations cannot be assignees, so a member is required. Optionally, signed in as that member, create a personal access token in the Notion Developer portal (content read and update, comment insert) and save it as `NOTION_AGENT_API_KEY`: comments, status changes, and the PR link are then written as the member instead of the integration. Reads and webhooks keep using `NOTION_API_KEY`. The token expires after at most one year, so rotate it before then.
+3. **Databases.** Save the task data source id as `NOTION_TASKS_DATA_SOURCE_ID` and the design-document data source id as `NOTION_DOCUMENTS_DATA_SOURCE_ID` (**⋯ → Manage data sources → Copy data source ID**). The task database needs an `Assignee` people property, a `Status` status property with **Not started**, **In progress**, and **In review** options, a `Repository` select whose options are `owner/name` values, a `Pull Request URL` URL property, and optionally a `Design` relation to the design documents, whose `Status` includes **Approved**. Different names are configured in [Customizing Notion tasks](CUSTOMIZATION.md#customizing-notion-tasks).
+4. **Webhook.** In the integration's **Webhooks** tab, create a subscription for `<URL>/webhooks/notion` with the events `page.created`, `page.properties_updated`, and `comment.created`. Notion then posts a verification token: while `NOTION_WEBHOOK_SECRET` is unset, Open SWE logs it (`Notion webhook verification token received`). Save it as `NOTION_WEBHOOK_SECRET`, restart, and paste it into Notion to verify the subscription.
+
+A task without a Repository falls back to the assigner's dashboard default repository, then the workspace default repository.
+
+**Questions by mention.** Mention the agent member in a comment on any page the integration can access, for example `@Jarvis how do we roll back a release?`, and it answers in that comment's discussion. Later replies in the discussion continue the same conversation without another mention. It works from the page's content and uses the page's Repository when the page is a task, otherwise the commenter's or the workspace's default repository, or no repository at all. A question never changes a task's status. Comment events only arrive for pages shared with the integration, so share the teamspaces or pages where people should be able to ask.
+
+**Verify:** create a task with **Repository** set, assign it to the agent member, and watch its status move to **In progress** and a Notion thread appear in the dashboard.
+
+</details>
+
 <details id="dashboard-on-its-own-origin">
 <summary><strong>Dashboard on its own origin (separate frontend deployment)</strong></summary>
 
@@ -441,8 +459,8 @@ Backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `ALLOWED
 ### Webhook not receiving events
 
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab. A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create (and Issues, for automations) for Linear.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create for Linear, `page.created`, `page.properties_updated`, and `comment.created` for Notion.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, `LINEAR_WEBHOOK_SECRET`, or `NOTION_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401 (Notion's one-time verification request excepted).
 
 ### Thread credential scope
 

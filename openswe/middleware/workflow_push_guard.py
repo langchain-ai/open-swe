@@ -446,7 +446,7 @@ def _blocked_message(
         "error_type": "WorkflowPushApprovalRequired",
         "error": (
             "This git push includes GitHub workflow file changes and requires human "
-            "approval before Open SWE can push it. Retry the same standalone git push "
+            "approval before Jarvis can push it. Retry the same standalone git push "
             "after the thread owner approves the workflow diff in Slack or the web UI."
         ),
         "workflow_approval_status": status,
