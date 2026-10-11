@@ -1006,6 +1006,17 @@ async def settle_repository(owner: str, repo: str) -> None:
         await settle(request)
 
 
+async def _author_identity(pr: PullRequest) -> str:
+    """The author's Open SWE identity for the picker prompt, or their login alone when unknown."""
+    author = await User.get(pr.author_user_id) if pr.author_user_id else None
+    if author is None:
+        return f"@{pr.author}"
+    identity = f"@{author.login_for('github')} (Open SWE user:{author.id}, {author.display_name})"
+    if author.slack_user_id:
+        identity = identity[:-1] + f", Slack <@{author.slack_user_id}>)"
+    return identity
+
+
 @dataclass(frozen=True, slots=True)
 class AutoAssignResult:
     status: Literal["picked", "waiting", "woken", "failed", "disabled", "claimed"]
@@ -1152,6 +1163,7 @@ async def _wake_picker(
         pr_url=pr.url,
         minutes=await _assignment_minutes(request),
         author=pr.author,
+        author_identity=await _author_identity(pr),
         posted=not request.has_card,
         asked=asked,
         trigger=trigger,
