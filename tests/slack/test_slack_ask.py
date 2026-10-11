@@ -45,9 +45,11 @@ def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("linked_asker")
-@pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
+@pytest.mark.parametrize(
+    "reply_thread_ts,selected_message", [("", ""), ("123.456", ""), ("", "Ship the migration")]
+)
 async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
-    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str, selected_message: str
 ) -> None:
     status = AsyncMock()
     monkeypatch.setattr("openswe.slack.thinking.set_slack_thread_status", status)
@@ -67,6 +69,7 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
         channel_id="C1",
         user_id="U1",
         question="why?",
+        selected_message=selected_message,
         thread_id="t-1",
         team_id="T1",
         reply_thread_ts=reply_thread_ts,
