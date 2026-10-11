@@ -172,7 +172,11 @@ from openswe.sandboxes.lifecycle import (
     get_cached_sandbox_backend,
     take_stale_boot,
 )
-from openswe.sandboxes.paths import resolve_sandbox_work_dir
+from openswe.sandboxes.paths import (
+    WORK_DIR_METADATA_KEY,
+    recorded_work_dir,
+    resolve_sandbox_work_dir,
+)
 from openswe.sandboxes.providers.langsmith import service_identity_jwks_url
 from openswe.sandboxes.read_only_backend import ReadOnlyBackend
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
@@ -304,6 +308,7 @@ from openswe.utils.model import (
 )
 from openswe.utils.startup_trace import aphase
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from openswe.utils.thread_reads import read_thread, shared_thread_reads
 from openswe.utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
@@ -435,7 +440,7 @@ async def _resolve_repo_custom_instructions(
 async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIdentity]:
     """Git identities of everyone who has posted in this thread."""
     try:
-        thread = await client.threads.get(thread_id=thread_id)
+        thread = await read_thread(thread_id, client)
         logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
         return await resolve_participant_identities(logins)
     except Exception:
@@ -754,7 +759,7 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     if not thread_id:
         return None
     try:
-        thread = await client.threads.get(thread_id=thread_id)
+        thread = await read_thread(thread_id, client)
     except Exception:
         logger.warning(
             "Could not read the thread's sandbox; treating it as hosted",
@@ -795,9 +800,7 @@ async def _mcp_code_mode(
 ) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
     if local_run or not (tools or additional_tools):
         return None, tools
-    import langgraph_sdk
-
-    thread = await langgraph_sdk.get_client().threads.get(thread_id)
+    thread = await read_thread(thread_id)
     launcher_login = thread_metadata(thread).get("owner_login")
     profile = await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
     if not profile or profile.get("experimental_mcp_ptc") is not True:
@@ -1340,6 +1343,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
+                work_dir_record = recorded_work_dir(sandbox_backend)
                 await client.threads.update(
                     thread_id=self._thread_id,
                     metadata={
@@ -1350,6 +1354,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         **(
                             {"model_route": attribution_route}
                             if attribution_route is not None
+                            else {}
+                        ),
+                        **(
+                            {WORK_DIR_METADATA_KEY: work_dir_record}
+                            if work_dir_record is not None
                             else {}
                         ),
                     },
@@ -2249,7 +2258,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     thread_id = configurable.get("thread_id")
     if not isinstance(thread_id, str):
         return await _get_agent(config)
-    async with aphase(thread_id, "factory.total"):
+    async with aphase(thread_id, "factory.total"), shared_thread_reads():
         return await _get_agent(config)
 
 

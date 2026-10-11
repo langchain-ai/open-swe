@@ -14,6 +14,7 @@ from langgraph.runtime import Runtime
 
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.utils.startup_trace import aphase, flush_phases
+from openswe.utils.thread_reads import shared_thread_reads
 
 
 def _take_latest[T](left: T | None, right: T | None) -> T | None:
@@ -75,7 +76,10 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
                 and prepared_state.get("run_prepared_for") == fingerprint
             ):
                 return None
-            async with aphase(getattr(self, "_thread_id", None), "prepare.total"):
+            async with (
+                aphase(getattr(self, "_thread_id", None), "prepare.total"),
+                shared_thread_reads(),
+            ):
                 updates = await self._prepare(prepared_state, runtime)
             return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
         finally:

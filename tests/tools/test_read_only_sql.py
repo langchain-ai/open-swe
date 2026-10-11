@@ -25,7 +25,7 @@ def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
     )
-    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: client)
+    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
 
 
 @pytest.mark.asyncio
