@@ -162,6 +162,15 @@ class EventSummary(BaseModel):
     @classmethod
     def of(cls, event: LoggedEvent) -> Self:
         payload = event.payload if isinstance(event.payload, dict) else {}
+        if event.source == "thread":
+            thread_id = payload.get("thread_id")
+            return cls(
+                source="thread",
+                event_type=event.event_type,
+                target=thread_id if isinstance(thread_id, str) else "",
+                body=str(payload),
+                trusted=True,
+            )
         if event.source == "github":
             return cls._github(event, _GitHubDelivery.model_validate(payload))
         if event.source == "slack":

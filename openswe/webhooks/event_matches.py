@@ -126,7 +126,7 @@ class EventMatch(Base):
                 match.content,
                 {
                     "sender_id": _SYSTEM["id"],
-                    "surface": match.source,
+                    "surface": "automation" if match.source == "thread" else match.source,
                     "kind": "system",
                     "data": data,
                 },

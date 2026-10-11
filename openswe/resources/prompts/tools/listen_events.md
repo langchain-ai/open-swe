@@ -8,7 +8,7 @@ Prefer narrow filters: each matching event costs a model turn. For CI, `event_ty
 
 Args:
     action: `subscribe` creates a subscription and returns its `subscription_id`; `list` shows this thread's outstanding subscriptions, each with `trigger_count` (events matched) and `last_triggered_at`; `cancel` removes the one named by `subscription_id`.
-    sources: `github` and/or `slack`. Empty matches every source.
+    sources: `github`, `slack`, `linear`, or `thread`. Empty matches every source. `thread` emits `thread_inactive` once per quiet period after an unresolved public thread has had no turn activity for one hour; running or queued threads and private threads are excluded. Use `payload_match={"thread_id": "..."}` to monitor a specific thread. The payload includes `last_activity_at` and the threshold `inactive_for_seconds` (3600). Events are checked every minute; renewed turn activity rearms the notification.
     repo: A GitHub repository (`owner/name`) of this workspace; only its events match.
     pr_url: A GitHub pull request URL; only that pull request's events match (reviews, comments, pushes, CI).
     event_types: Event types to match, as `list_event_types` names them. A bare name matches every action: `pull_request` matches `pull_request.opened`, `pull_request.closed`, and the rest; `pull_request.closed` matches only that action. E.g. GitHub `pull_request_review.submitted`, `issue_comment`, `check_suite.completed`, `issues.opened`; Slack `message`, `reaction_added`. Empty matches every type. `subscribe` needs at least one of `event_types`, `repo`, or `pr_url`.
