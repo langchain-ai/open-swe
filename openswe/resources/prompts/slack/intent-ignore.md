@@ -1,0 +1,1 @@
+The current message is clearly conversation between people, an aside, a joke, or brainstorming that does not ask Open SWE to answer or act. Ignoring this message would not leave a request to the agent unanswered.

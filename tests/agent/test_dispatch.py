@@ -255,8 +255,10 @@ async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
     assert envelope.attrib["sender"] == f"user:{user.id}"
 
 
+@pytest.mark.parametrize("defer_status", [False, True])
 async def test_dispatch_uses_moved_slack_destination_from_metadata(
     monkeypatch: pytest.MonkeyPatch,
+    defer_status: bool,
 ) -> None:
     client = AsyncMock()
     client.runs.create.return_value = {"run_id": "run-1"}
@@ -273,10 +275,18 @@ async def test_dispatch_uses_moved_slack_destination_from_metadata(
         source="slack",
         thread_title=None,
         client=client,
-        config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+        config={
+            "configurable": {
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+                "slack_defer_thinking_status": defer_status,
+            }
+        },
     )
-    client.threads.get.assert_awaited_once_with("thread-1")
-    set_status.assert_awaited_once_with("C2", "2.0", "Thinking...")
+    if defer_status:
+        set_status.assert_not_awaited()
+    else:
+        client.threads.get.assert_awaited_once_with("thread-1")
+        set_status.assert_awaited_once_with("C2", "2.0", "Thinking...")
 
 
 async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(

@@ -417,7 +417,11 @@ async def create_durable_run(
     if recorded.pull_request is not None:
         await Topic.PULL_REQUESTS.invalidate(key=recorded.pull_request)
     cfg = RunConfig.from_config(run_config)
-    if assistant_id == "agent" and cfg.slack_ask is not True:
+    if (
+        assistant_id == "agent"
+        and cfg.slack_ask is not True
+        and not cfg.slack_defer_thinking_status
+    ):
         from openswe.slack.thinking import sync_slack_background_status
 
         await sync_slack_background_status(

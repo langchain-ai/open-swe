@@ -8,6 +8,8 @@ from langchain_core.messages import HumanMessage
 
 from openswe.dashboard.options import available_requested_models
 from openswe.model_request import ModelRequestIntent, infer_requested_model
+from openswe.slack.intent import kitchen_message_intent
+from openswe.slack.request import SlackRequest
 from openswe.utils.jev import JevDecision, select_jev_choice
 
 type ResponseHandler = (
@@ -98,6 +100,76 @@ async def test_classification_accepts_only_confident_valid_answers(
     )
     if not valid_response or choice == "unknown":
         assert decision.reason == ("classifier_error" if not valid_response else "invalid_choice")
+
+
+@pytest.mark.parametrize(
+    ("choice", "confidence", "expected"),
+    [("respond", 0.95, "respond"), ("ignore", 0.95, "ignore"), ("ignore", 0.85, None)],
+)
+async def test_kitchen_intent_requires_high_confidence_and_uses_prior_context(
+    transport: InstallTransport, choice: str, confidence: float, expected: str | None
+) -> None:
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        state = json.loads(json.loads(request.read())["state"])
+        assert state["current_message"] == {"user": "U1", "text": "yes, do that"}
+        assert state["thread"] == [{"user": "BOT", "bot_id": "", "text": "Shall I fix it?"}]
+        return httpx2.Response(
+            200,
+            json={
+                "model": "jev-1.13.0",
+                "answers": {
+                    "slack_intent": {
+                        "type": "choice",
+                        "choice": choice,
+                        "confidence": confidence,
+                        "probabilities": {choice: 1.0},
+                    }
+                },
+            },
+        )
+
+    transport(handle)
+    assert (
+        await kitchen_message_intent(
+            SlackRequest(
+                channel_id="C1",
+                thread_ts="1.0",
+                event_ts="2.0",
+                user_id="U1",
+                text="yes, do that",
+                bot_user_id="BOT",
+                kitchen_channel=True,
+            ),
+            [
+                {"ts": "1.0", "user": "BOT", "text": "Shall I fix it?"},
+                {"ts": "3.0", "user": "U2", "text": "later chatter"},
+            ],
+            bot_username="openswe",
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize("bypass", ["root", "mention", "ordinary", "files"])
+async def test_kitchen_intent_bypasses_messages_that_need_no_text_preflight(
+    transport: InstallTransport, bypass: str
+) -> None:
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        pytest.fail("This message must not be classified")
+
+    transport(handle)
+    request = SlackRequest(
+        channel_id="C1",
+        thread_ts="1.0",
+        event_ts="1.0" if bypass == "root" else "2.0",
+        text="<@BOT> fix it" if bypass == "mention" else "fix it",
+        bot_user_id="BOT",
+        kitchen_channel=bypass != "ordinary",
+    )
+    messages: list[dict[str, object]] = (
+        [{"ts": "2.0", "files": [{"name": "report.pdf"}]}] if bypass == "files" else []
+    )
+    assert await kitchen_message_intent(request, messages, bot_username="openswe") is None
 
 
 async def test_missing_credentials_skips_classification(

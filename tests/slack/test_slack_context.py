@@ -547,9 +547,17 @@ async def test_slack_file_provisioning_requires_account_and_persisted_thread(
 
 
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
-@pytest.mark.parametrize("kitchen_channel", [True, False])
+@pytest.mark.parametrize(
+    ("kitchen_channel", "intent"),
+    [(False, None), (True, "respond"), (True, "ignore"), (True, "uncertain"), (True, None)],
+)
 def test_slack_followup_publishes_as_requester_and_preserves_owner(
-    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool, fake_store
+    monkeypatch: pytest.MonkeyPatch,
+    explicitly_tagged: bool,
+    kitchen_channel: bool,
+    intent: str | None,
+    fake_store,
+    slack_api,
 ) -> None:
     import importlib
 
@@ -560,6 +568,11 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     opr = importlib.import_module("openswe.tools.open_pull_request")
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
+    monkeypatch.setattr(slack_webhooks, "show_slack_thinking_status", AsyncMock())
+    effective_intent = intent if kitchen_channel and not explicitly_tagged else None
+    monkeypatch.setattr(
+        slack_webhooks, "kitchen_message_intent", AsyncMock(return_value=effective_intent)
+    )
     client = slack_webhooks.get_langgraph_client()
     client.store = fake_store
     saved_metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
@@ -589,9 +602,18 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
             ),
         )
     )
+    if effective_intent == "ignore":
+        assert "run_create" not in captured
+        assert not slack_api.calls
+        return
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
+    assert kwargs["config"]["configurable"]["slack_defer_thinking_status"] == (
+        kitchen_channel and effective_intent != "respond"
+    )
+    statuses = [params["status"] for method, params in slack_api.calls if "status" in params]
+    assert ("Thinking..." in statuses) is not kitchen_channel
     assert kwargs["multitask_strategy"] == ("interrupt" if explicitly_tagged else "enqueue")
     trigger = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert trigger.get("explicit_bot_mention") == str(explicitly_tagged).lower()
