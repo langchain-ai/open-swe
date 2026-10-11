@@ -891,6 +891,28 @@ test.describe("Human review in Slack", () => {
       "You own 1 of the 1 changed file",
     );
     await expectNoPickReplies(request, posted);
+    // The DM links back to the review's thread, and a thread Bob starts under it
+    // knows which review it came from.
+    expect(cardText(picked)).toContain("Slack thread");
+    const reply = (await control(request, "/mock/slack/send", {
+      channel: "D_BOB",
+      channel_type: "im",
+      user: BOB.slack,
+      mention_bot: false,
+      thread_ts: picked.ts,
+      text: "Why me? E2E_HELLO",
+    })) as { thread_id: string };
+    await expect
+      .poll(
+        async () =>
+          JSON.stringify(
+            await (
+              await request.get(`/threads/${reply.thread_id}/state`)
+            ).json(),
+          ),
+        { timeout: 60_000 },
+      )
+      .toContain("on behalf of the Slack thread");
     const accept = (picked.blocks ?? [])
       .filter((block) => block.type === "actions")
       .flatMap((block) => block.elements ?? [])
