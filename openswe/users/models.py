@@ -19,6 +19,7 @@ from sqlalchemy import (
     Select,
     Text,
     bindparam,
+    case,
     delete,
     func,
     or_,
@@ -435,6 +436,26 @@ class User(Base):
         if stored is None:
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
+
+    async def assign_slack_member(self, slack_user_id: str) -> None:
+        """Assign a Slack member, wiping identity fields only when the owner changes."""
+        upsert = insert(UserIdentity).values(
+            user_id=self.id, provider="slack", external_id=slack_user_id
+        )
+        transferred = UserIdentity.user_id.is_distinct_from(self.id)
+        async with postgres.session() as session:
+            await session.execute(
+                upsert.on_conflict_do_update(
+                    index_elements=[UserIdentity.provider, UserIdentity.external_id],
+                    set_={
+                        "user_id": self.id,
+                        "login": case((transferred, ""), else_=UserIdentity.login),
+                        "email": case((transferred, ""), else_=UserIdentity.email),
+                        "team_id": case((transferred, ""), else_=UserIdentity.team_id),
+                        "last_seen_at": func.clock_timestamp(),
+                    },
+                )
+            )
 
     async def rename(self, display_name: str) -> None:
         """Replace a person's display name, for the one backfill that knows better."""

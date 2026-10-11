@@ -31,6 +31,7 @@ _TOOL_MODULES = {
     "link_pull_request": ".open_pull_request",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "manage_slack_github_mapping": ".manage_slack_github_mapping",
     "switch_to_performance_model": ".switch_to_performance_model",
     "manage_code_channel": "openswe.slack.tools.manage_code_channel",
     "manage_incident": "openswe.incidents.tools",
@@ -71,13 +72,14 @@ _TOOL_MODULES = {
     "slack_attach_html": "openswe.slack.tools.attach_html",
     "slack_list_channel_members": "openswe.slack.tools.channels",
     "slack_list_channels": "openswe.slack.tools.channels",
+    "slack_lookup_github_user": "openswe.slack.tools.lookup_user",
     "slack_move_thread": "openswe.slack.tools.move_thread",
     "slack_no_reply_needed": "openswe.slack.tools.no_reply_needed",
     "slack_post_message": "openswe.slack.tools.channels",
     "slack_read_channel_messages": "openswe.slack.tools.read_channel_messages",
-    "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_reply": "openswe.slack.tools.reply",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
+    "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
@@ -116,6 +118,7 @@ __all__ = [
     "link_pull_request",
     "list_threads",
     "manage_baby_sit",
+    "manage_slack_github_mapping",
     "switch_to_performance_model",
     "manage_code_channel",
     "manage_incident",
@@ -156,6 +159,7 @@ __all__ = [
     "slack_attach_html",
     "slack_list_channel_members",
     "slack_list_channels",
+    "slack_lookup_github_user",
     "slack_move_thread",
     "slack_no_reply_needed",
     "slack_post_message",
@@ -183,6 +187,7 @@ if TYPE_CHECKING:
         slack_list_channels,
         slack_post_message,
     )
+    from openswe.slack.tools.lookup_user import slack_lookup_github_user
     from openswe.slack.tools.manage_code_channel import manage_code_channel
     from openswe.slack.tools.move_thread import slack_move_thread
     from openswe.slack.tools.no_reply_needed import slack_no_reply_needed
@@ -214,6 +219,7 @@ if TYPE_CHECKING:
     from openswe.tools.list_review_findings import list_review_findings
     from openswe.tools.listen_events import list_event_types, listen_events
     from openswe.tools.manage_baby_sit import manage_baby_sit
+    from openswe.tools.manage_slack_github_mapping import manage_slack_github_mapping
     from openswe.tools.merge_expedited_pr import merge_expedited_pr
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
