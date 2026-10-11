@@ -134,7 +134,7 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
     : null
 
   return (
-    <div className="my-1">
+    <div className="my-space-1">
       <div className="flex items-center gap-1.5 py-space-1 text-xxs text-secondary">
         <ChatCircleIcon
           size={14}
