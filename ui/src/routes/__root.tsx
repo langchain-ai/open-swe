@@ -26,6 +26,7 @@ import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
+import { PageAnnotations } from "@/features/annotations/PageAnnotations"
 
 const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
 
@@ -115,7 +116,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             <PageTracking />
             <InvalidationStream />
             <VersionMismatchBanner />
-            <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+            <AppCommandProvider>
+              {children ?? <Outlet />}
+              <PageAnnotations />
+            </AppCommandProvider>
             <PerfHudMount />
             {import.meta.env.VITE_DEVTOOLS !== "false" && (
               <>
