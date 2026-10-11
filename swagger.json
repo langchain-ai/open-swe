@@ -1942,6 +1942,14 @@
           "available": {
             "title": "Available",
             "type": "boolean"
+          },
+          "blockers": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "array"
           }
         },
         "required": [

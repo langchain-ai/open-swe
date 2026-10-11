@@ -190,6 +190,17 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     return blockers
 
 
+async def review_blockers(pull: PullRequestClient) -> list[str] | None:
+    """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
+    readiness = await Readiness.assess(pull)
+    if readiness is None:
+        return None
+    blockers = request_blockers(readiness.snapshot)
+    if await User.for_login("github", readiness.snapshot.author) is None:
+        blockers.append("its author is not an Open SWE user")
+    return blockers
+
+
 async def _target_channel(
     pr_ref: GitHubPrRef, pull: PullRequestClient, override: str
 ) -> SlackChannel | RequestResult:
@@ -367,10 +378,10 @@ async def _request_review(
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
 
-    readiness = await Readiness.assess(pull)
-    if readiness is None:
+    blockers = await review_blockers(pull)
+    if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
-    if blockers := request_blockers(readiness.snapshot):
+    if blockers:
         return _failure(
             f"{pr_ref.url} cannot be put up for review: "
             + "; ".join(blockers)
@@ -385,8 +396,6 @@ async def _request_review(
     if recorded is None:
         return _failure("Pull request is unavailable")
     pull_request, details = recorded
-    if await User.for_login("github", details.author) is None:
-        return _failure("Human review is only available for PRs authored by Open SWE users.")
     if origin.thread_id:
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
 
