@@ -11,6 +11,8 @@ from openswe.agent_cost import run_agent_cost_refresh
 from openswe.baby_sit import evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from openswe.background_tasks import monitor_background_tasks
+from openswe.github.merge_reminders import TASK as MERGE_REMINDER_TASK
+from openswe.github.merge_reminders import run_reminders
 from openswe.human_review.lifecycle import LEGACY_CRON_TASK as EXPEDITED_REVIEW_TASK
 from openswe.human_review.lifecycle import delete_legacy_crons
 from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_TASK
@@ -34,6 +36,7 @@ logger = logging.getLogger(__name__)
 class SchedulerState(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    login: str | None = None
     schedule_id: str | None = None
     # The schedule trigger an automation cron belongs to.
     trigger_id: str | None = None
@@ -62,6 +65,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
     async def launch_once() -> dict[str, Any]:
         cfg = RunConfig.from_config(config)
         task = state.task or cfg.task
+        if task == MERGE_REMINDER_TASK:
+            return {"result": await run_reminders(state.login or "")}
         if task == "reconcile":
             return {"result": await reconcile_stale_runs()}
         if task == "baby_sit":

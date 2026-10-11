@@ -10,6 +10,7 @@ class UserPreferences(BaseModel):
     concierge_mode: bool = False
     # Sandboxes created for this person's threads suspend RAM on idle stop and resume warm.
     preserve_sandbox_memory: bool = True
+    approved_pr_dm_reminders: bool = False
     pr_review_links: bool = False
     pr_failure_reactions: bool = False
     # Threads this person starts reach MCP and large-result tools only through the sandbox.
@@ -26,6 +27,9 @@ class UserPreferencesPatch(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     concierge_mode: bool | None = None
+    approved_pr_dm_reminders: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     preserve_sandbox_memory: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )

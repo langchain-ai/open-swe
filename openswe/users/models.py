@@ -284,7 +284,12 @@ class User(Base):
                 .values(preferences=merged)
                 .returning(cls.preferences)
             )
-        return UserPreferences.model_validate(stored or {})
+        preferences = UserPreferences.model_validate(stored or {})
+        if preferences.approved_pr_dm_reminders:
+            from openswe.github.merge_reminders import ensure_reminder_cron
+
+            await ensure_reminder_cron(login)
+        return preferences
 
     @classmethod
     async def known_logins(cls, logins: Iterable[str]) -> frozenset[str]:
