@@ -126,6 +126,7 @@
         "ui/src/**/*.test.ts",
         "ui/src/**/*.test.tsx",
         "ui/src/features/agents/components/AgentsSidebar.tsx",
+        "ui/src/features/agents/components/messages/ElapsedSeconds.tsx",
         "ui/src/features/agents/components/PlanReview.tsx",
         "ui/src/features/agents/components/PlanView.tsx",
         "ui/src/features/agents/components/ThreadFeedbackCard.tsx",

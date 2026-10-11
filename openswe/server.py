@@ -72,10 +72,7 @@ from openswe.bridge.worktree_handoff import worktree_handoff
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.agent_overrides import (
     load_profile,
-    normalize_profile_overrides,
-    normalize_profile_subagent_overrides,
     profile_draft_prs,
-    profile_model_routing_enabled,
     resolve_github_login,
 )
 from openswe.dashboard.options import (
@@ -1539,36 +1536,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     title_model_id, title_effort = title_defaults
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
-    if profile_login and profile:
-        overridden_model, overridden_effort = normalize_profile_overrides(profile)
-        if overridden_model:
-            logger.info(
-                "Applying dashboard profile override for %s: model=%s effort=%s",
-                profile_login,
-                overridden_model,
-                overridden_effort,
-            )
-            model_id = overridden_model
-            profile_effort = overridden_effort
-            subagent_model_id = overridden_model
-            subagent_effort = overridden_effort
-        overridden_subagent_model, overridden_subagent_effort = (
-            normalize_profile_subagent_overrides(profile)
-        )
-        if overridden_subagent_model:
-            logger.info(
-                "Applying dashboard profile subagent override for %s: model=%s effort=%s",
-                profile_login,
-                overridden_subagent_model,
-                overridden_subagent_effort,
-            )
-            subagent_model_id = overridden_subagent_model
-            subagent_effort = overridden_subagent_effort
-
-    # User preference overrides the workspace's toggle; None inherits it.
-    adaptive_model_routing = profile_model_routing_enabled(profile)
-    if adaptive_model_routing is None:
-        adaptive_model_routing = settings.model_routing_enabled if settings else False
+    adaptive_model_routing = settings.model_routing_enabled if settings else False
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str) and not reset_model_selection:
         model_id = stored_model

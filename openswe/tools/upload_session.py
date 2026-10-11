@@ -1,8 +1,9 @@
-"""Reserve the Open SWE thread a local coding session continues in, for ``oswe upload`` to fill."""
+"""Reserve the Open SWE thread a local coding session continues in, and the URL its transcript is posted to."""
 
 from typing import Literal
 
 from openswe.audit_logs.tools import audit_tool
+from openswe.prompts import prompt
 from openswe.threads.session_upload import (
     SessionType,
     SessionUploadHeader,
@@ -31,4 +32,12 @@ async def upload_session(
         type=type, repo=repo, branch=branch, pr_url=pr_url, visibility=visibility
     )
     reservation = await reserve_session_upload(header, cfg.github_login, email=cfg.user_email)
-    return {"ok": True, **reservation.model_dump()}
+    return {
+        "ok": True,
+        **reservation.model_dump(),
+        "next_step": prompt(
+            "tools/upload-session-next-step",
+            upload_url=reservation.upload_url,
+            upload_token=reservation.upload_token,
+        ),
+    }

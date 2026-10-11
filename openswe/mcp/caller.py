@@ -41,6 +41,12 @@ _TOOL_MODULES: Final = (
     "openswe.tools.report_platform_issue",
     "openswe.tools.upload_session",
     "openswe.slack.tools.request_pr_review",
+    "openswe.tools.request_human_review",
+    "openswe.tools.expedite_pr_approval",
+    "openswe.tools.read_user_settings",
+    "openswe.tools.search_pull_requests",
+    "openswe.tools.list_review_findings",
+    "openswe.tools.repair_data",
 )
 
 
@@ -58,7 +64,7 @@ def _exposed() -> dict[str, tuple[BaseTool, Access]]:
     for module in _TOOL_MODULES:
         import_module(module)
     names = list(EXPOSED_TOOLS)
-    functions = apply_tool_descriptions([func for func, _ in EXPOSED_TOOLS.values()])
+    functions = apply_tool_descriptions([func for func, _ in EXPOSED_TOOLS.values()], mcp=True)
     return {
         name: (
             StructuredTool.from_function(

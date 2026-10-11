@@ -270,7 +270,7 @@ async def control_reserve_session_upload(request: Request) -> JSONResponse:
     """Reserve an upload thread as the remote MCP's ``upload_session`` tool does.
 
     The E2E deployment mounts no remote MCP, so a spec reserves here and then
-    uploads through the real ``/threads/uploads`` route as ``oswe upload`` does."""
+    posts to the returned ``upload_url`` with ``upload_token`` as the agent's curl does."""
     from openswe.threads.session_upload import SessionUploadHeader, reserve_session_upload
 
     body = await request.json()

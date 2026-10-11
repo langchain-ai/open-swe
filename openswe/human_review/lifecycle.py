@@ -62,6 +62,7 @@ from openswe.slack.client import (
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_notes import note_for_thread_owner
+from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
 
@@ -616,12 +617,35 @@ class ReviewCard:
                 row.slack_copy_ts = ""
         request.slack_copy_ts = ""
 
-    async def notify_agent(self, prompt: str) -> bool:
-        """Wake the agent thread that asked for the review once with ``prompt``; whether it was queued."""
+    async def notify_agent(self, prompt: str, *, title: str) -> bool:
+        """Wake the agent thread that asked for the review, or start one for whoever asked; whether it was queued."""
         request = self.request
-        if not request.thread_id:
-            return False
         pr = request.pull_request
+        if not request.thread_id:
+            login = request.requester_login
+            if not login:
+                logger.info(
+                    "Review request has no agent thread or requester to wake",
+                    extra={"request_id": str(request.id)},
+                )
+                return False
+
+            async def record_thread(thread_id: str) -> None:
+                async with HumanReviewRequest.locked(request.id) as (_, row):
+                    if row is not None:
+                        row.thread_id = thread_id
+                request.thread_id = thread_id
+
+            await dispatch_pull_request_prompt(
+                pr.owner,
+                pr.repo,
+                pr.number,
+                login,
+                prompt,
+                title=title,
+                before_dispatch=record_thread,
+            )
+            return True
         configurable = dict(request.run_config)
         configurable.update(
             {

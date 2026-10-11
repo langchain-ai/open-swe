@@ -42,7 +42,6 @@ from openswe.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from openswe.tools.access import external_caller_run
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_preference import sandbox_only
 from openswe.users import User
@@ -623,7 +622,7 @@ def _looks_uuid(value: str) -> bool:
 
 
 async def _private_thread_context(actor: _Actor) -> bool:
-    if external_caller_run(RunConfig.parse(_config().get("configurable"))):
+    if RunConfig.parse(_config().get("configurable")).mcp_caller:
         return True
     thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:

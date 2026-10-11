@@ -78,7 +78,6 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
-from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
@@ -1299,32 +1298,9 @@ async def _wake_picker(
         trigger=trigger,
         suggestions=suggestions,
     )
-    if request.thread_id:
-        return await ReviewCard(request).notify_agent(text)
-    requester = request.requested_by
-    login = requester.login_for("github") if requester is not None else ""
-    if not login:
-        logger.info(
-            "Unclaimed review request has no agent thread or requester to wake",
-            extra={"request_id": str(request.id)},
-        )
-        return False
-
-    async def record_thread(thread_id: str) -> None:
-        async with HumanReviewRequest.locked(request.id) as (_, row):
-            if row is not None:
-                row.thread_id = thread_id
-
-    await dispatch_pull_request_prompt(
-        pr.owner,
-        pr.repo,
-        pr.number,
-        login,
-        text,
-        title=f"{pr.repo}#{pr.number}",
-        before_dispatch=record_thread,
+    return await ReviewCard(request).notify_agent(
+        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}"
     )
-    return True
 
 
 async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:

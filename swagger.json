@@ -3914,10 +3914,6 @@
             ],
             "title": "Concierge Mode"
           },
-          "default_model": {
-            "title": "Default Model",
-            "type": "string"
-          },
           "default_repo": {
             "anyOf": [
               {
@@ -3928,17 +3924,6 @@
               }
             ],
             "title": "Default Repo"
-          },
-          "default_subagent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Subagent Model"
           },
           "draft_prs": {
             "anyOf": [
@@ -4009,17 +3994,6 @@
             ],
             "title": "Experimental Task Coordination"
           },
-          "model_routing_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Routing Enabled"
-          },
           "pr_failure_reactions": {
             "anyOf": [
               {
@@ -4064,10 +4038,6 @@
             ],
             "title": "Preserve Sandbox Memory"
           },
-          "reasoning_effort": {
-            "title": "Reasoning Effort",
-            "type": "string"
-          },
           "recent_thread_context_enabled": {
             "default": false,
             "title": "Recent Thread Context Enabled",
@@ -4088,23 +4058,8 @@
             "default": false,
             "title": "Slack Onboarding Dismissed",
             "type": "boolean"
-          },
-          "subagent_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Subagent Reasoning Effort"
           }
         },
-        "required": [
-          "default_model",
-          "reasoning_effort"
-        ],
         "title": "ProfileUpdate",
         "type": "object"
       },
@@ -17905,18 +17860,14 @@
               }
             }
           },
-          "description": "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. Authorized by the upload code the upload_session MCP tool returned, as a bearer token.",
+          "description": "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. Authorized by the upload_token the upload_session MCP tool returned, as a bearer token.",
           "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Upload Session Dashboard Api Threads Uploads Post",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"

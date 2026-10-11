@@ -29,8 +29,6 @@ it("saves the account preference and isolates it when the account changes", asyn
     async () =>
       stored.get(session.login) ?? {
         login: session.login,
-        default_model: "openai:test",
-        reasoning_effort: "medium",
         draft_prs: false,
         experimental_assistant_ui: session.login === "alice",
       }
@@ -46,7 +44,6 @@ it("saves the account preference and isolates it when the account changes", asyn
     const saved = {
       ...body,
       login: session.login,
-      model_routing_enabled: body.model_routing_enabled ?? undefined,
     }
     stored.set(session.login, saved)
     return saved
@@ -70,7 +67,6 @@ it("saves the account preference and isolates it when the account changes", asyn
       expect.objectContaining({
         experimental_assistant_ui: false,
         draft_prs: false,
-        default_model: "openai:test",
       })
     )
   )
