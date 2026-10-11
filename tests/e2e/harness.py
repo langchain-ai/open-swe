@@ -70,6 +70,8 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
         for u in TEST_USERS
     },
 }
+# Slack time zones a spec gave people; nobody else has one, so they are always on shift.
+_SLACK_TIMEZONES: dict[str, str] = {}
 
 from langgraph_sdk import get_client  # noqa: E402
 
@@ -109,6 +111,7 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    _SLACK_TIMEZONES.clear()
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -530,11 +533,18 @@ async def control_human_review_deadline(request: Request) -> JSONResponse:
     from openswe.database import postgres
     from openswe.human_review.requests import HumanReviewRequest
     from openswe.human_review.standard import run_deadline
+    from openswe.users import User
 
     body = await request.json()
     request_id = str(body.get("request_id") or "")
     step = str(body.get("step") or "")
     hours = float(body.get("hours") or 0)
+    # A per-person step, such as ``pick_start:``, names its person by GitHub login.
+    if login := str(body.get("user") or ""):
+        person = await User.for_login("github", login)
+        if person is None:
+            raise HTTPException(404, f"No Open SWE user has the GitHub login {login}")
+        step = f"{step}{person.id}"
     if hours:
         async with postgres.session() as session:
             await session.execute(
@@ -1796,6 +1806,7 @@ async def slack_users_info(user: str = "") -> JSONResponse:
                 "id": user,
                 "name": info["name"],
                 "real_name": info["real_name"],
+                **({"tz": tz} if (tz := _SLACK_TIMEZONES.get(user)) else {}),
                 "profile": {
                     "email": info["email"],
                     "display_name": info["real_name"],
@@ -1804,6 +1815,29 @@ async def slack_users_info(user: str = "") -> JSONResponse:
             }
         }
     )
+
+
+@app.post("/control/slack-timezone")
+async def control_slack_timezone(request: Request) -> JSONResponse:
+    """Give a Slack user a time zone: ``tz`` as named, or ``off_shift`` for one where it is 03:00.
+
+    Specs run on the real clock, so only "outside work hours" can be set up deterministically:
+    some whole-hour offset is always in the middle of the night.
+    """
+    body = await request.json()
+    user = str(body.get("user") or "")
+    if not user:
+        raise HTTPException(400, "A Slack user id is required")
+    tz = str(body.get("tz") or "")
+    if body.get("off_shift"):
+        offset = (3 - datetime.now(UTC).hour) % 24
+        offset = offset - 24 if offset > 14 else offset
+        # POSIX-style Etc zones invert the sign: Etc/GMT-5 is UTC+5.
+        tz = "Etc/GMT" if offset == 0 else f"Etc/GMT{'-' if offset > 0 else '+'}{abs(offset)}"
+    if not tz:
+        raise HTTPException(400, "Pass tz or off_shift")
+    _SLACK_TIMEZONES[user] = tz
+    return JSONResponse({"ok": True, "user": user, "tz": tz})
 
 
 _CHANNEL_NAMES = {REVIEW_CHANNEL: "reviews"}

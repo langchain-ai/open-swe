@@ -179,7 +179,7 @@ async def test_reviewer_removal_sends_delete_body_without_aborting(
         patch.object(ReviewCard, "refresh", AsyncMock()),
         patch("openswe.github.http.github_request", respond),
     ):
-        dropped = await ReviewPicks(request).drop({grace.id}, "Withdrawn.")
+        dropped = await ReviewPicks(request).drop({grace.id}, "Withdrawn.", cause="declined")
     assert dropped == [pick]
     assert received == [
         (

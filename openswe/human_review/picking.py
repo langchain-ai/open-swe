@@ -10,10 +10,13 @@ away from it for not accepting, is skipped.
 
 import asyncio
 import logging
+import posixpath
+import re
 from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
+from html import escape
 from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -92,6 +95,20 @@ class WorkHours:
             if day.weekday() in _WORK_DAYS and start > local:
                 return start.astimezone(UTC)
         raise AssertionError("a work day starts within a week")
+
+    def after(self, start: datetime, duration: timedelta) -> datetime:
+        """When ``duration`` of work time has passed since ``start``."""
+        if self.zone is None:
+            return start + duration
+        cursor = self.next_start(start)
+        remaining = duration
+        while True:
+            local = cursor.astimezone(self.zone)
+            closing = datetime.combine(local.date(), WORK_END, tzinfo=self.zone)
+            if remaining <= closing - local:
+                return (local + remaining).astimezone(UTC)
+            remaining -= closing - local
+            cursor = self.next_start(closing)
 
     @classmethod
     async def for_user(cls, user: User) -> Self:
@@ -189,6 +206,15 @@ class Coverage:
     def of(self, login: str) -> list[Area]:
         return [area for area in self.areas if login.lower() in area.owners]
 
+    def overlap(self, login: str, other: str) -> bool:
+        """Whether ``login`` and ``other`` own any of the same changed code."""
+        return bool(set(self.of(login)) & set(self.of(other)))
+
+    def satisfied(self, login: str, approvers: Collection[str]) -> bool:
+        """Whether ``login`` owns some area and ``approvers`` cover every area they own."""
+        left = self.uncovered(approvers)
+        return bool(theirs := self.of(login)) and not any(area in left for area in theirs)
+
     def owned(self) -> Counter[str]:
         """How many changed files each owner owns."""
         counts: Counter[str] = Counter()
@@ -242,6 +268,79 @@ class Coverage:
         if codeowners is None:
             return None
         return await cls.build(codeowners, [changed.filename for changed in files])
+
+
+REVIEWER_INSTRUCTIONS_PATH = ".open-swe/REVIEWERS.md"
+_REVIEWER_INSTRUCTIONS_MAX_CHARS = 10_000
+_INCLUDED_FILE_MAX_CHARS = 100_000
+_INCLUDED_TOTAL_MAX_CHARS = 200_000
+_MAX_INCLUDES = 10
+_INCLUDE = re.compile(r"^@(\S+)[ \t]*$", re.MULTILINE)
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewerInstructions:
+    """A repository's ``.open-swe/REVIEWERS.md``: how its maintainers want reviewers picked.
+
+    Read from the pull request's base branch, so a pull request cannot rewrite how its own
+    reviewers are chosen. A line that is only ``@path`` includes that repository file.
+    """
+
+    text: str
+
+    @classmethod
+    async def load(cls, request: HumanReviewRequest) -> Self | None:
+        """``None`` when the file is absent, empty, too large, or unreadable."""
+        pr = request.pull_request
+        ref = pr.base_ref or None
+        try:
+            async with GitHubClient.as_app(pr.owner, pr.repo) as github:
+                repo = github.repo(pr.owner, pr.repo)
+                text = await repo.read_file(
+                    REVIEWER_INSTRUCTIONS_PATH, ref, max_chars=_REVIEWER_INSTRUCTIONS_MAX_CHARS
+                )
+                if text:
+                    text = await cls._include(repo, ref, REVIEWER_INSTRUCTIONS_PATH, text)
+        except GitHubAppUnavailable:
+            logger.warning(
+                "No GitHub App token to read reviewer instructions",
+                extra={"request_id": str(request.id)},
+            )
+            return None
+        return cls(text) if text else None
+
+    @staticmethod
+    async def _include(repo: RepoClient, ref: str | None, path: str, text: str) -> str:
+        """Replace each ``@path`` line of the file at ``path`` with the file it names at ``ref``.
+
+        ``@/a/b`` is from the repository root and ``@a/b`` from ``path``'s directory. A line
+        naming no file, such as a team mention, a path outside the repository, or one past the
+        include limits stays as written.
+        """
+        parts: list[str] = []
+        end = 0
+        budget = _INCLUDED_TOTAL_MAX_CHARS
+        for line in list(_INCLUDE.finditer(text))[:_MAX_INCLUDES]:
+            named = line.group(1)
+            resolved = posixpath.normpath(
+                named.lstrip("/")
+                if named.startswith("/")
+                else posixpath.join(posixpath.dirname(path), named)
+            )
+            if resolved in {".", ".."} or resolved.startswith("../"):
+                continue
+            content = await repo.read_file(
+                resolved, ref, max_chars=min(_INCLUDED_FILE_MAX_CHARS, budget)
+            )
+            if content is None:
+                continue
+            budget -= len(content)
+            parts += [
+                text[end : line.start()],
+                f'<included_file name="{escape(resolved)}">\n{content}\n</included_file>',
+            ]
+            end = line.end()
+        return "".join([*parts, text[end:]])
 
 
 async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) -> Counter[str]:

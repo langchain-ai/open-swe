@@ -31,6 +31,8 @@ from openswe.database.orm import NOW, Base
 from openswe.expedited_review.eligibility import ExcludedHunk
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.human_review.events import ReviewDecision, ReviewDecisionCause, ReviewDecisionKind
+from openswe.human_review.notices import NoticeKind, ReviewNotice
 from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
 from openswe.slack.client import lookup_slack_thread_id
@@ -38,6 +40,7 @@ from openswe.slack.dm import DmOrigin
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client
+from openswe.webhooks.event_log import EventLog, EventRefs
 
 RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
@@ -206,6 +209,44 @@ class HumanReviewRequest(Base):
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)
 
+    async def log_decision(
+        self,
+        decision: ReviewDecisionKind,
+        *,
+        cause: ReviewDecisionCause = "",
+        reviewers: Collection[str] = (),
+        code_owners: Collection[str] = (),
+        reason: str = "",
+    ) -> None:
+        """Record ``decision`` in the event log, where other threads can listen for it."""
+        pr = self.pull_request
+        who = ", ".join(f"@{login}" for login in reviewers)
+        summary = " ".join(
+            part
+            for part in (
+                decision.replace("_", " ").capitalize(),
+                who,
+                f"({cause.replace('_', ' ')})" if cause else "",
+                f"on {pr.url}",
+            )
+            if part
+        )
+        event = ReviewDecision(
+            decision=decision,
+            review_request_id=str(self.id),
+            pr_url=pr.url,
+            summary=f"{summary}: {reason}" if reason else summary,
+            cause=cause,
+            reviewers=list(reviewers),
+            code_owners=list(code_owners),
+            reason=reason,
+        )
+        await EventLog.emit(
+            f"human_review.{decision}",
+            event.model_dump(mode="json"),
+            EventRefs(github_repository=f"{pr.owner}/{pr.repo}", pull_request_number=pr.number),
+        )
+
     @property
     def dm_origin(self) -> DmOrigin | None:
         """The review's Slack thread, which DMs about it are sent on behalf of."""
@@ -215,6 +256,27 @@ class HumanReviewRequest(Base):
         return DmOrigin(
             channel_id=self.slack_channel_id, thread_ts=root, subject=self.pull_request.url
         )
+
+    def notice(self, kind: NoticeKind, text: str = "") -> ReviewNotice:
+        return ReviewNotice(
+            kind=kind,
+            review_request_id=str(self.id),
+            pr_url=self.pull_request.url,
+            text=text,
+            target_thread_id=self.thread_id,
+        )
+
+    def notice_origin(self, kind: NoticeKind) -> DmOrigin | None:
+        """``dm_origin`` for a DM that is this ``kind`` of notice, so a reply to it arrives described."""
+        origin = self.dm_origin
+        return origin.model_copy(update={"notice": self.notice(kind)}) if origin else None
+
+    @property
+    def card_notice(self) -> ReviewNotice:
+        pr = self.pull_request
+        if self.kind == "expedited":
+            return self.notice("expedited_review_card", f"Expedited review requested for {pr.url}")
+        return self.notice("review_card", f"Review requested for {pr.url}: {pr.title}")
 
     async def picked_by(self, thread_id: str) -> bool:
         """Whether ``thread_id`` may pick this request's reviewer: its own thread or its Slack thread's."""
@@ -368,13 +430,13 @@ class HumanReviewRequest(Base):
             return Counter(dict(rows.tuples().all()))
 
     @classmethod
-    async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:
-        """Whether this Slack thread contains an Open SWE review-request card."""
+    async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
+        """The request whose Open SWE card is in this Slack thread, the newest first."""
         if not postgres.configured():
-            return False
+            return None
         async with postgres.session() as session:
-            request_id = await session.scalar(
-                select(cls.id)
+            return await session.scalar(
+                cls._loaded(select(cls))
                 .where(
                     cls.kind.in_(("standard", "expedited")),
                     or_(
@@ -389,9 +451,9 @@ class HumanReviewRequest(Base):
                         & (cls.slack_copy_ts == thread_ts),
                     ),
                 )
+                .order_by(desc(cls.created_at))
                 .limit(1)
             )
-            return request_id is not None
 
     @classmethod
     async def copy_channels_for_author(cls, login: str, *, since: datetime) -> list[str]:
@@ -448,16 +510,6 @@ class HumanReviewRequest(Base):
             )
             yield session, row
 
-    async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
-        """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""
-        async with self.locked(self.id) as (_, row):
-            participant = row.participant(user_id) if row is not None else None
-            if participant is None:
-                return
-            participant.dm_channel_id = message.channel_id
-            participant.dm_ts = message.ts
-            participant.dm_text = message.text
-
     @classmethod
     async def transition(
         cls, request_id: UUID, *, expected: tuple[RequestState, ...], **changes: object
@@ -469,3 +521,13 @@ class HumanReviewRequest(Base):
             for name, value in changes.items():
                 setattr(row, name, value)
             return row
+
+    async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
+        """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""
+        async with self.locked(self.id) as (_, row):
+            participant = row.participant(user_id) if row is not None else None
+            if participant is None:
+                return
+            participant.dm_channel_id = message.channel_id
+            participant.dm_ts = message.ts
+            participant.dm_text = message.text

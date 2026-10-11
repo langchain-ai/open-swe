@@ -177,7 +177,7 @@ async def _process(
             elif action == "snooze":
                 outcome = await snooze(request, user, choice)
             else:
-                outcome = await claim(request, user)
+                outcome = await claim(request, user, from_pick=message is not None)
         note = prompt(
             "slack/review-request-clicked",
             action=action,

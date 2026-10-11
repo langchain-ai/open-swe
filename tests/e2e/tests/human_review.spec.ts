@@ -1043,8 +1043,8 @@ test.describe("Human review in Slack", () => {
     await expectNoPickReplies(request, posted);
     await showSlack(page, REVIEW_CHANNEL, "decline-4-card-repicked");
 
-    // 7. The pick DM links back to the review's thread, and a thread started under it
-    //    knows which review it came from.
+    // 7. The pick DM links back to the review's thread, and a reply under it reaches the
+    //    agent as a structured reply to that review's pick.
     expect(cardText(nextPicked)).toContain("Slack thread");
     const reply = (await control(request, "/mock/slack/send", {
       channel: nextDmChannel,
@@ -1054,17 +1054,83 @@ test.describe("Human review in Slack", () => {
       thread_ts: nextPicked.ts,
       text: "Why me? E2E_HELLO",
     })) as { thread_id: string };
+    const replyState = async () =>
+      JSON.stringify(
+        await (await request.get(`/threads/${reply.thread_id}/state`)).json(),
+      );
     await expect
-      .poll(
-        async () =>
-          JSON.stringify(
-            await (
-              await request.get(`/threads/${reply.thread_id}/state`)
-            ).json(),
-          ),
-        { timeout: 60_000 },
-      )
-      .toContain("on behalf of the Slack thread");
+      .poll(replyState, { timeout: 60_000 })
+      .toContain("kind: reviewer_pick");
+    expect(await replyState()).toContain(`review_request_id: ${posted.id}`);
+  });
+
+  test("a reviewer the agent picks in their night hears nothing until their work day starts", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    await setReviewChannel(request);
+    // Nobody Open SWE knows owns the code, so it has nobody to suggest and the agent picks.
+    await control(request, "/control/repo-file", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      files: { ".github/CODEOWNERS": "* @ghost-owner\n" },
+    });
+    // Bob's Slack time zone is one where it is 03:00 now.
+    await control(request, "/control/slack-timezone", {
+      user: BOB.slack,
+      off_shift: true,
+    });
+
+    // 1. Alice asks from the dashboard, and nobody signs up in time.
+    await loginAs(page, ALICE);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Add a nightly report",
+      author: ALICE.login,
+      body: "Writes a nightly usage report.",
+      files: { "nightly/report.py": 'print("report")\n' },
+      check_runs: GREEN,
+    });
+    await page.goto("/agents/reviews");
+    await page
+      .getByRole("listitem")
+      .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
+      .getByRole("button", { name: "Request review in Slack" })
+      .click();
+    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+      timeout: 30_000,
+    });
+    const posted = await latestRequest(request);
+    await control(request, "/control/human-review-deadline", {
+      request_id: posted.id,
+      step: "unclaimed",
+      hours: 2,
+    });
+
+    // 2. The agent picks Bob. He is on the card, but neither GitHub nor Slack tells him.
+    await expect
+      .poll(async () => (await latestRequest(request)).picks, {
+        timeout: 90_000,
+      })
+      .toEqual(["bob"]);
+    expect((await pull(request, seeded.number)).requested_reviewers).toEqual(
+      [],
+    );
+    expect(
+      (await channelMessages(request, "D_BOB")).filter((m) => m.is_bot),
+    ).toEqual([]);
+
+    // 3. His work day starts: the review is requested on GitHub and he is DMed the pick.
+    await control(request, "/control/human-review-deadline", {
+      request_id: posted.id,
+      step: "pick_start:",
+      user: BOB.login,
+    });
+    const picked = await pickedDm(request, "D_BOB");
+    expect(buttons(picked)).toEqual(["Accept", "Decline", "Snooze"]);
+    expect((await pull(request, seeded.number)).requested_reviewers).toEqual([
+      "bob",
+    ]);
   });
 
   test("the agent dismisses the review request its thread posted", async ({

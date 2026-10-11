@@ -26,14 +26,12 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
     Readiness,
     latest_review_states,
     review_authors,
 )
-from openswe.github.codeowners import CodeOwners
 from openswe.github.http import (
     GitHubAppUnavailable,
     GitHubClient,
@@ -45,12 +43,27 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
+from openswe.human_review.events import ReviewDecisionCause
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
+from openswe.human_review.notices import NoticeKind
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
-from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.picking import (
+    Area,
+    Coverage,
+    Pick,
+    ReviewerInstructions,
+    Wait,
+    WorkHours,
+    choose_reviewer,
+)
+from openswe.human_review.requests import (
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+    RequestState,
+)
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
@@ -65,7 +78,6 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
-from openswe.slack.thread_owner import wake_thread_owner
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
@@ -83,6 +95,12 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
+# Picks per code owner area, or assignment windows for an accepted reviewer, before the author hears.
+_ROUNDS_BEFORE_AUTHOR = 2
+# The why of an overdue notice still owed to the author, by the still-assigned reviewers' ids.
+_OVERDUE_NOTICE = "overdue_notice:"
+# The reason for a pick held until the reviewer's work day starts, by their user id.
+_PICK_START = "pick_start:"
 SNOOZE_DURATIONS = {
     "30 minutes": timedelta(minutes=30),
     "1 hour": timedelta(hours=1),
@@ -92,7 +110,7 @@ SNOOZE_DURATIONS = {
     "2 days": timedelta(days=2),
 }
 _AUTO_ASSIGN_ASKED = "auto_assign_asked"
-_REMAINING_OWNERS_ASKED = "remaining_owners_asked"
+_MORE_REVIEWERS_ASKED = "more_reviewers_asked"
 
 
 class ReviewChannelUnknownError(Exception):
@@ -137,6 +155,8 @@ class RequestResult(BaseModel):
     reused: bool = False
     summary_updated: bool = False
     claimed: bool = False
+    # A pick made outside the reviewer's work hours is told then.
+    starts_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,22 +256,22 @@ async def _permalink(request: HumanReviewRequest) -> str:
     return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
 
 
+def _duration(span: timedelta) -> str:
+    days, minutes = divmod(max(0, int(span.total_seconds() // 60)), 1440)
+    hours, minutes = divmod(minutes, 60)
+    return (
+        ", ".join(
+            f"{value} {unit}{'s' if value != 1 else ''}"
+            for value, unit in ((days, "day"), (hours, "hour"), (minutes, "minute"))
+            if value
+        )
+        or "less than a minute"
+    )
+
+
 def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
     """Add two hours within local weekday 9am–6pm windows."""
-    cursor = start.astimezone(timezone)
-    remaining = timedelta(hours=2)
-    while True:
-        opening = datetime.combine(cursor.date(), time(9), timezone)
-        closing = datetime.combine(cursor.date(), time(18), timezone)
-        if cursor.weekday() >= 5 or cursor >= closing:
-            cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
-            continue
-        cursor = max(cursor, opening)
-        available = closing - cursor
-        if remaining <= available:
-            return (cursor + remaining).astimezone(UTC)
-        remaining -= available
-        cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
+    return WorkHours(timezone).after(start, timedelta(hours=2))
 
 
 async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
@@ -521,27 +541,55 @@ async def _add_reviewer(
     return current
 
 
-async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
+async def claim(
+    request: HumanReviewRequest, user: User | None, *, from_pick: bool = False
+) -> Outcome:
     """Someone signs up from the card, or accepts Open SWE's pick of them; any number may.
 
-    Whoever else Open SWE picked and is still waiting on no longer needs to.
+    Pending picks for code the reviewer also owns no longer need to review; with no code owners,
+    none do. ``from_pick`` is the Accept on a pick DM, which only a still-pending pick may use.
     """
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
         return reviewer
     accepting = any(pick.user_id == reviewer.user.id for pick in request.picks)
+    if from_pick and not accepting:
+        current = request.participant(reviewer.user.id)
+        if current is None or current.decision != "review":
+            return Outcome("Open SWE no longer needs you to review this pull request.")
     added = await _add_reviewer(request, reviewer, picked=False)
     if isinstance(added, Outcome):
         return added
     pr = added.pull_request
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
-    if others := {pick.user_id for pick in added.picks}:
+    coverage = await Coverage.load(added) if added.picks else None
+    if others := {
+        pick.user_id
+        for pick in added.picks
+        if coverage is None
+        or not coverage.areas
+        or coverage.overlap(pick.github_login, reviewer.github_login)
+    }:
         await ReviewPicks(added).drop(
             others,
             f"{mention(reviewer.user)} is reviewing {label} *{escape(pr.title)}*, so you no "
             "longer need to. Open SWE removed you as a reviewer.",
+            cause="claimed_by_overlapping_owner",
+            reason=f"@{reviewer.github_login} signed up for the same code",
         )
+    await added.log_decision(
+        "reviewer_joined",
+        cause="accepted_pick" if accepting else "signed_up",
+        reviewers=[reviewer.github_login],
+        code_owners=[
+            handle
+            for area in (coverage.of(reviewer.github_login) if coverage is not None else ())
+            for handle in area.handles
+        ],
+    )
     if accepting:
+        await _schedule(added, f"remind:{reviewer.user.id}", timedelta(0))
+        await _check_overdue(added, str(reviewer.user.id))
         return Outcome(
             f"You accepted the review of {label}. It merges once every reviewer approves on GitHub."
         )
@@ -569,9 +617,9 @@ async def snooze(request: HumanReviewRequest, user: User | None, length: str) ->
             return Outcome("This reviewer pick is no longer pending for you.")
         participant.joined_at = until
         row.run_config = {**row.run_config, f"review_snoozed:{user.id}": until.isoformat()}
-    await _schedule(
-        request, "pick_expiry", duration + timedelta(minutes=await _assignment_minutes(request))
-    )
+    window = timedelta(minutes=await _assignment_minutes(request))
+    accept_by = (await WorkHours.for_user(user)).after(until, window)
+    await _schedule(request, "pick_expiry", accept_by - datetime.now(UTC))
     await _schedule(request, f"snooze:{user.id}", duration)
     return Outcome(f"Review snoozed for {length}; your pick stays reserved until then.")
 
@@ -581,7 +629,9 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
         return Outcome("Link your Open SWE account before declining a review.")
     if request.state != "open":
         return Outcome("This review request is no longer open.")
-    dropped = await ReviewPicks(request).drop({user.id}, None, expired=True)
+    dropped = await ReviewPicks(request).drop(
+        {user.id}, None, cause="declined", expired=True, reason=reason
+    )
     if not dropped:
         return Outcome("This reviewer pick is no longer pending for you.")
     logger.info(
@@ -591,6 +641,16 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
     trigger = PickTrigger("declined", tuple(p.github_login for p in dropped), reason)
     await start_auto_assign(request, asked=True, trigger=trigger)
     return Outcome("Review declined; Open SWE will find another reviewer.")
+
+
+async def _review_required(request: HumanReviewRequest) -> bool:
+    """Whether GitHub still wants an approval before merging; unreadable counts as wanted."""
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            return await pull.review_required()
+    except GitHubAppUnavailable:
+        return True
 
 
 async def _github_approvers(request: HumanReviewRequest) -> list[str]:
@@ -615,17 +675,21 @@ async def assign(
 ) -> RequestResult:
     """Pick ``github_login`` to review: show them on the card and DM them.
 
-    The first reviewer stands alone. More join only for code owner areas nobody on the request
-    owns, and unasked only once someone approved. ``replace`` is a person naming the reviewer:
-    Open SWE's pending picks for the same code are withdrawn first.
+    The repository's reviewer instructions decide who else may join. Without them one
+    reviewer stands alone and one approval is enough, unless GitHub still wants approvals:
+    then owners of code no approver or reviewer owns may join. ``replace`` is a person naming
+    the reviewer, which these limits never refuse: Open SWE's pending picks for the same code
+    are withdrawn first.
     """
     approvers = await _github_approvers(request)
     coverage = await Coverage.load(request)
-    if approvers and (coverage is None or not coverage.uncovered(approvers)):
+    instructed = await ReviewerInstructions.load(request) is not None
+    review_required = bool(approvers) and not instructed and await _review_required(request)
+    if approvers and not instructed and not review_required and not replace:
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
-            f"{names} already approved this pull request on GitHub for all of its code "
-            "owners, so it needs no reviewer. Do not pick anyone."
+            f"{names} already approved this pull request on GitHub, so it needs no "
+            "reviewer. Do not pick anyone."
         )
     user = await User.for_login("github", github_login)
     if user is None:
@@ -650,27 +714,20 @@ async def assign(
             others,
             f"Open SWE asked @{github_login} to review {label} *{escape(pr.title)}* instead, "
             "so you no longer need to.",
+            cause="replaced",
+            reason=f"a person named @{github_login} for the same code",
         )
         request = await HumanReviewRequest.get(request.id) or request
     assigned = [p.github_login for p in request.reviewers + request.picks]
     alongside = bool(assigned or approvers)
-    if alongside and not replace:
+    if alongside and not replace and not instructed:
         open_areas = coverage.uncovered([*assigned, *approvers]) if coverage is not None else []
-        if not any(area in open_areas for area in theirs):
+        if not review_required or not any(area in open_areas for area in theirs):
             return RequestResult(
                 success=False,
                 error=(
-                    "This pull request already has a reviewer for the code "
-                    f"@{github_login} owns. Do not pick anyone else for it."
-                ),
-                claimed=True,
-            )
-        if not approvers:
-            return RequestResult(
-                success=False,
-                error=(
-                    "Reviewers for the other code owners are picked only after the first "
-                    "reviewer approves. Do not pick anyone else yet."
+                    "This pull request already has a reviewer, and one review is enough. "
+                    "Do not pick anyone else."
                 ),
                 claimed=True,
             )
@@ -683,47 +740,104 @@ async def assign(
         async with HumanReviewRequest.locked(added.id) as (_, row):
             if row is not None:
                 row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
-    await _request_github_review(added, github_login)
+    await added.log_decision(
+        "reviewer_picked",
+        reviewers=[github_login],
+        code_owners=[handle for area in theirs for handle in area.handles],
+        reason=reason.strip(),
+    )
+    hours = await WorkHours.for_user(user)
+    now = datetime.now(UTC)
     minutes = await _assignment_minutes(added)
-    if not await _schedule(added, "pick_expiry", timedelta(minutes=minutes)):
+    # The window counts only their work hours, so it starts with their next work day.
+    accept_by = hours.after(now, timedelta(minutes=minutes))
+    if not await _schedule(added, "pick_expiry", accept_by - now):
         logger.warning(
             "A reviewer pick will not rotate if it is never accepted",
             extra={"request_id": str(added.id), "github_login": github_login},
         )
-    why = f" {escape(reason.strip())}" if reason.strip() else ""
-    deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
-    accept = actions(accept_button(added), decline_button(added), snooze_button(added))
-    permalink = await _permalink(added)
-    if user.slack_user_id:
-        where = "review card" if added.has_card else "Slack post"
-        card = f" (<{permalink}|{where}>)" if permalink else ""
-        dm_text = (
-            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
+    starts_at = hours.next_start(now)
+    if starts_at > now:
+        async with HumanReviewRequest.locked(added.id) as (_, row):
+            if row is not None:
+                row.run_config = {**row.run_config, f"{_PICK_START}{user.id}": reason.strip()}
+        logger.info(
+            "Holding a reviewer pick until their work day starts",
+            extra={
+                "request_id": str(added.id),
+                "github_login": github_login,
+                "until": starts_at.isoformat(),
+            },
         )
-        origin = added.dm_origin
-        sent = await send_dm_with_location(
-            user.slack_user_id,
-            dm_text,
-            blocks=block_payload(
-                [
-                    section(dm_text),
-                    accept,
-                    *await origin_footer(added.thread_id, origin.location if origin else None),
-                ]
-            ),
-            origin=origin,
-        )
-        if sent is not None:
-            await added.record_pick_message(
-                user.id, PickMessage(channel_id=sent[0], ts=sent[1], text=dm_text)
-            )
-    await _schedule(added, f"remind:{user.id}", timedelta(0))
+        await _schedule(added, f"{_PICK_START}{user.id}", starts_at - now)
+    else:
+        await _notify_pick(added, user, reason)
     return RequestResult(
         success=True,
         request_id=str(added.id),
         channel=added.slack_channel_id,
-        permalink=permalink,
+        permalink=await _permalink(added),
+        starts_at=starts_at if starts_at > now else None,
     )
+
+
+async def _notify_pick(request: HumanReviewRequest, user: User, reason: str) -> None:
+    """Tell a pick on GitHub and in Slack; only ever during their work hours."""
+    pr = request.pull_request
+    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    await _request_github_review(request, user.login_for("github"))
+    minutes = await _assignment_minutes(request)
+    why = f" {escape(reason.strip())}" if reason.strip() else ""
+    deadline = f" Accept within {minutes} minutes of your work hours."
+    permalink = await _permalink(request)
+    where = "review card" if request.has_card else "Slack post"
+    card = f" (<{permalink}|{where}>)" if permalink else ""
+    await _send_pick_dm(
+        request,
+        user,
+        f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}",
+    )
+
+
+async def _start_held_pick(request: HumanReviewRequest, user_id: str) -> str:
+    """Their work day started: tell a pick held overnight, unless it ended meanwhile."""
+    key = f"{_PICK_START}{user_id}"
+    reason = request.run_config.get(key)
+    try:
+        participant = request.participant(UUID(user_id))
+    except ValueError:
+        participant = None
+    await _forget(request, key)
+    if participant is None or participant.decision != "picked" or not isinstance(reason, str):
+        return "no_longer_picked"
+    await _notify_pick(request, participant.user, reason)
+    return "notified"
+
+
+async def _send_pick_dm(
+    request: HumanReviewRequest, user: User, text: str, kind: NoticeKind = "reviewer_pick"
+) -> None:
+    """DM a pick's buttons and remember the message, so it can be edited when the pick ends."""
+    if not user.slack_user_id:
+        return
+    origin = request.notice_origin(kind)
+    location = await send_dm_with_location(
+        user.slack_user_id,
+        text,
+        blocks=block_payload(
+            [
+                section(text),
+                actions(accept_button(request), decline_button(request), snooze_button(request)),
+                *await origin_footer(request.thread_id, origin.location if origin else None),
+            ]
+        ),
+        origin=origin,
+    )
+    if location is not None:
+        channel_id, ts = location
+        await request.record_pick_message(
+            user.id, PickMessage(channel_id=channel_id, ts=ts, text=text)
+        )
 
 
 class PendingPick(BaseModel):
@@ -740,8 +854,14 @@ class AreaStatus(BaseModel):
 
 
 class ReviewStatus(BaseModel):
-    """Who an open review request is assigned to, for an agent asked about it."""
+    """Where a review request stands and who it is assigned to, for an agent asked about it."""
 
+    review_request_id: str
+    pr_url: str
+    kind: RequestKind
+    state: RequestState
+    detail: str
+    requesting_thread_id: str
     requested_by: str
     reviewers: list[str]
     pending_picks: list[PendingPick]
@@ -757,10 +877,15 @@ class ReviewStatus(BaseModel):
         for pick in request.picks:
             snoozed = request.run_config.get(f"review_snoozed:{pick.user_id}")
             until = datetime.fromisoformat(snoozed) if isinstance(snoozed, str) else None
+            accept_by = (
+                (await WorkHours.for_user(pick.user)).after(pick.joined_at, wait)
+                if pick.joined_at
+                else None
+            )
             picks.append(
                 PendingPick(
                     github_login=pick.github_login,
-                    accept_by=pick.joined_at + wait if pick.joined_at else None,
+                    accept_by=accept_by,
                     snoozed_until=until if until and until > now else None,
                 )
             )
@@ -769,6 +894,12 @@ class ReviewStatus(BaseModel):
         coverage = await Coverage.load(request)
         assigned = [p.github_login for p in request.reviewers + request.picks]
         return cls(
+            review_request_id=str(request.id),
+            pr_url=request.pull_request.url,
+            kind=request.kind,
+            state=request.state,
+            detail=request.detail,
+            requesting_thread_id=request.thread_id,
             requested_by=requester.login_for("github") if requester else "",
             reviewers=[p.github_login for p in request.reviewers],
             pending_picks=picks,
@@ -818,35 +949,23 @@ async def _settle_posted(
     snapshot: PullRequestSnapshot,
     states: dict[str, str],
 ) -> None:
-    """React once the pull request's owners approve; until then, time how long it has sat green."""
-    approvers = {login for login, state in states.items() if state == "APPROVED"}
-    approved = bool(approvers)
-    if approved:
-        pr = request.pull_request
-        try:
-            codeowners = await CodeOwners.fetch(pull.repo, pr.base_ref or None, strict=True)
-        except RepoFileUnreadableError:
-            logger.warning(
-                "Cannot confirm codeowner approvals",
-                extra={"request_id": str(request.id)},
-                exc_info=True,
+    """React once the pull request is approved; until then, time how long it has sat green."""
+    approvers = sorted(login for login, state in states.items() if state == "APPROVED")
+    if approvers:
+        review_required = await pull.review_required()
+        if not review_required and await ReviewerInstructions.load(request) is None:
+            await ReviewCard(request).mark_approved()
+            await ReviewPicks(request).release(
+                ", ".join(f"@{login}" for login in approvers) + " approved it", cause="approved"
             )
-            approved = False
-            codeowners = None
-        if codeowners is not None:
-            files = await ChangedFile.of_pull(pull)
-            approved = (
-                files is not None
-                and len(files) < MAX_FILES
-                and await codeowners.approved_by([file.filename for file in files], approvers)
-            )
-    if approved:
-        await ReviewCard(request).mark_approved()
-        await ReviewPicks(request).release(
-            ", ".join(f"@{login}" for login in sorted(approvers)) + " approved it"
-        )
-        return
-    await _pick_remaining_owners(request, sorted(approvers))
+            return
+        request = await _ask_for_more_reviewers(request, approvers, review_required=review_required)
+        approved = {login.lower() for login in approvers}
+        if not review_required and not any(
+            p.github_login.lower() not in approved for p in request.reviewers + request.picks
+        ):
+            await ReviewCard(request).mark_approved()
+            return
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
             return
@@ -940,13 +1059,16 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
         await _settle_posted(request, pull, snapshot, states)
         return True
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
-        coverage = await Coverage.load(request)
-        if coverage is not None and coverage.uncovered(approvers):
-            await _pick_remaining_owners(request, approvers)
+        review_required = await pull.review_required()
+        if review_required or await ReviewerInstructions.load(request) is not None:
+            request = await _ask_for_more_reviewers(
+                request, approvers, review_required=review_required
+            )
         else:
             picked = len(request.reviewers) + len(request.picks)
             request = await ReviewPicks(request).release(
-                ", ".join(f"@{login}" for login in approvers) + " approved it"
+                ", ".join(f"@{login}" for login in approvers) + " approved it",
+                cause="approved",
             )
             # The unclaimed deadline already fired, so only a fresh one can pick again if the approval goes.
             if request.kind == "standard" and len(request.reviewers) + len(request.picks) < picked:
@@ -1006,11 +1128,13 @@ class AutoAssignResult:
 
 @dataclass(frozen=True, slots=True)
 class PickTrigger:
-    """Background work that needs a reviewer picked; the Slack thread's agent decides."""
+    """Background work that needs a reviewer picked; the implementer decides."""
 
     kind: Literal["unclaimed", "expired", "declined", "approved"]
     logins: tuple[str, ...] = ()
     reason: str = ""
+    review_required: bool = False
+    waiting_on: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1068,7 +1192,8 @@ async def _auto_assign(
         if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):
             return AutoAssignResult("waiting", choice.login, choice.until)
         return AutoAssignResult("failed")
-    if trigger is not None:
+    # A repository's own selection instructions only reach the agent, so it makes every pick.
+    if trigger is not None or await ReviewerInstructions.load(request) is not None:
         woken = await _wake_picker(
             request, asked=asked, trigger=trigger, suggestions=[Suggestion(choice)]
         )
@@ -1091,43 +1216,66 @@ async def _auto_assign(
     return AutoAssignResult("woken" if woken else "failed")
 
 
-async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[str]) -> None:
-    """After an approval, have the thread's agent pick one reviewer per code owner area left, at once."""
-    if not approvers or _REMAINING_OWNERS_ASKED in request.run_config:
-        return
+async def _ask_for_more_reviewers(
+    request: HumanReviewRequest, approvers: list[str], *, review_required: bool
+) -> HumanReviewRequest:
+    """Release picks whose code owner areas an approval covers, then ask the implementer, once
+    per set of approvers, to add anyone GitHub or the repository's reviewer instructions still
+    require. ``review_required`` is GitHub still wanting an approval before merging.
+
+    Code owners only guide who reviews unless GitHub requires their approval.
+    """
+    names = ", ".join(f"@{login}" for login in approvers)
     coverage = await Coverage.load(request)
-    if coverage is None:
-        return
-    assigned = [p.github_login for p in request.reviewers + request.picks]
-    if not (open_areas := coverage.uncovered([*approvers, *assigned])):
-        return
+    if coverage is not None:
+        request = await ReviewPicks(request).release(
+            f"{names} approved the code you were asked to review",
+            cause="code_owners_approved",
+            covered=lambda login: coverage.satisfied(login, approvers),
+        )
+    asked = sorted(login.lower() for login in approvers)
+    if request.run_config.get(_MORE_REVIEWERS_ASKED) == asked:
+        return request
     if await _auto_assign_hold(request, "unclaimed"):
-        return
+        return request
     async with HumanReviewRequest.locked(request.id) as (_, row):
-        if row is None or row.state != "open" or _REMAINING_OWNERS_ASKED in row.run_config:
-            return
-        row.run_config = {**row.run_config, _REMAINING_OWNERS_ASKED: True}
+        if row is None or row.state != "open" or row.run_config.get(_MORE_REVIEWERS_ASKED) == asked:
+            return request
+        row.run_config = {**row.run_config, _MORE_REVIEWERS_ASKED: asked}
+    assigned = [p.github_login for p in request.reviewers + request.picks]
+    open_areas = coverage.uncovered([*approvers, *assigned]) if coverage is not None else []
     suggestions: list[Suggestion] = []
     for area in open_areas:
         choice = await choose_reviewer(request, area=area)
         suggestions.append(Suggestion(choice if isinstance(choice, Pick) else None, area))
     logger.info(
-        "Asking for reviewers for the code owners an approval left",
+        "Asking the implementer whether an approval leaves reviewers to add",
         extra={
             "request_id": str(request.id),
             "approvers": approvers,
             "code_owner_areas": [list(area.handles) for area in open_areas],
         },
     )
-    trigger = PickTrigger("approved", tuple(approvers))
+    approved = {login.lower() for login in approvers}
+    trigger = PickTrigger(
+        "approved",
+        tuple(approvers),
+        review_required=review_required,
+        waiting_on=tuple(
+            p.github_login
+            for p in request.reviewers + request.picks
+            if p.github_login.lower() not in approved
+        ),
+    )
     if not await _wake_picker(request, asked=False, trigger=trigger, suggestions=suggestions):
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is not None:
                 row.run_config = {
                     key: value
                     for key, value in row.run_config.items()
-                    if key != _REMAINING_OWNERS_ASKED
+                    if key != _MORE_REVIEWERS_ASKED
                 }
+    return request
 
 
 async def _wake_picker(
@@ -1138,9 +1286,11 @@ async def _wake_picker(
     suggestions: list[Suggestion],
 ) -> bool:
     pr = request.pull_request
+    instructions = await ReviewerInstructions.load(request)
     text = prompt(
         "runs/human-review-unclaimed",
         pr_url=pr.url,
+        instructions=instructions.text if instructions is not None else "",
         minutes=await _assignment_minutes(request),
         author=pr.author,
         posted=not request.has_card,
@@ -1148,35 +1298,25 @@ async def _wake_picker(
         trigger=trigger,
         suggestions=suggestions,
     )
-    requester = request.requested_by
-    thread_ts = request.slack_thread_ts or request.slack_message_ts
-    if requester is not None and requester.slack_user_id and request.slack_channel_id and thread_ts:
-        try:
-            await wake_thread_owner(
-                request.slack_channel_id, thread_ts, requester.slack_user_id, text
-            )
-        except Exception:
-            logger.warning(
-                "Could not wake the Slack thread's agent to pick a reviewer; retrying",
-                extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
-                exc_info=True,
-            )
-            await _schedule(request, "unclaimed", _DEADLINE_RETRY)
-            return False
-        return True
     return await ReviewCard(request).notify_agent(
         text, title=f"Pick a reviewer for {pr.repo}#{pr.number}"
     )
 
 
 async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
+    """Remind a reviewer Open SWE picked who accepted but has not reviewed yet.
+
+    A pick not yet accepted is asked to accept, not to review; its window handles it.
+    """
     try:
         participant = request.participant(UUID(user_id))
     except ValueError:
         return "invalid_reviewer"
+    if participant is not None and participant.decision == "picked":
+        return "not_accepted"
     if (
         participant is None
-        or participant.decision not in ("picked", "review")
+        or participant.decision != "review"
         or not participant.assigned_by_agent
         or participant.joined_at is None
         or not participant.user.slack_user_id
@@ -1231,35 +1371,19 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
             or row.state != "open"
             or current is None
             or not current.assigned_by_agent
-            or current.decision not in ("picked", "review")
+            or current.decision != "review"
             or current.joined_at != participant.joined_at
             or row.run_config.get(marker)
         ):
             return "inactive"
-        waited_minutes = max(
-            0,
-            int(
-                (datetime.now(UTC) - (request.created_at or participant.joined_at)).total_seconds()
-                // 60
-            ),
-        )
-        days, minutes = divmod(waited_minutes, 1440)
-        hours, minutes = divmod(minutes, 60)
-        waited = (
-            ", ".join(
-                f"{value} {unit}{'s' if value != 1 else ''}"
-                for value, unit in ((days, "day"), (hours, "hour"), (minutes, "minute"))
-                if value
-            )
-            or "less than a minute"
-        )
+        waited = _duration(datetime.now(UTC) - (request.created_at or participant.joined_at))
         sent = await send_dm(
             participant.user.slack_user_id,
             f"Reminder: Open SWE picked you to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
-            origin=request.dm_origin,
+            origin=request.notice_origin("review_reminder"),
         )
         if sent:
             row.run_config = {**row.run_config, marker: True}
@@ -1270,12 +1394,13 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
 
 
 async def expire_picks(request: HumanReviewRequest) -> str:
-    """Rotate away from picks not accepted in time, when someone else could review instead.
+    """Rotate away from picks not accepted within their work hours, when someone else could review.
 
-    Reviewing on GitHub counts as accepting.
+    Reviewing on GitHub counts as accepting. An area's second pick is not rotated: it stays
+    assigned and the author is told the review is overdue.
     """
     minutes = await _assignment_minutes(request)
-    wait = timedelta(minutes=minutes) - _SCHEDULER_EARLINESS
+    window = timedelta(minutes=minutes)
     now = datetime.now(UTC)
     stale: list[HumanReviewParticipant] = []
     for pick in request.picks:
@@ -1283,7 +1408,11 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         if isinstance(snoozed, str) and (until := datetime.fromisoformat(snoozed)) > now:
             await _schedule(request, "pick_expiry", until - now)
             continue
-        if pick.joined_at is None or now - pick.joined_at >= wait:
+        if pick.joined_at is None:
+            stale.append(pick)
+            continue
+        due = (await WorkHours.for_user(pick.user)).after(pick.joined_at, window)
+        if now >= due - _SCHEDULER_EARLINESS:
             stale.append(pick)
     logger.info(
         "Checking reviewer picks for expiry",
@@ -1322,6 +1451,24 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     if not idle:
         return "accepted"
     area = await _area_left_by(request, {p.github_login.lower() for p in idle})
+    if len(rounds := _rounds(request, area)) >= _ROUNDS_BEFORE_AUTHOR:
+        logger.info(
+            "Keeping unaccepted reviewer picks after their last round; telling the author",
+            extra={
+                "request_id": str(request.id),
+                "github_logins": [p.github_login for p in idle],
+                "rounds": len(rounds),
+            },
+        )
+        await _tell_author_overdue(
+            request,
+            idle,
+            f"Open SWE has asked {len(rounds)} reviewers in turn for this code, each for "
+            f"{_duration(window)} of their work hours, and nobody has reviewed it.",
+            cause="rotation_exhausted",
+            area=area,
+        )
+        return "overdue"
     choice = await choose_reviewer(request, area=area)
     if choice is None:
         logger.info(
@@ -1339,12 +1486,16 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         },
     )
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
-    await ReviewPicks(request).drop(
+    if not await ReviewPicks(request).drop(
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
-        f"{minutes} minutes, so Open SWE released you from it.",
+        f"{minutes} minutes of your work hours, so Open SWE released you from it.",
+        cause="expired",
         expired=True,
-    )
+        reason=f"not accepted within {minutes} minutes of their work hours",
+    ):
+        # Another run released them first and woke the picker itself.
+        return "already_released"
     current = await HumanReviewRequest.get(request.id)
     if current is None or current.state != "open":
         return "closed"
@@ -1356,6 +1507,142 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     if not await _wake_picker(current, asked=False, trigger=trigger, suggestions=suggestions):
         return "rotation_failed"
     return "rotating"
+
+
+def _rounds(request: HumanReviewRequest, area: Area | None) -> list[HumanReviewParticipant]:
+    """Everyone Open SWE has picked for ``area``, or for the whole request without code owners."""
+    return [
+        p
+        for p in request.participants
+        if p.assigned_by_agent and (area is None or p.github_login.lower() in area.owners)
+    ]
+
+
+async def _tell_author_overdue(
+    request: HumanReviewRequest,
+    assigned: list[HumanReviewParticipant],
+    why: str,
+    *,
+    cause: ReviewDecisionCause,
+    area: Area | None = None,
+) -> None:
+    """Log, once per set of still-assigned reviewers, that a review is overdue, and tell the author.
+
+    The author hears during their own work hours; the notice waits for them until then.
+    """
+    ids = ",".join(sorted(str(p.user_id) for p in assigned))
+    marker = f"review_overdue:{ids}"
+    if request.run_config.get(marker):
+        return
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None or row.run_config.get(marker):
+            return
+        row.run_config = {**row.run_config, marker: True, f"{_OVERDUE_NOTICE}{ids}": why}
+    await request.log_decision(
+        "review_overdue",
+        cause=cause,
+        reviewers=[p.github_login for p in assigned],
+        code_owners=list(area.handles) if area is not None else [],
+        reason=why,
+    )
+    current = await HumanReviewRequest.get(request.id) or request
+    await _notify_author_overdue(current, ids)
+
+
+async def _notify_author_overdue(request: HumanReviewRequest, ids: str) -> str:
+    """DM the author the overdue notice waiting for ``ids`` once their work day has started."""
+    key = f"{_OVERDUE_NOTICE}{ids}"
+    why = request.run_config.get(key)
+    if not isinstance(why, str):
+        return "inactive"
+    assigned = [
+        p
+        for user_id in ids.split(",")
+        if (p := request.participant(UUID(user_id))) is not None
+        and p.decision in ("picked", "review")
+    ]
+    pr = request.pull_request
+    author = (
+        await User.get(pr.author_user_id)
+        if pr.author_user_id
+        else await User.for_login("github", pr.author)
+        if pr.author
+        else None
+    )
+    if not assigned or author is None or not author.slack_user_id:
+        if assigned:
+            logger.info(
+                "Cannot tell the author a review is overdue: no linked Slack account",
+                extra={"request_id": str(request.id)},
+            )
+        await _forget(request, key)
+        return "dropped"
+    now = datetime.now(UTC)
+    if (start := (await WorkHours.for_user(author)).next_start(now)) > now:
+        await _schedule(request, key, start - now)
+        return "waiting_for_work_hours"
+    who = ", ".join(mention(p.user) for p in assigned)
+    still = "is" if len(assigned) == 1 else "are"
+    waited = _duration(now - (request.created_at or now))
+    text = (
+        f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> *{escape(pr.title)}* has waited {waited} "
+        f"for a review since it was requested. {why} {who} {still} still assigned, and Open SWE "
+        "is no longer asking anyone else for this code."
+    )
+    if not await send_dm(
+        author.slack_user_id, text, origin=request.notice_origin("review_overdue")
+    ):
+        await _schedule(request, key, _DEADLINE_RETRY)
+        return "retrying"
+    await _forget(request, key)
+    return "sent"
+
+
+async def _forget(request: HumanReviewRequest, key: str) -> None:
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is not None:
+            row.run_config = {k: v for k, v in row.run_config.items() if k != key}
+
+
+async def _check_overdue(request: HumanReviewRequest, user_id: str) -> str:
+    """Tell the author when a reviewer Open SWE picked accepted but has not reviewed in time."""
+    try:
+        participant = request.participant(UUID(user_id))
+    except ValueError:
+        return "invalid_reviewer"
+    if (
+        participant is None
+        or participant.decision != "review"
+        or not participant.assigned_by_agent
+        or participant.joined_at is None
+    ):
+        return "not_assigned"
+    window = timedelta(minutes=await _assignment_minutes(request))
+    hours = await WorkHours.for_user(participant.user)
+    now = datetime.now(UTC)
+    due = hours.after(participant.joined_at, window * _ROUNDS_BEFORE_AUTHOR)
+    if now < due - _SCHEDULER_EARLINESS:
+        await _schedule(request, f"overdue:{user_id}", due - now)
+        return "scheduled"
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            reviewed = await review_authors(pull)
+    except GitHubAppUnavailable:
+        reviewed = None
+    if reviewed is None:
+        await _schedule(request, f"overdue:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    if participant.github_login.lower() in reviewed:
+        return "reviewed"
+    await _tell_author_overdue(
+        request,
+        [participant],
+        "They accepted the review but have not submitted one after "
+        f"{_duration(window * _ROUNDS_BEFORE_AUTHOR)} of their work hours.",
+        cause="accepted_without_review",
+    )
+    return "overdue"
 
 
 async def _area_left_by(request: HumanReviewRequest, leaving: set[str]) -> Area | None:
@@ -1402,6 +1689,8 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
         {pick.user_id for pick in request.picks},
         f"You no longer need to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
         f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
+        cause="not_asked",
+        reason="posted outside its review channels without asking for a reviewer",
     )
     return "not_asked"
 
@@ -1424,32 +1713,21 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         if remaining > timedelta(0):
             await _schedule(request, step, remaining)
             return {"status": "snoozed"}
-        if participant.user.slack_user_id:
-            text = f"Your review snooze ended: {request.pull_request.url}."
-            origin = request.dm_origin
-            sent = await send_dm_with_location(
-                participant.user.slack_user_id,
-                text,
-                blocks=block_payload(
-                    [
-                        section(text),
-                        actions(
-                            accept_button(request), decline_button(request), snooze_button(request)
-                        ),
-                        *await origin_footer(
-                            request.thread_id, origin.location if origin else None
-                        ),
-                    ]
-                ),
-                origin=origin,
-            )
-            if sent is not None:
-                await request.record_pick_message(
-                    user_id, PickMessage(channel_id=sent[0], ts=sent[1], text=text)
-                )
+        await _send_pick_dm(
+            request,
+            participant.user,
+            f"Your review snooze ended: {request.pull_request.url}.",
+            "review_snooze_ended",
+        )
         return {"status": "reminded"}
     if step.startswith("remind:"):
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
+    if step.startswith("overdue:"):
+        return {"status": await _check_overdue(request, step.removeprefix("overdue:"))}
+    if step.startswith(_PICK_START):
+        return {"status": await _start_held_pick(request, step.removeprefix(_PICK_START))}
+    if step.startswith(_OVERDUE_NOTICE):
+        return {"status": await _notify_author_overdue(request, step.removeprefix(_OVERDUE_NOTICE))}
 
     if (request.kind == "posted" or step in ("unclaimed", "pick_expiry")) and skip_on_preview(
         "run_deadline"

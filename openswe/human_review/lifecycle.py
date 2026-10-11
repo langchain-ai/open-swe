@@ -6,6 +6,7 @@ just acted, a GitHub event arrived, or one of the request's deadlines passed.
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -35,7 +36,9 @@ from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.github.repositories import Repository
 from openswe.human_review import card as standard_card
+from openswe.human_review.events import ReviewDecisionCause
 from openswe.human_review.people import Outcome
+from openswe.human_review.picking import WorkHours
 from openswe.human_review.requests import (
     ChannelChoice,
     HumanReviewParticipant,
@@ -58,6 +61,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
+from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
@@ -228,7 +232,7 @@ class ReviewCard:
             diff_image_id=approval.slack_diff_file_id or None,
         )
         text, blocks = await self._warn_target((text, blocks))
-        origin = approval.dm_origin
+        origin = approval.notice_origin("author_ready_prompt")
         dm_location = await send_dm_with_location(
             author.slack_user_id,
             text,
@@ -681,6 +685,8 @@ class ReviewCard:
         if state != "merged" and updated.kind == "expedited":
             await self.withdraw_reviews()
         await self.refresh_in_thread(outcome=outcome)
+        if state != "open":
+            await updated.log_decision("request_closed", cause=state, reason=outcome)
         return updated
 
     async def reopen(self) -> None:
@@ -700,7 +706,12 @@ class ReviewCard:
     async def dismiss_by(self, by: str, reason: str) -> bool:
         """Take the card down for ``by``, as a Dismiss click would; ``False`` if already closed."""
         detail = f": {escape(reason.strip())}" if reason.strip() else ""
-        return await self.retire("cancelled", f"dismissed by {by}{detail}") is not None
+        outcome = f"dismissed by {by}{detail}"
+        updated = await self.retire("cancelled", outcome)
+        if updated is None:
+            return False
+        await ReviewPicks(updated).release(f"it was {outcome}", cause="dismissed")
+        return True
 
     async def refresh_in_thread(self, *, outcome: str | None = None) -> None:
         """Re-render a card, reposting it into the thread only if it was also in the channel.
@@ -773,12 +784,12 @@ class ReviewCard:
         if updated is not None:
             # ✅ means approved, so a workspace without :merged: gets 🔀 instead.
             await self._react("merged", "twisted_rightwards_arrows")
-            await ReviewPicks(updated).release("it was merged")
+            await ReviewPicks(updated).release("it was merged", cause="merged")
 
     async def mark_closed(self) -> None:
         updated = await self.retire("cancelled", "the pull request was closed")
         if updated is not None:
-            await ReviewPicks(updated).release("it was closed")
+            await ReviewPicks(updated).release("it was closed", cause="closed")
 
     async def mark_approved(self) -> None:
         """React to a posted request's message the first time its pull request is approved."""
@@ -838,44 +849,71 @@ class ReviewPicks:
                 exc_info=True,
             )
 
-    async def _close(self, participant: HumanReviewParticipant, text: str) -> None:
-        """Say on a pending pick's DM why it ended, which does not notify; otherwise DM ``text``."""
+    async def _tell_withdrawn(self, participant: HumanReviewParticipant, text: str) -> None:
+        """Say on their pick DM why it ended, which does not notify; DM ``text`` when that is not
+        enough."""
+        request = self.request
         slack_user_id = participant.user.slack_user_id
         if not slack_user_id:
             return
-        # Someone who accepted may be partway through the review, so they get a notification.
-        message = participant.pick_message if participant.decision != "review" else None
-        if message is not None and await message.show(text):
+        origin = request.notice_origin("reviewer_released")
+        message = participant.pick_message
+        edited = message is not None and await message.show(text)
+        if message is not None and edited:
+            if origin is not None:
+                await origin.save_for(message.channel_id, message.ts, f"{message.text}\n{text}")
+                await note_for_thread_owner(
+                    *origin.location,
+                    prompt(
+                        "slack/review-pick-withdrawn",
+                        recipient=f"<@{slack_user_id}>",
+                        pr_url=request.pull_request.url,
+                        text=text,
+                    ),
+                )
             await note_for_concierge(
                 slack_user_id,
                 message.channel_id,
                 prompt("slack/concierge-dm-edited", text=message.text, status=text),
             )
+        # Someone who accepted may be partway through the review, so they get a notification,
+        # but only in their work hours; the edit already says it.
+        if edited and (
+            participant.decision != "review"
+            or not (await WorkHours.for_user(participant.user)).on_shift(datetime.now(UTC))
+        ):
             return
-        origin = self.request.dm_origin
         await send_dm(
             slack_user_id,
             text,
             blocks=block_payload(
                 [
                     section(text),
-                    *await origin_footer(
-                        self.request.thread_id, origin.location if origin else None
-                    ),
+                    *await origin_footer(request.thread_id, origin.location if origin else None),
                 ]
             ),
             origin=origin,
         )
 
-    async def release(self, reason: str) -> HumanReviewRequest:
-        """Take reviewers Open SWE picked who have not reviewed off the pull request, and tell them."""
+    async def release(
+        self,
+        reason: str,
+        *,
+        cause: ReviewDecisionCause,
+        covered: Callable[[str], bool] | None = None,
+    ) -> HumanReviewRequest:
+        """Take reviewers Open SWE picked who have not reviewed off the pull request, and tell them.
+
+        With ``covered``, only those whose GitHub login it accepts. Once the request is closed,
+        picks who reviewed without accepting lose their buttons too.
+        """
         request = self.request
         if not any(reviewer.assigned_by_agent for reviewer in request.reviewers + request.picks):
             return request
         pr = request.pull_request
         try:
             async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                return await self._release(pull, reason)
+                return await self._release(pull, reason, cause=cause, covered=covered)
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to release Open SWE's reviewer picks",
@@ -883,7 +921,14 @@ class ReviewPicks:
             )
             return request
 
-    async def _release(self, pull: PullRequestClient, reason: str) -> HumanReviewRequest:
+    async def _release(
+        self,
+        pull: PullRequestClient,
+        reason: str,
+        *,
+        cause: ReviewDecisionCause,
+        covered: Callable[[str], bool] | None,
+    ) -> HumanReviewRequest:
         request = self.request
         pr = request.pull_request
         reviewed = await review_authors(pull)
@@ -896,30 +941,51 @@ class ReviewPicks:
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is None:
                 return request
-            released = _idle(row.reviewers + row.picks, reviewed)
+            released = [
+                reviewer
+                for reviewer in _idle(row.reviewers + row.picks, reviewed)
+                if covered is None or covered(reviewer.github_login)
+            ]
             for reviewer in released:
                 row.participants.remove(reviewer)
+        current = self.request = await HumanReviewRequest.get(request.id) or request
+        label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+        if current.state != "open":
+            for pick in (p for p in current.picks if p.pick_message):
+                await self._tell_withdrawn(
+                    pick, f"The review request for {label} closed: {reason}."
+                )
         if not released:
-            return request
-        current = await HumanReviewRequest.get(request.id) or request
+            return current
         if current.state == "open":
             await ReviewCard(current).refresh()
-        label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+        text = (
+            f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
+            "Open SWE removed you as a reviewer."
+        )
         for reviewer in released:
             logger.info(
                 "Released a reviewer Open SWE picked",
                 extra={"request_id": str(request.id), "github_login": reviewer.github_login},
             )
             await self._unrequest(pull, reviewer.github_login)
-            await self._close(
-                reviewer,
-                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer.",
-            )
+            await self._tell_withdrawn(reviewer, text)
+        await request.log_decision(
+            "reviewers_released",
+            cause=cause,
+            reviewers=[reviewer.github_login for reviewer in released],
+            reason=reason,
+        )
         return await HumanReviewRequest.get(request.id) or current
 
     async def drop(
-        self, user_ids: set[UUID], message: str | None, *, expired: bool = False
+        self,
+        user_ids: set[UUID],
+        message: str | None,
+        *,
+        cause: ReviewDecisionCause,
+        expired: bool = False,
+        reason: str = "",
     ) -> list[HumanReviewParticipant]:
         """Withdraw pending picks of ``user_ids`` from the card and GitHub, and tell each ``message``.
 
@@ -958,7 +1024,13 @@ class ReviewPicks:
                 },
             )
             if message is not None:
-                await self._close(pick, message)
+                await self._tell_withdrawn(pick, message)
+        await request.log_decision(
+            "reviewers_released",
+            cause=cause,
+            reviewers=[pick.github_login for pick in dropped],
+            reason=reason,
+        )
         current = await HumanReviewRequest.get(request.id)
         if current is not None and current.state == "open":
             await ReviewCard(current).refresh()

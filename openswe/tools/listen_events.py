@@ -13,7 +13,7 @@ from openswe.github.repositories import Repository
 from openswe.review.styles import normalize_repo_full_name
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
-from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, WebhookSource
+from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, EventSource
 from openswe.webhooks.event_matches import MultitaskStrategy
 from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.routing import workspace_for_repo
@@ -81,7 +81,7 @@ def _error(message: str) -> dict[str, object]:
 
 async def listen_events(
     action: Literal["subscribe", "list", "cancel"],
-    sources: list[WebhookSource] | None = None,
+    sources: list[EventSource] | None = None,
     repo: str = "",
     pr_url: str = "",
     event_types: list[str] | None = None,
@@ -177,7 +177,7 @@ async def listen_events(
 
 
 async def list_event_types(
-    source: WebhookSource | None = None, event_type: str = ""
+    source: EventSource | None = None, event_type: str = ""
 ) -> dict[str, object]:
     """Implement the `list_event_types` tool."""
     since = datetime.now(UTC) - timedelta(days=RETAINED_DAYS)

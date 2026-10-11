@@ -4845,6 +4845,18 @@
             "title": "Reused",
             "type": "boolean"
           },
+          "starts_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
           "success": {
             "title": "Success",
             "type": "boolean"
