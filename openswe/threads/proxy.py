@@ -5,12 +5,13 @@ import copy
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from typing import Any
 
 import httpx2
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
+from langgraph_sdk.schema import ThreadState
 
 from openswe.config import ENV
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
@@ -44,7 +45,16 @@ from openswe.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
 
-_TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
+_AFTER_START_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _after_start(work: Coroutine[Any, Any, None]) -> None:
+    """Finish a started run's bookkeeping without holding the reply that carries its id."""
+    task = asyncio.create_task(work)
+    _AFTER_START_TASKS.add(task)
+    task.add_done_callback(_AFTER_START_TASKS.discard)
+
+
 _PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _PROXY_STREAM_TIMEOUT = httpx2.Timeout(None)
 _DISCOVERY_HISTORY_LIMIT = 5
@@ -153,6 +163,10 @@ async def _observe_dashboard_run_ttft(
         )
 
 
+async def _thread_state(thread_id: str) -> ThreadState:
+    return await langgraph_client().threads.get_state(thread_id)
+
+
 async def proxy_dashboard_thread_commands(
     thread_id: str,
     login: str,
@@ -186,6 +200,17 @@ async def proxy_dashboard_thread_commands(
     # commands on admin threads require an admin; other threads keep unattributed
     # commands such as ``input.respond`` owner-only.
     method = parsed.get("method")
+    # A person's start reads the conversation (`_attributed_run_messages`), so that
+    # read runs alongside the thread lookup instead of after the checks below.
+    prior_state = (
+        asyncio.ensure_future(_thread_state(thread_id))
+        if method == "run.start" and not principal.machine
+        else None
+    )
+    if prior_state is not None:
+        # Paths that never await it (a new thread, a busy one) must not leave its
+        # failure unretrieved.
+        prior_state.add_done_callback(lambda read: read.cancelled() or read.exception())
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception:  # noqa: BLE001
@@ -196,6 +221,9 @@ async def proxy_dashboard_thread_commands(
         if method != "run.start":
             raise HTTPException(404, "thread not found")
         creating = True
+        if prior_state is not None:
+            prior_state.cancel()
+            prior_state = None
         metadata: dict[str, Any] = {}
         thread_busy = False
     else:
@@ -228,6 +256,8 @@ async def proxy_dashboard_thread_commands(
         # closed it and is about to end, so the follow-up waits for it. Either
         # reply keeps the protocol's shape so the client cannot tell them from a
         # plain start. See docs/tla/SteerRace.tla.
+        if prior_state is not None:
+            prior_state.cancel()
         turn = await steer_target(thread_id) if transcribed and not enqueue else None
         handled = await (
             steer_running_thread(
@@ -264,6 +294,7 @@ async def proxy_dashboard_thread_commands(
             metadata=metadata,
             creating=creating,
             email=email,
+            prior_state=prior_state,
         )
     outgoing = json.dumps(enriched).encode()
 
@@ -298,42 +329,41 @@ async def proxy_dashboard_thread_commands(
             return 200, json.dumps(requeued).encode(), "application/json"
         if response.status_code >= 400:
             await _fail_requested_turn(thread_id, enriched)
-    if run_start_succeeded and not creating:
+    if run_start_succeeded and run_id is not None:
+        _after_start(_observe_dashboard_run_ttft(thread_id, run_id, received_at_ms))
+        _after_start(_record_started_run(thread_id, run_id, metadata, handoff=not creating))
+    media_type = response.headers.get("content-type")
+    return response.status_code, response.content, media_type
+
+
+async def _record_started_run(
+    thread_id: str, run_id: str, metadata: dict[str, Any], *, handoff: bool
+) -> None:
+    # LangGraph already reports the thread busy, which is what decides whether
+    # the next start queues; these writes only feed listings and Slack.
+    if handoff:
         try:
             await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
         except Exception:
             logger.exception(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id
             )
-
-    if run_start_succeeded and run_id is not None:
-        task = asyncio.create_task(
-            _observe_dashboard_run_ttft(
-                thread_id,
-                run_id,
-                received_at_ms,
-            )
+    try:
+        await langgraph_client().threads.update(
+            thread_id=thread_id,
+            metadata={
+                "latest_run_id": run_id,
+                "latest_run_status": "pending",
+                "updated_at_ms": _now_ms(),
+            },
         )
-        _TTFT_OBSERVER_TASKS.add(task)
-        task.add_done_callback(_TTFT_OBSERVER_TASKS.discard)
-        try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "latest_run_id": run_id,
-                    "latest_run_status": "pending",
-                    "updated_at_ms": _now_ms(),
-                },
-            )
-        except Exception:
-            logger.warning(
-                "Failed to persist started dashboard run %s on thread %s",
-                run_id,
-                thread_id,
-                exc_info=True,
-            )
-    media_type = response.headers.get("content-type")
-    return response.status_code, response.content, media_type
+    except Exception:
+        logger.warning(
+            "Failed to persist started dashboard run %s on thread %s",
+            run_id,
+            thread_id,
+            exc_info=True,
+        )
 
 
 async def _queue_if_thread_turned_busy(
