@@ -4,12 +4,13 @@ import base64
 import binascii
 import logging
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
+from langgraph_sdk.schema import ThreadState
 from pydantic import BaseModel, ConfigDict, Field
 
 from openswe.bridge.constants import HANDOFF_FROM_KEY
@@ -755,6 +756,7 @@ async def _attributed_run_messages(
     client: Any,
     sandbox_handoff: Mapping[str, Any] | None = None,
     review_chat_pr_url: str | None = None,
+    prior_state: Awaitable[ThreadState] | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -769,9 +771,9 @@ async def _attributed_run_messages(
     history_read = False
     if not creating:
         try:
-            prior_state = await client.threads.get_state(thread_id)
+            state = await (prior_state or client.threads.get_state(thread_id))
             history_read = True
-            values = prior_state.get("values") if isinstance(prior_state, dict) else None
+            values = state.get("values") if isinstance(state, dict) else None
             if isinstance(values, dict):
                 messages = values.get("messages")
                 injected.update(dynamic_context_hashes_from_messages(messages))
@@ -838,7 +840,9 @@ async def _enrich_run_start_command(
     metadata: dict[str, Any],
     creating: bool = False,
     email: str | None = None,
+    prior_state: Awaitable[ThreadState] | None = None,
 ) -> dict[str, Any]:
+    """``prior_state`` is the thread's state when the caller already started reading it."""
     if command.get("method") != "run.start":
         return command
 
@@ -951,6 +955,7 @@ async def _enrich_run_start_command(
         client=client,
         sandbox_handoff=sandbox_handoff,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
+        prior_state=prior_state,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
