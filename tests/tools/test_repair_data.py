@@ -19,7 +19,7 @@ def admin_context(monkeypatch: pytest.MonkeyPatch):
             )
         )
     )
-    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: client)
+    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
     config = {
         "configurable": {
             "thread_id": "t-1",
@@ -59,7 +59,7 @@ async def test_access_gate_blocks_writes(admin_context, monkeypatch, change):
                 )
             )
         )
-        monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: client)
+        monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
     with patch("openswe.tools.repair_data.put_value", new_callable=AsyncMock) as put:
         result = await write_store_item(["users"], "admin", {}, confirm=True)
         assert result["ok"] is False
