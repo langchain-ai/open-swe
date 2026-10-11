@@ -329,9 +329,7 @@ async def test_merged_card_names_only_actual_approvers(
         participant = HumanReviewParticipant(user_id=user.id, decision="review")
         participant.user = user
         request.participants.append(participant)
-    with patch(
-        "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
-    ):
+    with patch("openswe.human_review.lifecycle.review_standings", AsyncMock(return_value=states)):
         text, blocks = await ReviewCard(request).render("merged")
     payload = block_payload(blocks)
     assert payload is not None
@@ -376,9 +374,7 @@ async def test_approved_card_collapses_without_closing_the_request(
     request.pull_request = pr
     request.requested_by = None
     with (
-        patch(
-            "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
-        ),
+        patch("openswe.human_review.lifecycle.review_standings", AsyncMock(return_value=states)),
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
         text, blocks = await ReviewCard(request).render(None)

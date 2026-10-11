@@ -180,6 +180,7 @@ async def github_webhook(
         # Any reviewer's verdict can complete a review request, registered with Open SWE or not.
         background_tasks.add_task(service.settle_human_reviews, payload)
         if payload.get("action") == "submitted":
+            background_tasks.add_task(service.announce_human_review, payload)
             background_tasks.add_task(CompletedReview.record, payload)
 
     if is_issue_event:

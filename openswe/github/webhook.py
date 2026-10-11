@@ -15,6 +15,7 @@ from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
 from openswe.github.notifications import notify_slack_review
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
+from openswe.human_review.feedback import announce_review
 from openswe.human_review.lifecycle import close_for_pull_request
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import settle_pull_request, settle_repository
@@ -1637,6 +1638,11 @@ async def settle_human_reviews(payload: dict[str, Any]) -> None:
     owner, repo = event.repository.owner.login, event.repository.name
     for number in event.numbers:
         await settle_pull_request(owner, repo, number)
+
+
+async def announce_human_review(payload: dict[str, Any]) -> None:
+    if postgres.configured():
+        await announce_review(payload)
 
 
 class _StatusEvent(BaseModel):

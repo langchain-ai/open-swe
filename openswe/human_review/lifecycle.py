@@ -25,8 +25,8 @@ from openswe.expedited_review.diff_image import render_diff_png
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
-    latest_review_states,
     review_authors,
+    review_standings,
 )
 from openswe.expedited_review.reviews import dismiss_approval
 from openswe.github.http import GitHubAppUnavailable, or_none
@@ -278,7 +278,7 @@ class ReviewCard:
         pr = self.request.pull_request
         try:
             async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                return await latest_review_states(pull, pr.author) or {}
+                return await review_standings(pull, pr.author) or {}
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to read review states",

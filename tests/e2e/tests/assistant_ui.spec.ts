@@ -183,9 +183,11 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
   ).toBeVisible();
   await row.press("Shift+F10");
   await page.getByRole("menuitem", { name: "Unpin thread" }).click();
+  await row.press("Shift+F10");
   await expect(
-    sidebar.getByRole("button", { name: "Pinned", exact: true }),
-  ).toHaveCount(0);
+    page.getByRole("menuitem", { name: "Pin thread", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await composer(page).fill("Keep this draft when opening a new thread.");
   await sidebar.getByRole("button", { name: "Search", exact: true }).click();

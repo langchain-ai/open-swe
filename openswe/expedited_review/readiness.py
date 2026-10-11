@@ -219,6 +219,25 @@ async def latest_review_states(pull: PullRequestClient, author: str) -> dict[str
     return _latest_reviews_by_user(reviews, author)
 
 
+async def review_standings(pull: PullRequestClient, author: str) -> dict[str, str] | None:
+    """Like ``latest_review_states``, but ``COMMENTED`` for reviewers who only left comments."""
+    reviews = await or_none(pull.reviews())
+    if reviews is None:
+        return None
+    standings = _latest_reviews_by_user(reviews, author)
+    for review in reviews:
+        user = review.get("user")
+        login = user.get("login") if isinstance(user, Mapping) else None
+        if (
+            isinstance(login, str)
+            and review.get("state") == "COMMENTED"
+            and login.lower() != author.lower()
+            and standings.get(login, "DISMISSED") == "DISMISSED"
+        ):
+            standings[login] = "COMMENTED"
+    return standings
+
+
 def _resolve_mergeability(
     pr: Mapping[str, Any], live: Mergeability | None
 ) -> tuple[bool | None, str]:
