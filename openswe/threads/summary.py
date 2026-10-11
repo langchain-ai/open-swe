@@ -111,7 +111,11 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
     """Threads that remain accessible directly but stay out of thread lists."""
-    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
+    return (
+        metadata.get("unlisted") is True
+        or metadata.get("review_chat") is True
+        or bool(metadata.get("sandbox_host_thread_id"))
+    )
 
 
 def thread_is_readable(

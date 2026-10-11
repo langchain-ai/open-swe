@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import text
 
 from openswe.database import postgres
+from openswe.openai_responses.associations import record_guest_thread
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.openai_responses.ids import OpenSweId
 from openswe.openai_responses.models import CreateResponseRequest, InputItem
@@ -116,7 +117,9 @@ class SandboxCaller:
                 raise HTTPException(429, f"At most {MAX_ACTIVE_GUESTS} responses may run at once")
             yield
 
-    async def create_guest_thread(self, prompt: str, model: tuple[str, str] | None) -> str:
+    async def create_guest_thread(
+        self, prompt: str, model: tuple[str, str] | None, client_name: str = ""
+    ) -> str:
         thread_id = str(uuid.uuid4())
         visibility: Literal["public", "private"] = (
             "private" if self.host_metadata.get("visibility") == "private" else "public"
@@ -135,12 +138,14 @@ class SandboxCaller:
             workspace=workspace if isinstance(workspace, str) else None,
             extra_metadata={
                 SANDBOX_HOST_THREAD_KEY: self.host_thread_id,
+                "responses_client": client_name.strip()[:80],
                 "sandbox_id": self.sandbox_id,
                 SANDBOX_PROXY_CONFIG_METADATA_KEY: self.host_metadata.get(
                     SANDBOX_PROXY_CONFIG_METADATA_KEY
                 ),
             },
         )
+        await record_guest_thread(self.host_thread_id, thread_id)
         return thread_id
 
     async def start_run(

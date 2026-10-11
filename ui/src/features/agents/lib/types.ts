@@ -494,6 +494,7 @@ export type AgentSubagentStatus = "in_progress" | "completed" | "error"
  * last segment of the namespace every event the subagent emitted carries.
  */
 export interface AgentSubagentSummary {
+  threadId?: string
   toolCallId: string
   /** The first line of the task description. */
   title: string

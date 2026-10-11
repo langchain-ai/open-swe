@@ -831,7 +831,9 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     run_list_calls = 0
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, select, offset=0, sort_by=None, sort_order=None):
+            if "sandbox_host_thread_id" in metadata:
+                return []
             offsets.append(offset)
             assert select == thread_listing._THREAD_LIST_SELECT
             return threads[offset : offset + limit]
@@ -1062,7 +1064,9 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
     searches: list[dict[str, object]] = []
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, select, offset=0, sort_by=None, sort_order=None):
+            if "sandbox_host_thread_id" in metadata:
+                return []
             searches.append(metadata)
             return threads[offset : offset + limit]
 
@@ -1107,7 +1111,9 @@ async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch
     }
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, select, offset=0, sort_by=None, sort_order=None):
+            if "sandbox_host_thread_id" in metadata:
+                return []
             return threads[offset : offset + limit]
 
     class FakeRuns:
@@ -1150,7 +1156,9 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     run_list_thread_ids: list[str] = []
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, select, offset=0, sort_by=None, sort_order=None):
+            if "sandbox_host_thread_id" in metadata:
+                return []
             return threads[offset : offset + limit]
 
         async def update(self, *, thread_id, metadata):

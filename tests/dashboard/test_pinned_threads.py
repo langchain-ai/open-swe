@@ -42,6 +42,8 @@ class ThreadAPI:
             if self.fail_search:
                 return httpx.Response(503, json={"detail": "unavailable"})
             body = cast(dict[str, object], json.loads(request.content))
+            if "sandbox_host_thread_id" in cast(dict[str, object], body.get("metadata", {})):
+                return httpx.Response(200, json=[])
             ids = cast(list[str], body["ids"])
             select = cast(list[str], body["select"])
             assert "values" not in select
@@ -126,6 +128,11 @@ async def test_latest_run_requests_are_bounded_and_legacy_idle_status_is_refresh
         await pins.pin_thread("alice", thread_id)
     result = await listing.list_dashboard_pinned_threads("alice")
     assert all(item["status"] == "running" for item in result)
-    assert thread_api.count("POST", "/search") == 1
+    pin_searches = [
+        request
+        for request in thread_api.requests
+        if request.url.path == "/threads/search" and "ids" in json.loads(request.content)
+    ]
+    assert len(pin_searches) == 1
     assert thread_api.count("GET", "/runs") == 20
     assert 1 < thread_api.peak_runs <= 8
