@@ -452,7 +452,9 @@ async def slack_webhook(
         return ignored("Reaction not tracked for feedback")
 
     if event.type == "agent_session_stopped":
-        background_tasks.add_task(common.process_agent_session_stopped, raw_event, event_id)
+        background_tasks.add_task(
+            common.process_agent_session_stopped, raw_event, event_id, team_id
+        )
         return accepted("Session stop queued")
 
     retry_num = request.headers.get("X-Slack-Retry-Num", "")

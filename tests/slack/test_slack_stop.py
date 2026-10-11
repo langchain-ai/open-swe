@@ -1,10 +1,16 @@
 import builtins
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
+from openswe.slack import client as slack_client
+from openswe.slack import http as slack_http
 from openswe.slack import stop as slack_stop
+from openswe.slack import thinking
 from openswe.slack.stop import process_slack_stop_reaction
+from openswe.threads import handlers
+from openswe.users.models import User, UserIdentity
 
 
 class FakeStore:
@@ -36,13 +42,13 @@ class FakeThreads:
 
 class FakeRuns:
     def __init__(self) -> None:
-        self.by_status: dict[str, list[dict[str, str]]] = {"pending": [], "running": []}
+        self.by_status: dict[str, list[dict[str, object]]] = {"pending": [], "running": []}
         self.cancelled: list[dict[str, Any]] = []
         self.fail_cancel = False
 
     async def list(
         self, thread_id: str, *, status: str, limit: int, offset: int
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, object]]:
         del thread_id
         return self.by_status[status][offset : offset + limit]
 
@@ -250,3 +256,127 @@ async def test_failed_queue_cleanup_does_not_dispatch_summary(
 
     assert dispatched == []
     assert client.threads.updates == []
+
+
+def _patch_native_stop(monkeypatch: pytest.MonkeyPatch, client: FakeClient) -> AsyncMock:
+    _patch_handler(monkeypatch, client)
+    user = User(identities=[UserIdentity(provider="github", external_id="123", login="owner")])
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=user))
+    monkeypatch.setattr(handlers, "langgraph_client", lambda: client)
+    monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
+    monkeypatch.setattr(handlers, "settle_run_turn", AsyncMock())
+    monkeypatch.setattr(slack_client, "post_slack_thread_reply", AsyncMock())
+    monkeypatch.setattr(slack_http.SlackClient, "bot", lambda: AsyncMock())
+    monkeypatch.setattr(slack_http, "slack_identity", AsyncMock(return_value={"team_id": "T123"}))
+    status = AsyncMock(return_value=True)
+    monkeypatch.setattr(thinking, "set_slack_thread_status", status)
+    return status
+
+
+async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_deduplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeClient()
+    thread_id = _add_thread(client)
+    code_thread_id = _add_thread(client, "0")
+    client.runs.by_status["running"] = [{"run_id": "running"}]
+    client.runs.by_status["pending"] = [
+        {"run_id": "other-follow-up", "metadata": {"queued_by": "other"}}
+    ]
+    queued_key = (("queue", thread_id), "pending_messages")
+    client.store.items[queued_key] = {"value": {"messages": [{"text": "later"}]}}
+    status = _patch_native_stop(monkeypatch, client)
+    monkeypatch.setattr(slack_stop, "claim_slack_event", AsyncMock(side_effect=[True, False]))
+    event: dict[str, object] = {"channel": "C123", "thread_ts": "1.000", "user": "UOWNER"}
+
+    await slack_stop.process_agent_session_stopped(event, "EvStop", "T123")
+    await slack_stop.process_agent_session_stopped(event, "EvStop", "T123")
+
+    assert client.runs.cancelled == [
+        {"thread_id": thread_id, "run_ids": ["running"], "action": "interrupt"}
+    ]
+    assert client.store.items[queued_key]["value"]["messages"] == [{"text": "later"}]
+    assert client.store.deleted == []
+    assert "latest_run_status" not in client.threads.values[code_thread_id]["metadata"]
+    status.assert_awaited_once_with("C123", "1.000", "")
+
+
+@pytest.mark.parametrize("rejection", ["workspace", "moved", "unlinked", "private"])
+async def test_native_stop_rejects_wrong_location_or_unauthorized_user(
+    monkeypatch: pytest.MonkeyPatch, rejection: str
+) -> None:
+    client = FakeClient()
+    thread_id = _add_thread(client)
+    metadata = client.threads.values[thread_id]["metadata"]
+    slack_thread = metadata["source_context"]["slack_thread"]
+    slack_thread["team_id"] = "T123"
+    client.runs.by_status["running"] = [{"run_id": "running"}]
+    status = _patch_native_stop(monkeypatch, client)
+    if rejection == "workspace":
+        slack_thread["team_id"] = "TOTHER"
+    elif rejection == "moved":
+        slack_thread["thread_ts"] = "2.000"
+    elif rejection == "unlinked":
+        monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=None))
+    else:
+        metadata.update(visibility="private", owner_login="someone-else")
+
+    await slack_stop.process_agent_session_stopped(
+        {"channel": "C123", "thread_ts": "1.000", "user": "UOWNER"}, "EvStop", "T123"
+    )
+
+    assert client.runs.cancelled == []
+    assert client.threads.updates == []
+    assert client.store.deleted == []
+    status.assert_not_awaited()
+
+
+@pytest.mark.parametrize("cancel_fails", [False, True])
+async def test_native_stop_clears_status_after_interruption_even_if_follow_up_fails(
+    monkeypatch: pytest.MonkeyPatch, cancel_fails: bool
+) -> None:
+    client = FakeClient()
+    thread_id = _add_thread(client)
+    client.runs.by_status["running"] = [{"run_id": "running"}]
+    client.runs.fail_cancel = cancel_fails
+    status = _patch_native_stop(monkeypatch, client)
+    follow_up = AsyncMock(side_effect=RuntimeError("follow-up dispatch failed"))
+    monkeypatch.setattr(handlers, "dispatch_pending_follow_ups", follow_up)
+
+    await slack_stop.process_agent_session_stopped(
+        {"channel": "C123", "thread_ts": "1.000", "user": "UOWNER"}, "EvStop", "T123"
+    )
+
+    if cancel_fails:
+        assert client.runs.cancelled == []
+        status.assert_not_awaited()
+        follow_up.assert_not_awaited()
+    else:
+        assert client.runs.cancelled == [
+            {"thread_id": thread_id, "run_ids": ["running"], "action": "interrupt"}
+        ]
+        status.assert_awaited_once_with("C123", "1.000", "")
+        follow_up.assert_awaited_once()
+
+
+@pytest.mark.parametrize("thread_ts", ["0", None])
+async def test_native_stop_preserves_code_channel_routing(
+    monkeypatch: pytest.MonkeyPatch, thread_ts: str | None
+) -> None:
+    client = FakeClient()
+    thread_id = _add_thread(client, "0")
+    client.runs.by_status["running"] = [{"run_id": "running"}]
+    _patch_handler(monkeypatch, client)
+    status = AsyncMock()
+    monkeypatch.setattr(slack_stop, "set_session_status", status)
+    event: dict[str, object] = {"channel": "C123"}
+    if thread_ts is not None:
+        event["thread_ts"] = thread_ts
+
+    await slack_stop.process_agent_session_stopped(event, "EvStop")
+
+    assert client.runs.cancelled == [
+        {"thread_id": thread_id, "run_ids": ["running"], "action": "interrupt"}
+    ]
+    assert (("queue", thread_id), "pending_messages") in client.store.deleted
+    status.assert_awaited_once_with("C123", "active")
