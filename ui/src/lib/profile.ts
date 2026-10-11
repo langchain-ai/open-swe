@@ -174,6 +174,7 @@ export function buildProfileUpdate(
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
+    auto_human_review_enabled: current?.auto_human_review_enabled ?? true,
     recent_thread_context_enabled:
       current?.recent_thread_context_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,

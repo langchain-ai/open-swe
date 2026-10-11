@@ -25,6 +25,7 @@ import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
+from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
@@ -622,12 +623,7 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
 async def assign(
     request: HumanReviewRequest, github_login: str, reason: str, *, replace: bool = False
 ) -> RequestResult:
-    """Pick ``github_login`` to review: show them on the card and DM them.
-
-    The first reviewer stands alone. More join only for code owner areas nobody on the request
-    owns, and unasked only once someone approved. ``replace`` is a person naming the reviewer:
-    Open SWE's pending picks for the same code are withdrawn first.
-    """
+    """Pick a reviewer; person-named replacements withdraw overlapping pending picks."""
     approvers = await _github_approvers(request)
     coverage = await Coverage.load(request)
     if approvers and (coverage is None or not coverage.uncovered(approvers)):
@@ -639,6 +635,10 @@ async def assign(
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
+    if not replace and not await PROFILES.allows_auto_human_review(
+        user.github_login or github_login
+    ):
+        return _failure(f"@{github_login} opted out of automatic review picks; pick someone else.")
     if (previous := request.participant(user.id)) is not None and previous.decision == "expired":
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
