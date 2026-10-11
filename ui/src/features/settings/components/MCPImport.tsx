@@ -130,7 +130,7 @@ export function MCPImport({
   const [error, setError] = useState<string | null>(null)
   return (
     <form
-      className="space-y-3 rounded-md border border-default p-space-4"
+      className="space-y-space-3 rounded-md border border-default p-space-4"
       onSubmit={(event) => {
         event.preventDefault()
         try {

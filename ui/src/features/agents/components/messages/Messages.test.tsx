@@ -11,6 +11,8 @@ import {
 } from "@tanstack/react-router"
 
 import { HumanMessage } from "@langchain/core/messages"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 
 import { Messages } from "./Messages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
@@ -31,6 +33,12 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
 }))
 
 afterEach(() => cleanup())
+
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={new QueryClient()}>
+    {children}
+  </QueryClientProvider>
+)
 
 describe("Messages", () => {
   it("renders attributed task activity with safe expandable details", async () => {
@@ -130,7 +138,7 @@ describe("Messages", () => {
   it("shows run activity while a stream is starting with no messages", () => {
     render(<Messages messages={[]} isStreaming />)
 
-    expect(screen.getByRole("status").textContent).toBe("Working…")
+    expect(screen.getByRole("status").textContent).toBe("Working…0s")
   })
 
   it("shows reconnect activity in the existing status line", () => {
@@ -143,7 +151,7 @@ describe("Messages", () => {
     )
 
     expect(screen.getByRole("status").textContent).toBe(
-      "Reconnecting… 3/12 (retrying in 4s)"
+      "Reconnecting… 3/12 (retrying in 4s)0s"
     )
   })
 
@@ -175,7 +183,8 @@ describe("Messages", () => {
             ],
           },
         ]}
-      />
+      />,
+      { wrapper }
     )
 
     const reply = screen.getByText("On it!")
@@ -185,6 +194,60 @@ describe("Messages", () => {
     expect(
       reply.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it("folds each stretch of work between the Slack replies around it", () => {
+    render(
+      <Messages
+        isStreaming
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "tool-execution",
+                toolCallId: "ack",
+                title: "Slack thread reply",
+                toolKind: "slack",
+                status: "completed",
+                input: { message: "On it!" },
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "shell",
+                title: "ls",
+                toolKind: "execute",
+                status: "completed",
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "progress",
+                title: "Slack thread reply",
+                toolKind: "slack",
+                status: "completed",
+                input: { message: "Found the cause" },
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const inOrder = [
+      screen.getByText("On it!"),
+      screen.getByRole("button", { name: "Worked · 1 action" }),
+      screen.getByText("Found the cause"),
+      screen.getByRole("button", { name: "Thinking…" }),
+    ]
+    inOrder.slice(1).forEach((later, index) => {
+      expect(
+        inOrder[index]!.compareDocumentPosition(later) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
   })
 
   it("renders unfinished grouped work after its fold row", () => {
@@ -215,7 +278,8 @@ describe("Messages", () => {
             ],
           },
         ]}
-      />
+      />,
+      { wrapper }
     )
 
     const reply = screen.getByText("On it!")

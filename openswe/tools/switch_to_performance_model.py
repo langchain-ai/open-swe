@@ -27,7 +27,7 @@ async def switch_to_performance_model(
         cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts
     ):
         raise ValueError(
-            "Concierge DMs use your profile model; change it in agent settings instead"
+            "Performance switching is unavailable in concierge DMs; use a separate task thread instead"
         )
     client = langgraph_client()
     settings = (await load_thread_settings(client, cfg.thread_id)).copy()

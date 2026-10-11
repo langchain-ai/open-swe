@@ -537,12 +537,6 @@ class RepoClient:
             params["sha"] = ref
         return await self.get("commits", params)
 
-    async def review_comment(self, comment_id: int) -> object:
-        return await self.get(f"pulls/comments/{comment_id}")
-
-    async def edit_review_comment(self, comment_id: int, body: str) -> object:
-        return await self.patch(f"pulls/comments/{comment_id}", {"body": body})
-
     async def delete_review_comment(self, comment_id: int) -> None:
         await self.delete(f"pulls/comments/{comment_id}")
 

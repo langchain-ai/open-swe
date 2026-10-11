@@ -329,7 +329,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 @pytest.mark.asyncio
 async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     config = _base_config()
-    config["configurable"]["thread_id"] = "thread-1"
+    config["configurable"].update(thread_id="thread-1", source="dashboard", model_selection="auto")
     profile = {
         "default_model": "anthropic:claude-opus-5-5",
         "reasoning_effort": "high",
@@ -779,7 +779,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     assert snapshot["model_handoff_complete"] is True
     assert snapshot["model_id"] == expected_model
     assert snapshot["effort"] == expected_effort
-    assert snapshot["subagent_model_id"] == (expected_model if profile else "openai:gpt-6.1-sol")
+    assert snapshot["subagent_model_id"] == "openai:gpt-6.1-sol"
     assert snapshot["subagent_effort"] == "low"
 
     followup = _base_config()
@@ -876,3 +876,18 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     assert handler.call_args.args[0].model is not captured["model"]
     assert handler.call_args.args[0].messages == messages
     assert await QueuedMessage.for_thread("thread-ctx") == []
+
+
+@pytest.mark.asyncio
+async def test_historical_personal_models_and_routing_do_not_override_workspace() -> None:
+    captured = await _capture_create_deep_agent_kwargs(
+        profile={
+            "default_model": "anthropic:claude-opus-5-5",
+            "reasoning_effort": "high",
+            "default_subagent_model": "anthropic:claude-opus-5-5",
+            "subagent_reasoning_effort": "high",
+            "model_routing_enabled": True,
+        }
+    )
+    assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
+    assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"

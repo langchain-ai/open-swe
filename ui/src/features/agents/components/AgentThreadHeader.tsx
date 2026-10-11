@@ -1,4 +1,5 @@
-import { type ReactNode, useRef, useState } from "react"
+import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
+import { useRef, useState } from "react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -11,8 +12,10 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
+import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 
 import { useNavigate } from "@tanstack/react-router"
 import type { DesktopLegacyLocalThread } from "@/desktop"
@@ -89,10 +92,15 @@ function ThreadRepoIndicator({
   )
 }
 
+const TARGET_ICONS = {
+  Cloud: CloudIcon,
+  "This Mac": LaptopRegularIcon,
+  "Local CLI": TerminalIcon,
+}
+
 export function AgentThreadHeader({
   title,
   target,
-  targetMenu,
   panelCollapsed,
   thread,
   onRename,
@@ -101,9 +109,7 @@ export function AgentThreadHeader({
   onVisibilityChange,
 }: {
   title?: string | null
-  target: "Cloud" | "This Mac" | "Local CLI"
-  /** Replaces the target label with a control that moves the thread. */
-  targetMenu?: ReactNode
+  target: keyof typeof TARGET_ICONS
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
   localThread?: DesktopLegacyLocalThread
@@ -118,6 +124,7 @@ export function AgentThreadHeader({
   const [deletingLocal, setDeletingLocal] = useState(false)
   const worktreeThread = useLocalThread(thread?.id ?? "") ?? localThread
   const sidebarCollapsed = useSidebarCollapsed()
+  const TargetIcon = TARGET_ICONS[target]
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const pinnedThreads = useSidebarPinnedThreads({ enabled: Boolean(thread) })
@@ -258,17 +265,17 @@ export function AgentThreadHeader({
   const header = (
     <header
       data-desktop-drag-region=""
-      className="relative z-10 h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
+      className="relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
     >
       <div
         className={cn(
-          "flex h-full w-full items-center gap-3 px-4",
-          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
-          panelCollapsed && "pr-14"
+          "flex h-full w-full items-center gap-space-3 px-space-4",
+          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-space-8"),
+          panelCollapsed && "pr-space-8"
         )}
       >
         {title && (
-          <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
+          <div className="flex min-w-0 items-center gap-space-1 text-sm font-medium">
             {(thread || localThread) && (
               <ThreadRepoIndicator thread={thread} localThread={localThread} />
             )}
@@ -278,7 +285,7 @@ export function AgentThreadHeader({
                 onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
-                className="min-w-0 rounded-md bg-surface-level-2 px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                className="min-w-0 rounded-md bg-surface-level-2 px-space-2 py-space-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 style={{ width: editorWidth }}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -304,7 +311,7 @@ export function AgentThreadHeader({
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                className="min-w-0 truncate rounded-md px-space-2 py-space-1 text-left transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 onClick={startRename}
               >
                 {savingTitle ?? title}
@@ -339,10 +346,15 @@ export function AgentThreadHeader({
             )}
           </div>
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-3">
-          {targetMenu ?? (
-            <span className="text-xs text-secondary">{target}</span>
-          )}
+        <div className="ml-auto flex shrink-0 items-center gap-space-3">
+          <span
+            role="img"
+            aria-label={`Runs on ${target}`}
+            title={target}
+            className="text-icon-secondary"
+          >
+            <TargetIcon size={16} weight="regular" />
+          </span>
           {!localThread && visibilityMenu}
         </div>
       </div>

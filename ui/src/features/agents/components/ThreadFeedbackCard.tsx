@@ -111,7 +111,7 @@ export function ThreadFeedbackCard({
     return (
       <div
         role="status"
-        className="mt-4 rounded-lg bg-surface-level-1 px-4 py-3 text-sm text-secondary"
+        className="mt-space-4 rounded-lg bg-surface-level-1 px-space-4 py-space-3 text-sm text-secondary"
       >
         Thanks for your feedback.
       </div>
@@ -122,10 +122,10 @@ export function ThreadFeedbackCard({
     <form
       aria-label="Thread feedback"
       className={cn(
-        "mt-4 rounded-lg bg-surface-level-1 p-4",
+        "mt-space-4 rounded-lg bg-surface-level-1 p-space-4",
         showComment
-          ? "space-y-3"
-          : "flex flex-wrap items-center justify-between gap-x-6 gap-y-3"
+          ? "space-y-space-3"
+          : "flex flex-wrap items-center justify-between gap-x-space-5 gap-y-space-3"
       )}
       onSubmit={(event) => {
         event.preventDefault()
@@ -150,7 +150,7 @@ export function ThreadFeedbackCard({
         />
       ) : (
         <div
-          className="flex flex-wrap items-center gap-2"
+          className="flex flex-wrap items-center gap-space-2"
           role="group"
           aria-label="Rating"
         >
@@ -179,7 +179,7 @@ export function ThreadFeedbackCard({
         </div>
       )}
       {showComment && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-space-2">
           <Button
             type="submit"
             size="xs"

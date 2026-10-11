@@ -6,7 +6,7 @@ RUN cd /deps/open-swe \
 
 ENV LANGGRAPH_HTTP='{"app":"openswe.webapp:app"}'
 ENV LANGGRAPH_CHECKPOINTER='{"ttl":{"strategy":"delete","sweep_interval_minutes":60,"default_ttl":43200}}'
-ENV LANGSERVE_GRAPHS='{"agent":"openswe.graphs.agent:traced_agent","reviewer":"openswe.graphs.reviewer:traced_reviewer_agent","analyzer":"openswe.graphs.analyzer:traced_analyzer","review-scout":"openswe.graphs.review_scout:traced_review_scout","chat":"openswe.graphs.chat:traced_chat_agent","scheduler":"openswe.graphs.scheduler:get_scheduler"}'
+ENV LANGSERVE_GRAPHS='{"agent":"openswe.graphs.agent:traced_agent","reviewer":"openswe.graphs.reviewer:traced_reviewer_agent","review-scout":"openswe.graphs.review_scout:traced_review_scout","chat":"openswe.graphs.chat:traced_chat_agent","scheduler":"openswe.graphs.scheduler:get_scheduler"}'
 
 RUN mkdir -p /api/langgraph_api /api/langgraph_runtime /api/langgraph_license \
     && touch /api/langgraph_api/__init__.py /api/langgraph_runtime/__init__.py /api/langgraph_license/__init__.py

@@ -1,12 +1,14 @@
 import {
+  CaretDownIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import type { ReactNode } from "react"
 

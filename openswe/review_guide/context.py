@@ -1,20 +1,15 @@
-import re
 from dataclasses import dataclass
 from typing import Self
 
-from deepagents.backends.protocol import SandboxBackendProtocol
-
-from openswe.review_guide import git
-from openswe.review_guide.diff import ChangedLine, FileChange, parse
-from openswe.review_guide.render import MessageRenderer, render_chunk
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.review_guide.walk import LineRef, Walk
+from openswe.review_guide.walk import Reader, Walk
 from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
-from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.users import User
-
-_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
+from openswe.walkthrough.plan import LineRef
+from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
+from openswe.walkthrough.record import PlanMovedError
 
 
 class GuideUnavailableError(RuntimeError):
@@ -35,18 +30,10 @@ async def requester_login() -> str:
     return user.github_login
 
 
-async def guide_repo_dir(backend: SandboxBackendProtocol, repo: str) -> str:
-    if not _REPO_NAME_RE.fullmatch(repo):
-        raise GuideUnavailableError("review guide repository name is invalid")
-    return f"{await resolve_sandbox_work_dir(backend)}/{repo}"
-
-
 @dataclass
 class GuideContext:
     session: ReviewGuideSession
-    backend: SandboxBackendProtocol
-    repo_dir: str
-    head_sha: str
+    workspace: PlanWorkspace
 
     @classmethod
     async def current(cls) -> Self:
@@ -54,57 +41,31 @@ class GuideContext:
         session = await ReviewGuideSession.get(thread_id) if thread_id else None
         if thread_id is None or session is None:
             raise GuideUnavailableError("this thread is not a review guide session")
-        backend = get_cached_sandbox_backend(thread_id)
-        repo_dir = await guide_repo_dir(backend, session.pull_request.repo)
-        built = await git.built_for(backend, repo_dir)
-        if built is None:
-            raise GuideUnavailableError("the checkout is not ready; try again next turn")
-        return cls(session=session, backend=backend, repo_dir=repo_dir, head_sha=built[1])
+        try:
+            checkout = await PinnedCheckout.locate(
+                get_cached_sandbox_backend(thread_id), session.pull_request.repo
+            )
+            workspace = await PlanWorkspace.open(session.pull_request, checkout)
+        except (CheckoutError, PlannerUnavailableError, PlanMovedError) as exc:
+            raise GuideUnavailableError(str(exc)) from exc
+        return cls(session=session, workspace=workspace)
 
-    async def changes(self) -> list[FileChange]:
-        return parse(await git.pr_diff(self.backend, self.repo_dir))
+    @property
+    def head_sha(self) -> str:
+        return self.workspace.head_sha
 
-    async def unseen(self, changes: list[FileChange], walk: Walk) -> list[ChangedLine]:
-        return walk.unseen(changes, await self.session.seen_lines())
+    @property
+    def unplanned(self) -> list[LineRef]:
+        return [LineRef.of(line) for line in self.workspace.plan.unplanned(self.workspace.changes)]
 
-    def walk(self, changes: list[FileChange]) -> Walk:
-        """The walkthrough of the checkout's head, started fresh when the head moved."""
+    def walk(self) -> Walk:
+        """The reader's walk at the checkout's head; the middleware carries it there each turn."""
         walk = self.session.walk
-        if walk is not None and walk.head_sha == self.head_sha:
-            return walk
-        return Walk.start(self.head_sha, changes)
+        return (
+            walk
+            if walk is not None and walk.head_sha == self.head_sha
+            else Walk(head_sha=self.head_sha)
+        )
 
-    async def render(self, refs: list[LineRef]) -> str:
-        """``refs`` as the reader sees a chunk: its own lines only, at real line numbers."""
-        changes = await self.changes()
-        index = {LineRef.of(line): line for change in changes for line in change.lines}
-        lines = [index[ref] for ref in refs if ref in index]
-        paths = {line.path for line in lines}
-        head = {
-            change.path: (
-                await git.head_file(self.backend, self.repo_dir, change.path)
-            ).splitlines()
-            for change in changes
-            if change.path in paths and not change.deleted
-        }
-        added = {
-            change.path: {line.lineno for line in change.lines if line.sign == "+"}
-            for change in changes
-        }
-        return render_chunk(lines, head, added)
-
-    def renderer(self) -> MessageRenderer:
-        async def read_head(path: str) -> str:
-            return await git.head_file(self.backend, self.repo_dir, path)
-
-        async def file_diff(path: str) -> str:
-            return await git.pr_diff(self.backend, self.repo_dir, path=path, zero=False)
-
-        async def chunk() -> str:
-            walk = self.session.walk
-            current = walk.on_screen() if walk and walk.head_sha == self.head_sha else None
-            if current is None:
-                return "_(no chunk is on screen)_"
-            return await self.render(current.lines)
-
-        return MessageRenderer(read_head=read_head, file_diff=file_diff, chunk=chunk)
+    async def reader(self, walk: Walk) -> Reader:
+        return Reader.of(walk, self.workspace.plan, await self.session.seen_lines(), self.unplanned)

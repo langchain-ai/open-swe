@@ -1,4 +1,5 @@
 import { Button } from "@langchain/macaw-components/Button"
+import { Text } from "@langchain/macaw-components/Text"
 import { Kbd } from "@langchain/macaw-components/Kbd"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -161,15 +162,17 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       data-testid="plan-review"
       className="@container flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col gap-3 p-3 md:p-4">
-        <header className="flex flex-col gap-3 border-b border-default pb-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-space-3 p-space-3 md:p-space-4">
+        <header className="flex flex-col gap-space-3 border-b border-default pb-space-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
           <div data-testid="plan-summary" className="min-w-0">
-            <h1 className="text-lg font-semibold text-primary">Artifact</h1>
+            <Text as="h1" variant="h2" weight="semibold" color="primary">
+              Artifact
+            </Text>
             <p className="text-xs text-tertiary">Viewing as {plan.user.name}</p>
           </div>
           <div
             data-testid="plan-actions"
-            className="flex flex-wrap items-center gap-2"
+            className="flex flex-wrap items-center gap-space-2"
           >
             <Button
               data-testid="copy-plan"
@@ -207,8 +210,10 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   data-testid="plan-comments"
                   className="flex max-h-1/2 shrink-0 flex-col overflow-y-auto border-t border-default bg-surface-level-1/95 @3xl:max-h-none @3xl:w-80 @3xl:border-t-0 @3xl:border-l"
                 >
-                  <div className="border-b border-default p-3">
-                    <h2 className="text-sm font-semibold">Comments</h2>
+                  <div className="border-b border-default p-space-3">
+                    <Text as="h2" variant="h5" weight="semibold">
+                      Comments
+                    </Text>
                     <p className="mt-0.5 text-xs text-secondary">
                       Highlight text in the preview to comment.
                     </p>
@@ -216,9 +221,9 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   {anchor && (
                     <div
                       data-testid="comment-composer"
-                      className="border-b border-default bg-surface-level-2/30 p-3"
+                      className="border-b border-default bg-surface-level-2/30 p-space-3"
                     >
-                      <blockquote className="line-clamp-3 border-l-2 border-brand pl-2 text-xs text-secondary">
+                      <blockquote className="line-clamp-3 border-l-2 border-brand pl-space-2 text-xs text-secondary">
                         {anchor.exact}
                       </blockquote>
                       <Textarea
@@ -269,11 +274,11 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                       </div>
                     </div>
                   )}
-                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                  <div className="min-h-0 flex-1 overflow-y-auto p-space-3">
                     {comments.length === 0 ? (
                       <p className="text-xs text-secondary">No comments yet.</p>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="space-y-space-2">
                         {comments.map((comment, index) => (
                           <article
                             key={comment.id}
@@ -283,34 +288,36 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                               else commentRefs.current.delete(comment.id)
                             }}
                             data-testid="plan-comment"
-                            className="rounded-lg border border-default bg-surface-level-1 p-3"
+                            className="rounded-lg border border-default bg-surface-level-1 p-space-3"
                           >
                             <button
                               type="button"
-                              className="block w-full text-left focus-visible:outline-2 focus-visible:outline-[color:var(--border-focus)]"
+                              className="block w-full text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                               onClick={() => openComment(comment.id)}
                             >
                               <span className="text-xs font-semibold">
                                 {index + 1}. {comment.author}
                               </span>
                               {comment.anchor && (
-                                <blockquote className="mt-2 line-clamp-2 border-l-2 border-warning pl-2 text-xs text-secondary">
+                                <blockquote className="mt-space-2 line-clamp-2 border-l-2 border-warning pl-space-2 text-xs text-secondary">
                                   {comment.anchor.exact}
                                 </blockquote>
                               )}
-                              <span className="mt-2 block text-sm whitespace-pre-wrap">
+                              <span className="mt-space-2 block text-sm whitespace-pre-wrap">
                                 {comment.body}
                               </span>
                             </button>
                             {comment.author_login === plan.user.login && (
-                              <button
-                                type="button"
+                              <Button
                                 data-testid="comment-delete"
-                                className="mt-2 text-xs text-secondary hover:text-primary focus-visible:outline-2 focus-visible:outline-[color:var(--border-focus)]"
+                                size="xs"
+                                variant="plain"
+                                color="secondary"
+                                className="mt-space-2"
                                 onClick={() => void removeComment(comment.id)}
                               >
                                 Delete
-                              </button>
+                              </Button>
                             )}
                           </article>
                         ))}
@@ -320,7 +327,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   {comments.some(
                     (comment) => comment.author_login === plan.user.login
                   ) && (
-                    <div className="border-t border-default p-3">
+                    <div className="border-t border-default p-space-3">
                       <Button
                         className="w-full"
                         disabled={submitting || posting || submitted}
@@ -339,13 +346,13 @@ export function PlanReview({ plan }: { plan: PlanData }) {
             ) : (
               <div
                 data-testid="plan-markdown"
-                className="h-full w-full overflow-y-auto p-4 md:p-6"
+                className="h-full w-full overflow-y-auto p-space-4 md:p-space-5"
               >
                 <Markdown content={content} />
               </div>
             )
           ) : (
-            <p className="p-6 text-sm text-tertiary">
+            <p className="p-space-5 text-sm text-tertiary">
               The artifact hasn't been written yet.
             </p>
           )}

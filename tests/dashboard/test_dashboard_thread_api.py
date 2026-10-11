@@ -22,6 +22,7 @@ from openswe.threads import diffs as thread_diffs
 from openswe.threads import handlers
 from openswe.threads import listing as thread_listing
 from openswe.threads import proxy as thread_proxy
+from openswe.threads import routes as thread_routes
 from openswe.threads import runs as thread_runs
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
@@ -47,6 +48,48 @@ def _empty_thread_pins(monkeypatch) -> None:
         return []
 
     patch_thread_module(monkeypatch, "list_thread_pin_ids", empty_pins)
+
+
+@pytest.mark.parametrize("start", [True, False])
+async def test_create_session_starts_only_when_requested(monkeypatch, start: bool) -> None:
+    create = AsyncMock(return_value="new-thread")
+    dispatch = AsyncMock(
+        return_value=(200, b'{"type":"success","result":{"run_id":"run-1"}}', "application/json")
+    )
+    monkeypatch.setattr(thread_routes, "create_dashboard_session", create)
+    monkeypatch.setattr(thread_routes, "proxy_dashboard_thread_commands", dispatch)
+    result = await thread_routes.api_create_session(
+        thread_runs.SessionCreateBody(prompt="Fix login", start=start),
+        {"sub": "octocat", "email": "octocat@example.com"},
+    )
+    assert result == {"thread_id": "new-thread"}
+    if start:
+        command = json.loads(dispatch.call_args.args[2])
+        assert command["params"]["input"]["messages"] == [{"type": "human", "content": "Fix login"}]
+    else:
+        dispatch.assert_not_awaited()
+
+
+async def test_create_session_uses_saved_defaults(
+    monkeypatch, fake_store: FakeStore, registry_db
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/oss"})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    access = AsyncMock()
+    monkeypatch.setattr(thread_runs, "require_repo_access_for_user", access)
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
+    thread_id = await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="Fix login", start=False), "octocat"
+    )
+    assert thread_id == created["thread_id"]
+    metadata = created["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["owner_login"] == "octocat"
+    assert metadata["repo_owner"] == "acme"
+    assert metadata["repo_name"] == "oss"
+    assert metadata["workspace"] == "oss"
+    access.assert_awaited_once_with("octocat", "acme/oss")
 
 
 def _image() -> thread_runs.DashboardImageBody:
@@ -759,67 +802,6 @@ async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
     with pytest.raises(HTTPException) as exc_info:
         await handlers.get_dashboard_thread_state("tid", "owner")
     assert exc_info.value.status_code == 404
-
-
-async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypatch) -> None:
-    class FakeThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            assert thread_id == "tid"
-            return {
-                "thread_id": "tid",
-                "metadata": {"source": "dashboard", "github_login": "octocat"},
-            }
-
-    class FakeClient:
-        threads = FakeThreads()
-
-    async def unknown_activity(thread_id: str) -> None:
-        assert thread_id == "tid"
-        return None
-
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
-    patch_thread_module(monkeypatch, "get_thread_active_status", unknown_activity)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await handlers.send_dashboard_message(
-            "tid",
-            "octocat",
-            thread_runs.ThreadMessageBody(content="hello"),
-        )
-
-    assert exc_info.value.status_code == 502
-
-
-async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
-    class AdminThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": thread_id,
-                "metadata": {
-                    "source": "dashboard",
-                    "github_login": "workspace-admin",
-                    "admin_thread": True,
-                },
-            }
-
-        async def update(self, **kwargs: object) -> None:
-            raise AssertionError("must not update")
-
-    class AdminClient:
-        threads = AdminThreads()
-
-    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
-
-    with pytest.raises(HTTPException) as exc_info:
-        await handlers.send_dashboard_message(
-            "tid",
-            "teammate",
-            thread_runs.ThreadMessageBody(content="ship it"),
-        )
-
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
 def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]]:

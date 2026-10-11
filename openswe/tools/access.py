@@ -225,6 +225,17 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
     """Resolve the current run's access from its config and saved thread metadata."""
     cfg = cfg or configurable()
     login = login or cfg.github_login
+    if cfg.mcp_caller:
+        admin = bool(login) and await actor_is_admin(cfg, login=login)
+        return Access(
+            private=True,
+            owner=bool(login),
+            admin=admin,
+            admin_thread=admin and cfg.admin_thread is True,
+            admin_surface=admin and is_private_admin_surface(cfg),
+            sole=bool(login),
+            direct=bool(login),
+        )
     metadata = await _metadata(cfg.thread_id)
     try:
         scope = _ThreadScope.model_validate(metadata)

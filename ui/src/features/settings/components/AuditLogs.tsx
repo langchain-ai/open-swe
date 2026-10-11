@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Badge } from "@langchain/macaw-components/Badge"
+import { Text } from "@langchain/macaw-components/Text"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
@@ -93,9 +94,9 @@ function AuditDetails({ log }: { log: AuditLog }) {
     ["Settings scope", meta.settings_scope],
   ]
   return (
-    <div className="space-y-6">
+    <div className="space-y-space-5">
       <Outcome value={log.operation_succeeded} />
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-3 text-xs">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-space-5 gap-y-space-3 text-xs">
         {fields
           .filter(([, value]) => value != null)
           .map(([label, value]) => (
@@ -106,8 +107,10 @@ function AuditDetails({ log }: { log: AuditLog }) {
           ))}
       </dl>
       {meta.settings_changes != null && (
-        <section className="space-y-3">
-          <h3 className="text-sm font-medium text-primary">Settings changes</h3>
+        <section className="space-y-space-3">
+          <Text as="h3" variant="h5" weight="medium" color="primary">
+            Settings changes
+          </Text>
           <p className="text-xs text-secondary">
             Stored overrides, not effective values. Unset inherits defaults;
             redacted values are not available.
@@ -161,11 +164,11 @@ function ExclusionsSection({
   exclusions: ExpeditedExclusions
 }) {
   return (
-    <section className="space-y-3">
-      <h3 className="text-sm font-medium text-primary">
+    <section className="space-y-space-3">
+      <Text as="h3" variant="h5" weight="medium" color="primary">
         Excluded under .open-swe/APPROVALS.md
-      </h3>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-3 text-xs">
+      </Text>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-space-5 gap-y-space-3 text-xs">
         {(
           [
             ["Pull request ID", exclusions.pull_request_id ?? "Not stored"],
@@ -252,9 +255,9 @@ export function AuditLogs() {
   const items = logs.data?.pages.flatMap((page) => page.items) ?? []
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-space-5">
       <form
-        className="space-y-4 rounded-lg border border-default bg-surface-level-1 p-space-4"
+        className="space-y-space-4 rounded-lg border border-default bg-surface-level-1 p-space-4"
         onSubmit={(event) => {
           event.preventDefault()
           const start = new Date(draft.start_time).getTime()
@@ -276,7 +279,7 @@ export function AuditLogs() {
           {(["start_time", "end_time"] as const).map((key) => (
             <label
               key={key}
-              className="min-w-0 basis-full space-y-1.5 text-xs font-medium text-primary sm:flex-1 sm:basis-auto"
+              className="min-w-0 basis-full space-y-space-2 text-xs font-medium text-primary sm:flex-1 sm:basis-auto"
             >
               <span>{key === "start_time" ? "From" : "To"} (local time)</span>
               <Input
@@ -303,7 +306,7 @@ export function AuditLogs() {
           {FILTERS.map(([key, label, placeholder]) => (
             <label
               key={key}
-              className="space-y-1.5 text-xs font-medium text-primary"
+              className="space-y-space-2 text-xs font-medium text-primary"
             >
               <span>{label}</span>
               <Input
@@ -337,13 +340,15 @@ export function AuditLogs() {
       </form>
 
       <section
-        className="space-y-3"
+        className="space-y-space-3"
         aria-label="Audit events"
         aria-busy={logs.isFetching}
       >
         <div className="flex items-center justify-between gap-space-3">
-          <div className="space-y-1">
-            <h2 className="text-sm font-medium text-primary">Events</h2>
+          <div className="space-y-space-1">
+            <Text as="h2" variant="h5" weight="medium" color="primary">
+              Events
+            </Text>
             <p className="text-xs text-secondary">
               {items.length} loaded · Newest first · Times shown locally
             </p>
@@ -413,7 +418,7 @@ export function AuditLogs() {
                     <div className="font-mono break-all">
                       {log.operation_name}
                     </div>
-                    <div className="mt-1 text-secondary">
+                    <div className="mt-space-1 text-secondary">
                       {log.enrichments.source === "tool"
                         ? "Agent tool"
                         : "HTTP API"}
@@ -442,7 +447,7 @@ export function AuditLogs() {
                 <tr>
                   <td
                     colSpan={5}
-                    className="px-space-4 py-12 text-center text-secondary"
+                    className="px-space-4 py-space-8 text-center text-secondary"
                   >
                     {logs.isPending
                       ? "Loading audit logs…"

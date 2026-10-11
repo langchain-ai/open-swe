@@ -229,10 +229,11 @@ test.describe("thread pull requests", () => {
     );
 
     await page.keyboard.press("Escape");
-    await fixButton.click();
+    // Conflicts come first, so they're the button; the caret holds the rest.
     await expect(
-      page.getByRole("menuitem", { name: "Fix conflicts on PR #1" }),
+      page.getByRole("button", { name: "Fix conflicts", exact: true }),
     ).toBeVisible();
+    await fixButton.click();
     await expect(
       page.getByRole("menuitem", { name: "Address comments on PR #1" }),
     ).toBeVisible();

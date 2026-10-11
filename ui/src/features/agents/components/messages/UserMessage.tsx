@@ -135,7 +135,7 @@ function StandardUserMessage({ message }: { message: Message }) {
   return (
     <div
       className={cn(
-        "group/turn my-4 flex flex-col gap-space-1",
+        "group/turn my-space-4 flex flex-col gap-space-1",
         isSystem ? "items-start" : "items-end"
       )}
       data-testid="user-message"

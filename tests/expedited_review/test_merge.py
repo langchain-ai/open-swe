@@ -13,6 +13,7 @@ from openswe.github import http as github_http
 from openswe.github import squash_message
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review import lifecycle
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.users import User
 from tests.expedited_review.conftest import OpenApproval
@@ -58,7 +59,7 @@ class _GitHub:
         monkeypatch.setattr(merge, "submit_approval", self._review)
         monkeypatch.setattr(github_http, "github_request", self._request)
         monkeypatch.setattr(squash_message, "github_request", self._request)
-        monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
+        monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
         monkeypatch.setattr(lifecycle, "add_slack_reaction", AsyncMock(return_value=True))
         self.comments: list[str] = []
         self.comment_status = 201
@@ -434,10 +435,10 @@ async def test_a_dismissal_github_refused_is_retried_when_a_card_next_closes(
     approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
     github.dismiss_status = 500
 
-    await lifecycle.retire(approval, "cancelled", "dismissed by <@U_LINUS>")
+    await ReviewCard(approval).retire("cancelled", "dismissed by <@U_LINUS>")
     refused = await _reload(approval)
     github.dismiss_status = 200
-    await lifecycle.withdraw_reviews(refused)
+    await ReviewCard(refused).withdraw_reviews()
 
     assert refused.participants[0].github_review_id == 101
     assert github.dismissed == ["101", "101"]

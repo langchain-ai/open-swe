@@ -117,6 +117,9 @@ async def handle_button(
         channel_id=channel_id,
         thread_ts=thread_ts,
         target_channel=target_channel,
+        message_ts=interaction.message_ts,
+        message_text=interaction.message.text,
+        message_blocks=interaction.message.blocks,
     )
     return accepted("Expedited review vote queued")
 

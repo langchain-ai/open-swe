@@ -1,8 +1,9 @@
+import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Switch } from "@langchain/macaw-components/Switch"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
@@ -106,7 +107,7 @@ function RepositoriesOwnerPage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
+      <main className="p-space-5">
         <Skeleton className="h-64 w-full" />
       </main>
     )
@@ -130,18 +131,24 @@ function RepositoriesOwnerPage() {
       }
       backTo={{ to: "/review", label: "Back to Code review" }}
     >
-      <section className="space-y-3">
+      <section className="space-y-space-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs font-medium tracking-wide text-secondary uppercase">
+          <Text
+            as="h2"
+            variant="sm"
+            weight="medium"
+            color="secondary"
+            className="tracking-wide uppercase"
+          >
             Repositories
-          </h2>
+          </Text>
           <span className="text-xs text-secondary">
             {autoReviewCount}/{ownerRepos.length} run automatically
           </span>
         </div>
         <Input
           size="md"
-          leftIcon={MagnifyingGlassIcon}
+          leftIcon={MagnifyingGlassRegularIcon}
           value={search}
           onChange={(next) => setSearchPosition({ owner, search: next })}
           placeholder="Search repositories…"
@@ -149,12 +156,12 @@ function RepositoriesOwnerPage() {
         />
         <div className="rounded-lg border border-default bg-surface-level-1">
           {loading && (
-            <div className="p-4">
+            <div className="p-space-4">
               <Skeleton className="h-32 w-full" />
             </div>
           )}
           {!loading && filteredRepos.length === 0 && (
-            <p className="px-4 py-3 text-xs text-secondary">
+            <p className="px-space-4 py-space-3 text-xs text-secondary">
               {ownerRepos.length === 0
                 ? "No repositories found for this installation."
                 : "No repositories match your search."}
@@ -166,9 +173,9 @@ function RepositoriesOwnerPage() {
               return (
                 <li
                   key={r.full_name}
-                  className="flex items-center justify-between gap-4 px-4 py-3"
+                  className="flex items-center justify-between gap-space-4 px-space-4 py-space-3"
                 >
-                  <div className="flex min-w-0 items-center gap-2 text-xs">
+                  <div className="flex min-w-0 items-center gap-space-2 text-xs">
                     <span className="truncate">
                       <span className="text-secondary">{owner}/</span>
                       <span className="font-medium text-primary">
@@ -179,7 +186,7 @@ function RepositoriesOwnerPage() {
                       <span className="text-xxs text-tertiary">private</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-space-2">
                     <span className="text-xs text-secondary">
                       Run automatically
                     </span>
@@ -209,11 +216,11 @@ function RepositoriesOwnerPage() {
             })}
           </ul>
           {filteredRepos.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between gap-4 border-t border-default px-4 py-2 text-xs">
+            <div className="flex items-center justify-between gap-space-4 border-t border-default px-space-4 py-space-2 text-xs">
               <span className="text-secondary">
                 Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-space-2">
                 <Button
                   size="xs"
                   color="secondary"

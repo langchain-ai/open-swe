@@ -8,6 +8,7 @@ from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_requests import PullRequest
 from openswe.human_review import lifecycle, posted, standard
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.posted import linked_pull_request
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.users import User, UserPreferences
@@ -214,16 +215,16 @@ async def test_retirement_clears_in_flight_and_stale_blockers(
 
     async def retire() -> None:
         retiring.set()
-        await lifecycle.retire(request, "merged", "merged")
+        await ReviewCard(request).retire("merged", "merged")
 
     monkeypatch.setattr(lifecycle, "add_slack_reaction", add)
     monkeypatch.setattr(lifecycle, "remove_slack_reaction", remove)
     async with asyncio.TaskGroup() as tasks:
-        tasks.create_task(lifecycle.update_blocked_reactions(request, snapshot))
+        tasks.create_task(ReviewCard(request).update_blocked_reactions(snapshot))
         await asyncio.wait_for(adding.wait(), timeout=5)
         tasks.create_task(retire())
         await retiring.wait()
         release.set()
     assert not reactions
-    await lifecycle.update_blocked_reactions(request, snapshot)
+    await ReviewCard(request).update_blocked_reactions(snapshot)
     assert not reactions

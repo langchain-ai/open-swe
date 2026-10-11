@@ -1,7 +1,9 @@
 from collections.abc import Sequence
+from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
+import langgraph_sdk
 import pytest
 from langchain.agents import create_agent
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
@@ -32,6 +34,13 @@ def factory_settings(monkeypatch: pytest.MonkeyPatch) -> ThreadSettings:
         "store_thread_settings",
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}}))
+        ),
+    )
     monkeypatch.setattr(server, "_admin_thread", AsyncMock(return_value=False))
     monkeypatch.setattr(server, "_bridge_client", AsyncMock(return_value=None))
     monkeypatch.setattr(

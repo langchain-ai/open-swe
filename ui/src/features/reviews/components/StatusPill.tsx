@@ -2,9 +2,15 @@ import { Badge } from "@langchain/macaw-components/Badge"
 
 import { statusColors } from "../lib/status"
 
-export function StatusPill({ status }: { status: string }) {
+export function StatusPill({
+  status,
+  size = "sm",
+}: {
+  status: string
+  size?: "xs" | "sm"
+}) {
   return (
-    <Badge size="sm" color={statusColors[status] ?? "secondary"}>
+    <Badge size={size} color={statusColors[status] ?? "secondary"}>
       {status}
     </Badge>
   )

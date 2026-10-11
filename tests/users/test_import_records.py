@@ -19,7 +19,18 @@ async def test_import_moves_known_people_and_keeps_postgres_values(
     await User.sign_in("github", "1", login="Ada")
     await User.sign_in("github", "2", login="bob")
     await PROFILES.put("bob", {"draft_prs": True})
-    fake_store.seed(["profiles"], "Ada", {"draft_prs": False})
+    fake_store.seed(
+        ["profiles"],
+        "Ada",
+        {
+            "draft_prs": False,
+            "default_model": "expensive-model",
+            "reasoning_effort": "high",
+            "default_subagent_model": "expensive-model",
+            "subagent_reasoning_effort": "high",
+            "model_routing_enabled": False,
+        },
+    )
     fake_store.seed(["profiles"], "bob", {"draft_prs": False})
     fake_store.seed(["profiles"], "carol", {"draft_prs": False})
 

@@ -101,7 +101,7 @@ export function SkillsPage() {
     remove.mutate(selectedName, { onSuccess: clear })
   }
 
-  if (skills.isLoading) return <Skeleton className="m-6 h-64 flex-1" />
+  if (skills.isLoading) return <Skeleton className="m-space-5 h-64 flex-1" />
 
   const dirty =
     selected != null &&
@@ -111,38 +111,38 @@ export function SkillsPage() {
 
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="font-heading text-base font-medium text-primary">
+      <div className="mx-auto max-w-4xl px-space-5 py-space-6">
+        <Text as="h1" variant="h3" weight="medium" color="primary">
           Skills
-        </h1>
-        <p className="mt-1 text-xs text-secondary">
+        </Text>
+        <p className="mt-space-1 text-xs text-secondary">
           Reusable instructions Open SWE loads when a task matches their
           description.
         </p>
 
         <GroupedTabs<Scope>
           size="xs"
-          className="mt-4 w-fit"
+          className="mt-space-4 w-fit"
           value={organization ? "organization" : "personal"}
           onChange={(scope) => selectScope(scope === "organization")}
           options={SCOPES}
         />
 
-        <div className="mt-6 grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="mt-space-5 grid gap-space-5 md:grid-cols-[220px_minmax(0,1fr)]">
           <section>
             {canEdit && (
               <Button size="xs" className="w-full" onClick={clear}>
                 New skill
               </Button>
             )}
-            <div className="mt-3 space-y-1">
+            <div className="mt-space-3 space-y-space-1">
               {(skills.data ?? []).map((skill) => (
                 <button
                   key={skill.name}
                   type="button"
                   onClick={() => select(skill)}
                   className={cn(
-                    "w-full rounded-md px-2.5 py-2 text-left transition-colors",
+                    "w-full rounded-md px-space-2 py-space-2 text-left transition-colors",
                     selectedName === skill.name
                       ? "bg-selected"
                       : "hover:bg-surface-level-1-hover"
@@ -151,20 +151,20 @@ export function SkillsPage() {
                   <span className="block truncate text-xs font-medium text-primary">
                     {skill.name}
                   </span>
-                  <span className="mt-0.5 block truncate text-[10px] text-secondary">
+                  <span className="mt-0.5 block truncate text-xxs text-secondary">
                     {skill.description}
                   </span>
                 </button>
               ))}
               {skills.data?.length === 0 && (
-                <p className="px-2.5 py-4 text-xs text-secondary">
+                <p className="px-space-2 py-space-4 text-xs text-secondary">
                   No skills yet.
                 </p>
               )}
             </div>
           </section>
 
-          <section className="space-y-4 rounded-lg border border-default bg-surface-level-2 p-4">
+          <section className="space-y-space-4 rounded-lg border border-default bg-surface-level-2 p-space-4">
             {!canEdit && !selected ? (
               <p className="text-xs text-secondary">
                 Select an organization skill to view it.
@@ -199,7 +199,7 @@ export function SkillsPage() {
                   placeholder="What this skill does and when Open SWE should use it"
                 />
 
-                <div className="space-y-2">
+                <div className="space-y-space-2">
                   <Text variant="sm" weight="medium">
                     Instructions
                   </Text>
@@ -214,7 +214,7 @@ export function SkillsPage() {
                 </div>
 
                 {canEdit && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-space-2">
                     <Button
                       size="xs"
                       disabled={
