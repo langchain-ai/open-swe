@@ -15,6 +15,7 @@ import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SirenIcon } from "@phosphor-icons/react/dist/ssr/Siren"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
+import { TrayIcon } from "@phosphor-icons/react/dist/ssr/Tray"
 import { Link, useRouterState } from "@tanstack/react-router"
 
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
@@ -27,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 
 const NAV = [
+  { to: "/agents/inbox", label: "Inbox", icon: TrayIcon },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/bots", label: "Bots", icon: RobotIcon },
