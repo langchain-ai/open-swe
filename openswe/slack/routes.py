@@ -60,7 +60,12 @@ from openswe.slack.responses import (
     ephemeral,
     ignored,
 )
-from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
+from openswe.slack.run_feedback import (
+    FEEDBACK_ACTION,
+    handle_run_feedback_submission,
+    is_run_feedback_submission,
+    process_feedback,
+)
 from openswe.slack.solo_threads import allow_solo_thread_followup
 from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
 from openswe.slack.thread_feedback import (
@@ -908,6 +913,8 @@ async def slack_interactivity(
         return {"status": "error", "message": "Invalid payload"}
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
+    if is_run_feedback_submission(payload):
+        return await handle_run_feedback_submission(payload)
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
