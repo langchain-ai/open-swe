@@ -20,7 +20,7 @@ from openswe.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
-type WebhookSource = Literal["github", "slack", "linear", "deployment"]
+type WebhookSource = Literal["github", "slack", "linear", "deployment", "thread"]
 
 RETAINED_DAYS = 2
 _TABLE = "event_log"

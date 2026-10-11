@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -82,6 +82,73 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     monkeypatch.delenv("SEGMENT_WRITE_KEY")
     await segment.record_webhook(event)
     assert len(requests) == 6
+
+
+async def test_inactivity_emits_once_per_idle_period(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.transcript.engine import Command, append
+    from openswe.transcript.events import (
+        MessageSender,
+        ThreadCreated,
+        TranscriptEvent,
+        TurnCompleted,
+        TurnRequested,
+    )
+    from openswe.webhooks.event_subscriptions import EventSubscription
+    from openswe.webhooks.thread_inactivity import emit_inactivity_events
+
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    monkeypatch.setattr(EventSubscription, "deliver", AsyncMock())
+
+    async def turn(thread_id: str, *, ended: datetime | None) -> None:
+        turn_id = uuid4()
+        events: list[tuple[TranscriptEvent, datetime | None]] = [
+            (
+                TurnRequested(
+                    turn_id=turn_id,
+                    message_id=str(uuid4()),
+                    text="hi",
+                    sender=MessageSender(login="alice", kind="dashboard"),
+                ),
+                ended,
+            )
+        ]
+        if ended is not None:
+            events.append((TurnCompleted(turn_id=turn_id), ended))
+        await append(
+            thread_id,
+            [
+                Command(command_id=str(uuid4()), event=e, actor_kind="user", occurred_at=at)
+                for e, at in events
+            ],
+        )
+
+    long_ago = datetime.now(UTC) - timedelta(hours=2)
+    for thread_id, metadata in (
+        ("quiet", {}),
+        ("private", {"visibility": "private"}),
+        ("resolved", {"resolved": True}),
+    ):
+        created = ThreadCreated(
+            title="t", source="dashboard", owner_login="alice", metadata=metadata
+        )
+        await append(thread_id, [Command(command_id=thread_id, event=created, actor_kind="user")])
+        await turn(thread_id, ended=long_ago)
+    await append("busy", [Command(command_id="busy", event=created, actor_kind="user")])
+    await turn("busy", ended=long_ago)
+    await turn("busy", ended=None)
+
+    assert await emit_inactivity_events() == 1
+    assert await emit_inactivity_events() == 0
+    async with transaction() as conn:
+        payload = await conn.scalar(text("SELECT payload FROM event_log"))
+    assert payload["thread_id"] == "quiet"
+
+    await turn("quiet", ended=datetime.now(UTC))
+    assert await emit_inactivity_events() == 0
+    await turn("quiet", ended=long_ago)
+    assert await emit_inactivity_events() == 1
 
 
 async def _partitions() -> set[str]:
