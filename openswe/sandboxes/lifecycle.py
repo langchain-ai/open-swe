@@ -20,6 +20,7 @@ from openswe.config import ENV
 from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from openswe.github.sandbox_access import SandboxGitHubAccess, workspace_token
 from openswe.sandboxes.handoff import complete_handoff
+from openswe.sandboxes.paths import adopt_recorded_work_dir
 from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from openswe.sandboxes.state import (
@@ -587,6 +588,8 @@ async def ensure_sandbox_for_thread(
     from openswe.sandboxes.tool_access import provision_tool_url
     from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 
+    if not created:
+        adopt_recorded_work_dir(sandbox_backend, sandbox_metadata)
     async with aphase(thread_id, "sandbox.handoff"):
         await complete_handoff(thread_id, sandbox_metadata, sandbox_backend)
     await provision_tool_url(thread_id, sandbox_backend)

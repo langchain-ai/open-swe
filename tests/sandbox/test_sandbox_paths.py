@@ -3,7 +3,12 @@ from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-from openswe.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
+from openswe.sandboxes.paths import (
+    adopt_recorded_work_dir,
+    recorded_work_dir,
+    resolve_repo_dir,
+    resolve_sandbox_work_dir,
+)
 
 
 class _FakeProvider:
@@ -88,3 +93,31 @@ async def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_
         "pwd",
         "test -d /home/daytona && test -w /home/daytona",
     ]
+
+
+async def test_a_work_dir_resolved_on_one_worker_is_reused_for_the_same_sandbox() -> None:
+    first = _FakeSandboxBackend(
+        provider=_FakeProvider(work_dir="/workspace"), writable_dirs={"/workspace"}
+    )
+    await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, first))
+    metadata = {"sandbox_work_dir": recorded_work_dir(cast(SandboxBackendProtocol, first))}
+
+    other_worker = _FakeSandboxBackend(provider=_FakeProvider(work_dir="/workspace"))
+    adopt_recorded_work_dir(cast(SandboxBackendProtocol, other_worker), metadata)
+
+    assert (
+        await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, other_worker)) == "/workspace"
+    )
+    assert other_worker.commands == []
+
+
+async def test_a_work_dir_recorded_for_another_sandbox_is_probed_again() -> None:
+    backend = _FakeSandboxBackend(
+        provider=_FakeProvider(work_dir="/workspace"), writable_dirs={"/workspace"}
+    )
+    metadata = {"sandbox_work_dir": {"sandbox_id": "replaced-sandbox", "path": "/elsewhere"}}
+
+    adopt_recorded_work_dir(cast(SandboxBackendProtocol, backend), metadata)
+
+    assert await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend)) == "/workspace"
+    assert backend.commands == ["test -d /workspace && test -w /workspace"]
