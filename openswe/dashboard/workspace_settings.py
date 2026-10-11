@@ -23,6 +23,7 @@ from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.options import (
+    DEFAULT_ROUTING_MODELS,
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
@@ -335,6 +336,9 @@ def _parse_repo(value: object) -> dict[str, str] | None:
 
 def _default_settings() -> dict[str, Any]:
     fallback_model, fallback_effort = default_model_pair()
+    fast_model, fast_effort = DEFAULT_ROUTING_MODELS["fast"]
+    balanced_model, balanced_effort = DEFAULT_ROUTING_MODELS["balanced"]
+    performance_model, performance_effort = DEFAULT_ROUTING_MODELS["performance"]
     return {
         "review_draft_prs": False,
         "pr_summaries": True,
@@ -352,12 +356,12 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
-        "default_agent_routing_fast_model": "openai:gpt-6-luna",
-        "default_agent_routing_fast_reasoning_effort": "high",
-        "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
-        "default_agent_routing_balanced_reasoning_effort": "medium",
-        "default_agent_routing_performance_model": "openai:gpt-6-astra",
-        "default_agent_routing_performance_reasoning_effort": "low",
+        "default_agent_routing_fast_model": fast_model,
+        "default_agent_routing_fast_reasoning_effort": fast_effort,
+        "default_agent_routing_balanced_model": balanced_model,
+        "default_agent_routing_balanced_reasoning_effort": balanced_effort,
+        "default_agent_routing_performance_model": performance_model,
+        "default_agent_routing_performance_reasoning_effort": performance_effort,
         "default_repo": _env_default_repo(),
         "default_reviewer_model": fallback_model,
         "default_reviewer_reasoning_effort": fallback_effort,

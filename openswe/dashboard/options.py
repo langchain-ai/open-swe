@@ -3,7 +3,7 @@
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module
-from typing import NotRequired, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 
 from openswe.config import ENV
 
@@ -244,6 +244,22 @@ DEFAULT_MODEL_ID: str = (
     else "openai:gpt-6.1-sol"
 )
 DEFAULT_MODEL_EFFORT: str = "medium"
+
+RoutingTier = Literal["fast", "balanced", "performance"]
+
+DEFAULT_ROUTING_MODELS: dict[RoutingTier, tuple[str, str]] = (
+    {
+        "fast": ("anthropic:claude-haiku-5-5", "high"),
+        "balanced": ("anthropic:claude-sonnet-5-5", "medium"),
+        "performance": ("anthropic:claude-opus-5-5", "low"),
+    }
+    if DEFAULT_MODEL_ID.startswith("anthropic:")
+    else {
+        "fast": ("openai:gpt-6-luna", "high"),
+        "balanced": ("openai:gpt-6.1-sol", "medium"),
+        "performance": ("openai:gpt-6-astra", "low"),
+    }
+)
 
 
 def model_supports_effort(model_id: str, effort: str) -> bool:

@@ -80,6 +80,9 @@ def test_global_default_matches_available_credentials(
     defaults = runpy.run_path(options.__file__)
     assert defaults["default_model_pair"]() == (expected, "medium")
     assert defaults["default_vision_model_pair"]() == (expected, "medium")
+    provider = expected.split(":", 1)[0]
+    for model_id, _ in defaults["DEFAULT_ROUTING_MODELS"].values():
+        assert model_id.startswith(f"{provider}:")
 
 
 def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:
