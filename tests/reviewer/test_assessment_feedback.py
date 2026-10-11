@@ -68,13 +68,23 @@ async def test_feedback_is_per_person_and_published_assessment(fake_store: FakeS
         assert trace_feedback.await_count == 3
         assert trace_feedback.await_args_list[0].args == (
             "c" * 36,
-            "review_assessment:123:alice",
+            f"review_assessment:123:{'a' * 40}:alice",
         )
         assert trace_feedback.await_args_list[0].kwargs["score"] == 1.0
         assert trace_feedback.await_args_list[0].kwargs["comment"] == "Clear rationale"
         assert trace_feedback.await_args_list[1].kwargs["score"] == 0.0
         assert trace_feedback.await_args_list[2].args == trace_feedback.await_args_list[0].args
         assert trace_feedback.await_args_list[2].kwargs["score"] == 0.0
+        await ASSESSMENTS.put("123", assessment.model_copy(update={"head_sha": "d" * 40}))
+        assert await get_assessment_feedback("o", "r", 1, 123, {"sub": "alice"}) is None
+        await submit_assessment_feedback(
+            "o", "r", 1, 123, FeedbackSubmission(rating="helpful"), {"sub": "alice"}
+        )
+        assert trace_feedback.await_args_list[-1].args[1] == (
+            f"review_assessment:123:{'d' * 40}:alice"
+        )
+        await ASSESSMENTS.put("123", assessment)
+        assert await get_assessment_feedback("o", "r", 1, 123, {"sub": "alice"}) == edited
     assert await ASSESSMENTS.get("123") == assessment
 
 

@@ -37,8 +37,9 @@ class AssessmentFeedback(FeedbackSubmission):
 ASSESSMENTS = TypedStore(("review_assessments",), PublishedAssessment)
 
 
-def feedback_store(review_id: int) -> TypedStore[AssessmentFeedback]:
-    return TypedStore(("review_assessment_feedback", str(review_id)), AssessmentFeedback)
+def feedback_store(review_id: int, head_sha: str | None = None) -> TypedStore[AssessmentFeedback]:
+    key = f"{review_id}:{head_sha}" if head_sha else str(review_id)
+    return TypedStore(("review_assessment_feedback", key), AssessmentFeedback)
 
 
 async def require_assessment_access(
@@ -71,12 +72,12 @@ async def save_feedback(
         login=login.lower(),
         updated_at=now_iso(),
     )
-    await feedback_store(review_id).put(feedback.login, feedback)
+    await feedback_store(review_id, assessment.head_sha).put(feedback.login, feedback)
     if assessment.run_id:
         try:
             saved = await create_langsmith_feedback(
                 assessment.run_id,
-                f"review_assessment:{review_id}:{feedback.login}",
+                f"review_assessment:{review_id}:{assessment.head_sha}:{feedback.login}",
                 score=1.0 if feedback.rating == "helpful" else 0.0,
                 comment=feedback.comment or None,
                 source_info={

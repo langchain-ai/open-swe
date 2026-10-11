@@ -345,7 +345,10 @@ def render_review_body(
             if ui_url
             else ""
         )
-        parts.append(f"React 👍 or 👎{feedback_link}.")
+        if approved or surfaced_count:
+            parts.append(f"React 👍 or 👎{feedback_link}.")
+        elif ui_url:
+            parts.append(f"[Rate this assessment in Open SWE]({ui_url}#assessment-feedback).")
     links = []
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")
@@ -611,7 +614,7 @@ async def post_pull_request_review(
     token: str,
     event: Literal["COMMENT", "APPROVE"] = "COMMENT",
 ) -> dict[str, Any] | None:
-    """POST one GitHub PR Review with inline comments. Returns the API response or None."""
+    """Update an advisory summary or publish a review with new findings or approval."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
     payload: dict[str, Any] = {
         "commit_id": head_sha,
@@ -621,6 +624,41 @@ async def post_pull_request_review(
     }
     async with github_client(token=token) as client:
         try:
+            if (
+                event == "COMMENT"
+                and not inline_comments
+                and review_summary_marker(pr_number) in body
+            ):
+                latest_review_id: int | None = None
+                page = 1
+                while True:
+                    listed = await github_request(
+                        client, "GET", url, params={"per_page": 100, "page": page}
+                    )
+                    listed.raise_for_status()
+                    reviews = listed.json()
+                    if not isinstance(reviews, list):
+                        raise ValueError("GitHub returned an invalid PR review list")
+                    for review in reviews:
+                        if (
+                            isinstance(review, dict)
+                            and review.get("state") == "COMMENTED"
+                            and review_summary_marker(pr_number) in (review.get("body") or "")
+                            and (review.get("body") or "").startswith(
+                                "## ✅ Open SWE Review: No issues found"
+                            )
+                            and isinstance(review.get("id"), int)
+                        ):
+                            latest_review_id = review["id"]
+                    if len(reviews) < 100:
+                        break
+                    page += 1
+                if latest_review_id is not None:
+                    updated = await github_request(
+                        client, "PUT", f"{url}/{latest_review_id}", json={"body": body}
+                    )
+                    updated.raise_for_status()
+                    return updated.json()
             response = await github_request(client, "POST", url, json=payload)
             if response.status_code == 401:
                 raise GitHubAuthError(

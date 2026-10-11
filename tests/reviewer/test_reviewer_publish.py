@@ -212,6 +212,45 @@ async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() ->
 
 
 @pytest.mark.asyncio
+async def test_advisory_summary_updates_latest_commented_review() -> None:
+    from openswe.review.publish import review_summary_marker
+
+    marker = review_summary_marker(1)
+    listed = MagicMock()
+    listed.json.return_value = [
+        {"id": 10, "state": "COMMENTED", "body": marker},
+        {
+            "id": 11,
+            "state": "COMMENTED",
+            "body": f"## ✅ Open SWE Review: No issues found\n{marker}",
+        },
+        {"id": 12, "state": "APPROVED", "body": marker},
+        {
+            "id": 13,
+            "state": "COMMENTED",
+            "body": f"**Open SWE Review** found 3 potential issues.\n{marker}",
+        },
+    ]
+    updated = MagicMock()
+    updated.json.return_value = {"id": 11, "body": f"Updated assessment {marker}"}
+    with patch(
+        "openswe.review.publish.github_request", AsyncMock(side_effect=[listed, updated])
+    ) as request:
+        result = await post_pull_request_review(
+            owner="o",
+            repo="r",
+            pr_number=1,
+            head_sha="new-sha",
+            body=f"Updated assessment {marker}",
+            inline_comments=[],
+            token="t",
+        )
+    assert result == {"id": 11, "body": f"Updated assessment {marker}"}
+    assert [call.args[1] for call in request.await_args_list] == ["GET", "PUT"]
+    assert request.await_args_list[-1].args[2].endswith("/reviews/11")
+
+
+@pytest.mark.asyncio
 async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerpt() -> None:
     """A non-dict GitHub response body must surface status code + body excerpt
     via ``_error`` rather than collapsing to a bare ``None`` (which the
@@ -1190,6 +1229,7 @@ async def test_approval_publication_handles_github_rejections(
     request = httpx2.Request("POST", "https://api.github.com/repos/o/r/pulls/7/reviews")
     responses = [httpx2.Response(status, json=error_body, request=request)]
     if retry:
+        responses.append(httpx2.Response(200, json=[], request=request))
         responses.append(
             httpx2.Response(
                 200 if succeeds else 422,
@@ -1228,7 +1268,7 @@ async def test_approval_publication_handles_github_rejections(
             state={"review_approval_policy": "Docs only"},
         )
     assert result["success"] is succeeds
-    payloads = [call.kwargs["json"] for call in post.await_args_list]
+    payloads = [call.kwargs["json"] for call in post.await_args_list if call.args[1] == "POST"]
     assert [payload["event"] for payload in payloads] == (
         ["APPROVE", "COMMENT"] if retry else ["APPROVE"]
     )
