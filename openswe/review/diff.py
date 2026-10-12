@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from pydantic import BaseModel
+
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
 
@@ -241,6 +243,52 @@ async def fetch_pr_diff(
             response.raise_for_status()
     except httpx2.HTTPError:
         logger.exception("Failed to fetch PR diff for %s/%s#%s", owner, repo, pr_number)
+        return None
+    return response.text
+
+
+class _Comparison(BaseModel):
+    status: Literal["ahead", "behind", "diverged", "identical"]
+
+
+async def fetch_compare_diff(
+    *,
+    owner: str,
+    repo: str,
+    base_ref: str,
+    head_ref: str,
+    token: str,
+    timeout: float = 30.0,
+) -> str | None:
+    """Fetch the two-dot diff ``base_ref..head_ref`` from the GitHub REST API.
+
+    GitHub only compares from the merge base, which is ``base_ref`` only when it is an
+    ancestor of ``head_ref``; otherwise, as after a force-push, this returns None.
+    """
+    import httpx2
+
+    from openswe.github.http import github_client, github_request
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/compare/{base_ref}...{head_ref}"
+    try:
+        async with github_client(token=token) as client:
+            comparison = await github_request(client, "GET", url, timeout=timeout)
+            comparison.raise_for_status()
+            if _Comparison.model_validate(comparison.json()).status not in ("ahead", "identical"):
+                return None
+            response = await github_request(
+                client,
+                "GET",
+                url,
+                headers={"Accept": "application/vnd.github.diff"},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+    except httpx2.HTTPError:
+        logger.exception(
+            "Failed to fetch compare diff",
+            extra={"repository": f"{owner}/{repo}", "base_ref": base_ref, "head_ref": head_ref},
+        )
         return None
     return response.text
 

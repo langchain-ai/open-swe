@@ -4,7 +4,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Path
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.dashboard.oauth import session_user_id
 from openswe.slack.allowed_bots import (
     ALLOWED_SLACK_BOTS,
     AllowedSlackBot,
@@ -41,7 +43,7 @@ async def api_slack_user_name(
 async def api_concierge(
     session: dict[str, str] = SESSION_DEP,
 ) -> dict[str, str | None]:
-    user = await User.for_login("github", session["sub"])
+    user = await User.for_session(session_user_id(session), session["sub"])
     if user is None or not user.typed_preferences.concierge_mode or not user.slack_user_id:
         return {"thread_id": None, "channel_id": None}
     channel_id = await open_dm(user.slack_user_id)
@@ -96,6 +98,7 @@ async def api_allowed_slack_bot_directory(
 
 
 @router.post("/slack/allowed-bots")
+@audit_endpoint
 async def api_allow_slack_bot(
     body: AllowSlackBot,
     admin: dict[str, Any] = ADMIN_DEP,
@@ -104,6 +107,7 @@ async def api_allow_slack_bot(
 
 
 @router.delete("/slack/allowed-bots/{team_id}/{bot_id}")
+@audit_endpoint
 async def api_remove_allowed_slack_bot(
     team_id: str,
     bot_id: str,

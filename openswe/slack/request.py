@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, Field
 
+from openswe.input_messages import SystemIdentity
 from openswe.slack.failures import SlackRequestTarget
 from openswe.slack.payloads import SlackChannelContext
 from openswe.utils.json_types import JsonObject
@@ -20,6 +21,8 @@ class SlackRequest(BaseModel):
     bot_user_id: str = ""
     triggering_bot_id: str = ""
     triggering_bot_app_id: str = ""
+    # Open SWE wrote the request; ``user_id`` is only who the run acts for.
+    trigger_system: SystemIdentity | None = None
     thread_id: str | None = None
     channel_context: SlackChannelContext | None = None
     team_id: str = ""
@@ -29,6 +32,8 @@ class SlackRequest(BaseModel):
     context_channel_id: str = ""
     breakout_root_suffix: str | None = None
     prior_message_text: str = ""
+    # Guidance for this turn alone, from whatever stood in for a typed message.
+    turn_context: str = ""
     treat_all_messages_as_mentions: bool = False
     kitchen_channel: bool = False
     message_update: bool = False

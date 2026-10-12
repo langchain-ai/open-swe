@@ -1,4 +1,4 @@
-"""Approval criteria come from .open-swe/APPROVALS.md at the base commit; the repository's mode gates them."""
+"""Approval criteria come from .open-swe/APPROVALS.md on the default branch; the repository's mode gates them."""
 
 from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
@@ -20,12 +20,16 @@ from tests.conftest import FakeStore
 
 
 def _github(status: int, text: str = "") -> AsyncMock:
-    return AsyncMock(return_value=httpx2.Response(status, text=text))
+    return AsyncMock(
+        return_value=httpx2.Response(
+            status, text=text, request=httpx2.Request("GET", "https://api.github.com")
+        )
+    )
 
 
 async def test_fetch_reads_the_file_at_the_requested_ref() -> None:
     request = _github(200, "  Docs-only changes may be approved.\n")
-    with patch("openswe.github.repo_files.github_request", request):
+    with patch("openswe.github.http.github_request", request):
         policy = await fetch_approvals_md("o", "r", "a" * 40, token="t")
     assert policy == "Docs-only changes may be approved."
     _client, method, url = request.await_args.args
@@ -42,13 +46,13 @@ async def test_fetch_reads_the_file_at_the_requested_ref() -> None:
     ids=["missing", "empty", "oversized", "error"],
 )
 async def test_fetch_yields_no_policy_for_unusable_files(status: int, text: str) -> None:
-    with patch("openswe.github.repo_files.github_request", _github(status, text)):
+    with patch("openswe.github.http.github_request", _github(status, text)):
         assert await fetch_approvals_md("o", "r", "main", token="t") is None
 
 
 async def test_fetch_yields_no_policy_when_github_is_unreachable() -> None:
     failing = AsyncMock(side_effect=httpx2.ConnectError("down"))
-    with patch("openswe.github.repo_files.github_request", failing):
+    with patch("openswe.github.http.github_request", failing):
         assert await fetch_approvals_md("o", "r", "main", token="t") is None
 
 
@@ -56,20 +60,23 @@ async def test_unset_mode_is_dry_run_and_off_skips_the_file(fake_store: FakeStor
     assert await approval_mode_for("o", "r") == "dry_run"
     fetch = AsyncMock(return_value="Docs only")
     with patch("openswe.review.approvals.fetch_approvals_md", fetch):
-        assert await approval_policy_for_review("o", "r", "b" * 40, token="t") == "Docs only"
-        fetch.assert_awaited_once_with("o", "r", "b" * 40, token="t")
+        assert await approval_policy_for_review("o", "r", token="t") == "Docs only"
+        fetch.assert_awaited_once_with("o", "r", None, token="t")
 
         await REVIEW_STYLES.update_prompts("o/r", ReviewStylePromptUpdate(approval_mode="off"))
         fetch.reset_mock()
-        assert await approval_policy_for_review("o", "r", "b" * 40, token="t") is None
+        assert await approval_policy_for_review("o", "r", token="t") is None
         fetch.assert_not_awaited()
 
 
-async def test_review_without_a_base_commit_has_no_policy(fake_store: FakeStore) -> None:
-    fetch = AsyncMock(return_value="Docs only")
-    with patch("openswe.review.approvals.fetch_approvals_md", fetch):
-        assert await approval_policy_for_review("o", "r", "", token="t") is None
-    fetch.assert_not_awaited()
+async def test_review_reads_the_policy_from_the_default_branch(fake_store: FakeStore) -> None:
+    # Pull requests into release branches cut before the policy existed are judged by it too.
+    request = _github(200, "Cherry-picks may be approved.")
+    with patch("openswe.github.http.github_request", request):
+        assert (
+            await approval_policy_for_review("o", "r", token="t") == "Cherry-picks may be approved."
+        )
+    assert request.await_args.kwargs["params"] is None
 
 
 async def test_failed_mode_lookup_never_approves() -> None:

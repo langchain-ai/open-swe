@@ -6,22 +6,25 @@ from collections import Counter
 from datetime import timedelta
 from fnmatch import fnmatchcase
 
-import httpx2
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from openswe.github.http import GITHUB_API_BASE, github_client, github_request
+from openswe.github.http import (
+    GitHubAppUnavailable,
+    GitHubClient,
+    RepoClient,
+    RepoFileUnreadableError,
+)
+from openswe.github.pull_request_status import PullRequestClient
 
 logger = logging.getLogger(__name__)
 
-
-class RepoFileUnreadableError(RuntimeError):
-    """A repository file could not be read reliably."""
-
+__all__ = ["RepoFileUnreadableError", "RepoSettings", "fetch_repo_file"]
 
 SETTINGS_PATH = ".open-swe/settings.json"
 SETTINGS_MAX_CHARS = 10_000
 SETTINGS_FRESH_FOR = timedelta(minutes=30)
 SETTINGS_MAX_AGE = timedelta(hours=24)
+_ROUTED_FILE_PAGES = 30
 
 
 async def fetch_repo_file(
@@ -34,46 +37,13 @@ async def fetch_repo_file(
     max_chars: int,
     strict: bool = False,
 ) -> str | None:
-    """``path`` at ``ref`` (the default branch when ``None``).
-
-    With ``strict``, only absence returns ``None``; unreadable files raise.
-    """
+    """``RepoClient.read_file`` for callers that still hold a raw token, or none."""
     if not owner or not repo:
         return None
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/contents/{path}"
-    extra = {"repository": f"{owner}/{repo}", "ref": ref or "", "path": path}
-    try:
-        async with github_client(
-            token=token, headers={"Accept": "application/vnd.github.raw"}
-        ) as client:
-            response = await github_request(
-                client, "GET", url, params={"ref": ref} if ref else None
-            )
-    except httpx2.HTTPError:
-        logger.exception("repository file fetch failed", extra=extra)
-        if strict:
-            raise RepoFileUnreadableError(f"Could not read {path}") from None
-        return None
-    if response.status_code == 404:
-        return None
-    if response.status_code != 200:
-        logger.warning(
-            "repository file fetch returned an unexpected status",
-            extra={**extra, "status_code": response.status_code},
+    async with GitHubClient.connect(token=token) as github:
+        return await github.repo(owner, repo).read_file(
+            path, ref, max_chars=max_chars, strict=strict
         )
-        if strict:
-            raise RepoFileUnreadableError(f"Could not read {path}: HTTP {response.status_code}")
-        return None
-    content = response.text.strip()
-    if len(content) > max_chars:
-        logger.warning(
-            "repository file exceeds the size cap; ignoring it",
-            extra={**extra, "chars": len(content), "max_chars": max_chars},
-        )
-        if strict:
-            raise RepoFileUnreadableError(f"Repository file {path} exceeds the size cap")
-        return None
-    return content if strict else content or None
 
 
 class ReviewChannelRule(BaseModel):
@@ -118,35 +88,19 @@ class RepoSettings(BaseModel):
         count = max(counts.values())
         return random.choice([candidate for candidate, total in counts.items() if total == count])
 
-    async def channel_for_pr(self, owner: str, repo: str, number: int, *, token: str) -> str:
+    async def channel_for_pr(self, pull: PullRequestClient) -> str:
         if not self.review_channel_rules:
             return self.review_channel.strip()
-        filenames: list[str] = []
-        adapter = TypeAdapter(list[ReviewFile])
-        async with github_client(token=token) as client:
-            for page in range(1, 31):
-                response = await github_request(
-                    client,
-                    "GET",
-                    f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/files",
-                    params={"per_page": "100", "page": str(page)},
-                )
-                response.raise_for_status()
-                files = adapter.validate_python(response.json())
-                filenames.extend(file.filename for file in files)
-                if len(files) < 100:
-                    return self.channel_for_files(filenames)
-        raise ValueError("Cannot route a pull request with an incomplete changed-file list")
+        files = TypeAdapter(list[ReviewFile]).validate_python(
+            await pull.files(max_pages=_ROUTED_FILE_PAGES)
+        )
+        if len(files) >= _ROUTED_FILE_PAGES * 100:
+            raise ValueError("Cannot route a pull request with an incomplete changed-file list")
+        return self.channel_for_files([file.filename for file in files])
 
     @classmethod
     async def fetch(
-        cls,
-        owner: str,
-        repo: str,
-        *,
-        token: str | None,
-        ref: str | None = None,
-        strict: bool = False,
+        cls, repo: RepoClient, *, ref: str | None = None, strict: bool = False
     ) -> RepoSettings:
         """The settings at ``ref``, or the default branch's when ``ref`` has none.
 
@@ -154,24 +108,12 @@ class RepoSettings(BaseModel):
         """
         content = None
         if ref:
-            content = await fetch_repo_file(
-                owner,
-                repo,
-                SETTINGS_PATH,
-                ref,
-                token=token,
-                max_chars=SETTINGS_MAX_CHARS,
-                strict=strict,
+            content = await repo.read_file(
+                SETTINGS_PATH, ref, max_chars=SETTINGS_MAX_CHARS, strict=strict
             )
         if content is None:
-            content = await fetch_repo_file(
-                owner,
-                repo,
-                SETTINGS_PATH,
-                None,
-                token=token,
-                max_chars=SETTINGS_MAX_CHARS,
-                strict=strict,
+            content = await repo.read_file(
+                SETTINGS_PATH, None, max_chars=SETTINGS_MAX_CHARS, strict=strict
             )
         if content is None:
             return cls()
@@ -180,7 +122,7 @@ class RepoSettings(BaseModel):
         except ValidationError as exc:
             logger.warning(
                 "repository settings file is invalid; ignoring it",
-                extra={"repository": f"{owner}/{repo}"},
+                extra={"repository": repo.full_name},
                 exc_info=True,
             )
             if strict:
@@ -188,12 +130,23 @@ class RepoSettings(BaseModel):
             return cls()
 
     @classmethod
-    async def cached(cls, owner: str, repo: str, *, token: str | None) -> RepoSettings:
-        """The default branch's settings, served stale while they revalidate."""
+    async def cached(cls, owner: str, repo: str) -> RepoSettings:
+        """The default branch's settings as the App reads them, served stale while they revalidate.
+
+        Reads as empty when the App cannot reach the repository.
+        """
         from langgraph_api.cache import swr
 
         async def load() -> RepoSettings:
-            return await cls.fetch(owner, repo, token=token)
+            try:
+                async with GitHubClient.as_app(owner, repo) as github:
+                    return await cls.fetch(github.repo(owner, repo))
+            except GitHubAppUnavailable:
+                logger.warning(
+                    "No GitHub App token to read repository settings",
+                    extra={"repository": f"{owner}/{repo}"},
+                )
+                return cls()
 
         key = f"repo-settings:{owner}/{repo}".lower()
         result = await swr(

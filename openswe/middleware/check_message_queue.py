@@ -1,6 +1,6 @@
 """Before-model middleware that injects queued messages into state.
 
-Checks the LangGraph store for pending messages (e.g. follow-up Linear
+Checks the thread's queued follow-ups for pending messages (e.g. follow-up Linear
 comments that arrived while the agent was busy) and injects them as new
 human messages before the next model call.
 """
@@ -10,9 +10,8 @@ from typing import Any, cast
 
 import httpx2
 from langchain.agents.middleware import before_model
-from langgraph.config import get_config, get_store
+from langgraph.config import get_config
 from langgraph.runtime import Runtime
-from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from openswe.dashboard.options import model_supports_images
@@ -31,7 +30,6 @@ from openswe.middleware.require_user_reply import (
     current_reply_surface,
 )
 from openswe.middleware.trace import scrub_middleware_inputs
-from openswe.prompts import prompt
 from openswe.users import User
 from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -157,33 +155,6 @@ def _message_update(
     return {"messages": queued, **surface_update}
 
 
-async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
-    """Pull and clear a batched PR-babysitting event from the store (no thread fetch)."""
-    namespace = ("autofix", thread_id)
-    try:
-        item = await store.aget(namespace, "pending_event")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not read pending auto-fix event for thread %s", thread_id, exc_info=True
-        )
-        return None
-    if item is None or not item.value.get("reason"):
-        return None
-    try:
-        await store.adelete(namespace, "pending_event")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
-        )
-    message = prompt("runs/autofix-event")
-    details = item.value.get("details")
-    if isinstance(details, list):
-        joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
-        if joined:
-            message += "\n\nNewly arrived feedback to address:\n" + joined
-    return message
-
-
 @scrub_middleware_inputs
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(  # noqa: PLR0911
@@ -207,21 +178,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         if not thread_id:
             return None
 
-        try:
-            store = get_store()
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Could not get store from context: %s", e)
-            return None
-
-        if store is None:
-            return None
-
         queued_updates: list[dict[str, Any]] = []
         content_blocks: list[dict[str, Any]] = []
         injected = visible_dynamic_context_hashes(state)
-        pending_autofix = await _consume_pending_autofix_event(store, thread_id)
-        if pending_autofix:
-            content_blocks.append({"type": "text", "text": pending_autofix})
 
         try:
             # A snapshot: what this call consumes, whatever is queued meanwhile.

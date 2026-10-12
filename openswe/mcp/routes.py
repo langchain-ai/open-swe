@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.oauth import frontend_base_url
 from openswe.mcp.cards import ConnectCard
@@ -81,6 +82,7 @@ async def api_list_instance_mcps(_admin: dict[str, Any] = ADMIN_DEP) -> list[dic
 
 
 @instance_mcp_router.put("/mcps/{name}", response_model=MCPConnectionPublic)
+@audit_endpoint
 async def api_save_instance_mcp(
     name: str, update: MCPConnectionUpdate, _admin: dict[str, Any] = ADMIN_DEP
 ) -> dict[str, Any]:
@@ -91,11 +93,13 @@ async def api_save_instance_mcp(
 
 
 @instance_mcp_router.delete("/mcps/{name}", status_code=204)
+@audit_endpoint
 async def api_delete_instance_mcp(name: str, _admin: dict[str, Any] = ADMIN_DEP) -> None:
     await delete_instance_mcp(name)
 
 
 @instance_mcp_router.post("/mcps/{name}/headers/reveal")
+@audit_endpoint
 async def api_reveal_instance_mcp_headers(
     name: str, _admin: dict[str, Any] = ADMIN_DEP
 ) -> JSONResponse:
@@ -125,6 +129,7 @@ async def api_list_workspace_mcps(
 
 
 @workspace_mcp_router.put("/workspaces/{workspace}/mcps/{name}", response_model=MCPConnectionPublic)
+@audit_endpoint
 async def api_save_workspace_mcp(
     workspace: str,
     name: str,
@@ -138,6 +143,7 @@ async def api_save_workspace_mcp(
 
 
 @workspace_mcp_router.delete("/workspaces/{workspace}/mcps/{name}", status_code=204)
+@audit_endpoint
 async def api_delete_workspace_mcp(
     workspace: str, name: str, _admin: dict[str, Any] = ADMIN_DEP
 ) -> None:
@@ -145,6 +151,7 @@ async def api_delete_workspace_mcp(
 
 
 @workspace_mcp_router.post("/workspaces/{workspace}/mcps/{name}/headers/reveal")
+@audit_endpoint
 async def api_reveal_workspace_mcp_headers(
     workspace: str,
     name: str,
@@ -177,6 +184,7 @@ async def api_list_my_mcps(session: dict[str, Any] = SESSION_DEP) -> list[dict[s
 
 
 @user_mcp_router.put("/my-mcps/{name}", response_model=MCPConnectionPublic)
+@audit_endpoint
 async def api_save_my_mcp(
     name: str,
     update: MCPConnectionUpdate,
@@ -189,11 +197,13 @@ async def api_save_my_mcp(
 
 
 @user_mcp_router.delete("/my-mcps/{name}", status_code=204)
+@audit_endpoint
 async def api_delete_my_mcp(name: str, session: dict[str, Any] = SESSION_DEP) -> None:
     await delete_user_mcp(session["sub"], name)
 
 
 @user_mcp_router.post("/my-mcps/{name}/headers/reveal")
+@audit_endpoint
 async def api_reveal_my_mcp_headers(
     name: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -285,6 +295,7 @@ async def _card(thread_id: str, card_id: str, login: str, gateway: str) -> Conne
 @managed_mcp_router.post(
     "/my-managed-tools/{gateway}/connect/{slug}", response_model=ManagedConnectResponse
 )
+@audit_endpoint
 async def api_connect_managed_tool(
     gateway: str,
     slug: str,

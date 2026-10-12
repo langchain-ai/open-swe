@@ -8,7 +8,10 @@ from langgraph_sdk.errors import ConflictError
 
 from openswe import baby_sit
 from openswe import store as agent_store
+from openswe.github import app as github_app
 from openswe.github.ci import RequiredCheck
+from openswe.github.http import RepoClient
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 
@@ -126,10 +129,12 @@ async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch(watch_client)
-    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
-        baby_sit,
-        "fetch_pr",
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
         AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
     )
     checks = [
@@ -143,8 +148,8 @@ async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
         }
     ]
     list_checks = AsyncMock(return_value=checks)
-    monkeypatch.setattr(baby_sit, "list_check_runs", list_checks)
-    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(RepoClient, "check_runs", list_checks)
+    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
 
@@ -173,22 +178,24 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     first_client, second_client = shared_watch_clients
     _use_client(monkeypatch, first_client)
     await _start_watch(first_client)
-    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
-        baby_sit,
-        "fetch_pr",
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
         AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
     )
     monkeypatch.setattr(
-        baby_sit,
-        "list_check_runs",
+        RepoClient,
+        "check_runs",
         AsyncMock(
             return_value=[
                 {"id": 11, "name": "tests", "status": "completed", "conclusion": "failure"}
             ]
         ),
     )
-    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     dispatch_started = asyncio.Event()
     release_dispatch = asyncio.Event()
 
@@ -216,26 +223,28 @@ async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch(watch_client)
-    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
-        baby_sit,
-        "fetch_pr",
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
         AsyncMock(
             return_value={"state": "open", "head": {"sha": "head-1"}, "base": {"ref": "main"}}
         ),
     )
     required = AsyncMock(return_value={RequiredCheck("tests"), RequiredCheck("e2e")})
-    monkeypatch.setattr(baby_sit, "fetch_required_checks", required)
+    monkeypatch.setattr(RequiredCheck, "for_branch", required)
     monkeypatch.setattr(
-        baby_sit,
-        "list_check_runs",
+        RepoClient,
+        "check_runs",
         AsyncMock(
             return_value=[
                 {"id": 1, "name": "tests", "status": "completed", "conclusion": "success"}
             ]
         ),
     )
-    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     notify = AsyncMock(return_value=True)
     monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
@@ -268,22 +277,24 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
     watch.source_context = SourceContext()
     watch.run_config = {"thread_id": "thread-1", "source": "dashboard"}
     await baby_sit.WATCHES.save(watch)
-    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
-        baby_sit,
-        "fetch_pr",
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
         AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
     )
     monkeypatch.setattr(
-        baby_sit,
-        "list_check_runs",
+        RepoClient,
+        "check_runs",
         AsyncMock(
             return_value=[
                 {"id": 1, "name": "tests", "status": "completed", "conclusion": "cancelled"}
             ]
         ),
     )
-    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
 
@@ -337,18 +348,20 @@ async def test_new_head_resets_retry_budget(
             check_name="tests",
             evidence="runner timeout",
         )
-    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
-        baby_sit,
-        "fetch_pr",
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
         AsyncMock(return_value={"state": "open", "head": {"sha": "head-2"}}),
     )
     monkeypatch.setattr(
-        baby_sit,
-        "list_check_runs",
+        RepoClient,
+        "check_runs",
         AsyncMock(return_value=[{"id": 2, "name": "tests", "status": "in_progress"}]),
     )
-    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
 
     assert await baby_sit.evaluate_watch("acme/repo#7") == "pending"
     watch = await baby_sit.WATCHES.get("acme/repo#7")

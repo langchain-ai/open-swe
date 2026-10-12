@@ -26,6 +26,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.request import SlackRequest
+from openswe.slack.solo_threads import allow_solo_thread_followup
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread
 from openswe.utils.dashboard_links import dashboard_thread_url
@@ -381,6 +382,15 @@ async def slack_breakout_thread(
             await asyncio.sleep(delay)
 
     await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
+    if requester:
+        await allow_solo_thread_followup(
+            client,
+            channel_id=clean_channel_id,
+            thread_ts=message_ts,
+            message_ts=message_ts,
+            user_id=requester,
+            explicit_mention=True,
+        )
     new_slack_thread = _new_slack_thread_context(
         cfg.slack_thread.dump(),
         channel_id=clean_channel_id,

@@ -1,7 +1,7 @@
 """The shape of ``configurable`` — the per-run contract every graph reads.
 
-``configurable`` rides in the ``RunnableConfig`` of every agent, reviewer, and
-analyzer run. It is assembled by webhooks, the dashboard, and cron launchers,
+``configurable`` rides in the ``RunnableConfig`` of every agent and reviewer
+run. It is assembled by webhooks, the dashboard, and cron launchers,
 merged and re-written at several hops, and then read in ~40 modules.
 
 The same three rules that govern :mod:`openswe.source_context` apply here, for the
@@ -129,9 +129,7 @@ class RunConfig(BaseModel):
     diff_text: str | None = None
     diff_line_set: dict[str, Any] | None = None
 
-    # A review guide run that only prepares chunks ahead of the reader, and may not post
-    review_guide_prefetch: bool = False
-    # The review guide message whose "Looks good" this run records before the model runs.
+    # The review guide message whose "Next" this run records before the model runs.
     review_guide_approve_ts: str = ""
 
     # Reviewer run shape
@@ -179,15 +177,6 @@ class RunConfig(BaseModel):
     chat_model_id: str | None = None
     chat_effort: str | None = None
     chat_github_token: str | None = None
-
-    # Review-style analyzer
-    analyzer_mode: str | None = None
-    review_style_full_name: str | None = None
-    review_style_github_token: str | None = None
-    review_style_top_reviewers: list[str] | None = None
-    review_style_samples_text: str | None = None
-    review_style_reviews_sampled: Int | None = None
-    review_style_prs_sampled: Int | None = None
 
     # Eval harness
     eval: bool | None = None
@@ -272,6 +261,17 @@ class RunConfig(BaseModel):
     @property
     def repo_full_name(self) -> str:
         return self.repo.full_name if self.repo else ""
+
+    @property
+    def mcp_caller(self) -> str | None:
+        """The GitHub login of a person calling a tool over remote MCP, outside any thread.
+
+        Every graph run carries a thread id, so only the MCP server builds such a config;
+        the results go back to that person alone, as in a private thread they own.
+        """
+        if self.thread_id or self.source != "mcp" or not self.github_login:
+            return None
+        return self.github_login
 
     @property
     def is_eval(self) -> bool:

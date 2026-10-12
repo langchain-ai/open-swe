@@ -60,12 +60,46 @@ function parseCombo(combo: string): ParsedCombo {
   return parsed
 }
 
+/** Browser navigation the app must never take over, even where a page could intercept it. */
+const BROWSER_SHORTCUTS = [
+  "mod+l",
+  "alt+d",
+  "mod+t",
+  "mod+w",
+  "mod+r",
+  "mod+shift+r",
+  "mod+f",
+  "mod+g",
+  "mod+p",
+  "mod+[",
+  "mod+]",
+]
+
+function resolvedComboId(combo: ParsedCombo, platform: ShortcutPlatform) {
+  return [
+    (combo.meta || (combo.mod && platform === "mac")) && "meta",
+    (combo.ctrl || (combo.mod && platform !== "mac")) && "ctrl",
+    combo.alt && "alt",
+    combo.shift && "shift",
+    combo.key,
+  ]
+    .filter(Boolean)
+    .join("+")
+}
+
 export function eventMatchesShortcut(
   event: KeyboardEvent,
   shortcut: string,
   platform = shortcutPlatform()
 ): boolean {
   const combo = parseCombo(shortcut)
+  const id = resolvedComboId(combo, platform)
+  if (
+    BROWSER_SHORTCUTS.some(
+      (reserved) => resolvedComboId(parseCombo(reserved), platform) === id
+    )
+  )
+    return false
   if (event.key.toLowerCase() !== combo.key) return false
   const expectMeta = combo.meta || (combo.mod && platform === "mac")
   const expectCtrl = combo.ctrl || (combo.mod && platform !== "mac")

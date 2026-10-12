@@ -617,6 +617,40 @@ test.describe("Human review in Slack", () => {
     ).toHaveCount(0);
   });
 
+  test("unreviewable pull requests explain why a review can't be requested", async ({
+    page,
+    request,
+  }) => {
+    await setReviewChannel(request);
+    await loginAs(page, ALICE);
+    await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Conflicted change",
+      author: ALICE.login,
+      mergeable: false,
+      mergeable_state: "dirty",
+      check_runs: GREEN,
+    });
+    await page.goto("/agents/reviews");
+    const row = page
+      .getByRole("listitem")
+      .filter({ hasText: "Conflicted change" });
+    await expect(
+      row.getByRole("button", { name: "Request review in Slack" }),
+    ).toBeDisabled();
+    await row
+      .getByRole("button", { name: "Why a review can't be requested" })
+      .click();
+    await expect(
+      page.getByText(
+        "A review can't be requested yet: it has merge conflicts.",
+      ),
+    ).toBeVisible();
+    await page.screenshot({
+      path: "test-results/human-review-blocked-reason.png",
+    });
+  });
+
   test("requested from the dashboard; nobody signs up, so the agent picks a reviewer, DMs them without posting in the channel, and it merges on their approval", async ({
     page,
     request,
@@ -991,7 +1025,8 @@ test.describe("Human review in Slack", () => {
     );
     expect(modal.blocks[0].element.initial_option).toBeUndefined();
 
-    // 5. Submitting a reason withdraws the pick on Slack and GitHub and tells them.
+    // 5. Submitting a reason withdraws the pick on Slack and GitHub. The pick's own
+    //    message trades its buttons for the outcome, and no new DM notifies them.
     await control(request, "/mock/slack/view-submit", {
       view_id: modal.id,
       user: declining.slack,
@@ -1003,22 +1038,24 @@ test.describe("Human review in Slack", () => {
     });
     await expect
       .poll(
-        async () =>
-          (await channelMessages(request, dmChannel)).some(
-            (m) =>
-              m.is_bot &&
-              m.text.includes("You declined the review") &&
-              m.text.includes("Away or unavailable"),
-          ),
+        async () => {
+          const settled = (await channelMessages(request, dmChannel)).find(
+            (m) => m.ts === picked.ts,
+          );
+          return (
+            settled !== undefined &&
+            buttons(settled).length === 0 &&
+            cardText(settled).includes("Review declined")
+          );
+        },
         { timeout: 30_000 },
       )
       .toBe(true);
-    // The pick's own message trades its buttons for the outcome.
-    const settled = (await channelMessages(request, dmChannel)).find(
-      (m) => m.ts === picked.ts,
-    );
-    expect(buttons(settled!)).toEqual([]);
-    expect(cardText(settled!)).toContain("Review declined");
+    expect(
+      (await channelMessages(request, dmChannel)).some((m) =>
+        m.text.includes("You declined the review"),
+      ),
+    ).toBe(false);
     await expect
       .poll(async () =>
         (await pull(request, seeded.number)).requested_reviewers.includes(

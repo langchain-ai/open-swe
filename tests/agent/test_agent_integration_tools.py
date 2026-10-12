@@ -151,7 +151,9 @@ def provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LLM_FALLBACK_MODEL_ID", raising=False)
 
 
-async def test_a_routed_call_receives_loaded_tools_in_the_routed_models_format() -> None:
+async def test_a_routed_call_receives_loaded_tools_in_the_routed_models_format(
+    registry_db: None,
+) -> None:
     providers = _Providers()
 
     await _run(
@@ -174,6 +176,7 @@ async def test_a_routed_call_receives_loaded_tools_in_the_routed_models_format()
 
 
 async def test_a_fallback_attempt_receives_loaded_tools_in_the_fallback_models_format(
+    registry_db: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LLM_FALLBACK_MODEL_ID", _GPT)

@@ -41,7 +41,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
   )
 
   const state = transcript.state
-  const contextTokens = state?.contextTokens ?? null
+  const contextUsage = state?.contextUsage ?? null
   const subagents = useCallback(
     (namespace: ReadonlyArray<string>): Array<SubagentToolCall> =>
       state ? subagentToolCalls(state, namespace) : [],
@@ -71,7 +71,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       isOffloading: transcript.isOffloading,
       routed: transcript.routed,
       connection: transcript.connection,
-      contextTokens,
+      contextUsage,
       subagentToolCalls: subagents,
       subagentMessages: subagentTranscript,
       subagentTask: task,
@@ -83,7 +83,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       loadOlder: transcript.loadOlder,
     }),
     [
-      contextTokens,
+      contextUsage,
       startRun,
       stop,
       subagents,

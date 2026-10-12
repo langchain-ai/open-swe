@@ -2,11 +2,11 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github import repos
+from openswe.github.http import GitHubClient
 from openswe.github.repo_cache import (
     REPO_LIST_FRESH_MS,
     read_cached_repos,
@@ -69,7 +69,5 @@ async def list_repos(
 async def api_repository_merge_methods(
     owner: str, repo: str, session: dict[str, Any] = SESSION_DEP
 ) -> RepositoryMergeMethods:
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await repository_merge_methods(owner, repo, token)
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await repository_merge_methods(github.repo(owner, repo))

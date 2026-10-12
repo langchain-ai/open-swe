@@ -62,14 +62,14 @@ async def test_gateways_are_read_with_the_users_own_token(monkeypatch):
     def handle(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         return httpx.Response(
-            200, json={"items": [{"id": GATEWAY_ID, "name": "Open SWE", "tools": [{}, {}]}]}
+            200, json={"items": [{"id": GATEWAY_ID, "name": "Open SWE", "tool_count": 200}]}
         )
 
     monkeypatch.setattr(
         managed, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle))
     )
     assert await managed.list_gateways("Alice") == [
-        managed.Gateway(id=GATEWAY_ID, name="Open SWE", tool_count=2)
+        managed.Gateway(id=GATEWAY_ID, name="Open SWE", tool_count=200)
     ]
     assert requests[-1].headers["Authorization"] == "Bearer alice-langsmith-token"
     assert "X-LangSmith-Identity" not in requests[-1].headers
@@ -99,7 +99,7 @@ async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
         assert record.url.endswith(f"/v1/managed-tools/gateways/{GATEWAY_ID}/mcp")
         assert record.connection_headers()["Authorization"] == "Bearer alice-langsmith-token"
         return [
-            Tool(name=name, inputSchema={"type": "object"})
+            Tool(name=name, input_schema={"type": "object"})
             for name in ("notion_notion-search", "linear_list_issues")
         ]
 
@@ -125,7 +125,7 @@ async def test_langsmith_outage_drops_only_the_gateway(monkeypatch):
     monkeypatch.setattr(managed, "langsmith_access_token", unavailable)
 
     async def discover(record, namespace):
-        return [Tool(name="search", inputSchema={"type": "object"})]
+        return [Tool(name="search", input_schema={"type": "object"})]
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
     workspace_record = MCPConnection(

@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from openswe.audit_logs.context import bind_workspace, current_audit_log
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
@@ -467,8 +468,7 @@ async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSetti
     defaults = _default_settings()
     slug = resolve_settings_workspace(workspace)
     try:
-        instance = await _instance_record()
-        overrides = await _workspace_record(slug)
+        instance, overrides = await asyncio.gather(_instance_record(), _workspace_record(slug))
     except Exception:
         logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
         return WorkspaceSettings(defaults)
@@ -815,6 +815,7 @@ async def api_get_instance_settings(_session: dict[str, Any] = SESSION_DEP) -> d
 
 @router.put("/settings")
 @router.put("/team-settings", include_in_schema=False)
+@audit_endpoint
 async def api_put_instance_settings(
     body: WorkspaceSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
 ) -> dict[str, Any]:
@@ -833,6 +834,7 @@ async def api_get_workspace_settings(
 
 
 @router.put("/workspaces/{workspace}/settings")
+@audit_endpoint
 async def api_put_workspace_settings(
     workspace: str,
     body: WorkspaceSettingsUpdate,

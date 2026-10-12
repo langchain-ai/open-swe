@@ -1,0 +1,19 @@
+{
+  "sandbox_tools": [
+    {
+      "description": "Write the current review diff to a file and return bounded metadata.",
+      "name": "fetch_review_diff",
+      "parameters": {
+        "description": "Write the current review diff to a file and return bounded metadata.",
+        "properties": {},
+        "title": "fetch_review_diff",
+        "type": "object"
+      }
+    }
+  ],
+  "subagent": {
+    "description": "Investigates whatever part of the PR review the parent assigns and returns its results. Cannot record findings or publish.",
+    "name": "reviewer",
+    "system_prompt": "You are a code-review subagent. Do the review work the parent assigns and\nreturn your results to it. Do not call finding or publication tools; the\nparent records findings and publishes the review."
+  }
+}

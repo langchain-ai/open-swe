@@ -12,13 +12,16 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
+import httpx2
 import pytest
 
 from openswe import store as agent_store
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
 from openswe.tools import access as tool_access
+from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
+from openswe.utils.thread_ops import langgraph_url
 from openswe.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
 
@@ -91,8 +94,8 @@ class FakeStore:
         offset: int = 0,
     ) -> dict[str, Any]:
         matches = [
-            {"value": dict(value)}
-            for value in self.values(namespace).values()
+            {"key": key, "value": dict(value)}
+            for key, value in self.values(namespace).items()
             if all(value.get(k) == expected for k, expected in (filter or {}).items())
         ]
         return {"items": matches[offset : offset + limit]}
@@ -109,6 +112,44 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     client = FakeStoreClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client.store
+
+
+class FakeUserRecords:
+    """In-memory stand-in for every ``UserRecords`` kind, keyed like PostgreSQL resolves logins."""
+
+    def __init__(self) -> None:
+        self.items: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def seed(self, kind: str, login: str, value: dict[str, Any], key: str = "") -> None:
+        self.items[(kind, login.strip().lower(), key)] = dict(value)
+
+    def get(self, kind: str, login: str, key: str = "") -> dict[str, Any]:
+        return self.items[(kind, login.strip().lower(), key)]
+
+    def pop(self, kind: str, login: str, key: str = "") -> dict[str, Any] | None:
+        return self.items.pop((kind, login.strip().lower(), key), None)
+
+
+@pytest.fixture
+def user_records(monkeypatch: pytest.MonkeyPatch) -> FakeUserRecords:
+    """Route every ``UserRecords`` access to an in-memory table for this test."""
+    fake = FakeUserRecords()
+
+    async def get(self: UserRecords, login: str, key: str = "") -> dict[str, Any] | None:
+        value = fake.items.get((self.kind, login.strip().lower(), key))
+        return None if value is None else dict(value)
+
+    async def put(self: UserRecords, login: str, value: dict[str, Any], key: str = "") -> None:
+        fake.seed(self.kind, login, value, key)
+
+    async def pop(self: UserRecords, login: str, key: str = "") -> dict[str, Any] | None:
+        return fake.pop(self.kind, login, key)
+
+    monkeypatch.setattr(UserRecords, "get", get)
+    monkeypatch.setattr(UserRecords, "put", put)
+    monkeypatch.setattr(UserRecords, "delete", pop)
+    monkeypatch.setattr(UserRecords, "pop", pop)
+    return fake
 
 
 @pytest.fixture
@@ -227,6 +268,59 @@ def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
     return bot
 
 
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _refusal(url: httpx.URL | httpx2.URL) -> str | None:
+    """Why a test may not reach ``url``: another machine, or the LangGraph server a
+    developer may have running on ``LANGGRAPH_URL``."""
+    if url.host not in _LOOPBACK:
+        reason = "tests never leave this machine"
+    elif (langgraph := httpx.URL(langgraph_url())).host in _LOOPBACK and url.port == langgraph.port:
+        reason = "that is LANGGRAPH_URL, where a developer's LangGraph server may be running"
+    else:
+        return None
+    return f"Refused {url}: {reason}. Fake the boundary this test reaches."
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse real network requests; MockTransport, ASGITransport and local fakes still work."""
+    send_async = httpx.AsyncHTTPTransport.handle_async_request
+    send = httpx.HTTPTransport.handle_request
+    send_async2 = httpx2.AsyncHTTPTransport.handle_async_request
+    send2 = httpx2.HTTPTransport.handle_request
+
+    async def guarded_async(
+        self: httpx.AsyncHTTPTransport, request: httpx.Request
+    ) -> httpx.Response:
+        if refusal := _refusal(request.url):
+            raise httpx.ConnectError(refusal, request=request)
+        return await send_async(self, request)
+
+    def guarded(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        if refusal := _refusal(request.url):
+            raise httpx.ConnectError(refusal, request=request)
+        return send(self, request)
+
+    async def guarded_async2(
+        self: httpx2.AsyncHTTPTransport, request: httpx2.Request
+    ) -> httpx2.Response:
+        if refusal := _refusal(request.url):
+            raise httpx2.ConnectError(refusal, request=request)
+        return await send_async2(self, request)
+
+    def guarded2(self: httpx2.HTTPTransport, request: httpx2.Request) -> httpx2.Response:
+        if refusal := _refusal(request.url):
+            raise httpx2.ConnectError(refusal, request=request)
+        return send2(self, request)
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", guarded_async)
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guarded)
+    monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", guarded_async2)
+    monkeypatch.setattr(httpx2.HTTPTransport, "handle_request", guarded2)
+
+
 @pytest.fixture(autouse=True)
 def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "test-user,trusted-user,reviewer")
@@ -281,6 +375,17 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
         return True
 
     monkeypatch.setattr(webhook_common, "is_review_repo_enabled", _enabled)
+
+
+@pytest.fixture
+def github_app(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """The App installation token ``GitHubClient.as_app`` mints; ``return_value = None`` fails it."""
+    from openswe.github import app
+
+    monkeypatch.setattr(app, "get_github_app_installation_id_for_repo", AsyncMock(return_value=42))
+    token = AsyncMock(return_value="app-token")
+    monkeypatch.setattr(app, "get_github_app_installation_token", token)
+    return token
 
 
 @pytest.fixture

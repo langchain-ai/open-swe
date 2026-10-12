@@ -1,6 +1,8 @@
 /** @vitest-environment jsdom */
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { QueryClientProvider } from "@tanstack/react-query"
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -29,7 +31,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     openPullRequests: vi.fn(),
     searchPullRequests: vi.fn(),
-    myPullRequestDetails: vi.fn(),
+    pullRequestStatus: vi.fn(),
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
     fixPullRequest: vi.fn(),
@@ -73,6 +75,7 @@ const pull = (
   repo: "acme/app",
   number,
   title: `Change ${number}`,
+  state: "open",
   draft: false,
   additions: number,
   deletions: 3,
@@ -81,6 +84,7 @@ const pull = (
   headSha: "a".repeat(40),
   headRef: "feature/example",
   reviewDecision: "none",
+  reviewers: [],
   reviewRequired: false,
   statusAvailable: true,
   createdAt: `2026-09-0${number}T00:00:00Z`,
@@ -125,7 +129,9 @@ function mount() {
   client.setDefaultOptions({ queries: { retry: false } })
   return render(
     <QueryClientProvider client={client}>
-      <Harness />
+      <TooltipProvider>
+        <Harness />
+      </TooltipProvider>
     </QueryClientProvider>
   )
 }
@@ -164,17 +170,34 @@ const statuses = (card: HTMLElement) =>
   statusNames.filter((status) => within(card).queryAllByText(status).length > 0)
 const titles = () =>
   cards().map((card) => within(card).getByText(/^Change/).textContent)
-const mergeSelect = async (number: number) => {
-  const select = (await screen.findByRole("combobox", {
+// The merge button's face: a method once one is known, else a prompt to pick one.
+const MERGE = /^(Squash and merge|Merge|Rebase and merge|Choose how to merge)$/
+const openMergeMethods = async (number: number) => {
+  const trigger = (await screen.findByRole("button", {
     name: `Merge method for PR #${number}`,
-  })) as HTMLSelectElement
-  await waitFor(() => expect(select.disabled).toBe(false))
-  return select
+  })) as HTMLButtonElement
+  await waitFor(() => expect(trigger.disabled).toBe(false))
+  // Radix opens its menus on pointer-down or a key, never on a bare click.
+  fireEvent.keyDown(trigger, { key: "Enter" })
+  return screen.findAllByRole("menuitemradio")
 }
-const mergeOptions = (select: HTMLSelectElement) =>
-  within(select)
-    .getAllByRole("option")
-    .map((option) => option.textContent)
+const mergeOptions = async (number: number) => {
+  const items = await openMergeMethods(number)
+  const labels = items.map(
+    (item) => item.querySelector(".font-medium")?.textContent
+  )
+  fireEvent.keyDown(items[0]!, { key: "Escape" })
+  await waitFor(() =>
+    expect(screen.queryAllByRole("menuitemradio")).toEqual([])
+  )
+  return labels
+}
+const chooseMergeMethod = async (number: number, label: string) => {
+  await openMergeMethods(number)
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: new RegExp(`^${label}`) })
+  )
+}
 
 beforeEach(() => {
   vi.mocked(api.repoMergeMethods).mockResolvedValue({
@@ -200,23 +223,29 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
+const openFilter = (name: string) =>
+  act(() => screen.getByRole("combobox", { name }).focus())
+const repoListOptions = () =>
+  within(screen.getByRole("listbox", { name: /Filter by repository/ }))
+    .getAllByRole("option")
+    .map((option) => option.textContent)
 const repoOptions = async () => {
-  fireEvent.click(screen.getByLabelText("Filter by repository"))
-  return (await screen.findAllByRole("menuitemcheckbox")).map(
-    (option) => option.textContent
-  )
+  openFilter("Filter by repository")
+  await screen.findByRole("listbox", { name: /Filter by repository/ })
+  return repoListOptions()
 }
 const searchRepos = (text: string) =>
-  fireEvent.change(screen.getByLabelText("Search repositories…"), {
-    target: { value: text },
-  })
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "Filter by repository" }),
+    { target: { value: text } }
+  )
 
 describe("My PRs", () => {
   it("does not offer a fix while the associated thread is running", async () => {
     vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
     mount()
     const button = await screen.findByRole("button", {
-      name: "Fixing checks",
+      name: "Fixing conflicts",
     })
     expect((button as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByRole("button", { name: "Fix checks" })).toBeNull()
@@ -289,8 +318,10 @@ describe("My PRs", () => {
     )
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
-    fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
-    fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Squash and merge" })
+    )
     expect(await within(card).findByText(/^Merged ·/)).toBeTruthy()
     expect(screen.getByText("Change 1")).toBeTruthy()
     expect(api.mergePullRequest).toHaveBeenCalledWith(
@@ -302,7 +333,7 @@ describe("My PRs", () => {
       expect(within(card).getByText(/^Merged ·/)).toBeTruthy()
     )
     expect(titles()).toEqual(["Change 1", "Change 2"])
-    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
+    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
     expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
     expect(navigate).not.toHaveBeenCalled()
   })
@@ -317,7 +348,7 @@ describe("My PRs", () => {
     )
     mount()
     await screen.findByText("Change 1")
-    fireEvent.change(await mergeSelect(1), { target: { value: "merge" } })
+    await chooseMergeMethod(1, "Merge commit")
     fireEvent.click(screen.getByRole("button", { name: "Merge" }))
     await expectReported(
       "Could not merge acme/app#1",
@@ -370,10 +401,8 @@ describe("My PRs", () => {
       ["Draft", "Pending"],
       ["Conflicted", "Pending"],
     ])
-    fireEvent.click(screen.getByLabelText("Filter by status"))
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
-    )
+    openFilter("Filter by status")
+    fireEvent.click(await screen.findByRole("option", { name: "Conflicted" }))
     expect(titles()).toEqual(["Change 4"])
   })
   it("shows fix actions on conflicted or failing drafts but not healthy drafts", async () => {
@@ -474,7 +503,7 @@ describe("My PRs", () => {
       ),
     })
     let resolve!: (value: OpenPullRequest) => void
-    vi.mocked(api.myPullRequestDetails).mockImplementation(
+    vi.mocked(api.pullRequestStatus).mockImplementation(
       () =>
         new Promise((done) => {
           resolve = done
@@ -484,9 +513,7 @@ describe("My PRs", () => {
     await screen.findByText("Change 10")
     expect(screen.queryByText("Change 11")).toBeNull()
     expect(cards()).toHaveLength(10)
-    await waitFor(() =>
-      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(10)
-    )
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(10))
     resolve(pull(10))
     await waitFor(() =>
       expect(
@@ -544,11 +571,7 @@ describe("My PRs", () => {
     expect(within(section()).queryAllByRole("listitem")).toHaveLength(0)
     expect(await repoOptions()).toEqual(["acme/app", "acme/other"])
     searchRepos("other")
-    expect(
-      screen
-        .getAllByRole("menuitemcheckbox")
-        .map((option) => option.textContent)
-    ).toEqual(["acme/other"])
+    expect(repoListOptions()).toEqual(["acme/other"])
   })
 
   it("keeps the review verdict while GitHub decides whether the branch merges", async () => {
@@ -567,7 +590,7 @@ describe("My PRs", () => {
     expect(within(card).getByText("Approved")).toBeTruthy()
     expect(within(card).queryByText("Status unavailable")).toBeNull()
     // The card offers the merge and lets GitHub reject it.
-    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
+    expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
   it("names a required check that never reported instead of offering the merge", async () => {
@@ -585,7 +608,7 @@ describe("My PRs", () => {
     expect(
       within(card).getByText("Merge blocked: Lint Final Results never reported")
     ).toBeTruthy()
-    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
+    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
     expect(
       within(card).getByRole("button", { name: "Update branch" })
     ).toBeTruthy()
@@ -610,7 +633,7 @@ describe("My PRs", () => {
     expect(
       within(card).getByRole("button", { name: "Fix checks" })
     ).toBeTruthy()
-    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
+    expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
   it("shows a draft's conflicts and failing checks alongside Draft", async () => {
@@ -636,10 +659,8 @@ describe("My PRs", () => {
       expect((await card(title)).getByText("Draft")).toBeTruthy()
     }
     // Filtering by Conflicted has to reach the conflicted draft.
-    fireEvent.click(screen.getByLabelText("Filter by status"))
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
-    )
+    openFilter("Filter by status")
+    fireEvent.click(await screen.findByRole("option", { name: "Conflicted" }))
     expect(titles()).toEqual(["Change 1"])
   })
 
@@ -657,7 +678,7 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Approved")).toBeTruthy()
-    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
+    expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
   it("withholds the merge only where GitHub has already refused it", async () => {
@@ -672,7 +693,7 @@ describe("My PRs", () => {
     mount()
     const card = async (title: string) =>
       within((await screen.findByText(title)).closest("li")!)
-    const merge = { name: "Merge" }
+    const merge = { name: MERGE }
     expect((await card("Change 1")).queryByRole("button", merge)).toBeNull()
     expect((await card("Change 2")).queryByRole("button", merge)).toBeNull()
     // A failing check may be one GitHub does not require, so the attempt stands.
@@ -690,10 +711,11 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 1")
-    const select = await mergeSelect(1)
-    expect(select.value).toBe("")
-    fireEvent.change(select, { target: { value: "rebase" } })
-    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Choose how to merge" })
+    ).toBeTruthy()
+    await chooseMergeMethod(1, "Rebase merge")
+    fireEvent.click(screen.getByRole("button", { name: "Rebase and merge" }))
     await waitFor(() =>
       expect(window.localStorage.getItem("open-swe.reviews.mergeMethod")).toBe(
         "rebase"
@@ -706,7 +728,9 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 2")
-    expect((await mergeSelect(2)).value).toBe("rebase")
+    expect(
+      await screen.findByRole("button", { name: "Rebase and merge" })
+    ).toBeTruthy()
   })
 
   it("offers only the merge methods the repository allows", async () => {
@@ -727,20 +751,19 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 2")
     const card = screen.getByText("Change 1").closest("li")!
-    await waitFor(() => expect(within(card).queryByRole("combobox")).toBeNull())
-    const pair = await mergeSelect(2)
-    expect(mergeOptions(pair)).toEqual([
-      "Merge method",
-      "Squash merge",
-      "Merge commit",
-    ])
-    expect(pair.value).toBe("")
-    fireEvent.click(
-      within((await screen.findByText("Change 1")).closest("li")!).getByRole(
-        "button",
-        { name: "Merge" }
-      )
-    )
+    // The only allowed method needs no menu; the button already names it.
+    const only = await within(card).findByRole("button", {
+      name: "Squash and merge",
+    })
+    expect(
+      within(card).queryByRole("button", { name: "Merge method for PR #1" })
+    ).toBeNull()
+    expect(await mergeOptions(2)).toEqual(["Squash merge", "Merge commit"])
+    const pair = screen.getByText("Change 2").closest("li")!
+    expect(
+      within(pair).getByRole("button", { name: "Choose how to merge" })
+    ).toBeTruthy()
+    fireEvent.click(only)
     await waitFor(() =>
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
@@ -763,16 +786,14 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 1")
-    const select = await mergeSelect(1)
-    expect(mergeOptions(select)).toEqual([
-      "Merge method",
+    expect(await mergeOptions(1)).toEqual([
       "Squash merge",
       "Merge commit",
       "Rebase merge",
     ])
     expect(screen.queryByRole("alert")).toBeNull()
-    fireEvent.change(select, { target: { value: "rebase" } })
-    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    await chooseMergeMethod(1, "Rebase merge")
+    fireEvent.click(screen.getByRole("button", { name: "Rebase and merge" }))
     await waitFor(() =>
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
@@ -786,17 +807,15 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { detailsLoading: true })],
     })
-    vi.mocked(api.myPullRequestDetails)
+    vi.mocked(api.pullRequestStatus)
       .mockResolvedValueOnce(null)
       .mockResolvedValue(pull(1))
     mount()
-    await waitFor(() => expect(api.myPullRequestDetails).toHaveBeenCalledOnce())
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledOnce())
     await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
     expect(await screen.findByText("Change 1")).toBeTruthy()
-    await waitFor(() =>
-      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(2)
-    )
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(2))
   })
 
   it("filters conflicts and sends the applied repository to the server", async () => {
@@ -816,16 +835,17 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 1")
-    fireEvent.click(screen.getByLabelText("Filter by status"))
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
-    )
+    openFilter("Filter by status")
+    fireEvent.click(await screen.findByRole("option", { name: "Conflicted" }))
     expect(titles()).toEqual(["Change 2"])
-    fireEvent.click(
-      screen.getByRole("menuitemcheckbox", { name: "Reviewable" })
-    )
+    fireEvent.click(screen.getByRole("option", { name: "Reviewable" }))
     expect(titles()).toEqual(["Change 2", "Change 1"])
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
+    // Picking an option refocuses the filter on the next frame.
+    await act(() => new Promise(requestAnimationFrame))
+    fireEvent.keyDown(
+      screen.getByRole("combobox", { name: "Filter by status" }),
+      { key: "Escape" }
+    )
     // Options come from the accessible repository list, so globex/quiet is
     // offered even though no PR names it.
     expect(await repoOptions()).toEqual([
@@ -834,14 +854,8 @@ describe("My PRs", () => {
       "globex/quiet",
     ])
     searchRepos("ACME/OT")
-    expect(
-      screen
-        .getAllByRole("menuitemcheckbox")
-        .map((option) => option.textContent)
-    ).toEqual(["acme/other"])
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "acme/other" })
-    )
+    expect(repoListOptions()).toEqual(["acme/other"])
+    fireEvent.click(await screen.findByRole("option", { name: "acme/other" }))
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other",
@@ -852,9 +866,7 @@ describe("My PRs", () => {
       )
     )
     searchRepos("app")
-    fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "acme/app" })
-    )
+    fireEvent.click(await screen.findByRole("option", { name: "acme/app" }))
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other,acme/app",
@@ -972,7 +984,11 @@ describe("My PRs", () => {
         })
     )
     mount()
-    fireEvent.click(await screen.findByRole("button", { name: "Fix checks" }))
+    fireEvent.keyDown(
+      await screen.findByRole("button", { name: "More fixes for PR #2" }),
+      { key: "Enter" }
+    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Fix checks" }))
     expect(
       (
         (await screen.findByRole("button", {
@@ -1077,8 +1093,10 @@ describe("My PRs", () => {
     )
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
-    fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
-    fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Squash and merge" })
+    )
     await expectReported(
       "Could not merge acme/app#1",
       "A conversation must be resolved"

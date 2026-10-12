@@ -6,6 +6,7 @@ Wired into admin threads; each tool rechecks user or system authorization.
 import logging
 from typing import Any
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable as _configurable
 from openswe.tools.mcp_exposure import expose_mcp
@@ -95,6 +96,7 @@ async def list_workspaces() -> dict[str, Any]:
     }
 
 
+@audit_tool()
 @access(_WRITE)
 async def publish_workspace(
     name: str,
@@ -230,6 +232,7 @@ async def publish_workspace(
 
 
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def refresh_workspace_start(name: str) -> dict[str, Any]:
     """Implement the `refresh_workspace_start` tool."""
@@ -241,6 +244,7 @@ async def refresh_workspace_start(name: str) -> dict[str, Any]:
 
 
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def delete_workspace(name: str) -> dict[str, Any]:
     """Implement the `delete_workspace` tool."""
@@ -261,6 +265,7 @@ async def delete_workspace(name: str) -> dict[str, Any]:
 
 
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def configure_repository(
     workspace: str,

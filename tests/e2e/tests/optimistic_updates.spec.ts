@@ -84,8 +84,10 @@ async function writeInstanceSettings(
 
 function settingSwitch(page: Page, label: string): Locator {
   return page
-    .locator('div[class*="py-3.5"]')
+    .locator("div")
     .filter({ has: page.getByText(label, { exact: true }) })
+    .filter({ has: page.getByRole("switch") })
+    .last()
     .getByRole("switch");
 }
 

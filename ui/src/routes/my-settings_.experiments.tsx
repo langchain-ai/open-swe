@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { Switch } from "@langchain/macaw-components/Switch"
 
 import {
   SettingsPage,
   SettingsRow,
   SettingsSection,
 } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
@@ -34,7 +34,9 @@ function ExperimentsPage() {
           control={
             <Switch
               id="experimental_task_coordination"
+              aria-label="Asynchronous task coordination (experimental)"
               checked={profile.data?.experimental_task_coordination ?? false}
+              onChange={() => {}}
               disabled
             />
           }

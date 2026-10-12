@@ -9,6 +9,7 @@ from langgraph.config import get_config
 
 from openswe.run_config import RunConfig
 from openswe.runtime.execution import bindable_config
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.thread_ops import langgraph_client
 
@@ -55,6 +56,7 @@ async def _collect_thread_details() -> dict[str, Any]:
     return details
 
 
+@expose_mcp()
 async def report_platform_issue(
     problem_description: str,
     keywords: list[str],
