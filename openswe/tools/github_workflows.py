@@ -6,7 +6,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient
 from openswe.github.workflows import WorkflowPolicies, WorkflowRule, workflow_identity
-from openswe.tools.access import Policy, access, ack
+from openswe.tools.access import Policy, access, ack, resolve_access
 from openswe.tools.admin_gate import configurable
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
@@ -24,6 +24,7 @@ async def manage_workflow_allowlist(
     fixed_inputs: dict[str, str] | None = None,
     allow_bot_inputs: bool = False,
     workspace: str | None = None,
+    admin_only: bool = False,
 ) -> dict[str, object]:
     """Configure one workflow's fixed ref and permitted inputs as an admin."""
     repository, _ = workflow_identity(repository, workflow)
@@ -36,11 +37,14 @@ async def manage_workflow_allowlist(
     )
     if action == "set":
         rule = WorkflowRule(
-            ref=ref or "", fixed_inputs=fixed_inputs or {}, allow_bot_inputs=allow_bot_inputs
+            ref=ref or "",
+            fixed_inputs=fixed_inputs or {},
+            allow_bot_inputs=allow_bot_inputs,
+            admin_only=admin_only,
         )
         await policies.set(repository, workflow, rule)
     elif action in {"read", "remove"}:
-        if ref is not None or fixed_inputs is not None or allow_bot_inputs:
+        if ref is not None or fixed_inputs is not None or allow_bot_inputs or admin_only:
             raise ValueError("Configuration fields are only accepted for set")
         if action == "remove":
             await policies.remove(repository, workflow)
@@ -71,6 +75,10 @@ async def trigger_github_workflow(
     rule = await policies.read(repository, workflow)
     if not rule:
         raise ValueError("This workflow is not allowlisted")
+    if rule.admin_only and not (await resolve_access()).mode(
+        Policy(trusted="admin_thread", actor="admin")
+    ):
+        raise ValueError("This workflow can only be triggered in an admin thread by an admin")
     resolved_inputs = rule.dispatch_inputs(inputs)
     owner, name = repository.split("/")
     async with GitHubClient.as_app(owner, name, permissions={"metadata": "read"}) as github:

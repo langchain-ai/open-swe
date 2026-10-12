@@ -74,3 +74,11 @@ async def test_policies_do_not_cross_workspaces(fake_store: FakeStore):
     await WorkflowPolicies("one").set("o/r", "deploy.yml", WorkflowRule(ref="main"))
     assert await WorkflowPolicies("two").read("o/r", "deploy.yml") is None
     assert await WorkflowPolicies("one").read("o/r", "deploy.yml") is not None
+
+
+async def test_admin_only_requires_admin_thread(
+    fake_store: FakeStore, grant_tool_access: Callable[..., None]
+):
+    await manage_workflow_allowlist("set", "o/r", "deploy.yml", "main", admin_only=True)
+    with pytest.raises(ValueError, match="admin thread"):
+        await trigger_github_workflow("o/r", "deploy.yml")

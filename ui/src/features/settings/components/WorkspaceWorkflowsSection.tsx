@@ -32,6 +32,7 @@ export function WorkspaceWorkflowsSection({
   const [ref, setRef] = useState("main")
   const [fixedInputs, setFixedInputs] = useState("{}")
   const [allowBotInputs, setAllowBotInputs] = useState(false)
+  const [adminOnly, setAdminOnly] = useState(false)
   const [error, setError] = useState("")
   const mutation = useMutation({
     mutationFn: async ({
@@ -68,6 +69,7 @@ export function WorkspaceWorkflowsSection({
     setRef(policy.ref)
     setFixedInputs(JSON.stringify(policy.fixed_inputs, null, 2))
     setAllowBotInputs(policy.allow_bot_inputs)
+    setAdminOnly(policy.admin_only)
     setError("")
   }
   const save = () => {
@@ -101,6 +103,7 @@ export function WorkspaceWorkflowsSection({
           ref,
           fixed_inputs: inputs,
           allow_bot_inputs: allowBotInputs,
+          admin_only: adminOnly,
         },
         remove: false,
       })
@@ -227,6 +230,14 @@ export function WorkspaceWorkflowsSection({
                 aria-label="Allow additional bot inputs"
               />
               Allow additional bot inputs
+            </label>
+            <label className="flex items-center gap-space-2 text-xs text-secondary">
+              <Switch
+                checked={adminOnly}
+                onChange={setAdminOnly}
+                aria-label="Admin threads only"
+              />
+              Admin threads only
             </label>
             {error && (
               <p role="alert" className="text-xs text-error-primary">

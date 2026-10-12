@@ -16,6 +16,7 @@ class WorkflowRule(BaseModel):
     ref: str = Field(min_length=1)
     fixed_inputs: dict[str, str] = Field(default_factory=dict)
     allow_bot_inputs: bool = False
+    admin_only: bool = False
 
     def dispatch_inputs(self, supplied: dict[str, str] | None) -> dict[str, str]:
         supplied = supplied or {}

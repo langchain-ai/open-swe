@@ -6967,6 +6967,11 @@
       "WorkflowPolicy": {
         "additionalProperties": false,
         "properties": {
+          "admin_only": {
+            "default": false,
+            "title": "Admin Only",
+            "type": "boolean"
+          },
           "allow_bot_inputs": {
             "default": false,
             "title": "Allow Bot Inputs",
@@ -7004,6 +7009,11 @@
       "WorkflowRule": {
         "additionalProperties": false,
         "properties": {
+          "admin_only": {
+            "default": false,
+            "title": "Admin Only",
+            "type": "boolean"
+          },
           "allow_bot_inputs": {
             "default": false,
             "title": "Allow Bot Inputs",

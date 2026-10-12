@@ -899,6 +899,7 @@ export interface WorkflowPolicy {
   ref: string
   fixed_inputs: Record<string, string>
   allow_bot_inputs: boolean
+  admin_only: boolean
 }
 
 export interface RepositorySettings {
@@ -1622,6 +1623,7 @@ export const api = {
           ref: policy.ref,
           fixed_inputs: policy.fixed_inputs,
           allow_bot_inputs: policy.allow_bot_inputs,
+          admin_only: policy.admin_only,
         }),
       }
     ),
