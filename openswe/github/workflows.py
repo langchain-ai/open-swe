@@ -29,7 +29,10 @@ class WorkflowRule(BaseModel):
 
 def workflow_identity(repository: str, workflow: str) -> tuple[str, str]:
     repository = normalize_repo_full_name(repository).lower()
-    if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*\.ya?ml", workflow):
+    stem, dot, extension = workflow.rpartition(".")
+    if not (
+        dot and extension in {"yml", "yaml"} and re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*", stem)
+    ):
         raise ValueError("Provide a workflow filename, such as deploy.yml, without a path")
     return repository, f"{repository}/{workflow}"
 
