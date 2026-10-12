@@ -139,12 +139,28 @@ class PlanWorkspace:
         explanation: str,
         other: list[FileHunks] | None = None,
         after: int | None = None,
+        replace: list[int] | None = None,
     ) -> int:
         """Place a chunk of unplanned hunks; hunks in ``other`` go to Other first. Its number."""
         trimmed = " ".join(title.split())[:MAX_TITLE_CHARS]
         if not trimmed:
             raise RangeError("title must name the chunk")
-        unplanned = self.plan.unplanned(self.changes)
+        numbers = set(replace or [])
+        if any(number < 1 or number > len(self.plan.chunks) for number in numbers):
+            raise RangeError("replace must name existing chunk numbers")
+        replaced = {
+            chunk.id: chunk.model_copy(deep=True)
+            for number, chunk in enumerate(self.plan.chunks, start=1)
+            if number in numbers
+        }
+        released = {ref for chunk in replaced.values() for ref in chunk.lines}
+        planned = self.plan.planned() - released
+        unplanned = [
+            line
+            for change in self.changes
+            for line in change.lines
+            if LineRef.of(line) not in planned
+        ]
         hunks = self.hunks
         to_other = hunks.claim(other, unplanned) if other else []
         taken = set(to_other)
@@ -159,11 +175,17 @@ class PlanWorkspace:
 
         def place(plan: Plan) -> None:
             nonlocal number
-            planned = plan.planned()
+            if any(plan.chunk(chunk_id) != original for chunk_id, original in replaced.items()):
+                raise RangeError("another planner changed a chunk to replace; check again")
+            planned = plan.planned() - released
             if any(ref in planned for ref in [*to_other, *lines]):
                 raise RangeError("another planner just placed some of these lines; check again")
+            position = after
+            if replaced and position is None:
+                position = next(i for i, c in enumerate(plan.chunks) if c.id in replaced)
+            plan.chunks = [c for c in plan.chunks if c.id not in replaced]
             plan.add_other(to_other)
-            number = plan.add_chunk(chunk, after=after)
+            number = plan.add_chunk(chunk, after=position)
 
         await self._edit(place)
         return number
