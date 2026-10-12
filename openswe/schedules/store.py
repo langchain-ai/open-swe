@@ -6,6 +6,7 @@ GitHub triggers fire from the GitHub webhook, and every inbound event is
 claimed once per automation in ``event_claim`` before it runs.
 """
 
+import fnmatch
 import json
 import logging
 import re
@@ -110,6 +111,12 @@ class GitHubTrigger(BaseModel):
     kind: Literal["github"] = "github"
     repo: str = Field(min_length=3)
     events: list[GitHubEvent] = Field(min_length=1)
+    base_branches: list[Annotated[str, Field(min_length=1, pattern=r"\S")]] | None = Field(
+        default=None,
+        min_length=1,
+        description="Case-sensitive fnmatch patterns for PR base branches; null allows all. "
+        "Issue events ignore this filter; filtered PRs require a base ref.",
+    )
 
     @field_validator("repo")
     @classmethod
@@ -1166,7 +1173,7 @@ async def _github_event_prompt(
 
 
 async def _github_trigger_matches(
-    repo_full_name: str, events: set[GitHubEvent]
+    repo_full_name: str, events: set[GitHubEvent], base_ref: str | None = None
 ) -> list[tuple[dict[str, Any], GitHubEvent]]:
     """Enabled automations with a GitHub trigger on this repository for one of ``events``."""
     async with transaction() as conn:
@@ -1180,18 +1187,35 @@ async def _github_trigger_matches(
     for record in records:
         # Only this repository's triggers: another GitHub trigger on the same
         # automation configures events for its own repository.
-        configured = {
-            event
-            for trigger in record.get("triggers") or []
-            if trigger.get("kind") == "github"
-            and str((trigger.get("config") or {}).get("repo") or "").lower() == repo_full_name
-            for event in (trigger.get("config") or {}).get("events") or []
-        }
-        fired = sorted(event for event in events if event in configured)
+        fired: set[GitHubEvent] = set()
+        for trigger in record.get("triggers") or []:
+            config = trigger.get("config") or {}
+            if (
+                trigger.get("kind") != "github"
+                or str(config.get("repo") or "").lower() != repo_full_name
+            ):
+                continue
+            base_branches = config.get("base_branches")
+            fired.update(
+                event
+                for event in events
+                if event in (config.get("events") or [])
+                and (
+                    event == "issues.opened"
+                    or base_branches is None
+                    or (
+                        base_ref is not None
+                        and any(fnmatch.fnmatchcase(base_ref, pattern) for pattern in base_branches)
+                    )
+                )
+            )
         if fired:
             # The most specific event names the run: a merge over a plain close.
             matches.append(
-                (record, "pull_request.merged" if "pull_request.merged" in fired else fired[0])
+                (
+                    record,
+                    "pull_request.merged" if "pull_request.merged" in fired else sorted(fired)[0],
+                )
             )
     return matches
 
@@ -1233,7 +1257,12 @@ async def launch_github_automations(
         )
         return []
     full_name = f"{owner_login}/{repo_name}".lower()
-    matches = await _github_trigger_matches(full_name, events)
+    pull_request = payload.get("pull_request")
+    base = pull_request.get("base") if isinstance(pull_request, dict) else None
+    base_ref = base.get("ref") if isinstance(base, dict) else None
+    matches = await _github_trigger_matches(
+        full_name, events, base_ref if isinstance(base_ref, str) and base_ref else None
+    )
     if not matches:
         logger.info(
             "No GitHub automations matched the delivery",

@@ -10,6 +10,8 @@ Args:
   - ``{"kind": "schedule", "cron": "0 9 * * 1"}`` runs on a five-field UTC cron.
     Name any repository the run should work in in ``prompt``.
   - ``{"kind": "github", "repo": "owner/repo", "events": [...]}`` runs on events in that repository, passed to the run as untrusted context: "issues.opened", "pull_request.opened", "pull_request.closed" (merged or not), and "pull_request.merged".
+    Optional ``base_branches`` is a list of case-sensitive fnmatch patterns, e.g. ["main", "release/*"], for PR base refs; omit or null for all branches.
+    Filtered PRs without a base ref do not fire; issue events ignore it.
   - ``{"kind": "slack", "channel": "C0123456789", "events": ["message.posted"]}`` runs on new top-level messages in a Slack channel Open SWE is a member of, passed to the run as untrusted context.
     Optional filters: ``senders`` ("anyone", "people", or "bots"), ``match`` (a case-insensitive regular expression the text must match), and ``max_runs_per_hour``.
   - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created" and "issue.labeled" (a label was added).

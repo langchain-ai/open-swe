@@ -530,6 +530,16 @@ export function AutomationEditor({
                       ? "PR closed also fires when a pull request is merged."
                       : "Event details reach the run as untrusted context."
                   )}
+                  <FilterInput
+                    label="PR base branches"
+                    value={draft.baseBranches}
+                    onChange={(baseBranches) => set({ baseBranches })}
+                    placeholder="Any; main, release/*"
+                    disabled={!canManage}
+                  />
+                  {hint(
+                    "Comma-separated, case-sensitive fnmatch patterns. Blank allows all branches; issue events ignore this filter."
+                  )}
                 </TriggerCard>
               )
             }

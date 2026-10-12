@@ -330,6 +330,9 @@ describe("AutomationEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose repository" }))
     fireEvent.click(screen.getByRole("button", { name: "PR merged" }))
     fireEvent.click(screen.getByRole("button", { name: "PR closed" }))
+    fireEvent.change(screen.getByLabelText("PR base branches"), {
+      target: { value: "main, release/*" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
 
     expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([
@@ -338,8 +341,60 @@ describe("AutomationEditor", () => {
         kind: "github",
         repo: "acme/oss",
         events: ["pull_request.closed", "pull_request.merged"],
+        base_branches: ["main", "release/*"],
       },
     ])
+  })
+
+  it("preserves an existing base branch filter and lets the user clear it", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Backport",
+          prompt: "Backport the merged PR",
+          schedule: null,
+          triggers: [
+            {
+              id: "trigger_1",
+              kind: "github",
+              repo: "acme/oss",
+              events: ["pull_request.merged"],
+              base_branches: ["main"],
+            },
+          ],
+          scope: "workspace",
+          workspace: "default",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />,
+      { wrapper: TooltipProvider }
+    )
+
+    expect(screen.getByDisplayValue("main")).toBeTruthy()
+    fireEvent.change(screen.getByLabelText("Automation name"), {
+      target: { value: "Main backports" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(
+      mocks.updateMutate.mock.calls[0]?.[0].body.triggers[0]
+    ).toMatchObject({
+      base_branches: ["main"],
+    })
+
+    fireEvent.change(screen.getByLabelText("PR base branches"), {
+      target: { value: "" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(
+      mocks.updateMutate.mock.calls[1]?.[0].body.triggers[0]
+    ).toMatchObject({
+      base_branches: null,
+    })
   })
 
   it("saves a Linear trigger with its team and filters", () => {
