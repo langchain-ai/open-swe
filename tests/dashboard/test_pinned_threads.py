@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from typing import cast
 from unittest.mock import AsyncMock
 
@@ -8,7 +8,10 @@ import httpx
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
+from openswe.database.store_imports import StoreImport
+from openswe.store import StoreEntry
 from openswe.threads import listing, pins, summary
+from openswe.users.models import User
 from tests.conftest import FakeStore
 
 
@@ -85,8 +88,16 @@ async def thread_api(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[ThreadAPI
         yield api
 
 
+@pytest.fixture
+async def people(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob,admin")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    for external_id, login in enumerate(("alice", "bob", "admin")):
+        await User.sign_in("github", str(external_id), login=login)
+
+
 async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_and_refresh(
-    thread_api: ThreadAPI, fake_store: FakeStore
+    thread_api: ThreadAPI, people: None
 ) -> None:
     thread_api.add("shared", source="slack", github_login="someone-else")
     thread_api.add("private", visibility="private", owner_login="alice")
@@ -108,7 +119,7 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
 
 
 async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(
-    thread_api: ThreadAPI, fake_store: FakeStore
+    thread_api: ThreadAPI, people: None
 ) -> None:
     await pins.pin_thread("alice", "pin")
     thread_api.fail_search = True
@@ -118,7 +129,7 @@ async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(
 
 
 async def test_latest_run_requests_are_bounded_and_legacy_idle_status_is_refreshed(
-    thread_api: ThreadAPI, fake_store: FakeStore
+    thread_api: ThreadAPI, people: None
 ) -> None:
     for index in range(20):
         thread_id = str(index)
@@ -129,3 +140,27 @@ async def test_latest_run_requests_are_bounded_and_legacy_idle_status_is_refresh
     assert thread_api.count("POST", "/search") == 1
     assert thread_api.count("GET", "/runs") == 20
     assert 1 < thread_api.peak_runs <= 8
+
+
+async def test_store_import_moves_known_peoples_pins_and_keeps_the_rest_waiting(
+    people: None, fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await pins.pin_thread("alice", "kept")
+    for login in ("alice", "carol"):
+        fake_store.seed([pins.THREAD_PINS_NAMESPACE, login], "legacy", {"thread_id": "legacy"})
+
+    async def search_all_entries(namespace: Sequence[str]) -> list[StoreEntry]:
+        return [
+            StoreEntry(list(item_namespace), value, key)
+            for item_namespace, items in fake_store.items.items()
+            if item_namespace[: len(namespace)] == tuple(namespace)
+            for key, value in items.items()
+        ]
+
+    monkeypatch.setattr(pins, "search_all_entries", search_all_entries)
+
+    assert await pins.import_store_pins() == StoreImport(moved=1, waiting=1)
+    assert await pins.import_store_pins() == StoreImport(waiting=1)
+    assert await pins.list_thread_pin_ids("alice") == ["kept", "legacy"]
+    assert list(fake_store.values([pins.THREAD_PINS_NAMESPACE, "alice"])) == []
+    assert list(fake_store.values([pins.THREAD_PINS_NAMESPACE, "carol"])) == ["legacy"]

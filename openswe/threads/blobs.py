@@ -15,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.agent_store import AgentStore
 from openswe.database.orm import NOW, Base
-from openswe.database.store_imports import StoreImport, run_store_import
+from openswe.database.store_imports import StoreImport
 from openswe.store import StoreEntry, delete_value, search_entries
 from openswe.utils.json_types import JsonObject
 
@@ -116,14 +116,6 @@ async def copy_thread_blobs(
             )
             .on_conflict_do_nothing()
         )
-
-
-async def run_blob_import() -> None:
-    """Drain thread blobs from the Store in the background, so a backlog never delays startup."""
-    try:
-        await run_store_import("thread_blobs", import_store_blobs)
-    except Exception:
-        logger.exception("Importing thread blobs from the LangGraph Store failed")
 
 
 async def import_store_blobs() -> StoreImport:

@@ -51,12 +51,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
-    from openswe.database.store_imports import run_store_import
+    from openswe.database.store_imports import drain_store_imports, run_store_import
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
-    from openswe.threads.blobs import run_blob_import
+    from openswe.thread_feedback import FEEDBACK
+    from openswe.threads.blobs import import_store_blobs
+    from openswe.threads.pins import import_store_pins
+    from openswe.threads.plan_store import import_store_plans
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
@@ -121,11 +124,27 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # import succeeds.
         logger.exception("Importing skills from the LangGraph Store failed")
     try:
+        # Pinned threads used to live in the LangGraph Store, keyed by login.
+        await run_store_import("thread_pins", import_store_pins)
+    except Exception:  # noqa: BLE001
+        # Startup continues: pins still in the Store are missing from the
+        # sidebar until an import succeeds.
+        logger.exception("Importing thread pins from the LangGraph Store failed")
+    try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()
     except Exception:  # noqa: BLE001
         logger.exception("Deleting review-style analyzer crons failed")
-    blob_import = asyncio.create_task(run_blob_import())
+    # Thread-keyed content can be large, so it drains from the Store in the background.
+    store_imports = asyncio.create_task(
+        drain_store_imports(
+            {
+                "thread_feedback": FEEDBACK.import_store,
+                "plans": import_store_plans,
+                "thread_blobs": import_store_blobs,
+            }
+        )
+    )
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -167,7 +186,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
     finally:
-        blob_import.cancel()
+        store_imports.cancel()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()

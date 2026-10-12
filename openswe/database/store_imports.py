@@ -7,6 +7,7 @@ the import. ``store_import`` records each import's progress, and its row lock
 keeps two replicas from running the same import.
 """
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -63,3 +64,15 @@ async def run_store_import(name: str, run: Callable[[], Awaitable[StoreImport]])
         "Store import pass finished",
         extra={"store_import": name, "moved_records": result.moved, "waiting": result.waiting},
     )
+
+
+async def drain_store_imports(imports: dict[str, Callable[[], Awaitable[StoreImport]]]) -> None:
+    """Run imports side by side in the background, so a backlog never delays startup."""
+    await asyncio.gather(*(_run_logged(name, run) for name, run in imports.items()))
+
+
+async def _run_logged(name: str, run: Callable[[], Awaitable[StoreImport]]) -> None:
+    try:
+        await run_store_import(name, run)
+    except Exception:
+        logger.exception("Store import failed", extra={"store_import": name})
