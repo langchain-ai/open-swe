@@ -65,6 +65,39 @@ async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -
     )
 
 
+@pytest.mark.parametrize("deleted", [True, False])
+async def test_completed_pick_deletes_dm_and_preserves_reviewer(deleted: bool) -> None:
+    request = HumanReviewRequest(pull_request_id=User().id, head_sha="abc", kind="standard")
+    user = User(identities=[UserIdentity(provider="github", external_id="grace", login="Grace")])
+    pick = HumanReviewParticipant(
+        user_id=user.id,
+        decision="picked",
+        assigned_by_agent=True,
+        dm_channel_id="D1",
+        dm_ts="1.2",
+        dm_text="Accept this review",
+    )
+    pick.user = user
+    request.participants.append(pick)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch(
+            "openswe.human_review.lifecycle.delete_slack_message", AsyncMock(return_value=deleted)
+        ) as delete,
+    ):
+        await ReviewPicks(request).complete({"grace"})
+        assert request.participants == [pick]
+        assert pick.decision == ("review" if deleted else "picked")
+        assert pick.dm_ts == ("" if deleted else "1.2")
+        await ReviewPicks(request).complete({"grace"})
+        assert delete.await_count == (1 if deleted else 2)
+
+
 async def test_decline_only_withdraws_the_users_pending_pick() -> None:
     from openswe.human_review.standard import decline
 
