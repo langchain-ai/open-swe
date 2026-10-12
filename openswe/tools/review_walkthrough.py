@@ -247,11 +247,17 @@ async def walkthrough_plan_chunk(
     explanation: str,
     other: list[FileHunks] | None = None,
     after: int | None = None,
+    replace: list[int] | None = None,
 ) -> dict[str, Any]:
     """Implement the `walkthrough_plan_chunk` tool."""
     return await _plan(
         lambda ctx: ctx.workspace.plan_chunk(
-            title=title, show=show, explanation=explanation, other=other, after=after
+            title=title,
+            show=show,
+            explanation=explanation,
+            other=other,
+            after=after,
+            replace=replace,
         )
     )
 
