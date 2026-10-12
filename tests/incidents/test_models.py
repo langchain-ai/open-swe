@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from agent.incidents.models import IncidentPolicy
+from openswe.incidents.models import IncidentPolicy
 
 
 @pytest.mark.parametrize("prefix", ["", "#", "inc *", "*"])

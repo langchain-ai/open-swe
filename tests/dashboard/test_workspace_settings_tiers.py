@@ -1,17 +1,18 @@
 """Workspace settings resolve by tier: hardcoded defaults, the instance record, then a workspace's overrides."""
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
-from agent.dashboard import workspace_settings, workspace_settings_cache
-from agent.dashboard.workspace_settings import (
+from openswe.audit_logs.models import AuditLog
+from openswe.dashboard import workspace_settings, workspace_settings_cache
+from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_instance_settings,
     get_workspace_settings,
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
 
 
@@ -95,11 +96,16 @@ async def test_workspace_settings_api_round_trips_overrides(
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
     await upsert_instance_settings(WorkspaceSettingsUpdate(review_draft_prs=True))
 
+    entry = AuditLog(operation_name="put_workspace_settings")
+    request = Request({"type": "http", "state": {"audit_log": entry}})
     saved = await workspace_settings.api_put_workspace_settings(
         workspace=" OSS ",
         body=WorkspaceSettingsUpdate(review_draft_prs=False),
+        request=request,
         _admin={"sub": "alice"},
     )
+    assert entry.workspace_id == await WORKSPACES.id_for_slug("oss")
+    assert entry.enrichments.workspace == "oss"
     assert saved["overrides"] == {"review_draft_prs": False}
     assert saved["effective"]["review_draft_prs"] is False
 

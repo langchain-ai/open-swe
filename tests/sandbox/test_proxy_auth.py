@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx2
 import pytest
 
-from agent.github.sandbox_access import SandboxGitHubAccess
-from agent.sandboxes.providers.langsmith import (
+from openswe.github.sandbox_access import SandboxGitHubAccess
+from openswe.sandboxes.providers.langsmith import (
     configure_sandbox_proxy,
 )
 
@@ -23,7 +23,7 @@ class TestConfigureSandboxProxy:
 
     async def test_without_token_sends_no_github_credentials(self) -> None:
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
         ):
             mock_client = MagicMock()
@@ -42,7 +42,7 @@ class TestConfigureSandboxProxy:
     async def test_preserves_custom_proxy_config_when_adding_github_auth(self) -> None:
         custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
         ):
             mock_client = MagicMock()
@@ -74,9 +74,9 @@ class TestConfigureSandboxProxy:
             response=response,
         )
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch(
-                "agent.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
+                "openswe.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
             ) as mock_sleep,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
@@ -101,9 +101,9 @@ class TestConfigureSandboxProxy:
         response = httpx2.Response(403, request=request)
         error = httpx2.HTTPStatusError("Forbidden", request=request, response=response)
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch(
-                "agent.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
+                "openswe.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
             ) as mock_sleep,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
@@ -137,9 +137,9 @@ class TestConfigureSandboxProxyStartsStoppedSandbox:
 
     async def test_starts_sandbox_then_retries(self) -> None:
         with (
-            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch(
-                "agent.sandboxes.providers.langsmith.get_async_sandbox_client"
+                "openswe.sandboxes.providers.langsmith.get_async_sandbox_client"
             ) as mock_sandbox_client_factory,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
@@ -180,12 +180,12 @@ class TestRefreshProxyOnSandboxReuse:
 
         with (
             patch(
-                "agent.sandboxes.lifecycle.workspace_token",
+                "openswe.sandboxes.lifecycle.workspace_token",
                 new_callable=AsyncMock,
                 return_value=SandboxGitHubAccess("ghs_fresh"),
             ),
             patch(
-                "agent.sandboxes.lifecycle.configure_sandbox_proxy",
+                "openswe.sandboxes.lifecycle.configure_sandbox_proxy",
                 new_callable=AsyncMock,
                 side_effect=httpx2.HTTPStatusError(
                     "Bad request",
@@ -194,11 +194,11 @@ class TestRefreshProxyOnSandboxReuse:
                 ),
             ),
             patch(
-                "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
+                "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
             ) as mock_create,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            from agent.sandboxes.lifecycle import (
+            from openswe.sandboxes.lifecycle import (
                 SandboxUnreachableError,
                 _refresh_github_proxy_or_fail,
             )

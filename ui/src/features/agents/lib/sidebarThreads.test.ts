@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
+import type { DesktopLegacyLocalThread, DesktopProject } from "@/desktop"
 import type { AgentThread } from "./types"
 import {
   applyRepoKeyAliases,
@@ -31,8 +31,8 @@ function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
 }
 
 function localThread(
-  overrides: Partial<DesktopLocalThreadSummary> = {}
-): DesktopLocalThreadSummary {
+  overrides: Partial<DesktopLegacyLocalThread> = {}
+): DesktopLegacyLocalThread {
   return {
     id: "same-id",
     cwd: "/Users/example/open-swe",
@@ -138,12 +138,17 @@ describe("sidebar thread adapters", () => {
 })
 
 describe("sortSidebarThreads", () => {
-  it("sorts chats by creation time without moving recently updated chats", () => {
+  it("sorts chats and task families by creation or update time", () => {
     const olderUpdated = cloudSidebarThread(
       cloudThread({ id: "older-updated", createdAt: 10, updatedAt: 50 })
     )
     const newer = cloudSidebarThread(
-      cloudThread({ id: "newer", createdAt: 20, updatedAt: 20 })
+      cloudThread({
+        id: "newer",
+        createdAt: 5,
+        updatedAt: 20,
+        taskWorkers: [cloudThread({ id: "worker", createdAt: 20 })],
+      })
     )
 
     expect(

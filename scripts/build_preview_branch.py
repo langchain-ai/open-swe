@@ -23,6 +23,17 @@ from pydantic import BaseModel, TypeAdapter
 
 CONFLICT_LIMIT = 10
 PROMPT_PATH = Path(".github/prompts/resolve_preview_conflict.md")
+FIX_PROMPT_PATH = Path(".github/prompts/fix_preview_typecheck.md")
+FIXUP_MESSAGE = "preview: fix typecheck errors (oswe)"
+FORCE_MESSAGE = "preview: force deployment"
+TYPECHECK_IMAGE = "node:24-bookworm-slim"
+TYPECHECK_SCRIPT = (
+    "corepack pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile"
+    " && corepack pnpm --filter open-swe-dashboard run typecheck"
+)
+TYPECHECK_OUTPUT_LIMIT = 20_000
+FAILED_REF = "refs/preview-failed"
+PUBLISHED_REF = "refs/preview-published"
 MERGED_LINE = re.compile(r"merged:((?: \d+)*)")
 LEFT_OUT_LINE = re.compile(r"#(\d+): (.+)")
 AGENT_INTERRUPT_GRACE_SECONDS = 60
@@ -60,7 +71,6 @@ class Settings:
     label: str
     manual_branch: str
     max_prs: int
-    reset_days: int
     reset_hour: int
     reset_zone: ZoneInfo
     url: str
@@ -75,7 +85,6 @@ class Settings:
             label=_env("PREVIEW_LABEL", "preview"),
             manual_branch=_env("PREVIEW_MANUAL_BRANCH", "preview-manual"),
             max_prs=int(_env("PREVIEW_MAX_PRS", "50")),
-            reset_days=int(_env("PREVIEW_RESET_DAYS", "7")),
             reset_hour=int(_env("PREVIEW_RESET_HOUR", "7")),
             reset_zone=ZoneInfo(_env("PREVIEW_RESET_ZONE", "America/New_York")),
             url=_env(
@@ -230,6 +239,11 @@ class RerereCache:
             await git("read-tree", RERERE_REF, env=env)
             await git("checkout-index", "-a", "-f", f"--prefix={RERERE_DIR}/", env=env)
 
+    def discard(self) -> None:
+        if RERERE_DIR.is_dir():
+            shutil.rmtree(RERERE_DIR)
+        self.restored_tree = None
+
     async def save(self) -> None:
         if not RERERE_DIR.is_dir():
             return
@@ -318,19 +332,13 @@ class AgentReport:
         return cls(frozenset(int(number) for number in head.group(1).split()), reasons)
 
 
-async def resolve_with_agent(
-    prompt: str, pending: list[Pending], timeout: float
-) -> AgentReport | None:
-    """Hand every conflicting PR to one oswe run and return what it reports doing."""
-    before = await rev_parse("HEAD")
-    listing = "\n".join(f"#{item.pull.number} {item.sha} {item.pull.title}" for item in pending)
-    print(f"merging {len(pending)} conflicting PR(s) with oswe", file=sys.stderr, flush=True)
+async def run_agent(prompt: str, stdin: str, timeout: float) -> Completed:
     env = {name: value for name, value in os.environ.items() if name in AGENT_ENV}
     proc = await asyncio.create_subprocess_exec(
         "oswe", "run", prompt, stdin=PIPE, stdout=PIPE, env=env
     )
     try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(listing.encode()), timeout)
+        stdout, _ = await asyncio.wait_for(proc.communicate(stdin.encode()), timeout)
     except TimeoutError:
         warn(f"oswe ran past {timeout:.0f}s; interrupting it")
         proc.send_signal(signal.SIGINT)
@@ -343,13 +351,75 @@ async def resolve_with_agent(
     report = stdout.decode()
     print(report, file=sys.stderr, flush=True)
     await discard_uncommitted()
-    if parsed := AgentReport.parse(report):
+    return Completed(await proc.wait(), report, "")
+
+
+async def resolve_with_agent(
+    prompt: str, pending: list[Pending], timeout: float
+) -> AgentReport | None:
+    """Hand every conflicting PR to one oswe run and return what it reports doing."""
+    before = await rev_parse("HEAD")
+    listing = "\n".join(f"#{item.pull.number} {item.sha} {item.pull.title}" for item in pending)
+    print(f"merging {len(pending)} conflicting PR(s) with oswe", file=sys.stderr, flush=True)
+    result = await run_agent(prompt, listing, timeout)
+    if parsed := AgentReport.parse(result.stdout):
         return parsed
-    warn(
-        f"oswe exited {proc.returncode} without a report in the required format; discarding its work"
-    )
+    warn(f"oswe exited {result.code} without a report in the required format; discarding its work")
     await restore_head(before)
     return None
+
+
+async def typecheck() -> str | None:
+    """Errors from typechecking the dashboard at HEAD, or None when it is clean.
+
+    The Docker build installs and bundles the UI the same way but swallows failures, so this
+    is the only place a broken UI stops the preview instead of shipping without a dashboard.
+    The check runs the PRs' own toolchain, so it gets an exported copy of the tree in a
+    container: no ``.git`` credentials, no runner environment, no view of this process.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        archive = Path(scratch) / "tree.tar"
+        source = Path(scratch) / "src"
+        source.mkdir()
+        await git("archive", "--format=tar", "-o", str(archive), "HEAD")
+        await run("tar", "-xf", str(archive), "-C", str(source))
+        result = await run(
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "-e",
+            "HOME=/tmp",
+            "-e",
+            "COREPACK_HOME=/tmp/corepack",
+            "-e",
+            "COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
+            "-v",
+            f"{source}:/src",
+            "-w",
+            "/src",
+            TYPECHECK_IMAGE,
+            "sh",
+            "-c",
+            TYPECHECK_SCRIPT,
+            check=False,
+        )
+    if result.code == 0:
+        return None
+    return f"$ {TYPECHECK_SCRIPT}\n{result.stdout}{result.stderr}"[-TYPECHECK_OUTPUT_LIMIT:]
+
+
+async def fix_with_agent(prompt: str, errors: str, timeout: float) -> None:
+    """Let oswe commit a fix for ``errors`` on HEAD, squashed into one fix-up commit."""
+    before = await rev_parse("HEAD")
+    print("fixing the preview typecheck with oswe", file=sys.stderr, flush=True)
+    await run_agent(prompt, errors, timeout)
+    if await rev_parse("HEAD^{tree}") == await rev_parse(f"{before}^{{tree}}"):
+        await restore_head(before)
+        return
+    await git("reset", "-q", "--soft", before)
+    await git("commit", "-q", "-m", FIXUP_MESSAGE)
 
 
 def conflict_marker(sha: str, paths: tuple[str, ...]) -> str:
@@ -410,7 +480,7 @@ There is one `{s.manual_branch}` branch for everyone, which is why the recipe me
 rather than replacing it: the push stays a fast-forward, and a rejected push means someone else got
 there first — merge theirs in and push again.
 
-The preview resets to plain `main` every {s.reset_days} days, in the
+The preview resets to plain `main` every Sunday, in the
 {s.reset_hour:02d}:00 {s.reset_zone.key} hour: labels are removed and
 `{s.manual_branch}` is deleted. Re-push the branch to bring it back."""
 
@@ -561,6 +631,7 @@ The preview resets to plain `main` every {s.reset_days} days, in the
                 await self.skip_pull(item.pull, item.sha, Conflicted(item.conflicts, note))
 
     def write_summary(self, base_sha: str) -> None:
+        skipped = list(dict.fromkeys(self.skipped))
         summary(
             "## Preview tree",
             "",
@@ -572,27 +643,78 @@ The preview resets to plain `main` every {s.reset_days} days, in the
             "",
             *([f"- {entry}" for entry in self.included] or ["_preview is identical to main_"]),
             "",
-            f"### Skipped ({len(self.skipped)})",
+            f"### Skipped ({len(skipped)})",
             "",
-            *([f"- {entry}" for entry in self.skipped] or ["_nothing skipped_"]),
+            *([f"- {entry}" for entry in skipped] or ["_nothing skipped_"]),
         )
         if self.conflicted:
             summary("", "### Getting a conflicting change in", "", self.manual_instructions())
 
-    async def publish(self) -> None:
-        branch = self.settings.branch
-        assembled = await rev_parse("HEAD^{tree}")
-        published = None
+    async def fetch_published(self) -> str | None:
+        """Tree of the deployed preview branch, kept at ``PUBLISHED_REF``; None when there is none."""
         fetched = await git(
             "fetch",
             "--no-tags",
             "--force",
             "origin",
-            f"{branch}:refs/preview-published",
+            f"{self.settings.branch}:{PUBLISHED_REF}",
             check=False,
         )
-        if fetched.code == 0:
-            published = await rev_parse("refs/preview-published^{tree}")
+        return await rev_parse(f"{PUBLISHED_REF}^{{tree}}") if fetched.code == 0 else None
+
+    async def reuse_fixup(self) -> None:
+        """Replay the published oswe fix-up when it sits on exactly the tree just assembled."""
+        history = (
+            await git("log", "--first-parent", "--format=%H%x00%s", "-n", "20", PUBLISHED_REF)
+        ).stdout
+        commits = (line.split("\0", 1) for line in history.splitlines())
+        tip = next((commit for commit in commits if commit[1] != FORCE_MESSAGE), None)
+        if tip is None or tip[1] != FIXUP_MESSAGE:
+            return
+        fixup = tip[0]
+        if await rev_parse(f"{fixup}^^{{tree}}") != await rev_parse("HEAD^{tree}"):
+            return
+        await git("cherry-pick", fixup)
+
+    async def assemble(self, prompt: str | None) -> None:
+        """Merge everything onto main; ``skipped`` accumulates, since a skipped PR loses its label."""
+        self.included.clear()
+        await restore_head("origin/main")
+        await self.merge_manual_branch()
+        pending = await self.merge_pulls(defer_conflicts=prompt is not None)
+        if prompt is not None and pending:
+            await self.merge_pending(prompt, pending)
+
+    async def verify(self, prompt: str | None, rerere: RerereCache) -> str | None:
+        """Typecheck errors left in the tree about to publish, after a reassembly without
+        the rerere cache and an oswe fix-up have each had a go; None when it is clean."""
+        if not self.settings.force and await remote_refs(FAILED_REF):
+            await git("fetch", "--no-tags", "--force", "origin", f"{FAILED_REF}:{FAILED_REF}")
+            if await rev_parse(f"{FAILED_REF}^{{tree}}") == await rev_parse("HEAD^{tree}"):
+                return "Unchanged since an earlier run failed typecheck on this exact tree; see that run."
+        errors = await typecheck()
+        if errors and prompt is not None and rerere.restored_tree is not None:
+            warn("the preview tree fails typecheck; reassembling it without the rerere cache")
+            rerere.discard()
+            await self.assemble(prompt)
+            errors = await typecheck()
+        assembled = await rev_parse("HEAD")
+        if errors and prompt is not None:
+            await fix_with_agent(
+                FIX_PROMPT_PATH.read_text(), errors, self.settings.agent_timeout_seconds
+            )
+            errors = await typecheck()
+        if errors:
+            marked = await git(
+                "push", "--force", "origin", f"{assembled}:{FAILED_REF}", check=False
+            )
+            if marked.code != 0:
+                warn(f"could not record the failed preview tree: {marked.first_line}")
+        return errors
+
+    async def publish(self, published: str | None) -> None:
+        branch = self.settings.branch
+        assembled = await rev_parse("HEAD^{tree}")
         if assembled == published and not self.settings.force:
             summary("", f"Preview tree unchanged (`{assembled[:7]}`) — nothing published.")
             set_output("changed", "false")
@@ -602,9 +724,10 @@ The preview resets to plain `main` every {s.reset_days} days, in the
                 "",
                 f"Preview tree unchanged (`{assembled[:7]}`) — continuing because publication was forced.",
             )
-            await git("commit", "--allow-empty", "-m", "preview: force deployment")
+            await git("commit", "--allow-empty", "-m", FORCE_MESSAGE)
         await git("push", "--force", "origin", f"HEAD:refs/heads/{branch}")
         set_output("changed", "true")
+        set_output("sha", await rev_parse("HEAD"))
 
     async def build(self) -> None:
         await git("config", "user.name", "github-actions[bot]")
@@ -617,29 +740,35 @@ The preview resets to plain `main` every {s.reset_days} days, in the
         prompt = PROMPT_PATH.read_text() if shutil.which("oswe") else None
         rerere = RerereCache()
         await rerere.restore()
-        await self.merge_manual_branch()
-        pending = await self.merge_pulls(defer_conflicts=prompt is not None)
-        if prompt is not None and pending:
-            await self.merge_pending(prompt, pending)
+        published = await self.fetch_published()
+        await self.assemble(prompt)
+        if published is not None:
+            await self.reuse_fixup()
+        errors = None
+        if self.settings.force or await rev_parse("HEAD^{tree}") != published:
+            errors = await self.verify(prompt, rerere)
         await rerere.save()
         self.write_summary(base_sha)
-        await self.publish()
+        if errors:
+            summary("", "### Typecheck failed — nothing published", "", "```", errors, "```")
+            raise PreviewError("the preview tree fails typecheck; nothing was published")
+        await self.publish(published)
 
     async def reset(self) -> None:
         s = self.settings
         now = datetime.now(s.reset_zone)
-        if now.hour != s.reset_hour:
-            print(f"{now:%H:%M} {s.reset_zone.key} is outside the reset hour.")
+        if now.weekday() != 6 or now.hour != s.reset_hour:
+            print(f"{now:%A %H:%M} {s.reset_zone.key} is outside the Sunday reset hour.")
             return
         today = now.date()
         resets = sorted(
             ref.removeprefix(RESET_REF_PREFIX) for ref in await remote_refs(f"{RESET_REF_PREFIX}*")
         )
-        if resets and (today - date.fromisoformat(resets[-1])).days < s.reset_days:
-            print(f"The {resets[-1]} reset was less than {s.reset_days} days ago.")
+        if resets and date.fromisoformat(resets[-1]) >= today:
+            print(f"The {resets[-1]} reset already covers today.")
             return
 
-        summary(f"## {s.reset_days}-day reset", "")
+        summary("## Sunday reset", "")
         incomplete = False
         try:
             pulls = [pull for pull in await open_pulls(s.repo) if pull.has_label(s.label)]

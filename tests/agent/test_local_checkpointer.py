@@ -4,7 +4,7 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata, empty_checkpoint
 
-from agent.local_checkpointer import DB_PATH_ENV, create_checkpointer
+from openswe.local_checkpointer import DB_PATH_ENV, create_checkpointer
 
 
 def _thread_config(thread_id: str) -> RunnableConfig:

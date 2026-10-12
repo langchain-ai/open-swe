@@ -12,11 +12,11 @@ from fastapi import BackgroundTasks
 from langgraph_sdk.client import LangGraphClient
 from starlette.requests import Request
 
-from agent.slack import routes, solo_threads
-from agent.slack.payloads import SlackChannelContext
-from agent.slack.request import SlackRequest
-from agent.utils.json_types import JsonObject
-from agent.webhooks import common
+from openswe.slack import routes, solo_threads
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.request import SlackRequest
+from openswe.utils.json_types import JsonObject
+from openswe.webhooks import common
 
 
 class _Store:
@@ -127,11 +127,14 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
             return_value=SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
         ),
     )
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
     return state
 
 
 async def test_mention_arms_owner_followups_but_not_other_threads(harness: _Harness) -> None:
+    assert (await harness.send("@openswe help"))["status"] == "ignored"
     assert (await harness.send("before a mention"))["status"] == "ignored"
     assert (await harness.send("<@BOT> fix this"))["status"] == "accepted"
     assert (await harness.send("still wrong", subtype="file_share"))["status"] == "accepted"
@@ -146,7 +149,7 @@ async def test_mention_arms_owner_followups_but_not_other_threads(harness: _Harn
 async def test_second_human_permanently_disarms_even_after_another_mention(
     harness: _Harness,
 ) -> None:
-    await harness.send("@openswe help")
+    assert (await harness.send("<@BOT> help"))["status"] == "accepted"
     assert (await harness.send("I have thoughts", user="U2"))["status"] == "ignored"
     harness.history = [message for message in harness.history if message.get("user") != "U2"]
     assert (await harness.send("<@BOT> continue"))["status"] == "accepted"

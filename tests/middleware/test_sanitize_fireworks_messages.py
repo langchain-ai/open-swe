@@ -5,7 +5,7 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from agent.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
+from openswe.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
 
 
 def _make_request(messages: list[object], model: object | None = None) -> ModelRequest[None]:

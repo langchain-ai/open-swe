@@ -5,7 +5,7 @@ import httpx2
 import pytest
 from langgraph_sdk.errors import ConflictError
 
-from agent.slack.client import (
+from openswe.slack.client import (
     SlackThreadMappingError,
     bind_slack_thread_id,
     delete_slack_thread_associations,

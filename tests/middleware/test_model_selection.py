@@ -7,7 +7,7 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 
-from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+from openswe.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +53,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     jev = AsyncMock(return_value="fast")
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
     middleware, models = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
@@ -72,7 +72,7 @@ async def test_fast_mode_skips_classifier_and_routing_event(
 ) -> None:
     events: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        "agent.middleware.model_selection.get_stream_writer",
+        "openswe.middleware.model_selection.get_stream_writer",
         lambda: events.append,
     )
     middleware, models = _middleware(routing_mode="fast")
@@ -92,7 +92,7 @@ async def test_fast_mode_skips_classifier_and_routing_event(
 @pytest.mark.asyncio
 async def test_routing_decision_only_runs_once(monkeypatch: pytest.MonkeyPatch) -> None:
     jev = AsyncMock(return_value="balanced")
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
     middleware, _ = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
@@ -120,7 +120,7 @@ async def test_jev_sees_the_human_request_not_injected_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     jev = AsyncMock(return_value="balanced")
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
     middleware, _ = _middleware()
     state = {
         "messages": [HumanMessage(content=_HUMAN_ENVELOPE), HumanMessage(content=_PERSON_BLOCK)]
@@ -209,9 +209,11 @@ async def test_requested_model_wins_and_emits_actual_model(
     monkeypatch: pytest.MonkeyPatch, routing_mode: Literal["auto"] | None
 ) -> None:
     events: list[object] = []
-    monkeypatch.setattr("agent.middleware.model_selection.get_stream_writer", lambda: events.append)
+    monkeypatch.setattr(
+        "openswe.middleware.model_selection.get_stream_writer", lambda: events.append
+    )
     jev = AsyncMock()
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
     chosen = MagicMock()
     factory = MagicMock(return_value=chosen)
     middleware = ModelSelectionMiddleware(
@@ -240,7 +242,7 @@ async def test_requested_model_wins_and_emits_actual_model(
 @pytest.mark.asyncio
 async def test_handoff_without_routing_keeps_default_model(monkeypatch: pytest.MonkeyPatch) -> None:
     jev = AsyncMock()
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
     default = MagicMock()
     middleware = ModelSelectionMiddleware({}, default, routing_mode=None)
     state: ModelSelectionState = {

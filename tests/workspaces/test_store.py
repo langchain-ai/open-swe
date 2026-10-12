@@ -5,12 +5,12 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from agent.database import postgres
-from agent.github.repositories import Repository
-from agent.store import now_iso
-from agent.workspaces import store as env_store
-from agent.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
-from agent.workspaces.store import (
+from openswe.database import postgres
+from openswe.github.repositories import Repository
+from openswe.store import now_iso
+from openswe.workspaces import store as env_store
+from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
+from openswe.workspaces.store import (
     WORKSPACES,
     RefreshStep,
     Workspace,
@@ -160,7 +160,7 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> No
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
         patch(
-            "agent.sandboxes.providers.langsmith.get_async_sandbox_client",
+            "openswe.sandboxes.providers.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
         ),
     ):
@@ -216,7 +216,6 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
             "repos": [],
             "slack_channel_ids": [],
             "kitchen_channel_ids": [],
-            "breakout_channel_id": None,
             "is_default": True,
             "has_snapshot": True,
             "refresh_status": "success",
@@ -275,6 +274,7 @@ def _fully_populated(now: str) -> Workspace:
     """A record with nothing left at its default, so a dropped field shows up."""
     return Workspace(
         slug="base",
+        inherit_default_sandbox=True,
         name="Base",
         prompt="build with make",
         setup_script="make setup",
@@ -283,7 +283,6 @@ def _fully_populated(now: str) -> Workspace:
         repos=["acme/api"],
         slack_channel_ids=["C0API"],
         kitchen_channel_ids=["C0API"],
-        breakout_channel_id="C0API",
         mem_bytes=8 * 1024**3,
         vcpus=4,
         fs_capacity_bytes=128 * 1024**3,
@@ -479,27 +478,3 @@ async def test_a_claim_that_races_the_pre_check_still_names_the_owner() -> None:
 
     # Neither claim left a half-written workspace behind.
     assert await WORKSPACES.get("oss") is None
-
-
-@pytest.mark.usefixtures("registry_db")
-async def test_breakout_destination_stays_bound_and_can_be_cleared() -> None:
-    with pytest.raises(ValidationError, match="bound to this workspace"):
-        WorkspaceCreate(name="Core", breakout_channel_id="C0API")
-    await WORKSPACES.create(
-        WorkspaceCreate(
-            name="Core", slack_channel_ids=["C0API", "C0WEB"], breakout_channel_id="c0api"
-        ),
-        "alice",
-    )
-    with pytest.raises(ValueError, match="bound to this workspace"):
-        await WORKSPACES.apply_update("core", WorkspaceUpdate(breakout_channel_id="C0OTHER"))
-
-    edited = await WORKSPACES.apply_update("core", WorkspaceUpdate(prompt="new"))
-    assert edited.breakout_channel_id == "C0API"
-    cleared = await WORKSPACES.apply_update("core", WorkspaceUpdate(breakout_channel_id=None))
-    assert cleared.breakout_channel_id is None
-    await WORKSPACES.apply_update("core", WorkspaceUpdate(breakout_channel_id="C0WEB"))
-    await WORKSPACES.apply_update("core", WorkspaceUpdate(slack_channel_ids=["C0API"]))
-    stored = await WORKSPACES.get("core")
-    assert stored is not None
-    assert stored.breakout_channel_id is None

@@ -17,7 +17,10 @@ vi.mock("@/features/agents/lib/desktopProjects", () => ({
 }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
 vi.mock("@/features/agents/lib/desktopLocal", () => ({
-  useRefreshLocalThreads: () => vi.fn(),
+  useLocalThread: () => null,
+}))
+vi.mock("@/features/agents/lib/legacyLocal", () => ({
+  useRefreshLegacyLocalThreads: () => vi.fn(),
 }))
 vi.mock("@/features/agents/lib/sidebarPrefs", () => ({
   useSidebarPrefs: () => ({

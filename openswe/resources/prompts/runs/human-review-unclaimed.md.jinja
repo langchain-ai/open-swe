@@ -1,0 +1,20 @@
+{% if trigger and trigger.kind == "approved" %}@{{ trigger.logins | join(", @") }} approved {{ pr_url }}, but these code owner areas still need a reviewer. Pick one reviewer for each, all now, by calling `assign_human_reviewer` once per area:
+{% for suggestion in suggestions %}
+- {{ suggestion.area.handles | join(" ") }} ({{ suggestion.area.files | length }} changed file{{ "s" if suggestion.area.files | length != 1 }}): {% if suggestion.pick %}Open SWE suggests @{{ suggestion.pick.login }}: {{ suggestion.pick.reason }}{% else %}pick one of its owners yourself.{% endif %}
+{% endfor %}
+
+Take each suggestion unless this Slack thread points to a better choice. For an area without one, or when `assign_human_reviewer` refuses someone, follow these steps for that area's owners:
+{% else %}{% if trigger and trigger.kind == "declined" %}@{{ trigger.logins | join(", @") }} declined the review of {{ pr_url }}{% if trigger.reason %} ({{ trigger.reason }}){% endif %}. Pick another reviewer for it.{% elif trigger and trigger.kind == "expired" %}@{{ trigger.logins | join(", @") }} did not accept the review of {{ pr_url }} within {{ minutes }} minutes, so Open SWE released them. Pick another reviewer for it.{% elif asked %}Someone asked for a reviewer to be picked for {{ pr_url }}. Pick one reviewer for it.{% elif posted %}{{ pr_url }} was posted for review in its Slack review channel and has sat green without an approval for {{ minutes }} minutes. Pick one reviewer for it.{% else %}Nobody has signed up to review {{ pr_url }} in the {{ minutes }} minutes since its review was requested in Slack. Pick one reviewer for it.{% endif %}
+
+{% for suggestion in suggestions if suggestion.pick %}
+Open SWE suggests @{{ suggestion.pick.login }}: {{ suggestion.pick.reason }} Unless this Slack thread points to a better choice, call `assign_human_reviewer` with the pull request URL, their GitHub login, and that reason. If it refuses them, pick someone yourself:
+
+{% endfor %}
+The first reviewer comes from the code owners of most of the changed files; reviewers for the other code owners are added only after that reviewer approves.
+{% endif %}
+1. Read the repository's CODEOWNERS (`.github/CODEOWNERS`, `CODEOWNERS`, or `docs/CODEOWNERS`) for the files the pull request changes.
+2. Look at who has recently reviewed or changed those files: `gh api` for recent merged pull requests touching them and their reviewers, and `git log` on the files.
+3. Choose one person with write access who is not the author (@{{ author }}) and is likely to know this code. Prefer a code owner who has reviewed nearby changes recently; skip bots and teams.
+4. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them. It shows them on the review card, requests their review on GitHub, and messages them directly.
+
+If `assign_human_reviewer` refuses someone, pick the next best candidate, unless it says the pull request needs no reviewer: then stop. If people in the Slack thread asked to stop reviewer requests for this pull request altogether, call `dismiss_human_review_request` instead of picking. Do not post anything else in Slack and do not change the pull request.

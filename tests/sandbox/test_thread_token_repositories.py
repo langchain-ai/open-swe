@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
-from agent.sandboxes import state
+from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.sandboxes import state
 
 
 @pytest.fixture(autouse=True)

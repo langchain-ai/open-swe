@@ -10,8 +10,8 @@ import pytest
 from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
-from agent.slack import channel_options, dashboard_routes
-from agent.utils import ttl_cache
+from openswe.slack import channel_options, dashboard_routes
+from openswe.utils import ttl_cache
 
 
 def _rate_limited(retry_after: str) -> SlackApiError:

@@ -43,9 +43,15 @@ it("shows session build and safe API diagnostics without an analytics report", (
     "OPENSWE_ENV: preview"
   )
   expect(screen.getByText("rev-42")).toBeTruthy()
-  expect(screen.getByText("abc123")).toBeTruthy()
-  expect(screen.getByText("def456")).toBeTruthy()
-  expect(screen.getByText("fedcba")).toBeTruthy()
+  for (const commit of ["abc123", "def456", "fedcba"]) {
+    const link = screen.getByRole("link", { name: commit })
+    expect(link.getAttribute("href")).toBe(
+      `https://github.com/langchain-ai/open-swe/commit/${commit}`
+    )
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer")
+  }
+  expect(screen.getAllByRole("link")).toHaveLength(3)
   expect(screen.getByText(/different from the bundle/)).toBeTruthy()
   expect(screen.getByText(/API:/).textContent).toBe(
     "API: https://backend.example.com /dashboard/api"

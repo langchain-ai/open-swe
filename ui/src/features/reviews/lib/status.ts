@@ -1,54 +1,44 @@
+import type { BadgeProps } from "@langchain/macaw-components/Badge"
+
 import type { OpenPullRequest } from "@/lib/api"
+import type { PullRequestThreadActionName } from "./threadActions"
 
 export function pullRequestKey(pr: { repo: string; number: number }) {
   return `${pr.repo}#${pr.number}`
 }
 
-export function overallStatus(pr: OpenPullRequest) {
-  if (pr.detailsLoading) return "Loading…"
-  if (pr.detailsError) return "Could not load status"
-  if (pr.draft) return "Draft"
-  if (pr.mergeable === false || pr.mergeState === "dirty") return "Conflicted"
-  if (pr.ci === "failing") return "Failing"
-  if (pr.ci === "pending") return "Pending"
-  if (
-    !pr.statusAvailable ||
-    (pr.ci === "unknown" && pr.reviewDecision === null)
-  )
-    return "Status unavailable"
-  if (pr.reviewDecision === "changes_requested") return "Changes Requested"
-  if (pr.reviewDecision === "approved") return "Approved"
-  return "Reviewable"
-}
-
-// A draft still has to show a conflict or a failing check: they are what the
-// author has to act on, and they outlive the draft flag.
+/** One pill per condition the PR is in; Reviewable only when none applies. */
 export function statusLabels(pr: OpenPullRequest): string[] {
-  const status = overallStatus(pr)
-  // The missing approval is why the merge action is gone, so say so alongside
-  // whatever else the PR is waiting on.
-  const review = pr.reviewRequired ? ["Review required"] : []
-  if (status !== "Draft") return [status, ...review]
-  return [
-    status,
+  if (pr.detailsLoading) return ["Loading…"]
+  if (pr.detailsError) return ["Could not load status"]
+  const labels = [
+    ...(pr.draft ? ["Draft"] : []),
     ...(pr.mergeable === false || pr.mergeState === "dirty"
       ? ["Conflicted"]
       : []),
-    ...(pr.ci === "failing" ? ["Failing"] : []),
-    ...review,
+    ...(pr.ci === "failing"
+      ? ["Failing"]
+      : pr.ci === "pending"
+        ? ["Pending"]
+        : []),
+    // Nothing known to be wrong is not the same as known to be fine.
+    ...(!pr.statusAvailable ||
+    (pr.ci === "unknown" && pr.reviewDecision === null)
+      ? ["Status unavailable"]
+      : []),
+    ...(pr.reviewDecision === "changes_requested"
+      ? ["Changes Requested"]
+      : pr.reviewDecision === "approved"
+        ? ["Approved"]
+        : []),
+    ...(pr.reviewRequired && !pr.draft ? ["Review required"] : []),
   ]
+  return labels.length ? labels : ["Reviewable"]
 }
 
-/**
- * The single line a compact row shows under the title: whatever is most
- * worth acting on. Ordered by how hard it blocks the merge, not by how the
- * status was derived.
- */
-export function blockerLabel(pr: OpenPullRequest): string {
-  if (pr.detailsLoading) return "Loading…"
-  if (pr.detailsError) return "Could not load status"
-  if (pr.mergeable === false || pr.mergeState === "dirty")
-    return "Merge conflict"
+/** What a compact row adds under its pills: the specifics no pill names. */
+export function statusDetail(pr: OpenPullRequest): string | null {
+  if (pr.detailsLoading || pr.detailsError) return null
   if (pr.failingChecks.length)
     return pr.failingChecks.length === 1
       ? `${pr.failingChecks[0]} failing`
@@ -61,73 +51,47 @@ export function blockerLabel(pr: OpenPullRequest): string {
     return pr.unresolvedThreads === 1
       ? "1 unresolved comment"
       : `${pr.unresolvedThreads} unresolved comments`
-  if (pr.reviewDecision === "changes_requested") return "Changes requested"
   if (pr.pendingChecks.length)
     return pr.pendingChecks.length === 1
       ? `${pr.pendingChecks[0]} running`
       : `${pr.pendingChecks.length} checks running`
-  if (pr.reviewRequired) return "Waiting on review"
-  if (pr.draft) return "Draft"
-  // Nothing known to be wrong is not the same as known to be fine: claiming
-  // readiness for a PR whose status GitHub never returned would be a lie.
-  if (
-    !pr.statusAvailable ||
-    (pr.ci === "unknown" && pr.reviewDecision === null)
-  )
-    return "Status unavailable"
-  if (pr.reviewDecision === "approved") return "Approved, ready to merge"
-  return "Ready to merge"
+  return null
 }
 
-export function blockerTone(pr: OpenPullRequest): string {
-  if (
-    pr.mergeable === false ||
-    pr.mergeState === "dirty" ||
-    pr.ci === "failing"
-  )
-    return "text-destructive"
-  if (pr.reviewDecision === "changes_requested") return "text-destructive"
-  if (
-    pr.ci === "pending" ||
-    pr.missingChecks.length > 0 ||
-    pr.reviewRequired ||
-    (pr.unresolvedThreads !== null && pr.unresolvedThreads > 0)
-  )
-    return "text-amber-700 dark:text-amber-400"
-  if (
-    !pr.statusAvailable ||
-    (pr.ci === "unknown" && pr.reviewDecision === null)
-  )
-    return "text-amber-700 dark:text-amber-400"
-  if (pr.reviewDecision === "approved")
-    return "text-emerald-700 dark:text-emerald-400"
-  return "text-muted-foreground"
+export const statusColors: Record<string, BadgeProps["color"]> = {
+  Conflicted: "error",
+  Failing: "error",
+  "Changes Requested": "error",
+  Approved: "success",
+  Pending: "warning",
+  "Review required": "warning",
+  "Status unavailable": "warning",
+  Reviewable: "primary",
 }
 
-export const statusTones: Record<string, string> = {
-  Conflicted: "border-destructive/30 bg-destructive/10 text-destructive",
-  Failing: "border-destructive/30 bg-destructive/10 text-destructive",
-  "Changes Requested":
-    "border-destructive/30 bg-destructive/10 text-destructive",
-  Approved:
-    "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  Pending:
-    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  "Review required":
-    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  Reviewable: "border-sky-600/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
+export function isConflicted(pr: OpenPullRequest) {
+  return pr.mergeable === false || pr.mergeState === "dirty"
 }
 
-export function isFixable(pr: OpenPullRequest) {
-  return (
-    pr.mergeable === false || pr.mergeState === "dirty" || pr.ci === "failing"
-  )
+export function hasFailingChecks(pr: OpenPullRequest) {
+  return pr.ci === "failing"
 }
 
 // An unreadable count must not hide the action: the conversations may well be
 // there.
 export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
+}
+
+/** What Open SWE could fix on this PR, conflicts first since they block the rest. */
+export function pullRequestFixes(
+  pr: OpenPullRequest
+): Array<PullRequestThreadActionName> {
+  return [
+    ...(isConflicted(pr) ? (["fix-conflicts"] as const) : []),
+    ...(hasFailingChecks(pr) ? (["fix-checks"] as const) : []),
+    ...(hasUnresolvedConversations(pr) ? (["address-comments"] as const) : []),
+  ]
 }
 
 // A conflicted branch cannot be updated by GitHub; the Fix action covers it.

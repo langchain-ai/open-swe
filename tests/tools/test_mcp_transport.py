@@ -1,9 +1,7 @@
-import socket
-
-import httpx
+import httpx2
 import pytest
 
-from agent.mcp import transport as mcp_transport
+from openswe.mcp import transport as mcp_transport
 
 
 async def test_public_address_is_pinned_and_tls_hostname_preserved(monkeypatch):
@@ -11,22 +9,20 @@ async def test_public_address_is_pinned_and_tls_hostname_preserved(monkeypatch):
         mcp_transport,
         "resolve_and_validate",
         lambda url: (
-            True,
-            "",
             "example.com",
-            [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+            ["93.184.216.34"],
         ),
     )
     seen = []
 
     async def remote(request):
         seen.append(request)
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
     transport = mcp_transport.MCPTransport("https://example.com/mcp")
     await transport._transport.aclose()
-    transport._transport = httpx.MockTransport(remote)
-    async with httpx.AsyncClient(transport=transport) as client:
+    transport._transport = httpx2.MockTransport(remote)
+    async with httpx2.AsyncClient(transport=transport) as client:
         await client.post("https://example.com/mcp", headers={"Authorization": "test-key"})
     assert seen[0].url.host == "93.184.216.34"
     assert seen[0].headers["Host"] == "example.com"
@@ -42,9 +38,10 @@ async def test_server_cannot_redirect_credentials_to_another_origin(url):
 
 
 async def test_private_or_unresolved_address_is_blocked(monkeypatch):
-    monkeypatch.setattr(
-        mcp_transport, "resolve_and_validate", lambda url: (False, "blocked", "example.com", None)
-    )
+    def reject(url: str) -> tuple[str, list[str]]:
+        raise mcp_transport.UnsafeUrlError(url, "blocked")
+
+    monkeypatch.setattr(mcp_transport, "resolve_and_validate", reject)
     async with mcp_transport.mcp_http_client("https://example.com/mcp") as client:
         with pytest.raises(ValueError, match="public addresses"):
             await client.get("https://example.com/mcp")
@@ -52,23 +49,23 @@ async def test_private_or_unresolved_address_is_blocked(monkeypatch):
 
 async def test_connection_failure_tries_next_validated_address(monkeypatch):
     addresses = [
-        (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 443, 0, 0)),
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+        "2606:4700:4700::1111",
+        "93.184.216.34",
     ]
     monkeypatch.setattr(
-        mcp_transport, "resolve_and_validate", lambda url: (True, "", "example.com", addresses)
+        mcp_transport, "resolve_and_validate", lambda url: ("example.com", addresses)
     )
     seen = []
 
     async def remote(request):
         seen.append(request.url.host)
         if len(seen) == 1:
-            raise httpx.ConnectError("IPv6 unavailable")
-        return httpx.Response(200)
+            raise httpx2.ConnectError("IPv6 unavailable")
+        return httpx2.Response(200)
 
     transport = mcp_transport.MCPTransport("https://example.com/mcp")
     await transport._transport.aclose()
-    transport._transport = httpx.MockTransport(remote)
-    async with httpx.AsyncClient(transport=transport) as client:
+    transport._transport = httpx2.MockTransport(remote)
+    async with httpx2.AsyncClient(transport=transport) as client:
         assert (await client.get("https://example.com/mcp")).status_code == 200
     assert seen == ["2606:4700:4700::1111", "93.184.216.34"]

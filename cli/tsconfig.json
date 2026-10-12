@@ -3,6 +3,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "customConditions": ["bun"],
     "lib": ["ESNext"],
     "types": ["bun"],
     "moduleDetection": "force",

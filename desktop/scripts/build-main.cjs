@@ -3,6 +3,11 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
+// The bridge client is a workspace package the main process requires at runtime.
+execFileSync("pnpm", ["--filter", "open-swe-bridge-client", "run", "build"], {
+  cwd: root,
+  stdio: "inherit",
+});
 execFileSync(
   path.join(root, "node_modules", ".bin", "tsc"),
   ["-p", "tsconfig.json"],
@@ -11,6 +16,10 @@ execFileSync(
     stdio: "inherit",
   },
 );
-for (const file of ["backend-supervisor.cjs", "local-thread-store.cjs"]) {
+for (const file of [
+  "backend-supervisor.cjs",
+  "legacy-local-thread-store.cjs",
+  "local-thread-store.cjs",
+]) {
   fs.copyFileSync(path.join(root, "src", file), path.join(root, "build", file));
 }

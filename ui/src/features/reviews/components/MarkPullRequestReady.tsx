@@ -17,10 +17,8 @@ export function MarkPullRequestReady({
   const ready = usePullRequestAction({
     pr,
     action: "mark-ready",
-    onDone: () => {
-      markPullRequestReady(queryClient, pr)
-      onReady()
-    },
+    apply: () => markPullRequestReady(queryClient, pr),
+    onDone: onReady,
   })
   return (
     <PullRequestActionButton

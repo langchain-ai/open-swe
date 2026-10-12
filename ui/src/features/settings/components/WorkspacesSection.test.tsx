@@ -10,6 +10,7 @@ import {
   within,
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { WorkspacesSection } from "./WorkspacesSection"
 import { api } from "@/lib/api"
@@ -46,7 +47,8 @@ function renderSection(isAdmin: boolean) {
   return render(
     <QueryClientProvider client={client}>
       <WorkspacesSection isAdmin={isAdmin} renderConfigure={renderConfigure} />
-    </QueryClientProvider>
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
   )
 }
 
@@ -286,8 +288,7 @@ describe("WorkspacesSection", () => {
     const repositoryHelp = screen.getByRole("button", {
       name: "About workspace repositories",
     })
-    fireEvent.mouseEnter(repositoryHelp)
-    fireEvent.mouseMove(repositoryHelp)
+    fireEvent.pointerMove(repositoryHelp, { pointerType: "mouse" })
     expect(
       await screen.findByText(
         /routes its GitHub issues, pull requests, Linear tickets/
@@ -312,15 +313,6 @@ describe("WorkspacesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
     expect(screen.getByText("#oss-help")).toBeTruthy()
 
-    fireEvent.click(
-      screen.getByRole("combobox", { name: "Breakout destination" })
-    )
-    fireEvent.keyDown(
-      await screen.findByRole("option", { name: "#oss-help" }),
-      {
-        key: "Enter",
-      }
-    )
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled())
@@ -329,7 +321,6 @@ describe("WorkspacesSection", () => {
       repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],
       kitchen_channel_ids: [],
-      breakout_channel_id: "C0000000002",
     })
   })
 })

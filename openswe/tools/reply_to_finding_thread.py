@@ -1,0 +1,89 @@
+from typing import Any
+
+from openswe.github.thread_token import resolve_thread_github_token
+from openswe.review.findings import (
+    FindingInteraction,
+    ReviewerThreadMissingError,
+    append_finding_interaction,
+    comment_ids_for_finding,
+    get_finding,
+    get_thread_id_from_runtime,
+    thread_missing_tool_result,
+    update_finding_fields,
+)
+from openswe.review.publish import reply_to_review_comment
+from openswe.run_config import RunConfig
+
+
+async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
+    """Implement the `reply_to_finding_thread` tool."""
+    if not body.strip():
+        return {"success": False, "error": "Reply body is required"}
+
+    cfg = RunConfig.from_runtime()
+    if not cfg.repo or cfg.pr_number is None:
+        return {"success": False, "error": "Missing repo or PR info in run config"}
+
+    token = await resolve_thread_github_token()
+    if not token:
+        return {"success": False, "error": "No GitHub token available"}
+
+    try:
+        return await _reply_to_finding_thread_async(
+            finding_id=finding_id,
+            body=body,
+            owner=cfg.repo.owner,
+            repo=cfg.repo.name,
+            pr_number=cfg.pr_number,
+            token=token,
+        )
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
+
+
+async def _reply_to_finding_thread_async(
+    *,
+    finding_id: str,
+    body: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> dict[str, Any]:
+    thread_id = get_thread_id_from_runtime()
+    finding = await get_finding(thread_id, finding_id)
+    if finding is None:
+        return {"success": False, "error": f"No finding found with id {finding_id}"}
+
+    comment_ids = comment_ids_for_finding(finding)
+    if not comment_ids:
+        return {"success": False, "error": "Finding has no GitHub review comment mapping"}
+    comment_id = comment_ids[0]
+
+    response = await reply_to_review_comment(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        review_comment_id=comment_id,
+        body=body.strip(),
+        token=token,
+    )
+    if response is None:
+        return {"success": False, "error": "GitHub did not accept the reply"}
+
+    reply_id = response.get("id")
+    updates: dict[str, Any] = {"last_reconciliation_note": "Replied to GitHub review thread."}
+    if isinstance(reply_id, int):
+        updates["last_review_reply_comment_id"] = reply_id
+    updated = await update_finding_fields(thread_id, finding_id, updates)
+    interaction: FindingInteraction = {
+        "kind": "bot_reply",
+        "github_comment_id": reply_id if isinstance(reply_id, int) else None,
+        "github_parent_comment_id": comment_id,
+        "author": "open-swe[bot]",
+        "body": body.strip(),
+        "created_at": "",
+        "needs_reassessment": False,
+    }
+    updated = await append_finding_interaction(thread_id, finding_id, interaction)
+    return {"success": True, "finding": updated, "reply_id": reply_id}

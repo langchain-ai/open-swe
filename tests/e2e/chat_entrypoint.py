@@ -13,6 +13,6 @@ import patches  # noqa: E402
 
 patches.apply()
 
-from agent.chat import traced_chat_agent  # noqa: E402
+from openswe.chat import traced_chat_agent  # noqa: E402
 
 __all__ = ["traced_chat_agent"]

@@ -1,8 +1,12 @@
-from agent.expedited_review.eligibility import (
+import pytest
+
+from openswe.expedited_review.eligibility import (
     ACCEPTED_CHANGED_LINES,
     MAX_CHANGED_LINES,
     ChangedFile,
     EligibleDiff,
+    Exclusion,
+    ExpeditedDiff,
     Ineligible,
     assess_eligibility,
     fingerprint_matches,
@@ -64,3 +68,64 @@ def test_a_move_into_the_tests_tree_is_not_exempt() -> None:
 
     assert not moved.is_test
     assert isinstance(assess_eligibility([moved]), Ineligible)
+
+
+def test_excluded_hunks_leave_the_card_until_their_content_changes() -> None:
+    small = "@@ -1,1 +1,2 @@\n a\n+b"
+    big = "@@ -10,1 +11,30 @@\n x\n" + "\n".join(f"+gen{i}" for i in range(29))
+    file = ChangedFile(filename="src/app.py", additions=30, deletions=0, patch=f"{small}\n{big}")
+    exclusions = Exclusion(
+        path="src/app.py", hunks=[11], guideline="Generated", reason="r"
+    ).resolve([file])
+
+    assert isinstance(assess_eligibility([file]), Ineligible)
+    verdict = assess_eligibility([file], exclusions)
+    assert isinstance(verdict, EligibleDiff)
+    assert (verdict.changed_lines, verdict.excluded_lines) == (1, 29)
+    assert ExpeditedDiff([file], exclusions).shown[0].patch == small
+
+    edited = file.model_copy(update={"patch": f"{small}\n{big}\n+sneaky", "additions": 31})
+    assert isinstance(assess_eligibility([edited], exclusions), Ineligible)
+
+    unparsed = file.model_copy(update={"additions": 40})
+    verdict = assess_eligibility([unparsed], exclusions)
+    assert isinstance(verdict, Ineligible)
+    assert "30 of the pull request's 40" in verdict.reason
+
+
+def test_one_exclusion_hides_only_the_hunk_it_named_among_identical_bodies() -> None:
+    body = " x\n+import os"
+    file = ChangedFile(
+        filename="src/app.py",
+        additions=2,
+        patch=f"@@ -1,1 +1,2 @@\n{body}\n@@ -40,1 +41,2 @@\n{body}",
+    )
+    exclusions = Exclusion(path="src/app.py", hunks=[41], guideline="g", reason="r").resolve([file])
+
+    diff = ExpeditedDiff([file], exclusions)
+    assert diff.excluded_lines == 1
+    assert diff.shown[0].patch == f"@@ -1,1 +1,2 @@\n{body}"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".github/workflows/ci.yml", "db/migrations/0001.py", "uv.lock", "src/auth/session.py", ".env"],
+)
+def test_sensitive_paths_cannot_be_excluded(path: str) -> None:
+    file = ChangedFile(filename=path, additions=1, patch="@@ -1 +1,2 @@\n a\n+b")
+
+    with pytest.raises(ValueError, match="cannot be excluded"):
+        Exclusion(path=path, guideline="g", reason="r").resolve([file])
+
+
+def test_generated_files_never_count_and_regenerating_them_keeps_the_votes() -> None:
+    source = _file("src/app.py", patch="+a")
+    swagger = ChangedFile(filename="swagger.json", additions=400, deletions=200, patch=None)
+    card = assess_eligibility([source, swagger])
+
+    assert isinstance(card, EligibleDiff)
+    assert (card.changed_lines, card.generated_lines) == (1, 600)
+    regenerated = swagger.model_copy(update={"additions": 401})
+    assert fingerprint_matches([source, regenerated], card.fingerprint)
+    assert not ChangedFile(filename=".github/openapi.yaml").is_generated
+    assert not ChangedFile(filename="dist/app.min.js").is_generated

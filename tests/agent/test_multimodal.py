@@ -4,9 +4,9 @@ from urllib.parse import urlparse
 
 import httpx2
 
-import agent.utils.multimodal as multimodal
-import agent.utils.url_safety as url_safety
-from agent.utils.multimodal import (
+import openswe.utils.multimodal as multimodal
+import openswe.utils.url_safety as url_safety
+from openswe.utils.multimodal import (
     extract_image_urls,
     fetch_image_block,
 )

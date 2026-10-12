@@ -1,7 +1,7 @@
+import { Input } from "@langchain/macaw-components/Input"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 
-import { Input } from "@/components/ui/input"
 import { parsePullRequestReference } from "@/features/reviews/search"
 
 /** Jumps to the review of a pasted GitHub pull request link. */
@@ -33,12 +33,13 @@ export function OpenPullRequestInput() {
       }}
     >
       <Input
+        size="sm"
         aria-label="Open a pull request review"
-        aria-invalid={invalid || undefined}
+        isError={invalid}
         placeholder="Paste a GitHub PR link"
         value={value}
-        onChange={(event) => {
-          setValue(event.target.value)
+        onChange={(next) => {
+          setValue(next)
           setInvalid(false)
         }}
         onPaste={(event) => {

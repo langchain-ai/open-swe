@@ -76,6 +76,15 @@ describe("filterThreads", () => {
   })
 })
 
+it("retains a nonmatching coordinator as context for matching workers", () => {
+  const match = makeThread({ source: "dashboard" })
+  const sibling = makeThread({ source: "github" })
+  const parent = makeThread({ source: "slack", taskWorkers: [match, sibling] })
+  expect(filterThreads([parent], filters({ sources: ["dashboard"] }))).toEqual([
+    { ...parent, taskWorkers: [match] },
+  ])
+})
+
 describe("hasActiveFilters", () => {
   it("is false for defaults", () => {
     expect(hasActiveFilters(DEFAULT_SIDEBAR_FILTERS)).toBe(false)

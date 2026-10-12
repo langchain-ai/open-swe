@@ -13,7 +13,7 @@ dependencies = [
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
     "langgraph-sdk>=0.4.5",
-    "langchain>=1.4.2",
+    "langchain[mcp]>=1.4.4",
     "langgraph>=1.2.12",
     "markdownify>=1.2.3",
     "markdown-it-py==4.2.0",
@@ -27,7 +27,6 @@ dependencies = [
     "fireworks-ai>=1.2.9",
     "exa-py>=2.18.1",
     "langchain-google-genai>=4.4.0",
-    "langchain-mcp-adapters>=0.3.2",
     "websockets>=16.1.1",
     "slack-sdk>=3.44.1,<4.0.0",
     "aiohttp>=3.14.3,<4.0.0",
@@ -41,6 +40,7 @@ dependencies = [
     "githubkit-schemas[2022-11-28]==26.9.29",
     "jinja2>=3.1.6",
     "langchain-typesafe==0.0.1a3",
+    "langchain-quickjs==0.3.8",
 ]
 
 [project.optional-dependencies]
@@ -88,7 +88,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["agent"]
+packages = ["openswe"]
 
 [tool.ruff]
 line-length = 100
@@ -119,7 +119,7 @@ ignore = [
 # Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.
-"agent/threads/*" = ["PLC2701"]
+"openswe/threads/*" = ["PLC2701"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."
@@ -129,7 +129,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ty.src]
-include = ["agent", "tests"]
+include = ["openswe", "tests"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [

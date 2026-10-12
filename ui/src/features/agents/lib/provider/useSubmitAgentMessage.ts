@@ -1,3 +1,5 @@
+import { useContext } from "react"
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
@@ -17,6 +19,13 @@ import { reportError } from "@/lib/errorReporting"
 export interface SubmitAgentMessageVariables extends SendAgentMessageVariables {
   /** The stream can reject after the optimistic mutation has already resolved. */
   onStartError?: () => void
+  /** Moves the thread to another sandbox with this message. */
+  handoff?: ThreadHandoff
+}
+
+export interface ThreadHandoff {
+  configurable: Record<string, string>
+  sandboxBridgeClient: "desktop" | null
 }
 
 function setPendingMessage(
@@ -57,6 +66,7 @@ export function describeSendError(error: unknown): string {
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
   const source = useThreadSource()
+  const review = useContext(ReviewChatActionsContext)
 
   return useMutation({
     meta: { errorTitle: "Couldn't send message" },
@@ -90,7 +100,13 @@ export function useSubmitAgentMessage(threadId: string) {
           agentThreadKeys.detail(threadId),
           (prev) => (prev ? update(prev) : prev)
         )
-      updateThread((thread) => setPendingMessage(thread, pendingMessage))
+      const handoff = vars.handoff
+      updateThread((thread) => ({
+        ...setPendingMessage(thread, pendingMessage),
+        ...(handoff
+          ? { sandboxBridgeClient: handoff.sandboxBridgeClient }
+          : {}),
+      }))
       // Set before the start is fired: a rejection below flips it to error and
       // nothing may flip it back afterwards.
       setAgentThreadStatus(queryClient, threadId, "running")
@@ -99,11 +115,19 @@ export function useSubmitAgentMessage(threadId: string) {
         { modelId: vars.model_id, effort: vars.effort },
         vars.model_selection_changed
       )
+      Object.assign(configurable, handoff?.configurable)
 
       void source
         .startRun({
           message: { id, text: vars.content, images: vars.images },
-          configurable,
+          configurable: {
+            ...configurable,
+            ...(review
+              ? {
+                  review_chat_pr_url: `https://github.com/${review.owner}/${review.repo}/pull/${review.number}`,
+                }
+              : {}),
+          },
           ...(vars.enqueue ? { enqueue: true } : {}),
         })
         .catch((error: unknown) => {
@@ -119,6 +143,10 @@ export function useSubmitAgentMessage(threadId: string) {
             })
           )
           setAgentThreadStatus(queryClient, threadId, "error")
+          if (handoff)
+            void queryClient.invalidateQueries({
+              queryKey: agentThreadKeys.detail(threadId),
+            })
           vars.onStartError?.()
           reportError({ title: "Couldn't send message", error })
         })

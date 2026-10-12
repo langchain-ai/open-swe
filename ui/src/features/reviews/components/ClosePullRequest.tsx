@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/macaw-components/Button"
 import type { OpenPullRequest } from "@/lib/api"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import { pullRequestKey } from "../lib/status"
@@ -7,19 +7,27 @@ import { TextPopover } from "./TextPopover"
 
 export function ClosePullRequest({
   pr,
+  apply,
   onClosed,
 }: {
   pr: OpenPullRequest
-  onClosed: () => void
+  apply: () => () => void
+  onClosed?: () => void
 }) {
-  const close = usePullRequestAction({ pr, action: "close", onDone: onClosed })
+  const close = usePullRequestAction({
+    pr,
+    action: "close",
+    apply,
+    onDone: onClosed,
+  })
   return (
     <div>
       <TextPopover
         trigger={
           <Button
-            size="sm"
-            variant="outline"
+            size="xs"
+            color="secondary"
+            variant="outlined"
             disabled={close.isPending || close.isSuccess}
             aria-live="polite"
           >
@@ -30,8 +38,7 @@ export function ClosePullRequest({
         description="GitHub closes it without merging. A reason is posted as a comment."
         placeholder="Reason (optional)"
         submitLabel="Close pull request"
-        pending={close.isPending}
-        onSubmit={(reason, done) => close.mutate(reason, { onSuccess: done })}
+        onSubmit={(reason) => close.mutateAsync(reason)}
       />
     </div>
   )

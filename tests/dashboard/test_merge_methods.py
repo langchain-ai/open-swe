@@ -1,21 +1,10 @@
-from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
-from fastapi import HTTPException
 
-from agent.github import dashboard_routes as repo_routes
-from agent.github import repo_merge_methods as merge_methods
-
-
-def _client(expected_token: str):
-    @asynccontextmanager
-    async def client(**kwargs):
-        assert kwargs == {"token": expected_token}
-        yield object()
-
-    return client
+from openswe.github import http as github_http
+from openswe.github import repo_merge_methods as merge_methods
 
 
 @pytest.mark.parametrize(
@@ -43,19 +32,9 @@ async def test_merge_methods_reflect_repository_flags(monkeypatch, flags, expect
             200, json=flags, request=httpx2.Request("GET", "https://api.github.com")
         )
     )
-    monkeypatch.setattr(merge_methods, "github_client", _client("user-token"))
-    monkeypatch.setattr(merge_methods, "github_request", request)
-    result = await merge_methods.repository_merge_methods("acme", "app", "user-token")
+    monkeypatch.setattr(github_http, "github_request", request)
+    repo = github_http.GitHubClient(MagicMock()).repo("acme", "app")
+    result = await merge_methods.repository_merge_methods(repo)
     assert result.merge_methods == expected
     assert result.model_dump(by_alias=True, mode="json") == {"mergeMethods": expected}
     assert request.await_args.args[1:] == ("GET", "https://api.github.com/repos/acme/app")
-
-
-async def test_merge_methods_without_user_token_never_calls_github(monkeypatch):
-    monkeypatch.setattr(repo_routes, "get_valid_access_token", AsyncMock(return_value=None))
-    methods = AsyncMock()
-    monkeypatch.setattr(repo_routes, "repository_merge_methods", methods)
-    with pytest.raises(HTTPException) as error:
-        await repo_routes.api_repository_merge_methods("acme", "app", {"sub": "octocat"})
-    assert error.value.status_code == 401
-    methods.assert_not_awaited()

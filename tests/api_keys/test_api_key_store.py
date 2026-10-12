@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
-from agent.api_keys.models import KEY_PREFIX, ApiKey
-from agent.database import postgres
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.api_keys.models import KEY_PREFIX, ApiKey
+from openswe.database import postgres
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 def _future(days: int = 30) -> datetime:

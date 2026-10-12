@@ -1,4 +1,4 @@
-from agent.slack.markdown import markdown_to_mrkdwn
+from openswe.slack.markdown import markdown_to_mrkdwn
 
 
 def test_markdown_to_mrkdwn_common_constructs() -> None:

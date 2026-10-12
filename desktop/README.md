@@ -6,27 +6,18 @@
 The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
 compatible Open SWE backend; they do not need a separately hosted dashboard.
 
-Desktop users can choose **This Mac** in the new-task composer to run the same Open SWE LangGraph agent over a selected local project. Electron owns a loopback-only LangGraph server, proxies it to the bundled UI, and stops it with the app. Local threads use the same streaming protocol, graph, tools, subagents, and middleware assembly as cloud threads; only the filesystem backend and unavailable cloud integrations differ.
+Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project. The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted box. The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back. This is the same bridge `oswe run` uses, from the shared `bridge-client` package.
 
-The composer's workspace selector chooses where a local thread runs. **Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects. **New worktree** gives the thread its own git worktree, checked out from the selected base branch on a placeholder `open-swe/local-<id>` branch that the agent renames after it reads the request — so your own checkout is never touched and up to ten local threads can run at once without contending for a working tree. Deleting a thread removes its worktree along with anything uncommitted in it. Only one agent may work in a given tree at a time, so starting a thread in a checkout another agent is running in, or switching that checkout's branch under it, is refused.
+Commands run with your login shell's environment, minus anything secret-shaped except `GITHUB_TOKEN` and `GH_TOKEN`, so `git` and `gh` use your own identity and credentials. A thread runs only while the app that started it is open: quitting closes its bridge, and a run started meanwhile reports the Mac as unreachable. Opening the thread again, or sending a follow-up, reopens it. The thread is visible from the web and other computers, but only this Mac can continue it.
 
-The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data. Thread checkpoints are committed to a SQLite database there rather than to `langgraph dev`'s periodically flushed pickle files, so quitting or killing the app does not lose thread history.
+Threads started before this change ran on a private loopback LangGraph server the app bundles. They are still listed under This Mac and run on that server, with their own `OPENAI_API_KEY` or ChatGPT sign-in; new threads always use the bridge. The local server will be removed once those threads have aged out.
 
-For local OpenAI models, the app can use either `OPENAI_API_KEY` or a ChatGPT subscription. When no
-API key is configured, sending the first local task opens the system browser for ChatGPT sign-in.
-OAuth credentials are encrypted with the operating system's secure storage, refreshed by Electron,
-and made available to the local model client through an authenticated loopback broker. Refresh
-tokens are never placed in the local backend environment or inherited by agent shell commands.
-
-Local model calls also honor `LANGSMITH_GATEWAY_*` configuration. On managed macOS installs, the
-app reads `LC_GATEWAY_KEY` from `launchctl` when no explicit gateway key is configured and enables
-gateway routing for the local backend. The local backend traces to the connected cloud deployment's
-`LANGSMITH_PROJECT` by default. Gateway and provider credentials are not inherited by agent shell
-commands.
+The composer's workspace selector chooses where a local thread runs. **Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects. **New worktree** gives the thread its own git worktree, checked out from the selected base branch on a placeholder `open-swe/local-<id>` branch that the agent renames after it reads the request — so your own checkout is never touched and several local threads can run at once without contending for a working tree. Deleting a thread removes its worktree along with anything uncommitted in it. Only one agent may work in a given tree at a time, so starting a thread in a checkout another agent is running in, or switching that checkout's branch under it, is refused.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
 the workspace's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
+The **Terminal** and file browser open in the same checkout, on this Mac.
 
 ## How it connects
 
@@ -41,13 +32,7 @@ deployments; switching clears the previous deployment's local session data.
 
 The shared backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a
 callback URL. Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which
-GitHub users can create cloud dashboard sessions. The desktop app's private local backend does not
-require GitHub or either allowlist.
-
-The desktop sign-in screen also offers **Continue in local mode**. This skips GitHub sign-in and
-limits the Agents workspace to projects and threads on **This Mac**; cloud threads, settings, and
-other account-backed features remain behind sign-in. The choice is remembered on that computer,
-and **Sign in for cloud mode** remains available from the local sidebar.
+GitHub users can create dashboard sessions, including the ones "This Mac" threads run under.
 
 ## Install on macOS
 
@@ -79,14 +64,12 @@ make desktop
 make web
 ```
 
-`pnpm run dev:desktop` is equivalent to `make desktop`. The desktop app starts its private local-agent backend on a random loopback port while connecting cloud features and GitHub login to the shared backend at `http://localhost:2024`.
+`pnpm run dev:desktop` is equivalent to `make desktop`. The desktop app connects to the backend at `http://localhost:2024`, which runs "This Mac" threads too; the bridge needs that backend's PostgreSQL.
 
 Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run
 beside an installed `Open SWE` app without sharing its login session, backend configuration,
 projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
 launch may require signing in and adding projects again.
-
-A separate agent installation is not required. Confirm `uv --version` succeeds before starting the desktop app in development.
 
 Development defaults to `http://localhost:2024`. Point to another backend with:
 
@@ -129,7 +112,7 @@ The workflow requires these GitHub Actions secrets:
 - `APPLE_SIGNING_CERT`: base64-encoded Developer ID Application `.p12` certificate
 - `APPLE_SIGNING_CERT_PASSWORD`: password for the certificate
 - `APPLE_PROVISIONING_PROFILE`: base64-encoded Developer ID provisioning profile for
-  `com.langchain.openswe` with Associated Domains enabled (required for Universal Links)
+  `com.langchain.openswe` with Associated Domains enabled (optional; enables Universal Links)
 - `APPLE_API_KEY`: App Store Connect `.p8` key contents
 - `APPLE_API_KEY_ID`: App Store Connect key ID
 - `APPLE_API_ISSUER`: App Store Connect issuer ID

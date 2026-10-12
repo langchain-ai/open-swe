@@ -4,6 +4,7 @@ import {
   SAME_USER,
   loginAs,
   seedOpenPullRequest,
+  typeIntoComposer,
   type SeededPullRequest,
 } from "./helpers/dashboard";
 
@@ -101,28 +102,20 @@ async function openReview(page: Page, pr: SeededPullRequest) {
 function chatPanel(page: Page): Locator {
   return page
     .locator("aside")
-    .filter({ has: page.getByPlaceholder("Ask anything about this PR…") });
+    .filter({ has: page.getByTestId("composer-editor") });
 }
 
-// The app shell's <main> wraps the side panel too; the diff column is the inner one.
 function diffColumn(page: Page): Locator {
-  return page
-    .locator("main")
-    .filter({ has: page.getByRole("heading", { name: "Changes" }) })
-    .filter({ hasNot: page.getByPlaceholder("Ask anything about this PR…") });
+  return page.getByRole("region", { name: "Changes" });
 }
 
 async function openChatTab(page: Page) {
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
-  await expect(
-    page.getByPlaceholder("Ask anything about this PR…"),
-  ).toBeVisible();
+  await page.getByRole("tab", { name: "Chat", exact: true }).click();
+  await expect(page.getByTestId("composer-editor")).toBeVisible();
 }
 
 async function sendChat(page: Page, text: string) {
-  const input = page.getByPlaceholder("Ask anything about this PR…");
-  await input.fill(text);
-  await input.press("Enter");
+  await typeIntoComposer(page, text);
 }
 
 let pr: SeededPullRequest;
@@ -185,7 +178,7 @@ test.describe("review page", () => {
     await expect(link.locator('svg[aria-label="GitHub"]')).toBeVisible();
 
     const pill = title.locator("xpath=preceding-sibling::span[1]");
-    await expect(pill).toHaveText("open");
+    await expect(pill).toHaveText("Reviewable");
     const pillBox = await pill.boundingBox();
     const titleBox = await title.boundingBox();
     expect(pillBox).not.toBeNull();
@@ -196,7 +189,7 @@ test.describe("review page", () => {
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
   });
 
-  test("renders human input between the description and the changes", async ({
+  test("renders human input above the description and the changes", async ({
     page,
   }) => {
     const seeded = await page.request.post("/control/walkthrough", {
@@ -222,8 +215,10 @@ test.describe("review page", () => {
       .getByRole("heading", { name: "Changes", exact: true })
       .boundingBox();
     expect(description && card && changes).toBeTruthy();
-    expect(description!.y + description!.height).toBeLessThanOrEqual(card!.y);
-    expect(card!.y + card!.height).toBeLessThanOrEqual(changes!.y);
+    expect(card!.y + card!.height).toBeLessThanOrEqual(description!.y);
+    expect(description!.y + description!.height).toBeLessThanOrEqual(
+      changes!.y,
+    );
   });
 
   test("dismissing a walkthrough reports whether there was one", async ({
@@ -315,11 +310,7 @@ test.describe("review page", () => {
   }) => {
     await openReview(page, pr);
     await openChatTab(page);
-    await expect(
-      chatPanel(page).getByText("This PR hasn't been reviewed yet", {
-        exact: false,
-      }),
-    ).toBeVisible();
+    await expect(chatPanel(page).getByTestId("composer-editor")).toBeEditable();
     await expect(page.getByText("I've reviewed this PR")).toHaveCount(0);
     await expect(
       chatPanel(page).getByRole("button", {
@@ -350,8 +341,8 @@ test.describe("review page", () => {
       timeout: 30_000,
     });
     await expect(chatCard(toDiscard)).toContainText("Draft review comment");
+    await chatCard(toPost).getByRole("button", { name: toPost }).click();
     await expect(inlineCard(toPost)).toContainText("Draft review comment");
-    await expect(inlineCard(toDiscard)).toContainText("Draft review comment");
     await expect(inlineCard(toPost).getByLabel("Comment body")).toHaveValue(
       "Rename ZETA_5 to something descriptive.",
     );
@@ -490,15 +481,14 @@ test.describe("review page", () => {
     page,
   }) => {
     await openReview(page, pr);
+    await page.getByRole("tab", { name: /Discussion/ }).click();
     const conversation = page.getByRole("region", { name: "Conversation" });
     await expect(conversation).toBeVisible();
 
     const comment = "Thanks, taking a look now.";
-    await expect(conversation.getByRole("textbox")).toHaveCount(0);
     await conversation
-      .getByRole("button", { name: "Comment", exact: true })
-      .click();
-    await conversation.getByRole("textbox").fill(comment);
+      .getByRole("textbox", { name: "Comment on this pull request" })
+      .fill(comment);
     await conversation
       .getByRole("button", { name: "Comment", exact: true })
       .click();
@@ -511,7 +501,7 @@ test.describe("review page", () => {
     await page.getByRole("button", { name: "Submit review" }).click();
     await expect(conversation.getByText(verdict)).toBeVisible();
     await expect(
-      conversation.getByText("Approved", { exact: true }),
+      conversation.getByText("approved", { exact: true }),
     ).toBeVisible();
 
     const fake = await fakePull(page, pr);
@@ -565,16 +555,12 @@ test.describe("review page", () => {
     expect((await fakePull(page, pr)).standalone_comment_posts).toEqual([]);
   });
 
-  test("opens info and chat as a sheet on a narrow window", async ({
-    page,
-  }) => {
+  test("opens the chat as a sheet on a narrow window", async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 800 });
     await openReview(page, pr);
-    const open = page.getByRole("button", { name: "Info & chat" });
+    const open = page.getByRole("button", { name: "Chat", exact: true });
     await expect(open).toBeVisible();
-    await expect(
-      page.getByPlaceholder("Ask anything about this PR…"),
-    ).toBeHidden();
+    await expect(page.getByTestId("composer-editor")).toBeHidden();
 
     await open.click();
     const sheet = page.getByRole("dialog");
@@ -594,9 +580,9 @@ test.describe("review page", () => {
       sheet.getByText("The pull request adds two constant modules."),
     ).toBeVisible();
     await expect(sheet).toBeVisible();
-    const input = sheet.getByPlaceholder("Ask anything about this PR…");
+    const input = sheet.getByTestId("composer-editor");
     await input.pressSequentially("follow-up question");
-    await expect(input).toHaveValue("follow-up question");
+    await expect(input).toHaveText("follow-up question");
     await expect(sheet).toBeVisible();
   });
 });

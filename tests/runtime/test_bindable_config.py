@@ -1,7 +1,7 @@
 """Factories must not bake the server's runtime plumbing into the graphs they return."""
 
-from agent.chat import get_chat_agent
-from agent.runtime import bindable_config
+from openswe.chat import get_chat_agent
+from openswe.runtime import bindable_config
 
 
 class _ReadOnlyRuntime:

@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.tools import read_only_sql as query_tool
+from openswe.tools import read_only_sql as query_tool
 
-sql_tool = import_module("agent.tools.read_only_sql")
+sql_tool = import_module("openswe.tools.read_only_sql")
 
 
 def _config(**configurable: object) -> dict[str, dict[str, object]]:
@@ -25,7 +25,7 @@ def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
     )
-    monkeypatch.setattr("agent.tools.access.langgraph_sdk.get_client", lambda: client)
+    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: client)
 
 
 @pytest.mark.asyncio
@@ -50,7 +50,7 @@ async def test_read_only_sql_requires_private_admin_surface(
     )
 
     for config in configs:
-        with patch("agent.run_config.get_config", return_value=config):
+        with patch("openswe.run_config.get_config", return_value=config):
             result = await query_tool("SELECT 1")
         assert result["ok"] is False
         assert "not available in this thread" in str(result["error"])
@@ -71,7 +71,7 @@ async def test_read_only_sql_allows_admin_slack_dm(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(sql_tool.postgres, "read_only_transaction", connection)
     with patch(
-        "agent.run_config.get_config",
+        "openswe.run_config.get_config",
         return_value=_config(
             admin_thread=True,
             source="slack",
@@ -93,7 +93,7 @@ async def test_read_only_sql_allows_admin_slack_dm(monkeypatch: pytest.MonkeyPat
 async def test_read_only_sql_rechecks_admin_membership(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
     with patch(
-        "agent.run_config.get_config",
+        "openswe.run_config.get_config",
         return_value=_config(admin_thread=True, source="dashboard", github_login="not-admin"),
     ):
         result = await query_tool("SELECT 1")
@@ -121,7 +121,7 @@ async def test_read_only_sql_returns_json_safe_limited_rows(
 
     monkeypatch.setattr(sql_tool.postgres, "read_only_transaction", connection)
     with patch(
-        "agent.run_config.get_config",
+        "openswe.run_config.get_config",
         return_value=_config(admin_thread=True, source="dashboard", github_login="admin"),
     ):
         response = await query_tool("SELECT created_at, cost, ratio FROM usage")
@@ -150,7 +150,7 @@ async def test_read_only_sql_hides_database_errors(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(sql_tool.postgres, "read_only_transaction", connection)
     with patch(
-        "agent.run_config.get_config",
+        "openswe.run_config.get_config",
         return_value=_config(admin_thread=True, source="dashboard", github_login="admin"),
     ):
         response = await query_tool("DELETE FROM users")

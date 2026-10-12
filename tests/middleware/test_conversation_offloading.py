@@ -8,8 +8,8 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from agent.middleware.prepare_run import BasePrepareRunMiddleware
+from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 
 
 async def test_manual_offload_preserves_history_and_hides_summary_stream(tmp_path):

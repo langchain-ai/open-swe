@@ -26,6 +26,7 @@ function warmApiRequests(
   if (sidebarPath) {
     let includeAutomations = false
     let includeResolved = false
+    let owned = false
     let repoMode = true
     let sortByCreated = true
     try {
@@ -40,6 +41,7 @@ function warmApiRequests(
           (Array.isArray(filters.sources) &&
             filters.sources.indexOf("schedule") !== -1)
         includeResolved = filters.includeResolved === true
+        owned = filters.ownedOnly === true
       }
     } catch {
       // An unreadable preference just means the default (false).
@@ -47,11 +49,13 @@ function warmApiRequests(
     // Parameter order has to match the api client's, because the handoff below
     // matches on the resolved URL.
     const search = new URLSearchParams()
+    search.set("hierarchy", "false")
     search.set("limit", String(pageSize))
     search.set("offset", "0")
     if (!includeResolved) search.set("resolved", "false")
     search.set("scope", includeAutomations ? "all" : "interactive")
     if (repoMode) search.set("ownerless", "true")
+    if (owned) search.set("owned", "true")
     search.set("sort_by", sortByCreated ? "created_at" : "updated_at")
     targets.push(sidebarPath + "?" + search.toString())
   }

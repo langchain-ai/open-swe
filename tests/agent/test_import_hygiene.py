@@ -1,6 +1,6 @@
 """Guardrails against import-graph regressions.
 
-Slow imports of agent.webapp delay pod readiness on LangGraph Cloud and have
+Slow imports of openswe.webapp delay pod readiness on LangGraph Cloud and have
 caused runs to fail with "exceeded max attempts". These tests pin which heavy
 modules are allowed in each entrypoint's transitive import closure.
 """
@@ -22,16 +22,16 @@ def _closure_check(entry: str, forbidden: list[str]) -> dict[str, bool]:
 
 def test_webapp_does_not_import_agent_stack() -> None:
     loaded = _closure_check(
-        "agent.webapp",
+        "openswe.webapp",
         [
             "deepagents",
             "anthropic",
             "langchain_anthropic",
             "openai",
             "exa_py",
-            "agent.server",
-            "agent.middleware",
-            "agent.tools",
+            "openswe.server",
+            "openswe.middleware",
+            "openswe.tools",
         ],
     )
-    assert not any(loaded.values()), f"forbidden modules imported by agent.webapp: {loaded}"
+    assert not any(loaded.values()), f"forbidden modules imported by openswe.webapp: {loaded}"

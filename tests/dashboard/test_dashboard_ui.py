@@ -6,8 +6,8 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from agent.api import app as app_module
-from agent.utils.dashboard_ui import (
+from openswe.api import app as app_module
+from openswe.utils.dashboard_ui import (
     DashboardDevProxyRoute,
     DashboardShellRoute,
     keep_dashboard_ui_last,

@@ -45,7 +45,7 @@ it("warns about a lagging frontend even when it matches the backend-served bundl
   )
   expect(
     screen.getByRole("link", { name: "Details" }).getAttribute("href")
-  ).toBe("/my-settings#about")
+  ).toBe("/my-settings/about")
   client.setQueryData(["session"], session("old"))
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull())
   client.clear()

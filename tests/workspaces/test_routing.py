@@ -1,21 +1,20 @@
 import pytest
 
-from agent.config import ENV
-from agent.dashboard.user_preferences import (
+from openswe.config import ENV
+from openswe.dashboard.user_preferences import (
     UserPreferencesUpdate,
     get_user_preferences,
     set_user_preferences,
 )
-from agent.workspaces import routing
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
-from tests.conftest import FakeStore
+from openswe.workspaces import routing
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
+from tests.conftest import FakeUserRecords
 
-# Workspaces are rows; user preferences are still Store records, so the tests
-# that read a preference keep the store double as well.
+# Workspaces are rows; tests that read a preference use the in-memory user_records double.
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-async def test_default_workspace_preference_round_trips(fake_store: FakeStore) -> None:
+async def test_default_workspace_preference_round_trips(user_records: FakeUserRecords) -> None:
     assert (await get_user_preferences("alice"))["default_workspace"] is None
     await set_user_preferences(
         "alice", UserPreferencesUpdate(default_visibility="public", default_workspace=" OSS ")
@@ -37,7 +36,7 @@ async def test_thread_wins_over_everything() -> None:
     assert result == routing.WorkspaceResolution("default", "thread")
 
 
-async def test_tag_then_channel_then_repo_then_user_default(fake_store: FakeStore) -> None:
+async def test_tag_then_channel_then_repo_then_user_default(user_records: FakeUserRecords) -> None:
     await _seed()
     await set_user_preferences(
         "alice", UserPreferencesUpdate(default_visibility="public", default_workspace="oss")
@@ -71,7 +70,7 @@ async def test_a_bound_channel_outranks_the_repositorys_preferred_workspace() ->
     )
 
 
-async def test_unknown_user_default_is_ignored(fake_store: FakeStore) -> None:
+async def test_unknown_user_default_is_ignored(user_records: FakeUserRecords) -> None:
     await _seed()
     await set_user_preferences(
         "alice", UserPreferencesUpdate(default_visibility="public", default_workspace="gone")

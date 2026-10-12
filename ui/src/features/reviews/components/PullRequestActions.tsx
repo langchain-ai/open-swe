@@ -3,8 +3,7 @@ import { PullRequestLinks } from "../PullRequestLinks"
 import {
   canAttemptMerge,
   canUpdateBranch,
-  hasUnresolvedConversations,
-  isFixable,
+  pullRequestFixes,
 } from "../lib/status"
 import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
@@ -26,53 +25,63 @@ export function PullRequestActions({
   login,
   outcome,
   onSettled,
+  onSettledConfirmed,
   onReady,
   onReviewPage = false,
 }: {
   pr: OpenPullRequest
   login: string
   outcome?: PullRequestOutcome
-  onSettled: (outcome: PullRequestOutcome) => void
+  onSettled: (outcome: PullRequestOutcome | undefined) => void
+  /** Runs once GitHub confirms a merge or close; the list leaves it unset to keep the row. */
+  onSettledConfirmed?: () => void
   onReady: () => void
   onReviewPage?: boolean
 }) {
+  const settle = (next: PullRequestOutcome) => {
+    onSettled(next)
+    return () => onSettled(undefined)
+  }
+  const fixes = pullRequestFixes(pr)
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-        {outcome ? (
-          <span className="text-xs text-muted-foreground">
-            {outcomeLabels[outcome]} · leaves the list on the next refresh
-          </span>
-        ) : (
-          <>
-            {isFixable(pr) && (
-              <PullRequestThreadAction pr={pr} login={login} action="fix" />
-            )}
-            {hasUnresolvedConversations(pr) && (
-              <PullRequestThreadAction
-                pr={pr}
-                login={login}
-                action="address-comments"
-              />
-            )}
-            {pr.draft === true && (
-              <MarkPullRequestReady pr={pr} onReady={onReady} />
-            )}
-            {pr.draft === false && <RequestHumanReview pr={pr} />}
-            {canUpdateBranch(pr) && (
-              <UpdatePullRequestBranch pr={pr} onUpdated={onReady} />
-            )}
-            {canAttemptMerge(pr) && (
-              <MergePullRequest pr={pr} onMerged={() => onSettled("merged")} />
-            )}
-            {pr.missingChecks.length > 0 && (
-              <span className="text-xs text-amber-700 dark:text-amber-400">
-                Merge blocked: {pr.missingChecks.join(", ")} never reported
-              </span>
-            )}
-            <ClosePullRequest pr={pr} onClosed={() => onSettled("closed")} />
-          </>
+    <div className="flex flex-wrap items-center gap-x-space-4 gap-y-space-2">
+      {outcome && (
+        <span className="text-xs text-secondary">
+          {outcomeLabels[outcome]} · leaves the list on the next refresh
+        </span>
+      )}
+      {/* Hidden rather than unmounted, so a rolled-back outcome keeps each control's state. */}
+      <div
+        hidden={Boolean(outcome)}
+        className="flex flex-wrap items-center gap-x-space-2 gap-y-space-2"
+      >
+        {fixes.length > 0 && (
+          <PullRequestThreadAction pr={pr} login={login} actions={fixes} />
         )}
+        {pr.draft === true && (
+          <MarkPullRequestReady pr={pr} onReady={onReady} />
+        )}
+        {pr.draft === false && <RequestHumanReview pr={pr} />}
+        {canUpdateBranch(pr) && (
+          <UpdatePullRequestBranch pr={pr} onUpdated={onReady} />
+        )}
+        {canAttemptMerge(pr) && (
+          <MergePullRequest
+            pr={pr}
+            apply={() => settle("merged")}
+            onMerged={onSettledConfirmed}
+          />
+        )}
+        {pr.missingChecks.length > 0 && (
+          <span className="text-xs text-warning-secondary">
+            Merge blocked: {pr.missingChecks.join(", ")} never reported
+          </span>
+        )}
+        <ClosePullRequest
+          pr={pr}
+          apply={() => settle("closed")}
+          onClosed={onSettledConfirmed}
+        />
       </div>
       <PullRequestLinks
         repo={pr.repo}

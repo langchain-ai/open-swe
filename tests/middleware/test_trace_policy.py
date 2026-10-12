@@ -2,7 +2,7 @@ import inspect
 
 from langchain.agents.middleware import AgentMiddleware, omit_payload
 
-from agent import middleware
+from openswe import middleware
 
 
 def test_custom_middleware_scrubs_trace_inputs() -> None:

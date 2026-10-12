@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 
 import pkg from "../package.json"
 import { ApiClient, ApiError, normalizeBackend } from "./api.ts"
-import { Bridge } from "./bridge.ts"
+import { Bridge } from "open-swe-bridge-client"
 import {
   forgetSession,
   readBridgeMemory,
@@ -17,7 +17,6 @@ import { isGitRepository, originRepo, repoFullName } from "./git.ts"
 import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
-import { serveMcp } from "./mcp.ts"
 import {
   followRun,
   RESULT_TOOL,
@@ -32,8 +31,6 @@ Usage:
   oswe logout                       Forget the session for the current backend
   oswe auth status                  Show which credential is in use and check it
   oswe run [options] [prompt...]    Start an agent bridged to this directory
-  oswe mcp                          Serve an MCP server on stdio (list_threads,
-                                    upload_session)
   oswe --help | --version
 
 Run options:
@@ -197,10 +194,13 @@ async function runCommand(options: RunOptions): Promise<number> {
 
   let bridge: Bridge
   try {
-    bridge = await Bridge.open(api, {
+    bridge = await Bridge.open(api.bridges(), {
+      client: "cli",
       rootPath: root,
       label: basename(root),
       bridgeId,
+      credentialRejected: credential.rejected,
+      log: (message) => process.stderr.write(`oswe: ${message}\n`),
     })
   } catch (cause) {
     if (!(cause instanceof ApiError)) throw cause
@@ -375,9 +375,6 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await authStatusCommand()
       fail("usage: oswe auth status")
       return 2
-    case "mcp":
-      await serveMcp(pkg.version)
-      return 0
     case "run":
       return await runCommand({
         thread: values.thread,

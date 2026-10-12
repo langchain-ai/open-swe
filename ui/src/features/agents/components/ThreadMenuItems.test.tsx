@@ -1,10 +1,14 @@
 /** @vitest-environment jsdom */
 
-import { Menu } from "@base-ui/react/menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
+import type { DesktopLegacyLocalThread } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { ThreadMenuItems } from "./ThreadMenuItems"
 
@@ -22,7 +26,7 @@ const thread: AgentThread = {
   messages: [],
 }
 
-const localThread: DesktopLocalThreadSummary = {
+const localThread: DesktopLegacyLocalThread = {
   id: "local-thread-id",
   title: "Local thread",
   cwd: "/workspace/open-swe",
@@ -75,27 +79,25 @@ describe("Copy thread ID", () => {
     })
 
     render(
-      <Menu.Root>
-        <Menu.Trigger>Thread actions</Menu.Trigger>
-        <Menu.Portal>
-          <Menu.Positioner>
-            <Menu.Popup>
-              <ThreadMenuItems
-                {...props}
-                pinned={false}
-                archived={false}
-                isDeleting={false}
-                onTogglePin={vi.fn()}
-                onToggleArchived={vi.fn()}
-                onDelete={vi.fn()}
-              />
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>
+      <DropdownMenu>
+        <DropdownMenuTrigger>Thread actions</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <ThreadMenuItems
+            {...props}
+            pinned={false}
+            archived={false}
+            isDeleting={false}
+            onTogglePin={vi.fn()}
+            onToggleArchived={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Thread actions" }))
+    fireEvent.keyDown(screen.getByRole("button", { name: "Thread actions" }), {
+      key: "Enter",
+    })
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Copy thread ID" })
     )

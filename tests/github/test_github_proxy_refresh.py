@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain.agents.middleware import AgentState
 
-from agent.github import proxy as github_proxy
-from agent.github.proxy import (
+from openswe.github import proxy as github_proxy
+from openswe.github.proxy import (
     PROXY_TOKEN_FALLBACK_TTL,
     proxy_token_needs_refresh,
     record_proxy_token_expiry,
@@ -50,15 +50,15 @@ class TestProxyTokenNeedsRefresh:
 class TestRefreshGithubProxyMiddleware:
     @pytest.mark.asyncio
     async def test_calls_refresh_with_thread_id(self) -> None:
-        from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+        from openswe.middleware.refresh_github_proxy import refresh_github_proxy_before_model
 
         with (
             patch(
-                "agent.middleware.refresh_github_proxy.get_config",
+                "openswe.middleware.refresh_github_proxy.get_config",
                 return_value={"configurable": {"thread_id": "thread-9"}},
             ),
             patch(
-                "agent.middleware.refresh_github_proxy.maybe_refresh_proxy_token",
+                "openswe.middleware.refresh_github_proxy.maybe_refresh_proxy_token",
                 new=AsyncMock(return_value=True),
             ) as mock_refresh,
         ):
@@ -71,15 +71,15 @@ class TestRefreshGithubProxyMiddleware:
 
     @pytest.mark.asyncio
     async def test_swallows_refresh_errors(self) -> None:
-        from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+        from openswe.middleware.refresh_github_proxy import refresh_github_proxy_before_model
 
         with (
             patch(
-                "agent.middleware.refresh_github_proxy.get_config",
+                "openswe.middleware.refresh_github_proxy.get_config",
                 return_value={"configurable": {"thread_id": "thread-9"}},
             ),
             patch(
-                "agent.middleware.refresh_github_proxy.maybe_refresh_proxy_token",
+                "openswe.middleware.refresh_github_proxy.maybe_refresh_proxy_token",
                 new=AsyncMock(side_effect=RuntimeError("boom")),
             ),
         ):

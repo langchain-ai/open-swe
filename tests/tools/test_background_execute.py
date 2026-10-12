@@ -15,24 +15,21 @@ import pytest
 from fastapi import FastAPI
 from langgraph_sdk.errors import NotFoundError
 
-from agent import background_tasks
-from agent.background_tasks import monitor_background_tasks, reconcile_background_tasks
-from agent.sandboxes import tool_access, tool_routes
-from agent.slack import thinking as slack_thinking
-from agent.tools.background_execute import (
+from openswe import background_tasks
+from openswe.background_tasks import monitor_background_tasks, reconcile_background_tasks
+from openswe.sandboxes import tool_access, tool_routes
+from openswe.slack import thinking as slack_thinking
+from openswe.tasks import service as task_service
+from openswe.tools import threads
+from openswe.tools.background_execute import (
     TASK_ROOT,
     _launch_command,
     _runner,
     background_execute,
     control_script,
 )
-from agent.utils.background_task_state import update_background_task_state
+from openswe.utils.background_task_state import update_background_task_state
 
-# _launch_command refuses to run without setsid, which macOS does not ship; the
-# sandbox these tasks run in is always Linux.
-requires_setsid = pytest.mark.skipif(
-    shutil.which("setsid") is None, reason="setsid is unavailable on this host"
-)
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
 FAKE_CURL = """#!/usr/bin/env python3
 import pathlib, sys
@@ -74,17 +71,19 @@ def test_runner_calls_back_on_completion_until_accepted(
     fake_curl: Path, monkeypatch: pytest.MonkeyPatch, callback: bool, codes: list[str], calls: int
 ) -> None:
     (fake_curl / "codes").write_text("\n".join(codes))
-    module = importlib.import_module("agent.tools.background_execute")
+    module = importlib.import_module("openswe.tools.background_execute")
     monkeypatch.setattr(module, "CALLBACK_RETRY_DELAYS", (0, 0, 0, 0))
     task_id = f"test-{uuid.uuid4().hex}"
     task_dir = Path(TASK_ROOT, task_id)
     task_dir.mkdir(parents=True)
     runner = task_dir / "runner.py"
-    runner.write_text(_runner(task_id, "echo hi", 10, callback))
+    runner.write_text(_runner(task_id, "echo hi", 10, callback, owner_thread_id="thread-a"))
     try:
         subprocess.run(["python3", str(runner)], check=True, timeout=10)
 
-        assert json.loads((task_dir / "state.json").read_text())["status"] == "completed"
+        state = json.loads((task_dir / "state.json").read_text())
+        assert state["status"] == "completed"
+        assert state["owner_thread_id"] == "thread-a"
         url = f"{TOOLS_URL}/background-tasks/{task_id}/complete"
         calls_file = fake_curl / "calls"
         recorded = calls_file.read_text().splitlines() if calls_file.exists() else []
@@ -93,7 +92,6 @@ def test_runner_calls_back_on_completion_until_accepted(
         shutil.rmtree(task_dir, ignore_errors=True)
 
 
-@requires_setsid
 def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch) -> None:
     if Path(tool_access.TOOLS_URL_FILE).exists():
         pytest.skip("this host has a provisioned sandbox tools URL")
@@ -101,7 +99,11 @@ def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch
     task_id = f"test-{uuid.uuid4().hex}"
     try:
         result = subprocess.run(
-            ["/bin/sh", "-c", _launch_command(task_id, "true", 10, callback=True)],
+            [
+                "/bin/sh",
+                "-c",
+                _launch_command(task_id, "true", 10, callback=True, owner_thread_id="thread-a"),
+            ],
             capture_output=True,
             text=True,
             timeout=3,
@@ -112,7 +114,6 @@ def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch
         shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
 
 
-@requires_setsid
 def test_background_command_returns_while_running_then_caps_output(fake_curl: Path) -> None:
     task_id = f"test-{uuid.uuid4().hex}"
     task_dir = Path(TASK_ROOT, task_id)
@@ -120,7 +121,11 @@ def test_background_command_returns_while_running_then_caps_output(fake_curl: Pa
     try:
         started = time.monotonic()
         launched = subprocess.run(
-            ["/bin/sh", "-c", _launch_command(task_id, command, 10, callback=True)],
+            [
+                "/bin/sh",
+                "-c",
+                _launch_command(task_id, command, 10, callback=True, owner_thread_id="thread-a"),
+            ],
             capture_output=True,
             check=True,
             text=True,
@@ -128,6 +133,7 @@ def test_background_command_returns_while_running_then_caps_output(fake_curl: Pa
         )
         assert time.monotonic() - started < 2
         assert json.loads(launched.stdout)["status"] == "running"
+        assert json.loads(launched.stdout)["owner_thread_id"] == "thread-a"
 
         deadline = time.monotonic() + 5
         while (state := _run_control("status", task_id))["status"] == "running":
@@ -143,14 +149,19 @@ def test_background_command_returns_while_running_then_caps_output(fake_curl: Pa
         shutil.rmtree(task_dir, ignore_errors=True)
 
 
-@requires_setsid
 def test_background_command_timeout_and_stop(fake_curl: Path) -> None:
     for timeout, stop, expected in ((1, False, "timed_out"), (10, True, "stopped")):
         task_id = f"test-{uuid.uuid4().hex}"
         task_dir = Path(TASK_ROOT, task_id)
         try:
             subprocess.run(
-                ["/bin/sh", "-c", _launch_command(task_id, "sleep 30", timeout, callback=False)],
+                [
+                    "/bin/sh",
+                    "-c",
+                    _launch_command(
+                        task_id, "sleep 30", timeout, callback=False, owner_thread_id="thread-a"
+                    ),
+                ],
                 capture_output=True,
                 check=True,
                 text=True,
@@ -181,20 +192,71 @@ async def _callback_client(monkeypatch: pytest.MonkeyPatch) -> tuple[httpx.Async
     return http, issued[1]
 
 
-@pytest.mark.parametrize(("pending", "status_code"), [(0, 204), (1, 503)])
+@pytest.mark.parametrize("dispatch_fails", [False, True])
 async def test_completion_callback_asks_runner_to_retry_until_delivered(
-    monkeypatch: pytest.MonkeyPatch, pending: int, status_code: int
+    monkeypatch: pytest.MonkeyPatch, dispatch_fails: bool
 ) -> None:
-    reconcile = AsyncMock(return_value={"status": "idle", "delivered": 0, "pending": pending})
-    monkeypatch.setattr(background_tasks, "reconcile_background_tasks", reconcile)
+    client = AsyncMock()
+    client.threads.get.return_value = {
+        "metadata": {
+            "sandbox_id": "sandbox-a",
+            "sandbox_host_thread_id": "thread-a",
+            "running_background_tasks": ["cmd-1"],
+        }
+    }
+    task = {
+        "task_id": "cmd-1",
+        "owner_thread_id": "thread-b",
+        "status": "completed",
+        "notification": "pending",
+    }
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+    dispatch = AsyncMock(side_effect=RuntimeError("unavailable") if dispatch_fails else None)
+    monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[task]))
+    monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
     http, token = await _callback_client(monkeypatch)
     async with http:
         response = await http.post(
             "/dashboard/api/sandbox-tools/background-tasks/cmd-1/complete",
             headers={tool_access.TOOLS_HEADER: token},
         )
-    assert response.status_code == status_code
-    reconcile.assert_awaited_once_with("thread-a")
+    assert response.status_code == (503 if dispatch_fails else 204)
+    assert dispatch.await_args is not None
+    assert dispatch.await_args.args[0] == "thread-b"
+    assert task["notification"] == ("pending" if dispatch_fails else "done")
+
+
+@pytest.mark.parametrize(
+    ("sandbox_id", "host_id"),
+    [("another-sandbox", "thread-a"), ("sandbox-a", "another-host")],
+)
+async def test_completion_callback_cannot_route_outside_its_shared_sandbox(
+    monkeypatch: pytest.MonkeyPatch, sandbox_id: str, host_id: str
+) -> None:
+    client = AsyncMock()
+    client.threads.get.return_value = {
+        "metadata": {"sandbox_id": sandbox_id, "sandbox_host_thread_id": host_id}
+    }
+    monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock())
+    monkeypatch.setattr(
+        background_tasks,
+        "_list_tasks",
+        AsyncMock(return_value=[{"task_id": "cmd-1", "owner_thread_id": "thread-b"}]),
+    )
+    dispatch = AsyncMock()
+    monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
+    http, token = await _callback_client(monkeypatch)
+    async with http:
+        response = await http.post(
+            "/dashboard/api/sandbox-tools/background-tasks/cmd-1/complete",
+            headers={tool_access.TOOLS_HEADER: token},
+        )
+    assert response.status_code == 403
+    dispatch.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -209,7 +271,7 @@ async def test_heartbeat_keeps_the_sandbox_alive_only_for_a_running_task(
     monkeypatch: pytest.MonkeyPatch, tasks: list[dict[str, str]], status_code: int
 ) -> None:
     create_sandbox = AsyncMock(return_value=object())
-    monkeypatch.setattr(background_tasks, "create_sandbox", create_sandbox)
+    monkeypatch.setattr(background_tasks, "connect_sandbox", create_sandbox)
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
     http, token = await _callback_client(monkeypatch)
     async with http:
@@ -258,6 +320,70 @@ async def test_cron_tick_deletes_its_cron_only_once_nothing_is_left(
     assert delete_crons.await_count == int(deleted)
 
 
+async def test_shared_sandbox_monitors_deliver_only_their_own_completions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored: dict[str, dict[str, object]] = {
+        "host": {"sandbox_id": "shared"},
+        "worker-a": {"sandbox_id": "shared", "sandbox_host_thread_id": "host"},
+        "worker-b": {"sandbox_id": "shared", "sandbox_host_thread_id": "host"},
+    }
+    tasks = [
+        {"task_id": "cmd-a", "owner_thread_id": "worker-a", "status": "completed"},
+        {"task_id": "cmd-a-running", "owner_thread_id": "worker-a", "status": "running"},
+        {"task_id": "cmd-b", "owner_thread_id": "worker-b", "status": "completed"},
+        {"task_id": "cmd-legacy", "status": "completed"},
+    ]
+
+    async def get(thread_id: str) -> dict[str, object]:
+        return {"metadata": dict(stored[thread_id])}
+
+    async def update(thread_id: str, *, metadata: dict[str, object]) -> None:
+        stored[thread_id].update(metadata)
+
+    client = AsyncMock()
+    client.threads.get.side_effect = get
+    client.threads.update.side_effect = update
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+    dispatch = AsyncMock()
+    delete_crons = AsyncMock()
+    monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
+    monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
+
+    assert await monitor_background_tasks("worker-b") == {
+        "status": "idle",
+        "delivered": 1,
+        "pending": 0,
+    }
+    assert "notification" not in tasks[0]
+    assert "notification" not in tasks[3]
+    assert not stored["worker-b"].get("running_background_tasks")
+    delete_crons.assert_awaited_once_with("worker-b")
+
+    assert await monitor_background_tasks("worker-a") == {
+        "status": "running",
+        "delivered": 1,
+        "pending": 0,
+    }
+    assert stored["worker-a"]["running_background_tasks"] == ["cmd-a-running"]
+    delete_crons.assert_awaited_once_with("worker-b")
+
+    assert await monitor_background_tasks("host") == {
+        "status": "idle",
+        "delivered": 1,
+        "pending": 0,
+    }
+    assert [call.args[0] for call in dispatch.await_args_list] == ["worker-b", "worker-a", "host"]
+    for call, task_id in zip(
+        dispatch.await_args_list, ("cmd-b", "cmd-a", "cmd-legacy"), strict=True
+    ):
+        assert task_id in call.args[1]
+
+
 @pytest.mark.parametrize(
     ("login", "profile", "enabled"),
     [
@@ -271,7 +397,7 @@ async def test_cron_tick_deletes_its_cron_only_once_nothing_is_left(
 async def test_callbacks_follow_the_triggering_persons_flag(
     login: str | None, profile: dict[str, object] | None, enabled: bool
 ) -> None:
-    module = importlib.import_module("agent.tools.background_execute")
+    module = importlib.import_module("openswe.tools.background_execute")
     get_profile = AsyncMock(return_value=profile)
     with (
         patch.object(module, "get_profile", get_profile),
@@ -291,18 +417,18 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
     launches = [{"task_id": "cmd-1", "status": "running"}]
     with (
         patch(
-            "agent.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute._uses_completion_callback",
             AsyncMock(return_value=callback),
         ),
         patch(
-            "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
+            "openswe.tools.background_execute._current_backend", return_value=("thread-1", backend)
         ),
         patch(
-            "agent.tools.background_execute.execute",
+            "openswe.tools.background_execute.execute",
             AsyncMock(side_effect=launches if callback else [{"tasks": []}, *launches]),
         ),
-        patch("agent.tools.background_execute.update_background_task_state", AsyncMock()),
-        patch("agent.background_tasks.ensure_background_task_cron", AsyncMock()) as ensure_cron,
+        patch("openswe.tools.background_execute.update_background_task_state", AsyncMock()),
+        patch("openswe.background_tasks.ensure_background_task_cron", AsyncMock()) as ensure_cron,
     ):
         result = await background_execute("sleep 10")
 
@@ -316,19 +442,19 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
 
     with (
         patch(
-            "agent.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute._uses_completion_callback",
             AsyncMock(return_value=False),
         ),
-        patch("agent.tools.background_execute.update_background_task_state", AsyncMock()),
+        patch("openswe.tools.background_execute.update_background_task_state", AsyncMock()),
         patch(
-            "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
+            "openswe.tools.background_execute._current_backend", return_value=("thread-1", backend)
         ),
         patch(
-            "agent.tools.background_execute.execute",
+            "openswe.tools.background_execute.execute",
             AsyncMock(side_effect=[{"tasks": []}, {"task_id": "task-1", "status": "running"}]),
         ),
         patch(
-            "agent.background_tasks.ensure_background_task_cron",
+            "openswe.background_tasks.ensure_background_task_cron",
             AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
         ),
     ):
@@ -342,10 +468,15 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
     }
 
 
-@pytest.mark.parametrize("tracking_failure", [False, True])
-async def test_reconcile_enqueues_one_claimed_completion(tracking_failure: bool) -> None:
+@pytest.mark.parametrize(
+    ("tracking_failure", "worker"), [(False, False), (True, False), (False, True)]
+)
+async def test_reconcile_enqueues_one_claimed_completion(
+    monkeypatch: pytest.MonkeyPatch, tracking_failure: bool, worker: bool
+) -> None:
     task = {
         "task_id": "task-1",
+        "owner_thread_id": "thread-1",
         "status": "completed",
         "exit_code": 0,
         "duration_seconds": 1,
@@ -363,20 +494,39 @@ async def test_reconcile_enqueues_one_claimed_completion(tracking_failure: bool)
             "running_background_tasks": ["task-1"],
         }
     }
+    if worker:
+        client.threads.get.return_value["metadata"].update(
+            source="dashboard",
+            source_context={},
+            task_id=str(uuid.uuid4()),
+            sandbox_host_thread_id="coordinator",
+            owner_type="user",
+            owner_login="worker-owner",
+        )
+        monkeypatch.setattr(task_service, "langgraph_client", lambda: client)
+        monkeypatch.setattr(task_service, "enforce_github_login_gate", AsyncMock())
+        monkeypatch.setattr(
+            task_service.ThreadMetadata,
+            "owner",
+            AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), github_login="worker-owner")),
+        )
+        monkeypatch.setattr(task_service, "get_profile", AsyncMock(return_value={}))
+        monkeypatch.setattr(task_service, "resolve_run_email", AsyncMock(return_value=None))
+        monkeypatch.setattr(threads, "enforce_github_login_gate", AsyncMock())
 
     with (
-        patch("agent.background_tasks._client", return_value=client),
+        patch("openswe.background_tasks._client", return_value=client),
         patch(
-            "agent.background_tasks.update_background_task_state",
+            "openswe.background_tasks.update_background_task_state",
             AsyncMock(
                 side_effect=RuntimeError("metadata unavailable") if tracking_failure else None
             ),
         ),
-        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
-        patch("agent.background_tasks._list_tasks", AsyncMock(return_value=[task])),
-        patch("agent.background_tasks._claim", AsyncMock(return_value=True)),
-        patch("agent.background_tasks._mark_delivered", AsyncMock()),
-        patch("agent.background_tasks.dispatch_agent_run", AsyncMock()) as dispatch,
+        patch("openswe.background_tasks.connect_sandbox", AsyncMock(return_value=backend)),
+        patch("openswe.background_tasks._list_tasks", AsyncMock(return_value=[task])),
+        patch("openswe.background_tasks._claim", AsyncMock(return_value=True)),
+        patch("openswe.background_tasks._mark_delivered", AsyncMock()),
+        patch("openswe.background_tasks.dispatch_agent_run", AsyncMock()) as dispatch,
     ):
         result = await reconcile_background_tasks("thread-1")
 
@@ -384,9 +534,17 @@ async def test_reconcile_enqueues_one_claimed_completion(tracking_failure: bool)
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
     configurable = dispatch.await_args.args[2]
-    assert configurable["source"] == "slack"
+    source = "dashboard" if worker else "slack"
+    assert configurable["source"] == source
     assert configurable["background_task_completion"] is True
-    assert dispatch.await_args.kwargs["source"] == "slack"
+    assert dispatch.await_args.kwargs["source"] == source
+    if worker:
+        config = {"configurable": configurable}
+        monkeypatch.setattr(threads, "get_config", lambda: config)
+        monkeypatch.setattr(task_service, "get_config", lambda: config)
+        assert await task_service.Actor.resolve({}) == task_service.Actor(
+            thread_id="thread-1", login="worker-owner"
+        )
     assert dispatch.await_args.kwargs["context"] == {
         "sender_id": "system:background-task",
         "surface": "automation",
@@ -410,14 +568,14 @@ async def test_reconcile_releases_claim_when_dispatch_fails() -> None:
     }
 
     with (
-        patch("agent.background_tasks._client", return_value=client),
-        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=AsyncMock())),
-        patch("agent.background_tasks._list_tasks", AsyncMock(return_value=[task])),
-        patch("agent.background_tasks._claim", AsyncMock(return_value=True)),
-        patch("agent.background_tasks._unclaim", AsyncMock()) as unclaim,
-        patch("agent.background_tasks._mark_delivered", AsyncMock()) as mark_delivered,
+        patch("openswe.background_tasks._client", return_value=client),
+        patch("openswe.background_tasks.connect_sandbox", AsyncMock(return_value=AsyncMock())),
+        patch("openswe.background_tasks._list_tasks", AsyncMock(return_value=[task])),
+        patch("openswe.background_tasks._claim", AsyncMock(return_value=True)),
+        patch("openswe.background_tasks._unclaim", AsyncMock()) as unclaim,
+        patch("openswe.background_tasks._mark_delivered", AsyncMock()) as mark_delivered,
         patch(
-            "agent.background_tasks.dispatch_agent_run",
+            "openswe.background_tasks.dispatch_agent_run",
             AsyncMock(side_effect=RuntimeError("langgraph unavailable")),
         ),
     ):
@@ -458,7 +616,7 @@ async def test_reconcile_uses_fresh_state_for_concurrent_launch(
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
-    monkeypatch.setattr(background_tasks, "create_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[]))
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -480,7 +638,7 @@ async def test_reconcile_uses_fresh_state_for_concurrent_launch(
 async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     monkeypatch: pytest.MonkeyPatch, slack: bool, run_active: bool
 ) -> None:
-    from agent import dispatch, thread_feedback
+    from openswe import dispatch, thread_feedback
 
     client = AsyncMock()
     stored: dict[str, object] = {
@@ -509,7 +667,7 @@ async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
     monkeypatch.setattr(dispatch, "dispatch_client", lambda: client)
     monkeypatch.setattr(thread_feedback, "note_feedback_activity", AsyncMock())
-    monkeypatch.setattr(background_tasks, "create_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(
         background_tasks,
         "_list_tasks",
@@ -582,15 +740,15 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
 
     with (
         patch(
-            "agent.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute._uses_completion_callback",
             AsyncMock(return_value=True),
         ),
         patch(
-            "agent.tools.background_execute._current_backend", return_value=("thread-1", object())
+            "openswe.tools.background_execute._current_backend", return_value=("thread-1", object())
         ),
-        patch("agent.tools.background_execute.execute", side_effect=launch),
-        patch("agent.tools.background_execute.update_background_task_state", side_effect=update),
-        patch("agent.tools.background_execute.langgraph_client"),
+        patch("openswe.tools.background_execute.execute", side_effect=launch),
+        patch("openswe.tools.background_execute.update_background_task_state", side_effect=update),
+        patch("openswe.tools.background_execute.langgraph_client"),
     ):
         result = await background_execute("true")
 
@@ -604,8 +762,8 @@ async def test_reattach_reconciles_tracked_tasks_even_on_a_replacement_sandbox(
 ) -> None:
     import asyncio
 
-    from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-    from agent.sandboxes.providers.registry import SandboxGoneError
+    from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
+    from openswe.sandboxes.providers.registry import SandboxGoneError
 
     SANDBOX_BACKENDS.clear()
     sandbox = MagicMock()
@@ -613,22 +771,25 @@ async def test_reattach_reconciles_tracked_tasks_even_on_a_replacement_sandbox(
     reconcile = AsyncMock()
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             AsyncMock(
                 return_value={"sandbox_id": "sandbox-old", "running_background_tasks": ["cmd-1"]}
             ),
         ),
         patch(
-            "agent.sandboxes.lifecycle._connect_existing_sandbox",
+            "openswe.sandboxes.lifecycle._connect_existing_sandbox",
             AsyncMock(
                 side_effect=SandboxGoneError("gone") if replaced else None, return_value=sandbox
             ),
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy", AsyncMock(return_value=sandbox)
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
+            AsyncMock(return_value=sandbox),
         ),
-        patch("agent.sandboxes.lifecycle.client.threads.update", AsyncMock()),
-        patch("agent.sandboxes.lifecycle.thread_token_repositories", AsyncMock(return_value=None)),
+        patch("openswe.sandboxes.lifecycle.client.threads.update", AsyncMock()),
+        patch(
+            "openswe.sandboxes.lifecycle.thread_token_repositories", AsyncMock(return_value=None)
+        ),
         patch.object(background_tasks, "reconcile_background_tasks", reconcile),
     ):
         await ensure_sandbox_for_thread("thread-1")

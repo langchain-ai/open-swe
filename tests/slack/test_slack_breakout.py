@@ -1,13 +1,14 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
-from agent.slack import breakout, breakout_destination
-from agent.slack.channels import SlackChannel
-from agent.slack.request import SlackRequest
-from agent.users import User
-from agent.workspaces import routing
+from openswe.slack import breakout
+from openswe.slack.channels import SlackChannel
+from openswe.slack.parsed_message import ParsedSlackMessage
+from openswe.slack.request import SlackRequest
+from openswe.users import User
+from openswe.workspaces import routing
 
 Command = breakout.BreakoutCommand
 
@@ -34,7 +35,6 @@ def public_channels(monkeypatch):
     )
     monkeypatch.setattr(breakout.common, "thread_exists", AsyncMock(return_value=False))
     monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value="alice"))
-    monkeypatch.setattr(breakout_destination.WORKSPACES, "get", AsyncMock(return_value=None))
     return load
 
 
@@ -67,37 +67,49 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     ("text", "expected"),
     [
         ("<@U0BOT> /breakout fix it", Command("fix it")),
-        ("/breakout fix it", Command("fix it")),
         (
             "details <@U0BOT> /breakout <#C2|target> fix it",
             Command("fix it", "<#C2|target>", "C2", "details"),
         ),
         ("details <@U0BOT> /breakout", Command("", prior_text="details")),
-        ("details <@U0BOT> please /breakout fix it", None),
-        ("details /breakout fix it <@U0BOT>", None),
+        (
+            "<@U0BOT> /WORKSPACE:Infra /breakout fix it",
+            Command("fix it", options="/workspace:infra", workspace="infra"),
+        ),
+        ("<@U0BOT> /breakout:web <#C2> why", Command("<#C2> why")),
+        (
+            "<@U0BOT> /breakout fix workspace:infra bug",
+            Command("fix workspace:infra bug", workspace="infra"),
+        ),
     ],
 )
-def test_breakout_command_requires_position_after_mention(text, expected):
-    assert Command.parse(text, "U0BOT") == expected
+def test_breakout_command_from_message(text, expected):
+    assert Command.from_message(ParsedSlackMessage.parse(text, "U0BOT")) == expected
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("configured", "explicit", "expected", "email_only"),
+    ("explicit", "expected", "email_only"),
     [
-        (None, "", "C1", False),
-        ("C2", "", "C2", False),
-        ("C2", "C3", "C3", False),
-        ("C2", "", "C2", True),
+        ("", "C1", False),
+        ("C3", "C3", False),
+        ("", "C1", True),
     ],
 )
 async def test_breakout_with_text_starts_new_thread_with_old_transcript(
-    monkeypatch, configured, explicit, expected, email_only
+    monkeypatch, explicit, expected, email_only
 ):
     posted = _patch_slack(monkeypatch)
-    root = AsyncMock(return_value=("200.0", None))
+    root = AsyncMock(return_value="200.0")
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
+    monkeypatch.setattr(
+        breakout,
+        "dashboard_thread_url",
+        lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
+    )
+    update = AsyncMock(return_value=None)
+    monkeypatch.setattr(breakout, "update_slack_message", update)
     monkeypatch.setattr(
         breakout.common, "resolve_slack_thread_id", AsyncMock(return_value="new-thread")
     )
@@ -105,10 +117,10 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
 
     request = _request()
-    instruction = "workspace:other fix it"
+    command = Command("fix it", channel_id=explicit, options="/workspace:other", workspace="other")
     if email_only:
         request = request.model_copy(update={"thread_id": None})
-        instruction = "fix it"
+        command = Command("fix it", channel_id=explicit)
         monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
         monkeypatch.setattr(
             breakout.common,
@@ -137,24 +149,24 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
                 )
             ),
         )
-    monkeypatch.setattr(
-        breakout_destination.WORKSPACES,
-        "get",
-        AsyncMock(
-            side_effect=lambda slug: (
-                SimpleNamespace(breakout_channel_id=configured) if slug == "engineering" else None
-            )
-        ),
-    )
     monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
-    await breakout.process_slack_breakout(request, Command(instruction, channel_id=explicit), None)
+    await breakout.process_slack_breakout(request, command, None)
 
     assert mention.await_args is not None
     assert mention.await_args.kwargs["inherited_workspace"] == (None if explicit else "engineering")
     assert root.await_args is not None
     assert root.await_args.args[0] == expected
     assert root.await_args.args[1] == (
-        f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE>"
+        "`/breakout`: fix it · <https://slack/p105|(source)> · <@U_ALICE>"
+    )
+    update.assert_awaited_once_with(
+        expected,
+        "200.0",
+        "`/breakout`: fix it · <https://slack/p105|(source)> · <@U_ALICE> "
+        "<https://dashboard.example/agents/new-thread|Open in Web>",
+        blocks=ANY,
+        unfurl_links=False,
+        unfurl_media=False,
     )
     posted.source_line.assert_awaited_once_with("C1", "105.0")
     posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", expected, "200.0")
@@ -162,16 +174,17 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
         "200.0",
         "new-thread",
-        instruction,
+        command.thread_text,
         "100.0",
     )
+    assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
     posted.ephemeral.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(monkeypatch):
     posted = _patch_slack(monkeypatch)
-    root = AsyncMock(return_value=("200.0", None))
+    root = AsyncMock(return_value="200.0")
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
     monkeypatch.setattr(
@@ -180,7 +193,7 @@ async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(
     mention = AsyncMock()
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
     text = "Context for this task.\nMore details <@U0BOT> /breakout fix it"
-    command = Command.parse(text, "U0BOT")
+    command = Command.from_message(ParsedSlackMessage.parse(text, "U0BOT"))
 
     assert command == Command("fix it", prior_text="Context for this task.\nMore details")
     await breakout.process_slack_breakout(

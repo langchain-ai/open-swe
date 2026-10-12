@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent.github import comments as github_comments
+from openswe.github import comments as github_comments
 
 
 @pytest.mark.parametrize(

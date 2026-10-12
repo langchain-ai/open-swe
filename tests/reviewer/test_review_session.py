@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.threads import listing, summary
+from openswe.threads import listing, summary
 
 
 def _review_thread(**metadata: object) -> dict[str, object]:

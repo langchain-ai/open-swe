@@ -4,7 +4,7 @@ import pytest
 from langchain.agents.middleware import AgentState
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.middleware.notify_step_limit import notify_step_limit_reached
+from openswe.middleware.notify_step_limit import notify_step_limit_reached
 
 
 class TestNotifyStepLimitReached:
@@ -26,13 +26,13 @@ class TestNotifyStepLimitReached:
 
         with (
             patch(
-                "agent.run_config.get_config",
+                "openswe.run_config.get_config",
                 return_value={
                     "configurable": {"slack_thread": {"channel_id": "C123", "thread_ts": "171.123"}}
                 },
             ),
             patch(
-                "agent.middleware.notify_step_limit.post_slack_thread_reply",
+                "openswe.middleware.notify_step_limit.post_slack_thread_reply",
                 new_callable=AsyncMock,
             ) as mock_post,
         ):
@@ -46,7 +46,7 @@ class TestNotifyStepLimitReached:
         state: AgentState = {"messages": [HumanMessage(content="keep going")]}
 
         with patch(
-            "agent.middleware.notify_step_limit.post_slack_thread_reply",
+            "openswe.middleware.notify_step_limit.post_slack_thread_reply",
             new_callable=AsyncMock,
         ) as mock_post:
             result = await notify_step_limit_reached.aafter_agent(state, self._make_runtime())

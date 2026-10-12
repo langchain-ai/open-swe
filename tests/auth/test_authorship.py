@@ -3,15 +3,50 @@ from typing import Any
 
 import pytest
 
-import agent.utils.authorship as authorship
-from agent.github import app as github_app
-from agent.users import User
-from agent.utils import ttl_cache
-from agent.utils.authorship import (
+import openswe.utils.authorship as authorship
+from openswe.github import app as github_app
+from openswe.users import User
+from openswe.utils import ttl_cache
+from openswe.utils.authorship import (
     resolve_participant_identities,
     resolve_public_github_profile,
     resolve_triggering_user_identity,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_slack_id", ["", "U_CURRENT"])
+async def test_participant_context_includes_slack_identity(
+    monkeypatch: pytest.MonkeyPatch, source_slack_id: str
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from openswe.input_messages import person_introduction
+    from openswe.server import _thread_participant
+    from openswe.users.models import UserIdentity
+
+    user = User(
+        display_name="Mason",
+        identities=[UserIdentity(provider="slack", external_id="U_LINKED")],
+    )
+    monkeypatch.setattr("openswe.server._user_for_login", AsyncMock(return_value=user))
+    monkeypatch.setattr("openswe.server.load_profile", AsyncMock(return_value={}))
+    monkeypatch.setattr("openswe.server.participant_is_admin", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        "openswe.server._resolve_user_custom_instructions", AsyncMock(return_value="")
+    )
+    participant = await _thread_participant(
+        authorship.CollaboratorIdentity(
+            display_name="Mason",
+            commit_name="Mason",
+            commit_email="mason@example.com",
+            github_login="mason",
+        ),
+        {},
+        slack_user_id=source_slack_id,
+    )
+    content = person_introduction(participant.as_person())["content"]
+    assert f"slack_user_id: {source_slack_id or 'U_LINKED'}" in content
 
 
 async def test_participant_identity_ignores_users_table_email(

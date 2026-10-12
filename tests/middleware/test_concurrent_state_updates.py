@@ -1,8 +1,8 @@
 import pytest
 from langgraph.graph import END, START, StateGraph
 
-from agent.middleware.conversation_offloading import OffloadingState
-from agent.middleware.prepare_run import PrepareRunState
+from openswe.middleware.conversation_offloading import OffloadingState
+from openswe.middleware.prepare_run import PrepareRunState
 
 
 async def _run_concurrent_updates(

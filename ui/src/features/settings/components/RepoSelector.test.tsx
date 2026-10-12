@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { RepoSelector } from "./RepoSelector"
 
@@ -19,7 +20,8 @@ it("never offers archived choices or an archive toggle by default", async () => 
         { full_name: "org/legacy", private: false, archived: true },
       ]}
       onRepoChange={vi.fn()}
-    />
+    />,
+    { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
   expect(await screen.findByText("org/active")).toBeTruthy()
@@ -39,7 +41,8 @@ it("hides archives even in search until opted in, without clearing the selection
       ]}
       selectedRepo="org/legacy"
       onRepoChange={onRepoChange}
-    />
+    />,
+    { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "org/legacy" }))
   expect(

@@ -4,8 +4,8 @@ import httpx
 import pytest
 from langgraph_sdk.errors import ConflictError, InternalServerError
 
-from agent.utils import thread_pr_state
-from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.utils import thread_pr_state
+from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
 
 def _response(status: int) -> httpx.Response:

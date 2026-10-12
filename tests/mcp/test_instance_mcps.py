@@ -1,20 +1,20 @@
 import pytest
 
-from agent.mcp import instance as instance_mcps
-from agent.mcp.instance import (
+from openswe.mcp import instance as instance_mcps
+from openswe.mcp.instance import (
     INSTANCE_MCPS_NAMESPACE,
     delete_instance_mcp,
     instance_mcp_source,
     list_instance_mcps,
     save_instance_mcp,
 )
-from agent.mcp.models import MCPConnectionUpdate
-from agent.mcp.workspace import (
+from openswe.mcp.models import MCPConnectionUpdate
+from openswe.mcp.workspace import (
     WORKSPACE_MCPS_NAMESPACE,
     list_workspace_mcps,
     save_workspace_mcp,
 )
-from agent.store import StoreEntry
+from openswe.store import StoreEntry
 from tests.conftest import FakeStore
 
 

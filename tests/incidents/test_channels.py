@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
-from agent.incidents import channels, service, turns
-from agent.incidents.models import Incident, IncidentPolicy
-from agent.slack.channels import SlackChannel
+from openswe.incidents import channels, service, turns
+from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",
@@ -54,9 +54,7 @@ async def configured(fake_store, monkeypatch):
     )
     monkeypatch.setattr(channels, "resolve_slack_thread_id", AsyncMock(return_value="thread-1"))
     monkeypatch.setattr(channels, "upsert_agent_thread_metadata", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        channels, "post_slack_thread_reply_with_ts", AsyncMock(return_value=("5.0", None))
-    )
+    monkeypatch.setattr(channels, "post_slack_thread_reply_with_ts", AsyncMock(return_value="5.0"))
     monkeypatch.setattr(
         channels,
         "fetch_slack_thread_messages",

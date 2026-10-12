@@ -21,7 +21,6 @@ from langgraph_sdk import get_client
 from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
-from agent.review.eval_store import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
 from evals.reviewer.costs import print_summary, record_experiment_costs
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.store_reporter import StoreReporter, is_enabled
@@ -31,6 +30,7 @@ from evals.reviewer.target import (
     get_langgraph_url,
     review_pr,
 )
+from openswe.review.eval_store import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
 
 logger = logging.getLogger(__name__)
 

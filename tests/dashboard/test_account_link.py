@@ -4,7 +4,7 @@ from typing import TypedDict
 
 import pytest
 
-from agent.webhooks import common as webhook_common
+from openswe.webhooks import common as webhook_common
 
 
 class _Reply(TypedDict):
@@ -39,7 +39,7 @@ def test_account_link_prompt_posts_generic_token_free_link(
     reply = calls["reply"]
     assert reply["channel_id"] == "C1"
     assert reply["thread_ts"] == "1.1"
-    assert "https://app.example.com/my-settings" in reply["text"]
+    assert "https://app.example.com/my-settings/connections" in reply["text"]
     # No signed account-link token may appear in the public thread.
     assert "link=" not in reply["text"]
 

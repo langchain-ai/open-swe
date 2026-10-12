@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.webhooks import common as webhook_common
+from openswe.webhooks import common as webhook_common
 
 
 @pytest.mark.parametrize(

@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from agent.threads import runs as thread_runs
+from openswe.threads import runs as thread_runs
 from tests.conftest import patch_thread_module
 
 

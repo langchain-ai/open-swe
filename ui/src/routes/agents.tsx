@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
   Outlet,
   Navigate,
@@ -7,17 +8,15 @@ import {
   useRouterState,
 } from "@tanstack/react-router"
 
-import { useQuery } from "@tanstack/react-query"
-
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents")({
@@ -25,22 +24,7 @@ export const Route = createFileRoute("/agents")({
   head: () => ({ meta: [{ title: pageTitle("Agents") }] }),
 })
 
-/**
- * The `.agents-ui` class themes the layout subtree, but popovers, tooltips and
- * menus portal to `<body>`. Marking the document root while these routes are
- * mounted is what keeps those in the same palette.
- */
-function useAgentsTheme() {
-  useEffect(() => {
-    document.documentElement.dataset["agentsTheme"] = "true"
-    return () => {
-      delete document.documentElement.dataset["agentsTheme"]
-    }
-  }, [])
-}
-
 function AgentsLayout() {
-  useAgentsTheme()
   const session = useSession()
   const profile = useProfile()
   const experimentalAssistantUi = useExperimentalAssistantUi()
@@ -58,15 +42,15 @@ function AgentsLayout() {
   })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
-  const reviewNumber = Number(reviewMatch?.params.number)
-  // A review page's sidebar row is the user's review chat thread.
+  // A review page's sidebar row is the user's review chat thread. The page
+  // loads it; the layout only reads it, so off a review page it asks for nothing.
   const reviewChat = useQuery({
     ...reviewChatQuery({
       owner: reviewMatch?.params.owner ?? "",
       repo: reviewMatch?.params.repo ?? "",
-      number: reviewNumber,
+      number: Number(reviewMatch?.params.number),
     }),
-    enabled: Boolean(session.data) && Boolean(reviewMatch) && reviewNumber > 0,
+    enabled: false,
   })
   const activeReviewThreadId = reviewMatch
     ? reviewChat.data?.thread_id
@@ -75,13 +59,19 @@ function AgentsLayout() {
   const [desktopSource] = useDesktopThreadSource()
   const localHome =
     Boolean(homeMatch) &&
-    (!session.data ||
-      Boolean(homeMatch?.search.localRepo) ||
+    (Boolean(homeMatch?.search.localRepo) ||
       (typeof window !== "undefined" &&
         Boolean(window.openSweDesktop) &&
         desktopSource === "local" &&
         !homeMatch?.search.repo &&
         !homeMatch?.search.noRepo))
+  // A "This Mac" thread needs this app's bridge and git controls, which only
+  // the agents view has.
+  const localThreads = useLocalThreads()
+  const thisMacThread = Boolean(
+    activeThreadId &&
+    localThreads.data?.some((thread) => thread.id === activeThreadId)
+  )
   const runtimeThreadId = activeLocalSessionId ?? activeThreadId ?? null
   // Only a thread route has to wait for the profile: mounting the runtime the
   // profile does not select hydrates that thread's transcript a second time.
@@ -91,31 +81,25 @@ function AgentsLayout() {
   const pathname = location.pathname
   const awaitingRuntimeChoice =
     Boolean(session.data) &&
-    profile.isPending &&
+    (profile.isPending || localThreads.isLoading) &&
     (runtimeThreadId !== null ||
       pathname === "/agents" ||
       pathname === "/agents/")
-  const localOnly = !session.data && isDesktopLocalModeEnabled()
-  const isLocalRoute =
-    pathname === "/agents" ||
-    pathname === "/agents/" ||
-    Boolean(activeLocalSessionId)
-
   useEffect(() => {
     rememberAppLocation(location.href)
   }, [location.href])
 
   if (session.isLoading) {
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-background p-6">
+      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1 p-space-5">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )
   }
 
-  if (!session.data && (!localOnly || !isLocalRoute)) return <RequireLogin />
+  if (!session.data) return <RequireLogin />
   if (!awaitingRuntimeChoice && experimentalAssistantUi && !localHome) {
-    if (activeThreadId)
+    if (activeThreadId && !thisMacThread)
       return (
         <Navigate
           to="/assistant/$threadId"
@@ -138,13 +122,12 @@ function AgentsLayout() {
 
   return (
     <AgentsShell
-      user={session.data ?? null}
-      localOnly={localOnly}
+      user={session.data}
       activeThreadId={activeThreadId ?? activeReviewThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
       {awaitingRuntimeChoice ? (
-        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+        <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
           <Skeleton className="h-40 w-full max-w-md" />
         </main>
       ) : (

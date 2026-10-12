@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.users import User, import_store
-from agent.users.import_store import USER_MAPPINGS_NAMESPACE, import_user_mappings
+from openswe.users import User, import_store
+from openswe.users.import_store import USER_MAPPINGS_NAMESPACE, import_user_mappings
 from tests.conftest import FakeStore
 
 pytestmark = pytest.mark.usefixtures("registry_db")

@@ -3,10 +3,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 
-from agent.dashboard import oauth, routes
-from agent.mcp import MCPConnectionUpdate, load_mcp_tools
-from agent.mcp import user as mcps
-from agent.mcp import workspace as workspace_mcps
+from openswe.dashboard import oauth, routes
+from openswe.mcp import MCPConnectionUpdate, load_mcp_tools
+from openswe.mcp import user as mcps
+from openswe.mcp import workspace as workspace_mcps
 
 
 @pytest.fixture(autouse=True)

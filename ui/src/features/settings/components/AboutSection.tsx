@@ -26,18 +26,16 @@ export function AboutSection({ user }: { user: SessionUser }) {
         <SettingsRow
           label="Open SWE Desktop"
           control={
-            <span className="text-xs text-muted-foreground">
-              Version {version}
-            </span>
+            <span className="text-xs text-secondary">Version {version}</span>
           }
         />
       ) : null}
-      <details className="group p-4 text-xs break-words text-muted-foreground">
-        <summary className="w-fit cursor-pointer rounded-sm font-medium text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+      <details className="group p-space-4 text-xs break-words text-secondary">
+        <summary className="focus-visible:outline-focus w-fit cursor-pointer rounded-sm font-medium text-primary focus-visible:outline-2">
           <span className="group-open:hidden">Show diagnostics</span>
           <span className="hidden group-open:inline">Hide diagnostics</span>
         </summary>
-        <div className="mt-4 space-y-2">
+        <div className="mt-space-4 space-y-space-2">
           <p>
             API: {apiBase.origin ?? "same origin"} {apiBase.path}
           </p>
@@ -63,6 +61,20 @@ function IdentityValue({ value }: { value: string | null | undefined }) {
   )
 }
 
+function CommitValue({ value }: { value: string | null }) {
+  if (!value) return <IdentityValue value={value} />
+  return (
+    <a
+      href={`https://github.com/langchain-ai/open-swe/commit/${encodeURIComponent(value)}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline underline-offset-2 hover:text-primary"
+    >
+      <IdentityValue value={value} />
+    </a>
+  )
+}
+
 function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
   const hydrated = useIsHydrated()
 
@@ -73,7 +85,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
           <p>
             Backend: revision{" "}
             <IdentityValue value={buildInfo.backend.revision_id} />
-            {" · "}commit <IdentityValue value={buildInfo.backend.commit} />
+            {" · "}commit <CommitValue value={buildInfo.backend.commit} />
             {" · "}built{" "}
             {buildInfo.backend.built_at ? (
               <time dateTime={buildInfo.backend.built_at}>
@@ -89,7 +101,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
             Dashboard bundle:{" "}
             {buildInfo.dashboard.served ? (
               <>
-                commit <IdentityValue value={buildInfo.dashboard.commit} />
+                commit <CommitValue value={buildInfo.dashboard.commit} />
                 {" · "}built{" "}
                 {buildInfo.dashboard.built_at ? (
                   <time dateTime={buildInfo.dashboard.built_at}>
@@ -122,18 +134,18 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
         return (
           <p>
             This browser is running: commit{" "}
-            <IdentityValue value={bundle.commit} />
+            <CommitValue value={bundle.commit} />
             {" · "}built{" "}
             <time dateTime={bundle.built_at}>
               {new Date(bundle.built_at).toLocaleString()}
             </time>
             {differs ? (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-warning-secondary">
                 {" "}
                 — different from the bundle the backend reports serving.
               </span>
             ) : buildInfo?.dashboard.served && !comparable ? (
-              <span className="text-muted-foreground">
+              <span className="text-secondary">
                 {" "}
                 — comparison with the backend-served bundle unavailable.
               </span>

@@ -1,0 +1,1624 @@
+"""Shared webhook dispatch and thread helpers."""
+
+import asyncio
+import hashlib
+import hmac
+import json
+import logging
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import parse_qs, quote
+
+import httpx2
+from fastapi import BackgroundTasks, HTTPException, Request
+from langgraph_sdk import get_client
+from langgraph_sdk.client import LangGraphClient
+from pydantic import BaseModel
+
+from openswe.analytics.usage import update_agent_pr_usage_from_webhook
+from openswe.config import ENV
+from openswe.dashboard.agent_overrides import (
+    get_profile_default_repo,
+    resolve_agent_model_id,  # noqa: F401
+)
+from openswe.dashboard.oauth import build_settings_url
+from openswe.dashboard.options import (
+    default_vision_model_pair,
+    model_supports_images,  # noqa: F401
+    normalize_model_choice,
+)
+from openswe.dashboard.profiles import (  # noqa: F401
+    get_profile,
+    get_valid_access_token,
+    has_access_token_record,
+)
+from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dispatch import dispatch_agent_run
+from openswe.github.app import (
+    get_github_app_installation_token,  # noqa: F401
+    get_github_app_installation_token_with_expiry,
+)
+from openswe.github.checks import (  # noqa: F401
+    complete_review_check_run,
+    create_review_check_run,
+)
+from openswe.github.comments import (
+    OPEN_SWE_TAGS,
+    build_pr_prompt,  # noqa: F401
+    derive_pr_state,  # noqa: F401
+    describe_open_swe_tags,  # noqa: F401
+    extract_pr_context,  # noqa: F401
+    fetch_issue_comments,  # noqa: F401
+    fetch_pr_comments_since_last_tag,  # noqa: F401
+    fetch_pr_event_comments,  # noqa: F401
+    format_github_comment_body_for_prompt,
+    mentions_open_swe,  # noqa: F401
+    react_to_github_comment,  # noqa: F401
+    sanitize_github_comment_body,  # noqa: F401
+    verify_github_signature,
+)
+from openswe.github.http import GitHubClient
+from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
+from openswe.github.pull_requests import PullRequestEvent
+from openswe.github.thread_token import (
+    cache_github_token_for_thread,
+    invalidate_cached_github_token,
+)
+from openswe.github.token import (
+    is_bot_token_only_mode,
+)
+from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
+from openswe.input_messages import PersonIdentity
+from openswe.linear.comments import get_recent_comments  # noqa: F401
+from openswe.prompts import prompt
+from openswe.review.enabled_repos import is_review_repo_enabled
+from openswe.review.findings import (
+    REVIEWER_THREAD_KIND,
+    Finding,
+    append_finding_interaction,  # noqa: F401
+    set_reviewer_thread_metadata,
+)
+from openswe.review.findings import (
+    list_findings as list_reviewer_findings,  # noqa: F401
+)
+from openswe.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
+from openswe.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from openswe.rollout_events import ROLLOUT_CHECK_REQUESTED, subscribe_merged_thread
+from openswe.run_config import Repo
+from openswe.slack.channels import SlackChannel
+from openswe.slack.client import (
+    GitHubPrRef,
+    SlackThreadMappingError,  # noqa: F401
+    fetch_slack_thread_messages,  # noqa: F401
+    format_slack_messages_for_prompt,  # noqa: F401
+    get_slack_permalink,
+    get_slack_user_info,
+    get_slack_user_names,  # noqa: F401
+    lookup_slack_run_mapping,  # noqa: F401
+    lookup_slack_thread_id,  # noqa: F401
+    parse_slack_ts,  # noqa: F401
+    post_slack_ephemeral_message,
+    post_slack_thread_reply,
+    post_slack_trace_reply,  # noqa: F401
+    resolve_slack_links_in_context,  # noqa: F401
+    resolve_slack_thread_id,  # noqa: F401
+    select_slack_context_messages,  # noqa: F401
+    store_slack_run_mapping,  # noqa: F401
+    strip_bot_mention,  # noqa: F401
+    update_slack_message,
+    verify_slack_signature,
+)
+from openswe.slack.code_channels import (  # noqa: F401
+    CODE_CHANNEL_SESSION_TS,
+    DEFAULT_CODE_CHANNEL_COMMANDS,
+    get_block_suggestions,
+    is_code_channel,
+    repo_context_bar_items,
+    set_commands,
+    set_context_bar,
+    set_session_status,
+)
+from openswe.slack.events import (
+    claim_slack_event,
+    slack_event_already_seen,
+)
+from openswe.slack.feedback import (
+    FEEDBACK_REACTIONS,
+    process_slack_reaction_added,
+    process_slack_reaction_removed,
+)
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
+from openswe.source_context import SourceContext
+from openswe.threads.creation import create_thread, ensure_titled_thread
+from openswe.threads.summary import (
+    SLACK_BOT_TRIGGER_KIND,
+    TRIGGERING_BOT_KEY,
+    thread_is_bot_triggered,
+    thread_is_private,
+    thread_is_promptable,
+)
+from openswe.threads.workflow_approval import decide_workflow_push_approval
+from openswe.transcript.mirror import mirror_thread_metadata
+from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_thread_url  # noqa: F401
+from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.json_types import ThreadLike, as_thread_dict
+from openswe.utils.langsmith import create_langsmith_thread_feedback
+from openswe.utils.multimodal import (
+    dedupe_urls,  # noqa: F401
+    extract_image_urls,  # noqa: F401
+    fetch_image_block,  # noqa: F401
+    vision_not_supported_warning,  # noqa: F401
+)
+from openswe.utils.repo import extract_repo_from_text
+from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
+from openswe.utils.thread_participants import participant_metadata
+from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
+
+__all__ = [
+    "Any",
+    "BackgroundTasks",
+    "CODE_CHANNEL_SESSION_TS",
+    "DEFAULT_HTTP_TIMEOUT",
+    "DEFAULT_REPO_OWNER",
+    "FEEDBACK_REACTIONS",
+    "GITHUB_WEBHOOK_SECRET",
+    "HTTPException",
+    "LANGGRAPH_URL",
+    "LINEAR_WEBHOOK_SECRET",
+    "OPEN_SWE_TAGS",
+    "REVIEWER_THREAD_KIND",
+    "Request",
+    "SLACK_BOT_USERNAME",
+    "SLACK_BOT_USER_ID",
+    "SLACK_SIGNING_SECRET",
+    "SlackThreadMappingError",
+    "AGENT_VERSION_METADATA",
+    "describe_open_swe_tags",
+    "mentions_open_swe",
+    "GH_PR_AGENT_STATE_ACTIONS",
+    "GH_PR_FIRST_REVIEW_ACTIONS",
+    "GH_PR_WATCH_TOGGLE_ACTIONS",
+    "SUPPORTED_GH_COMMENT_ACTIONS",
+    "SUPPORTED_GH_EVENTS",
+    "SUPPORTED_GH_ISSUE_ACTIONS",
+    "SUPPORTED_GH_PULL_REQUEST_ACTIONS",
+    "build_github_issue_comments_text",
+    "build_queued_finding_reply_prompt",
+    "build_reviewer_configurable",
+    "draft_review_enabled_for_author",
+    "enforce_public_repo_org_gate",
+    "ensure_thread_exists_for_metadata",
+    "fetch_open_pr_for_branch",
+    "finding_comment_ids",
+    "get_or_resolve_thread_github_token",
+    "resolve_slack_channel_context",
+    "get_thread_metadata_safe",
+    "get_thread_workspace",
+    "get_thread_model_choice",
+    "is_not_found_error",
+    "is_pr_diff_unchanged_since_last_review",
+    "is_repo_allowed",
+    "is_repo_auto_review_enabled",
+    "post_account_link_prompt",
+    "refresh_thread_github_token_after_401",
+    "repo_id_from_payload",
+    "repo_id_from_pr_metadata",
+    "repo_private_from_payload",
+    "repo_private_from_pr_metadata",
+    "review_comment_reply_parent_id",
+    "reviewer_token_for_repo",
+    "run_id_for_logging",
+    "store_current_reviewer_run_id",
+    "thread_exists",
+    "track_review_check_run",
+    "trigger_or_queue_run",
+    "append_finding_interaction",
+    "build_pr_prompt",
+    "claim_slack_event",
+    "complete_review_check_run",
+    "create_review_check_run",
+    "dashboard_thread_url",
+    "decide_workflow_push_approval",
+    "dedupe_urls",
+    "default_vision_model_pair",
+    "dispatch_agent_run",
+    "extract_image_urls",
+    "extract_pr_context",
+    "extract_repo_from_text",
+    "fetch_github_pr_metadata",
+    "fetch_image_block",
+    "fetch_issue_comments",
+    "fetch_pr_comments_since_last_tag",
+    "fetch_pr_event_comments",
+    "fetch_pr_review_threads",
+    "fetch_slack_thread_messages",
+    "format_github_comment_body_for_prompt",
+    "format_slack_messages_for_prompt",
+    "get_client",
+    "get_github_app_installation_token",
+    "get_github_app_installation_token_with_expiry",
+    "get_profile_default_repo",
+    "get_recent_comments",
+    "SlackRepoResolution",
+    "get_slack_repo_config",
+    "get_slack_user_info",
+    "get_slack_user_names",
+    "get_workspace_settings",
+    "get_valid_access_token",
+    "has_access_token_record",
+    "is_bot_token_only_mode",
+    "is_code_channel",
+    "json",
+    "list_reviewer_findings",
+    "logger",
+    "lookup_slack_thread_id",
+    "model_supports_images",
+    "parse_qs",
+    "post_review_started_comment",
+    "post_slack_thread_reply",
+    "post_slack_trace_reply",
+    "process_agent_session_stopped",
+    "process_slack_reaction_added",
+    "process_slack_reaction_removed",
+    "process_slack_stop_reaction",
+    "queue_message_for_thread",
+    "react_to_github_comment",
+    "reconcile_findings_with_review_threads",
+    "repo_context_bar_items",
+    "resolve_agent_model_id",
+    "resolve_slack_links_in_context",
+    "resolve_slack_thread_id",
+    "sanitize_github_comment_body",
+    "select_slack_context_messages",
+    "set_context_bar",
+    "set_reviewer_thread_metadata",
+    "set_session_status",
+    "slack_event_already_seen",
+    "store_slack_run_mapping",
+    "strip_bot_mention",
+    "update_agent_pr_usage_from_webhook",
+    "update_agent_thread_pr_state",
+    "update_slack_message",
+    "upsert_agent_thread_metadata",
+    "verify_github_signature",
+    "verify_linear_signature",
+    "verify_slack_signature",
+    "workspace_for_repo_config",
+]
+
+logger = logging.getLogger(__name__)
+
+
+# Opt-in leak diagnostics. Bursts of aiohttp "Unclosed client session" warnings
+# (from a third-party SDK) leak fds + memory in prod, but the warning omits the
+# allocation site. With tracemalloc running, aiohttp appends an "Object allocated
+# at" traceback to each warning, naming the exact source. Inert unless the env
+# var is set, so this is safe to ship and flip on for one diagnostic run.
+if ENV.DEBUG_TRACEMALLOC.optional():
+    import tracemalloc
+
+    try:
+        _tracemalloc_frames = int(ENV.DEBUG_TRACEMALLOC_FRAMES.optional() or "25")
+    except ValueError:
+        _tracemalloc_frames = 25
+    tracemalloc.start(_tracemalloc_frames)
+    logger.warning(
+        "DEBUG_TRACEMALLOC enabled: tracemalloc started (%d frames) to attribute "
+        "unclosed-session warnings",
+        _tracemalloc_frames,
+    )
+
+
+LINEAR_WEBHOOK_SECRET = ENV.LINEAR_WEBHOOK_SECRET.get()
+GITHUB_WEBHOOK_SECRET = ENV.GITHUB_WEBHOOK_SECRET.get()
+SLACK_SIGNING_SECRET = ENV.SLACK_SIGNING_SECRET.get()
+SLACK_BOT_USER_ID = ENV.SLACK_BOT_USER_ID.get()
+SLACK_BOT_USERNAME = ENV.SLACK_BOT_USERNAME.get()
+DEFAULT_REPO_OWNER = ENV.DEFAULT_REPO_OWNER.get()
+DEFAULT_REPO_NAME = ENV.DEFAULT_REPO_NAME.get()
+SLACK_REPO_OWNER = ENV.SLACK_REPO_OWNER.get() or DEFAULT_REPO_OWNER
+SLACK_REPO_NAME = ENV.SLACK_REPO_NAME.get() or DEFAULT_REPO_NAME
+
+LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
+
+AGENT_VERSION_METADATA: dict[str, str] = (
+    {"LANGSMITH_AGENT_VERSION": ENV.LANGCHAIN_REVISION_ID.require()}
+    if ENV.LANGCHAIN_REVISION_ID.optional()
+    else {}
+)
+
+ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
+    org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
+)
+# Org whose members are allowed to tag @open-swe on public repos. When empty,
+# the public-repo gate is disabled (back-compat).
+PUBLIC_REPO_ORG_GATE: str = ENV.PUBLIC_REPO_ORG_GATE.get().strip()
+
+ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
+    repo.strip().lower() for repo in ENV.ALLOWED_GITHUB_REPOS.get().split(",") if repo.strip()
+)
+
+_GITHUB_BOT_MESSAGE_PREFIXES = (
+    "🔐 **GitHub Authentication Required**",
+    "✅ **Pull Request Created**",
+    "✅ **Pull Request Updated**",
+    "**Pull Request Created**",
+    "**Pull Request Updated**",
+    "🤖 **Agent Response**",
+    "❌ **Agent Error**",
+)
+
+
+def _extract_repo_config_from_thread(thread: ThreadLike) -> dict[str, str] | None:
+    """Extract repo config from persisted thread data."""
+    thread = as_thread_dict(thread)
+    metadata = thread.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+
+    repo = metadata.get("repo")
+    if isinstance(repo, dict):
+        owner = repo.get("owner")
+        name = repo.get("name")
+        if isinstance(owner, str) and owner and isinstance(name, str) and name:
+            return {"owner": owner, "name": name}
+
+    owner = metadata.get("repo_owner")
+    name = metadata.get("repo_name")
+    if isinstance(owner, str) and owner and isinstance(name, str) and name:
+        return {"owner": owner, "name": name}
+
+    return None
+
+
+def is_not_found_error(exc: Exception) -> bool:
+    """Best-effort check for LangGraph 404 errors."""
+    return getattr(exc, "status_code", None) == 404
+
+
+def run_id_for_logging(run: Any) -> str:
+    """Extract a run id from SDK response shapes for log messages."""
+    if isinstance(run, dict):
+        run_id = run.get("run_id")
+    else:
+        run_id = getattr(run, "run_id", None)
+    return run_id if isinstance(run_id, str) and run_id else "<unknown>"
+
+
+async def resolve_slack_channel_context(
+    channel_id: str, *, use_cache: bool = True
+) -> SlackChannelContext:
+    """Fetch Slack channel context without blocking Slack-triggered runs on failure."""
+    try:
+        return await SlackChannel.context_for(channel_id, use_cache=use_cache)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to resolve Slack channel context")
+        return SlackChannelContext(id=channel_id)
+
+
+def is_repo_allowed(repo_config: dict[str, str]) -> bool:
+    """Check if the repo is in the allowlist.
+
+    Returns True if no allowlist is configured (both ALLOWED_GITHUB_ORGS and
+    ALLOWED_GITHUB_REPOS are empty), or if the repo owner is in
+    ALLOWED_GITHUB_ORGS, or if owner/name is in ALLOWED_GITHUB_REPOS.
+    """
+    if not ALLOWED_GITHUB_ORGS and not ALLOWED_GITHUB_REPOS:
+        return True
+    owner = repo_config.get("owner", "").lower()
+    name = repo_config.get("name", "").lower()
+    if ALLOWED_GITHUB_ORGS and owner in ALLOWED_GITHUB_ORGS:
+        return True
+    if ALLOWED_GITHUB_REPOS and f"{owner}/{name}" in ALLOWED_GITHUB_REPOS:
+        return True
+    return False
+
+
+async def is_repo_auto_review_enabled(repo_config: dict[str, str]) -> bool:
+    """Return whether automatic reviews are enabled for a repository."""
+    return await is_review_repo_enabled(repo_config.get("owner", ""), repo_config.get("name", ""))
+
+
+_PUBLIC_REPO_GATE_REJECTION = {
+    "status": "ignored",
+    "reason": "Sender is not a member of the allowed organization for public-repo triggers",
+}
+
+
+async def _is_sender_allowed_for_public_repo(payload: dict[str, Any]) -> bool:
+    """Public-repo gate: only ``PUBLIC_REPO_ORG_GATE`` org members may trigger.
+
+    Returns True (allowed) when:
+    - The gate is disabled (``PUBLIC_REPO_ORG_GATE`` empty), OR
+    - The repo is private (gate only applies to public repos), OR
+    - The sender is a known internal bot, OR
+    - The sender is an active member of ``PUBLIC_REPO_ORG_GATE``.
+    """
+    if not PUBLIC_REPO_ORG_GATE:
+        return True
+
+    repository = payload.get("repository") or {}
+    if repository.get("private", False):
+        return True
+
+    sender = payload.get("sender") or {}
+    sender_login = sender.get("login", "") or ""
+    if sender_login in INTERNAL_BOT_LOGINS:
+        return True
+
+    if not sender_login:
+        return False
+
+    return await is_user_active_org_member(sender_login, PUBLIC_REPO_ORG_GATE)
+
+
+async def enforce_public_repo_org_gate(
+    payload: dict[str, Any], event_type: str
+) -> dict[str, str] | None:
+    """Return a rejection response if the public-repo org gate blocks this event."""
+    if await _is_sender_allowed_for_public_repo(payload):
+        return None
+    sender_login = (payload.get("sender") or {}).get("login", "")
+    repo = payload.get("repository") or {}
+    logger.warning(
+        "Blocking GitHub %s from non-org-member sender '%s' on public repo '%s/%s'",
+        event_type,
+        sender_login,
+        (repo.get("owner") or {}).get("login", ""),
+        repo.get("name", ""),
+    )
+    return _PUBLIC_REPO_GATE_REJECTION
+
+
+def _existing_slack_permalink(
+    existing_metadata: dict[str, Any], channel_id: str, thread_ts: str
+) -> str | None:
+    slack_thread = SourceContext.from_metadata(existing_metadata).slack_thread
+    if slack_thread is None or not slack_thread.is_at(channel_id, thread_ts):
+        return None
+    return slack_thread.permalink.strip() or None
+
+
+async def _source_context_with_slack_permalink(
+    source_context: SourceContext,
+    existing_metadata: dict[str, Any] | None = None,
+) -> SourceContext:
+    enriched = source_context.model_copy(deep=True)
+    slack_thread = enriched.slack_thread
+    if slack_thread is None:
+        return enriched
+
+    if slack_thread.permalink.strip():
+        slack_thread.permalink = slack_thread.permalink.strip()
+        return enriched
+
+    channel_id = slack_thread.channel_id.strip()
+    thread_ts = slack_thread.thread_ts.strip()
+    if not channel_id or not thread_ts:
+        return enriched
+
+    try:
+        permalink = await get_slack_permalink(channel_id, thread_ts)
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to resolve Slack permalink for thread metadata", exc_info=True)
+        permalink = None
+    if not permalink and existing_metadata:
+        permalink = _existing_slack_permalink(existing_metadata, channel_id, thread_ts)
+    if permalink:
+        slack_thread.permalink = permalink
+    return enriched
+
+
+async def upsert_agent_thread_metadata(
+    thread_id: str,
+    *,
+    source: str,
+    repo_config: dict[str, str] | None = None,
+    github_login: str = "",
+    user_email: str = "",
+    title: str,
+    static_title: bool = False,
+    source_context: SourceContext | None = None,
+    workspace: str | None = None,
+    slack_participant_user_ids: Collection[str] = (),
+    visibility: str = "public",
+    owner_login: str = "",
+    owner_type: str = "user",
+    unlisted: bool = False,
+    token_repositories: Sequence[str] | None = None,
+) -> bool:
+    """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
+
+    Returns whether the write succeeded so private-thread callers can fail closed.
+
+    Webhook-triggered runs only pass ``source``/``github_login`` through the run
+    config; the Agents UI lists threads by thread *metadata*, so we mirror the
+    sender onto the thread's participants here. ``visibility`` and ``owner_login``
+    are stamped once, when the thread is created, and never changed afterwards, as
+    is ``token_repositories``, the repositories the thread's GitHub token is
+    narrowed to (see :mod:`openswe.github.token_scope`).
+    Slack events on an existing thread also pass ``slack_participant_user_ids`` so
+    every linked human in the Slack thread becomes an Open SWE participant of the
+    agent thread.
+    """
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    category = "interactive"
+    if source_context is not None:
+        if source_context.github_issue or source_context.linear_issue:
+            category = "issue"
+        elif source_context.pr_number:
+            category = "pull_request"
+    metadata: dict[str, Any] = {
+        "source": source,
+        "origin": source,
+        "thread_category": category,
+        "trigger_kind": "user",
+        "updated_at_ms": now_ms,
+    }
+    if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
+        metadata["repo"] = repo_config
+        metadata["repo_owner"] = repo_config["owner"]
+        metadata["repo_name"] = repo_config["name"]
+    if title:
+        metadata["title"] = title[:80]
+    if workspace:
+        metadata["workspace"] = workspace
+    # Only ever set here: the dashboard clears it when someone continues the
+    # thread on the web, and that promotion must survive later Slack events.
+    if unlisted:
+        metadata["unlisted"] = True
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        existing = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if not is_not_found_error(exc):
+            logger.exception("Failed to read thread %s for owner metadata", thread_id)
+        existing = None
+
+    existing_dict = as_thread_dict(existing) if existing is not None else {}
+    existing_meta = (
+        existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
+    )
+    existing_context = SourceContext.from_metadata(existing_meta)
+    # A thread a bot started stays one, whoever speaks in its Slack thread later.
+    if thread_is_bot_triggered(existing_meta):
+        metadata.pop("trigger_kind")
+    if owner_type == "system" and existing_meta:
+        expected_bot = source_context.slack_thread if source_context else None
+        saved_bot = existing_context.slack_thread
+        if (
+            existing_meta.get("owner_type") != "system"
+            or existing_meta.get("visibility") != "public"
+            or expected_bot is None
+            or saved_bot is None
+            or (saved_bot.team_id, saved_bot.triggering_bot_id)
+            != (expected_bot.team_id, expected_bot.triggering_bot_id)
+        ):
+            return False
+    sender_login = github_login or await User.login_for_email(user_email) or ""
+    slack_ids = set(slack_participant_user_ids)
+    triggering_slack = source_context.slack_thread if source_context else None
+    if triggering_slack and triggering_slack.triggering_user_id:
+        slack_ids.add(triggering_slack.triggering_user_id)
+    slack_logins = await asyncio.gather(*(User.login_for_slack(user_id) for user_id in slack_ids))
+    people: list[PersonIdentity] = []
+    for user_id, login in zip(slack_ids, slack_logins, strict=True):
+        person: PersonIdentity = {"id": f"slack:{user_id}"}
+        if triggering_slack and user_id == triggering_slack.triggering_user_id:
+            login = login or sender_login
+        if isinstance(login, str) and login:
+            person["github_login"] = login
+        people.append(person)
+    metadata.update(
+        await participant_metadata(
+            existing_meta, login=sender_login, email=user_email, people=people
+        )
+    )
+    # The context that opened the thread identifies it; later messages arrive
+    # through the same surface and must not repoint it.
+    if not existing_context.is_empty:
+        source_context = existing_context
+    if source_context is not None and not source_context.is_empty:
+        enriched = await _source_context_with_slack_permalink(source_context, existing_meta)
+        metadata["source_context"] = enriched.dump()
+    if existing_meta.get("created_at_ms") is None:
+        metadata["created_at_ms"] = now_ms
+    if existing_meta.get("title") and "title" in metadata:
+        # Preserve a title that was already chosen (first message wins).
+        metadata.pop("title")
+    elif source == "slack" and "title" in metadata and not static_title:
+        # The seed is what title generation is allowed to replace; a thread whose
+        # name is fixed never offers one.
+        metadata["title_seed"] = metadata["title"]
+
+    # A helper may have pre-created a bare stub this request; it still needs the
+    # creation stamps. Legacy threads carry created_at_ms and are left alone.
+    if existing is None or (
+        "visibility" not in existing_meta and existing_meta.get("created_at_ms") is None
+    ):
+        metadata["visibility"] = visibility
+        metadata["owner_type"] = owner_type
+        starting_bot = source_context.slack_thread if source_context else None
+        if owner_type == "system" and starting_bot and starting_bot.triggering_bot_id:
+            metadata["trigger_kind"] = SLACK_BOT_TRIGGER_KIND
+            metadata[TRIGGERING_BOT_KEY] = (
+                f"{starting_bot.team_id}:{starting_bot.triggering_bot_id}"
+            )
+        if token_repositories is not None:
+            metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(token_repositories)
+        initiating_login = owner_login.strip() or sender_login.strip()
+        if initiating_login and owner_type == "user":
+            metadata["owner_login"] = initiating_login
+
+    try:
+        if existing is None:
+            await create_thread(
+                langgraph_client,
+                thread_id,
+                title=title[:80],
+                if_exists="do_nothing",
+                metadata=metadata,
+            )
+            if owner_type == "system":
+                saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
+                saved_meta = saved.get("metadata") or {}
+                if any(
+                    saved_meta.get(key) != metadata.get(key)
+                    for key in (
+                        "owner_type",
+                        "visibility",
+                        "source_context",
+                    )
+                ):
+                    return False
+        elif _pr_linked(existing_meta) or _pr_state_reset_for_user_activity(existing_meta):
+            # A person is continuing the thread, so PR-driven resolution or the
+            # "PRs closed" mark no longer applies. Only the PR webhook sets those,
+            # and only on PR-linked threads, so take its lock for any such thread
+            # and derive the reset from a fresh read rather than the pre-lock one.
+            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+                current = as_thread_dict(await langgraph_client.threads.get(thread_id))
+                current_meta = (
+                    current["metadata"] if isinstance(current.get("metadata"), dict) else {}
+                )
+                metadata.update(_pr_state_reset_for_user_activity(current_meta))
+                await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+                await mirror_thread_metadata(thread_id, metadata)
+        else:
+            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+            await mirror_thread_metadata(thread_id, metadata)
+        return True
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to persist owner metadata for thread %s", thread_id)
+        return False
+
+
+@dataclass(frozen=True)
+class SlackRepoResolution:
+    """A Slack run's repository, plus whether anything actually named it.
+
+    A named repository may pick the workspace when no Slack channel is bound,
+    while a deployment-wide default behind it never does, so routing needs to
+    tell the two apart. ``explicit`` is true only for a repository the thread
+    or the channel description named.
+    """
+
+    repo: Repo | None = None
+    explicit: bool = False
+
+    @property
+    def routing_repo(self) -> tuple[str, str] | None:
+        """The repository allowed to decide the workspace, if any."""
+        if self.repo is None or not self.explicit:
+            return None
+        return (self.repo.owner, self.repo.name)
+
+
+async def get_slack_repo_config(
+    channel_id: str,
+    thread_ts: str,
+    slack_user_id: str | None = None,
+    channel_context: SlackChannelContext | None = None,
+    thread_id: str | None = None,
+) -> SlackRepoResolution:
+    """Resolve the default repository hint for a Slack-triggered run, if any source names one.
+
+    Priority, the first two explicit and the rest defaults:
+        1. Repo carried over from the existing Slack thread's metadata.
+        2. A ``repo:owner/name`` token in the channel's topic/purpose.
+        3. The triggering user's dashboard ``default_repo`` (if they have a
+           profile and their Slack email maps to a known GitHub login).
+        4. The default repo of the workspace this channel is bound to.
+        5. ``SLACK_REPO_*`` env defaults.
+
+    An empty resolution is not an error: the agent clones lazily and the message
+    itself usually names the repository when one matters.
+    """
+    default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
+    default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+
+    repo_config: dict[str, str] | None = None
+    explicit = False
+
+    try:
+        resolved_thread_id = thread_id or await resolve_slack_thread_id(
+            langgraph_client, channel_id, thread_ts
+        )
+        thread = await langgraph_client.threads.get(resolved_thread_id)
+        thread_repo_config = _extract_repo_config_from_thread(thread)
+        if thread_repo_config:
+            repo_config = thread_repo_config
+            explicit = True
+    except Exception as exc:  # noqa: BLE001
+        if not is_not_found_error(exc):
+            logger.debug(
+                "Failed to fetch Slack thread %s for repo resolution",
+                thread_id,
+            )
+
+    if not repo_config:
+        try:
+            if channel_context is not None:
+                channel_description = channel_context.description_text
+            else:
+                channel_description = (await SlackChannel.context_for(channel_id)).description_text
+            if channel_description:
+                channel_repo_config = extract_repo_from_text(
+                    channel_description, default_owner=default_owner
+                )
+                if channel_repo_config:
+                    logger.info(
+                        "Applying repo from Slack channel %s description: %s/%s",
+                        channel_id,
+                        channel_repo_config["owner"],
+                        channel_repo_config["name"],
+                    )
+                    repo_config = channel_repo_config
+                    explicit = True
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to resolve repo from Slack channel description")
+
+    if not repo_config and slack_user_id:
+        try:
+            slack_user = await get_slack_user_info(slack_user_id)
+            slack_email = (
+                (slack_user or {}).get("profile", {}).get("email")
+                if isinstance(slack_user, dict)
+                else None
+            )
+            profile_repo = await get_profile_default_repo(await User.login_for_email(slack_email))
+            if profile_repo:
+                logger.info(
+                    "Applying dashboard default_repo for Slack user %s: %s/%s",
+                    slack_user_id,
+                    profile_repo["owner"],
+                    profile_repo["name"],
+                )
+                repo_config = profile_repo
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to apply dashboard default_repo for Slack user")
+
+    if not repo_config:
+        # A channel bound to a workspace takes the default repository that
+        # workspace resolves to: its own override, else the instance record's.
+        repo_config = (
+            await get_workspace_settings(await workspace_for_slack_channel(channel_id))
+        ).default_repo
+
+    if not repo_config and default_owner and default_name:
+        repo_config = {"owner": default_owner, "name": default_name}
+
+    if not repo_config:
+        return SlackRepoResolution()
+    return SlackRepoResolution(Repo.model_validate(repo_config), explicit)
+
+
+async def thread_exists(thread_id: str) -> bool:
+    """Return whether a LangGraph thread already exists."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        await langgraph_client.threads.get(thread_id)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        if is_not_found_error(exc):
+            return False
+        logger.warning("Failed to fetch thread %s, assuming it exists", thread_id)
+        return True
+
+
+async def ensure_thread_exists_for_metadata(
+    thread_id: str, langgraph_client: LangGraphClient, *, title: str
+) -> bool:
+    try:
+        await ensure_titled_thread(langgraph_client, thread_id, title=title)
+        return True
+    except Exception:
+        logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
+        return False
+
+
+async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
+    """Return the explicit model choice persisted for a thread, if any."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if not is_not_found_error(exc):
+            logger.warning("Failed to fetch model metadata for thread %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict) or metadata.get("model_selection") != "explicit":
+        return None
+    model_id, effort = normalize_model_choice(metadata.get("model"), metadata.get("effort"))
+    return (model_id, effort) if model_id and effort else None
+
+
+async def get_thread_workspace(thread_id: str) -> str | None:
+    """The workspace a thread was created in; ``environment`` is the pre-workspace key."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if not is_not_found_error(exc):
+            logger.warning(
+                "Failed to fetch workspace metadata for thread",
+                extra={"agent_thread_id": thread_id},
+            )
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict):
+        return None
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
+    """The workspace that owns ``repo_config``, or the instance default.
+
+    A failed ownership lookup lands on the default too:
+    :func:`openswe.workspaces.routing.workspace_for_repo` logs it at error and
+    answers ``None``, because every caller of this is about to start or label a
+    run, and one in ``default`` beats none.
+    """
+    if not repo_config or not repo_config.get("owner") or not repo_config.get("name"):
+        return DEFAULT_WORKSPACE_SLUG
+    return (
+        await workspace_for_repo(repo_config["owner"], repo_config["name"])
+    ) or DEFAULT_WORKSPACE_SLUG
+
+
+async def post_account_link_prompt(
+    channel_id: str,
+    thread_ts: str,
+    user_id: str,
+    user_email: str | None,
+    reason: str = "unlinked",
+    agent_thread_id: str | None = None,
+    ephemeral: bool = False,
+) -> None:
+    """Prompt a Slack user to connect their account via the dashboard.
+
+    ``reason`` is ``"unlinked"`` (never signed in with GitHub) or ``"revoked"``
+    (signed in before, but the stored GitHub authorization is no longer usable).
+    Open SWE opens PRs as the triggering user, so it cannot start until the user
+    has signed in with GitHub and connected their Slack account in the dashboard.
+
+    Posts a plain, token-free dashboard link as a visible threaded reply. The
+    link carries no per-user identity, so it's safe to show in a shared channel:
+    the user signs in with GitHub from their own session and connects Slack via
+    verified OIDC on the settings page.
+    """
+    settings_url = build_settings_url()
+    if not settings_url:
+        logger.debug(
+            "Dashboard settings URL unavailable (DASHBOARD_BASE_URL unset); skipping prompt"
+        )
+        return
+    if reason == "revoked":
+        text = (
+            "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
+            f"account. Re-connect it in <{settings_url}|your Open SWE settings>, then tag me again."
+        )
+    else:
+        text = (
+            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
+            f"connect your Slack account in <{settings_url}|your Open SWE settings>, then tag me "
+            "again."
+        )
+    try:
+        if ephemeral:
+            await post_slack_ephemeral_message(channel_id, user_id, text)
+        else:
+            await post_slack_thread_reply(
+                channel_id, thread_ts, text, agent_thread_id=agent_thread_id
+            )
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
+
+
+def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
+    """Verify the Linear webhook signature.
+
+    Args:
+        body: Raw request body bytes
+        signature: The Linear-Signature header value
+        secret: The webhook signing secret
+
+    Returns:
+        True if signature is valid, False otherwise
+    """
+    if not secret:
+        logger.warning("LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request")
+        return False
+
+    if not signature:
+        return False
+
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+    return hmac.compare_digest(expected, signature)
+
+
+GITHUB_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
+SUPPORTED_GH_EVENTS = frozenset(
+    [
+        "issue_comment",
+        "issues",
+        "pull_request",
+        "pull_request_review_comment",
+        "pull_request_review",
+        "push",
+        *GITHUB_CI_EVENTS,
+    ]
+)
+SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
+SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
+    [
+        "opened",
+        "edited",
+        "ready_for_review",
+        "converted_to_draft",
+        "closed",
+        "reopened",
+        "synchronize",
+    ]
+)
+GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
+GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
+# PR lifecycle actions that should refresh the agent thread's tracked pr_state.
+GH_PR_AGENT_STATE_ACTIONS = frozenset(
+    ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
+)
+_TERMINAL_PR_STATES = frozenset(["closed", "merged"])
+_PRS_CLOSED_ATTENTION_REASON = "prs_closed"
+PR_MERGED_FEEDBACK_KEY = "pr_merged"
+
+
+def _pr_linked(metadata: Mapping[str, Any]) -> bool:
+    return any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
+
+
+def _pr_state_reset_for_user_activity(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Metadata that a new user message invalidates: PR-driven resolution and attention."""
+    reset: dict[str, Any] = {}
+    if metadata.get("attention_reason"):
+        reset["attention_reason"] = None
+    if metadata.get("auto_resolved_by_prs") is True:
+        reset["resolved"] = False
+        reset["resolved_at_ms"] = None
+        reset["auto_resolved_by_prs"] = False
+    return reset
+
+
+SUPPORTED_GH_COMMENT_ACTIONS = {
+    "issue_comment": frozenset(["created", "edited"]),
+    "pull_request_review_comment": frozenset(["created", "edited"]),
+    "pull_request_review": frozenset(["submitted", "edited"]),
+}
+
+
+def build_github_issue_comments_text(
+    comments: list[dict[str, Any]], *, trusted: Collection[str]
+) -> str:
+    lines: list[str] = []
+    for comment in comments:
+        body = comment.get("body", "")
+        if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
+            continue
+        author = comment.get("author", "unknown")
+        formatted_body = format_github_comment_body_for_prompt(author, body, trusted=trusted)
+        lines.append(f"\n**{author}:**\n{formatted_body}\n")
+
+    if not lines:
+        return ""
+    return "\n\n## Comments:\n" + "".join(lines)
+
+
+async def authorize_github_thread(thread_id: str, github_login: str) -> dict[str, Any]:
+    """Reject private-thread follow-ups before reading credentials or dispatching."""
+    try:
+        thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
+    except Exception as exc:
+        if is_not_found_error(exc):
+            return {}
+        raise
+    metadata = as_thread_dict(thread).get("metadata") or {}
+    if thread_is_private(metadata) and not thread_is_promptable(metadata, github_login):
+        raise HTTPException(404, "thread not found")
+    return metadata
+
+
+async def trigger_or_queue_run(
+    thread_id: str,
+    prompt: str,
+    *,
+    input: Any | None = None,
+    github_login: str,
+    github_user_id: int | None,
+    repo_config: dict[str, str],
+    pr_number: int,
+    token_repositories: Sequence[str] | None = None,
+) -> bool:
+    """Return whether a new agent run was created or queued for a busy thread.
+
+    ``token_repositories`` is recorded if this creates the thread; a thread that
+    must be narrowed but could not record it is not started.
+    """
+    await authorize_github_thread(thread_id, github_login)
+    # An existing thread keeps the workspace it started in even if its
+    # repository has since moved: the settings and MCP connections a
+    # conversation began with must not change under it.
+    workspace = await get_thread_workspace(thread_id) or await workspace_for_repo_config(
+        repo_config
+    )
+    persisted = await upsert_agent_thread_metadata(
+        thread_id,
+        source="github",
+        repo_config=repo_config,
+        github_login=github_login,
+        title=f"PR #{pr_number}" if pr_number else "Pull request",
+        source_context=SourceContext(pr_number=pr_number) if pr_number else None,
+        workspace=workspace,
+        token_repositories=token_repositories,
+    )
+    if not persisted and token_repositories is not None:
+        logger.error(
+            "Not starting a GitHub run whose token scope could not be recorded",
+            extra={"agent_thread_id": thread_id},
+        )
+        return False
+    logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
+    await dispatch_agent_run(
+        thread_id,
+        None if input is not None else prompt,
+        {
+            "source": "github",
+            "github_login": github_login,
+            "github_user_id": github_user_id,
+            "repo": repo_config,
+            "pr_number": pr_number,
+            "workspace": workspace,
+            "environment": workspace,
+        },
+        source="github",
+        thread_title=None,
+        input=input,
+        metadata=AGENT_VERSION_METADATA,
+    )
+    logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
+    return True
+
+
+async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[str, Any] | None:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.get(
+                f"https://api.github.com/repos/{pr_ref.owner}/{pr_ref.repo}/pulls/{pr_ref.number}",
+                headers=headers,
+            )
+            response.raise_for_status()
+        except httpx2.HTTPError:
+            logger.exception(
+                "Failed to fetch PR metadata for %s/%s#%s",
+                pr_ref.owner,
+                pr_ref.repo,
+                pr_ref.number,
+            )
+            return None
+    data = response.json()
+    return data if isinstance(data, dict) else None
+
+
+def repo_private_from_pr_metadata(pr_metadata: dict[str, Any]) -> bool | None:
+    repo = pr_metadata.get("base", {}).get("repo")
+    if isinstance(repo, dict) and isinstance(repo.get("private"), bool):
+        return repo["private"]
+    return None
+
+
+def repo_id_from_pr_metadata(pr_metadata: dict[str, Any]) -> int | None:
+    repo = pr_metadata.get("base", {}).get("repo")
+    repo_id = repo.get("id") if isinstance(repo, dict) else None
+    return repo_id if isinstance(repo_id, int) else None
+
+
+def repo_private_from_payload(payload: dict[str, Any]) -> bool | None:
+    repo = payload.get("repository")
+    private = repo.get("private") if isinstance(repo, dict) else None
+    return private if isinstance(private, bool) else None
+
+
+def event_thread_token_repositories(
+    repo_config: dict[str, str], payload: dict[str, Any]
+) -> list[str] | None:
+    """The token scope for a thread a GitHub event on ``repo_config`` starts."""
+    return event_token_repositories(
+        repo_config.get("owner", ""),
+        repo_config.get("name", ""),
+        private=repo_private_from_payload(payload),
+    )
+
+
+def repo_id_from_payload(payload: dict[str, Any]) -> int | None:
+    repo = payload.get("repository")
+    repo_id = repo.get("id") if isinstance(repo, dict) else None
+    return repo_id if isinstance(repo_id, int) else None
+
+
+async def reviewer_token_for_repo(
+    repo_config: dict[str, str],
+    *,
+    repo_private: bool | None,
+    repo_id: int | None = None,
+) -> tuple[str | None, str | None]:
+    if repo_private is False:
+        if repo_id is not None:
+            return await get_github_app_installation_token_with_expiry(repository_ids=[repo_id])
+        repo_name = repo_config.get("name")
+        if repo_name:
+            return await get_github_app_installation_token_with_expiry(repositories=[repo_name])
+    return await get_github_app_installation_token_with_expiry()
+
+
+async def store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
+    run_id = run.get("run_id") if isinstance(run, dict) else None
+    if isinstance(run_id, str) and run_id:
+        await set_reviewer_thread_metadata(thread_id, extra={"current_reviewer_run_id": run_id})
+
+
+class _TrackedReviewCheck(BaseModel):
+    review_check_run_id: int | None = None
+    superseded_review_check_run_ids: list[int] = []
+
+
+async def track_review_check_run(
+    thread_id: str, *, owner: str, repo: str, token: str, check_run_id: int
+) -> None:
+    """Track ``check_run_id`` as the thread's review check, closing the ones it supersedes.
+
+    The run that owned the previous check is interrupted by the new one and never
+    settles it, so it would otherwise stay "in progress" on its commit forever.
+    Checks that fail to close are kept and retried on the next call.
+    """
+    tracked = _TrackedReviewCheck.model_validate(await get_thread_metadata_safe(thread_id) or {})
+    superseded = [
+        stale
+        for stale in dict.fromkeys(
+            [*tracked.superseded_review_check_run_ids, tracked.review_check_run_id]
+        )
+        if stale is not None and stale != check_run_id
+    ]
+    unsettled = [
+        stale
+        for stale in superseded
+        if not await complete_review_check_run(
+            owner=owner,
+            repo=repo,
+            check_run_id=stale,
+            token=token,
+            conclusion="neutral",
+            title="Superseded by a newer review",
+            summary="A newer Open SWE review run replaced this one.",
+        )
+    ]
+    await set_reviewer_thread_metadata(
+        thread_id,
+        extra={
+            "review_check_run_id": check_run_id,
+            "review_check_pending_result": None,
+            "superseded_review_check_run_ids": unsettled,
+        },
+    )
+
+
+async def build_reviewer_configurable(
+    *,
+    source: str,
+    github_login: str,
+    github_user_id: int | None,
+    repo_config: dict[str, str],
+    pr_number: int,
+    pr_url: str,
+    base_sha: str,
+    head_sha: str,
+    branch_name: str,
+    repo_private: bool | None = None,
+    re_review: bool = False,
+    last_reviewed_sha: str = "",
+    slack_channel_id: str = "",
+    slack_thread_ts: str = "",
+) -> dict[str, Any]:
+    """Assemble the runnable-config ``configurable`` dict for a reviewer run."""
+    workspace = await workspace_for_repo_config(repo_config)
+    configurable: dict[str, Any] = {
+        "source": source,
+        "github_login": github_login,
+        "github_user_id": github_user_id,
+        "repo": repo_config,
+        "pr_number": pr_number,
+        "pr_url": pr_url,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "review_requested": True,
+        "re_review": re_review,
+        "workspace": workspace,
+        "environment": workspace,
+    }
+    if branch_name:
+        configurable["branch_name"] = branch_name
+    if repo_private is not None:
+        configurable["repo_private"] = repo_private
+    if last_reviewed_sha:
+        configurable["last_reviewed_sha"] = last_reviewed_sha
+    if slack_channel_id and slack_thread_ts:
+        configurable["slack_thread"] = {
+            "channel_id": slack_channel_id,
+            "thread_ts": slack_thread_ts,
+        }
+    return configurable
+
+
+async def draft_review_enabled_for_author(
+    author_login: str, repo_config: dict[str, str] | None = None
+) -> bool:
+    """Return whether draft PRs by ``author_login`` should auto-review.
+
+    Tri-state: the PR author's profile ``review_draft_prs`` wins when set to
+    True/False; ``None`` (or no profile, e.g. external contributors) falls back
+    to the default of the workspace that owns ``repo_config``.
+    """
+    if author_login:
+        profile = await get_profile(author_login)
+        if isinstance(profile, dict):
+            override = profile.get("review_draft_prs")
+            if isinstance(override, bool):
+                return override
+    settings = await get_workspace_settings(await workspace_for_repo_config(repo_config))
+    return bool(settings.get("review_draft_prs"))
+
+
+async def fetch_open_pr_for_branch(
+    repo_config: dict[str, str], head_ref: str, *, token: str
+) -> dict[str, Any] | None:
+    """Find the open PR whose head ref matches ``head_ref``, if one exists."""
+    async with GitHubClient.connect(token=token) as github:
+        return await github.repo(
+            repo_config.get("owner", ""), repo_config.get("name", "")
+        ).open_pull_for_branch(head_ref)
+
+
+def _normalized_diff_hash(diff_text: str) -> str:
+    normalized = "\n".join(
+        line.rstrip() for line in diff_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ).strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+async def _fetch_compare_diff(
+    repo_config: dict[str, str], base_ref: str, head_ref: str, *, token: str
+) -> str | None:
+    owner = repo_config.get("owner", "")
+    repo = repo_config.get("name", "")
+    if not owner or not repo or not base_ref or not head_ref:
+        return None
+
+    base = quote(base_ref, safe="")
+    head = quote(head_ref, safe="")
+    headers = {
+        "Accept": "application/vnd.github.diff",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/compare/{base}...{head}",
+                headers=headers,
+            )
+            response.raise_for_status()
+        except httpx2.HTTPError:
+            logger.exception(
+                "Failed to fetch compare diff for %s/%s %s...%s", owner, repo, base_ref, head_ref
+            )
+            return None
+    return response.text
+
+
+async def is_pr_diff_unchanged_since_last_review(
+    repo_config: dict[str, str],
+    *,
+    base_ref: str,
+    last_reviewed_sha: str,
+    head_sha: str,
+    token: str,
+) -> bool:
+    previous_diff = await _fetch_compare_diff(repo_config, base_ref, last_reviewed_sha, token=token)
+    current_diff = await _fetch_compare_diff(repo_config, base_ref, head_sha, token=token)
+    if previous_diff is None or current_diff is None:
+        return False
+    return _normalized_diff_hash(previous_diff) == _normalized_diff_hash(current_diff)
+
+
+async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
+    """Fetch a thread's metadata; return ``None`` if the thread doesn't exist."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if is_not_found_error(exc):
+            return None
+        logger.warning("Failed to fetch reviewer thread metadata for %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    return metadata if isinstance(metadata, dict) else {}
+
+
+async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
+    """Record merge feedback on the thread's trace under two keys.
+
+    ``github_pr_merged:<url>`` stays unique per PR; ``pr_merged`` is constant
+    across threads so LangSmith can filter and count merges project-wide.
+
+    Args:
+        thread_id: LangGraph thread the PR was opened from.
+        pr_url: Stored as the feedback comment.
+    """
+    source_info = {"source": "github_pr_merged", "thread_id": thread_id, "pr_url": pr_url}
+    await asyncio.gather(
+        create_langsmith_thread_feedback(
+            thread_id,
+            f"github_pr_merged:{pr_url}",
+            score=1.0,
+            comment=f"Agent-authored pull request merged: {pr_url}",
+            source_info=source_info,
+        ),
+        create_langsmith_thread_feedback(
+            thread_id,
+            PR_MERGED_FEEDBACK_KEY,
+            score=1.0,
+            comment=pr_url,
+            source_info=source_info,
+        ),
+    )
+
+
+async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
+    """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
+
+    Agent threads come from the PR's own record; a PR that predates the record
+    falls back to a one-time scan of ``pr_url`` thread metadata. Reviewer
+    threads are skipped.
+
+    A thread auto-resolves only when every tracked PR is merged or closed and the
+    agent opened at least one of them with ``resolves_thread=True``. Without that
+    flag the thread is instead marked ``attention_reason="prs_closed"`` so a
+    person decides whether to resolve it; any PR reopening clears the mark.
+    """
+    event = PullRequestEvent.parse(payload)
+    pull_request = event.to_pull_request() if event is not None else None
+    if event is None or pull_request is None:
+        return
+    pr_url = pull_request.url
+    new_state = pull_request.state
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        saved = await pull_request.save(repository_private=event.repo_private)
+        thread_ids = await saved.linked_threads()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Pull request registry unavailable; scanning thread metadata instead",
+            extra={"pr_url": pr_url},
+            exc_info=True,
+        )
+        thread_ids = list(await pull_request.discover_threads() or [])
+
+    for thread_id in thread_ids:
+        metadata: dict[str, Any] | None = None
+        newly_merged = False
+        try:
+            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+                current = await langgraph_client.threads.get(thread_id)
+                metadata = current.get("metadata") if isinstance(current, dict) else None
+                if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
+                    continue
+                metadata_update: dict[str, Any] = {}
+                pull_requests = metadata.get("pull_requests")
+                updated_pull_requests: list[dict[str, Any]] = []
+                previous_state: Any = None
+                if isinstance(pull_requests, list):
+                    previous_state = next(
+                        (
+                            record.get("state")
+                            for record in pull_requests
+                            if isinstance(record, dict) and record.get("url") == pr_url
+                        ),
+                        None,
+                    )
+                    updated_pull_requests = [
+                        {**record, "state": new_state} if record.get("url") == pr_url else record
+                        for record in pull_requests
+                        if isinstance(record, dict)
+                    ]
+                    if updated_pull_requests != pull_requests:
+                        metadata_update["pull_requests"] = updated_pull_requests
+                if not updated_pull_requests and metadata.get("pr_url") == pr_url:
+                    previous_state = metadata.get("pr_state")
+                state_changed = previous_state != new_state
+                newly_merged = (
+                    state_changed
+                    and new_state == "merged"
+                    and bool((event.pull_request.merge_commit_sha or "").strip())
+                )
+                if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
+                    metadata_update["pr_state"] = new_state
+
+                tracked_states = [record.get("state") for record in updated_pull_requests]
+                if not tracked_states and metadata.get("pr_url") == pr_url:
+                    tracked_states = [new_state]
+                all_terminal = bool(tracked_states) and all(
+                    state in _TERMINAL_PR_STATES for state in tracked_states
+                )
+                resolves_thread = any(
+                    record.get("resolves_thread") is True for record in updated_pull_requests
+                )
+                needs_attention = metadata.get("attention_reason") == _PRS_CLOSED_ATTENTION_REASON
+                if all_terminal:
+                    if state_changed and metadata.get("resolved") is not True:
+                        if resolves_thread:
+                            metadata_update["resolved"] = True
+                            metadata_update["resolved_at_ms"] = int(
+                                datetime.now(UTC).timestamp() * 1000
+                            )
+                            metadata_update["auto_resolved_by_prs"] = True
+                        elif not needs_attention:
+                            metadata_update["attention_reason"] = _PRS_CLOSED_ATTENTION_REASON
+                else:
+                    if metadata.get("auto_resolved_by_prs") is True:
+                        metadata_update["resolved"] = False
+                        metadata_update["resolved_at_ms"] = None
+                        metadata_update["auto_resolved_by_prs"] = False
+                    if needs_attention:
+                        metadata_update["attention_reason"] = None
+                if metadata_update:
+                    await langgraph_client.threads.update(
+                        thread_id=thread_id, metadata=metadata_update
+                    )
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
+            continue
+        if new_state == "merged":
+            from openswe.analytics.emitter import task_marked_complete
+
+            await task_marked_complete(thread_id, source="github", auto=True)
+            await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
+            from openswe.thread_feedback import schedule_pr_feedback
+
+            await schedule_pr_feedback(thread_id, metadata, pr_url)
+        elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
+            from openswe.analytics.emitter import task_rework
+
+            await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
+        if (
+            newly_merged
+            and event.identity is not None
+            and isinstance(metadata, dict)
+            and metadata.get(ROLLOUT_CHECK_REQUESTED) is True
+        ):
+            owner, repo, number = event.identity
+            await subscribe_merged_thread(
+                thread_id,
+                owner=owner,
+                repo=repo,
+                number=number,
+                sha=event.pull_request.merge_commit_sha or "",
+                metadata=metadata if isinstance(metadata, dict) else {},
+            )
+
+
+async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
+    """Invalidate the cached token after a 401 and try to resolve a fresh one."""
+    logger.warning(
+        "GitHub returned 401 for thread %s; invalidating cached token and re-resolving",
+        thread_id,
+    )
+    await invalidate_cached_github_token(thread_id)
+    return await get_or_resolve_thread_github_token(thread_id, email)
+
+
+async def get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
+    """GitHub webhook conversations always use the workspace bot identity."""
+    del email
+    await invalidate_cached_github_token(thread_id)
+    bot_token, expires_at = await get_github_app_installation_token_with_expiry()
+    if bot_token:
+        cache_github_token_for_thread(
+            thread_id, bot_token, expires_at=expires_at, is_bot_token=True
+        )
+        return bot_token
+    logger.warning("Workspace GitHub App token unavailable", extra={"thread_id": thread_id})
+    return None
+
+
+def finding_comment_ids(finding: Finding) -> set[int]:
+    comment_ids: set[int] = set()
+    comment_id = finding.get("github_review_comment_id")
+    if isinstance(comment_id, int):
+        comment_ids.add(comment_id)
+    comment_id_list = finding.get("github_review_comment_ids")
+    if isinstance(comment_id_list, list):
+        comment_ids.update(item for item in comment_id_list if isinstance(item, int))
+    return comment_ids
+
+
+def review_comment_reply_parent_id(payload: dict[str, Any]) -> int | None:
+    comment = payload.get("comment")
+    if not isinstance(comment, dict):
+        return None
+    parent_id = comment.get("in_reply_to_id")
+    return parent_id if isinstance(parent_id, int) else None
+
+
+def _escape_review_reply_data(text: str) -> str:
+    return text.replace("</body>", "</body_>").replace("</finding_reply>", "</finding_reply_>")
+
+
+def _escape_review_reply_attr(text: str) -> str:
+    return (
+        text.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+
+
+def build_queued_finding_reply_prompt(
+    *,
+    finding_id: str,
+    reply_author: str,
+    reply_body: str,
+    pr_number: int,
+) -> str:
+    safe_body = _escape_review_reply_data(reply_body)
+    safe_author = _escape_review_reply_attr(reply_author)
+    return prompt(
+        "reviewer/queued-finding-reply",
+        reply_author=reply_author,
+        finding_id=finding_id,
+        pr_number=pr_number,
+        safe_author=safe_author,
+        safe_body=safe_body,
+    )

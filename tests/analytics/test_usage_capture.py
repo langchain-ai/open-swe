@@ -6,8 +6,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import directory, emitter, identity, ingestion
-from agent.analytics.events import EventName, RunCanceledPayload, RunFailedPayload
+from openswe.analytics import directory, emitter, identity, ingestion
+from openswe.analytics.events import EventName, RunCanceledPayload, RunFailedPayload
 from tests.analytics.helpers import DAY, event
 
 

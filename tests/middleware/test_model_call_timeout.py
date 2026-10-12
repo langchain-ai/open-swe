@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from agent.middleware.model_call_timeout import (
+from openswe.middleware.model_call_timeout import (
     DEFAULT_MODEL_CALL_TIMEOUT_SECONDS,
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
@@ -53,8 +53,8 @@ class TestModelCallTimeoutMiddleware:
     def test_every_subagent_spec_carries_the_deadline(self) -> None:
         # Subagents compile into their own graphs, so the parent's middleware
         # never wraps their model calls.
-        from agent.reviewer import _reviewer_subagent
-        from agent.server import _general_purpose_subagent
+        from openswe.reviewer import _reviewer_subagent
+        from openswe.server import _general_purpose_subagent
 
         model = MagicMock()
         specs = [

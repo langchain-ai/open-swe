@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from agent.github import dashboard_routes, repo_cache, repos
+from openswe.github import dashboard_routes, repo_cache, repos
 from tests.support.github_sdk import mock_github_sdk
 
 

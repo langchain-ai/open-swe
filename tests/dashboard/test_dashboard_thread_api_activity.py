@@ -1,6 +1,6 @@
 from typing import Any
 
-from agent.threads import handlers as thread_api
+from openswe.threads import handlers as thread_api
 from tests.conftest import patch_thread_module
 
 

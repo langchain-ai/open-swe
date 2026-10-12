@@ -2,8 +2,8 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { LocalAgentThreadView } from "@/features/agents/components/LocalAgentThreadView"
-import { useReadyDesktopLocalThread } from "@/features/agents/lib/desktopLocal"
-import { Skeleton } from "@/components/ui/skeleton"
+import { useReadyLegacyLocalThread } from "@/features/agents/lib/legacyLocal"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import {
   ensureThreadLoad,
   threadDetailFailed,
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/agents/local/$sessionId")({
 
 function LocalAgentThreadPage() {
   const { sessionId } = Route.useParams()
-  const threadQuery = useReadyDesktopLocalThread(sessionId)
+  const threadQuery = useReadyLegacyLocalThread(sessionId)
   const resolved = threadQuery.data !== undefined
   const failed = threadQuery.isError || threadQuery.data === null
   useEffect(() => {
@@ -43,7 +43,7 @@ function LocalAgentThreadPage() {
   }
   if (threadQuery.isPending) {
     return (
-      <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+      <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )

@@ -7,7 +7,7 @@ import httpx
 import pytest
 from githubkit import GitHub
 
-from agent.github import sdk
+from openswe.github import sdk
 
 
 def mock_github_sdk(

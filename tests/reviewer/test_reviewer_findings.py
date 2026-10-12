@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.review.findings import (
+from openswe.review.findings import (
     Finding,
     ReviewerThreadMissingError,
     ReviewerThreadUnlinkedError,
@@ -76,8 +76,8 @@ async def test_first_access_backfills_metadata_findings_once(
     client = _metadata_client({"findings": [_f(id="f_a"), _f(id="f_b", description="other")]})
 
     with (
-        patch("agent.review.findings.get_client", return_value=client),
-        caplog.at_level(logging.INFO, logger="agent.review.findings"),
+        patch("openswe.review.findings.get_client", return_value=client),
+        caplog.at_level(logging.INFO, logger="openswe.review.findings"),
     ):
         first = await list_findings("tid")
         client.threads.get.return_value = {"metadata": {"findings": []}}
@@ -99,7 +99,7 @@ async def test_a_thread_without_pull_request_metadata_stores_nothing() -> None:
     client = AsyncMock()
     client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_a")]}}
 
-    with patch("agent.review.findings.get_client", return_value=client):
+    with patch("openswe.review.findings.get_client", return_value=client):
         with pytest.raises(ReviewerThreadUnlinkedError):
             await append_finding("tid", _f(id="f_b"))
 
@@ -109,7 +109,7 @@ async def test_failed_backfill_read_copies_nothing_and_retries_later() -> None:
     client = _metadata_client()
     client.threads.get.side_effect = RuntimeError("transient")
 
-    with patch("agent.review.findings.get_client", return_value=client):
+    with patch("openswe.review.findings.get_client", return_value=client):
         with pytest.raises(RuntimeError, match="transient"):
             await mutate_findings("tid", lambda findings: bool(findings.append(_f(id="f_new"))))
         assert await list_findings("tid") == []
@@ -125,7 +125,7 @@ async def test_failed_backfill_read_copies_nothing_and_retries_later() -> None:
 
 async def _read_persisted(record: dict[str, Any]) -> Finding:
     with patch(
-        "agent.review.findings.get_client", return_value=_metadata_client({"findings": [record]})
+        "openswe.review.findings.get_client", return_value=_metadata_client({"findings": [record]})
     ):
         findings = await list_findings("tid")
     return findings[0]
@@ -158,7 +158,7 @@ async def test_reading_legacy_surface_record_folds_ids_and_state() -> None:
 
 @pytest.mark.usefixtures("registry_db")
 async def test_concurrent_append_finding_preserves_distinct_findings() -> None:
-    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
+    with patch("openswe.review.findings.get_client", return_value=_metadata_client()):
         first, second = await asyncio.gather(
             append_finding("tid", _f(id="f_a", description="first")),
             append_finding("tid", _f(id="f_b", description="second")),
@@ -172,7 +172,7 @@ async def test_concurrent_append_finding_preserves_distinct_findings() -> None:
 
 @pytest.mark.usefixtures("registry_db")
 async def test_concurrent_identical_findings_are_idempotent() -> None:
-    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
+    with patch("openswe.review.findings.get_client", return_value=_metadata_client()):
         first, second = await asyncio.gather(
             append_finding("tid", _f(id="f_a")),
             append_finding("tid", _f(id="f_b")),
@@ -186,7 +186,7 @@ async def test_concurrent_identical_findings_are_idempotent() -> None:
 
 @pytest.mark.usefixtures("registry_db")
 async def test_replace_findings_keeps_records_added_since_the_snapshot() -> None:
-    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
+    with patch("openswe.review.findings.get_client", return_value=_metadata_client()):
         await append_finding("tid", _f(id="f_a", description="a"))
         snapshot = await list_findings("tid")
         await append_finding("tid", _f(id="f_b", description="b"))
@@ -210,11 +210,11 @@ async def test_get_thread_metadata_raises_domain_error_when_thread_missing() -> 
     """A missing thread must surface as ReviewerThreadMissingError, not be
     swallowed into ``{}`` — that produced misleading tool results like
     "No finding found" instead of the do-not-retry contract."""
-    from agent.review.findings import get_thread_metadata
+    from openswe.review.findings import get_thread_metadata
 
     fake_client = AsyncMock()
     fake_client.threads.get.side_effect = _not_found()
 
-    with patch("agent.review.findings.get_client", return_value=fake_client):
+    with patch("openswe.review.findings.get_client", return_value=fake_client):
         with pytest.raises(ReviewerThreadMissingError):
             await get_thread_metadata("tid")

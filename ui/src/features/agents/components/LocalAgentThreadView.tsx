@@ -1,3 +1,4 @@
+import { XIcon } from "@langchain/macaw-components/icons"
 import {
   useCallback,
   useEffect,
@@ -8,12 +9,13 @@ import {
 } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useSubmissionQueue } from "@langchain/react"
-import { CircleAlert, X } from "lucide-react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Link } from "@tanstack/react-router"
 
 import type {
-  DesktopLocalPromptInput,
-  DesktopLocalThreadSummary,
+  DesktopLegacyLocalPromptInput,
+  DesktopLegacyLocalThread,
 } from "@/desktop"
 import type {
   ImageChunk,
@@ -21,7 +23,6 @@ import type {
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
@@ -44,15 +45,17 @@ import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
-  ensureDesktopModelCredential,
-  localThreadKeys,
-  useDesktopLocalThread,
   useLocalRepoRefs,
-  useLocalThreadActivity,
   useLocalThreadDiff,
   useLocalThreadPr,
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
+import {
+  ensureDesktopModelCredential,
+  legacyLocalThreadKeys,
+  useLegacyLocalActivity,
+  useLegacyLocalThread,
+} from "@/features/agents/lib/legacyLocal"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -73,7 +76,7 @@ import {
   threadTranscriptPainted,
 } from "@/lib/perf/threadLoad"
 
-function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
+function skillFiles(skills: DesktopLegacyLocalPromptInput["skills"]) {
   return Object.fromEntries(
     skills.map(({ name, description, instructions }) => [
       `/${name}/SKILL.md`,
@@ -96,7 +99,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     transport: "local",
     threadId: sessionId,
   })
-  const threadQuery = useDesktopLocalThread(sessionId)
+  const threadQuery = useLegacyLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
   const skills = useAgentSkills({ enabled: Boolean(session.data) })
@@ -191,7 +194,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           branch,
         })
         if (updated)
-          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+          queryClient.setQueryData(
+            legacyLocalThreadKeys.detail(sessionId),
+            updated
+          )
         await refetchRepoRefs()
       } catch (cause) {
         setError(errorMessage(cause))
@@ -200,7 +206,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [queryClient, refetchRepoRefs, sessionId]
   )
 
-  const activity = useLocalThreadActivity()[sessionId]
+  const activity = useLegacyLocalActivity()[sessionId]
   const isRunning =
     stream.isLoading ||
     (Boolean(thread?.pending) && !error) ||
@@ -285,16 +291,16 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const rememberSelection = useCallback(
     async (model?: ModelSelection | null) => {
       if (!model) return
-      const updated = await window.openSweDesktop?.updateLocalThread({
+      const updated = await window.openSweDesktop?.updateLegacyLocalThread({
         threadId: sessionId,
         viewed: true,
         modelId: model.modelId,
         effort: model.effort,
       })
       if (!updated) return
-      queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-      queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-        localThreadKeys.all,
+      queryClient.setQueryData(legacyLocalThreadKeys.detail(sessionId), updated)
+      queryClient.setQueryData<Array<DesktopLegacyLocalThread>>(
+        legacyLocalThreadKeys.all,
         (threads = []) =>
           threads.map((entry) => (entry.id === sessionId ? updated : entry))
       )
@@ -310,12 +316,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     if (!thread || acknowledgedRef.current === sessionId) return
     acknowledgedRef.current = sessionId
     void window.openSweDesktop
-      ?.updateLocalThread({ threadId: sessionId, viewed: true })
+      ?.updateLegacyLocalThread({ threadId: sessionId, viewed: true })
       .then((updated) => {
         if (!updated) return
-        queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-        queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-          localThreadKeys.all,
+        queryClient.setQueryData(
+          legacyLocalThreadKeys.detail(sessionId),
+          updated
+        )
+        queryClient.setQueryData<Array<DesktopLegacyLocalThread>>(
+          legacyLocalThreadKeys.all,
           (threads = []) =>
             threads.map((item) => (item.id === sessionId ? updated : item))
         )
@@ -326,7 +335,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     async (
       prompt: string,
       images: Array<ImageChunk>,
-      promptSkills: DesktopLocalPromptInput["skills"] = [],
+      promptSkills: DesktopLegacyLocalPromptInput["skills"] = [],
       enqueue = false
     ) => {
       if (!thread) return false
@@ -389,7 +398,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       return
     initialPromptRef.current = sessionId
     void stream.hydrationPromise
-      .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
+      .then(() => window.openSweDesktop?.getLegacyLocalPrompt(sessionId))
       .then(async (pending) => {
         if (!pending) return
         // The pending prompt is only cleared once its run finishes, so a
@@ -404,9 +413,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           initialPromptRef.current = null
           return
         }
-        const updated = await window.openSweDesktop?.clearLocalPrompt(sessionId)
+        const updated =
+          await window.openSweDesktop?.clearLegacyLocalPrompt(sessionId)
         if (updated)
-          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+          queryClient.setQueryData(
+            legacyLocalThreadKeys.detail(sessionId),
+            updated
+          )
       })
       .catch((cause) => {
         initialPromptRef.current = null
@@ -428,7 +441,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
 
   if (!thread) {
     return (
-      <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-xs text-muted-foreground">
+      <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-space-3 text-xs text-secondary">
         {threadQuery.isPending
           ? "Loading local Open SWE session…"
           : threadQuery.error
@@ -436,7 +449,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             : "This local session no longer exists."}
         {!threadQuery.isPending && (
           <Link
-            className="text-foreground underline underline-offset-4"
+            className="text-primary underline underline-offset-4"
             to="/agents"
           >
             Start a new task
@@ -457,14 +470,18 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           title={thread.title}
           localThread={thread}
           onRename={async (title) => {
-            const updated = await window.openSweDesktop?.updateLocalThread({
-              threadId: sessionId,
-              title,
-            })
+            const updated =
+              await window.openSweDesktop?.updateLegacyLocalThread({
+                threadId: sessionId,
+                title,
+              })
             if (!updated) throw new Error("Could not rename local thread")
-            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-            queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-              localThreadKeys.all,
+            queryClient.setQueryData(
+              legacyLocalThreadKeys.detail(sessionId),
+              updated
+            )
+            queryClient.setQueryData<Array<DesktopLegacyLocalThread>>(
+              legacyLocalThreadKeys.all,
               (threads = []) =>
                 threads.map((entry) =>
                   entry.id === sessionId ? updated : entry
@@ -475,13 +492,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           panelCollapsed={panelCollapsed}
         />
         {(shownError || activity === "error") && (
-          <div className="mx-auto w-full max-w-3xl px-4 pt-3">
-            <Alert variant="error">
-              <CircleAlert />
-              <AlertDescription>
-                {shownError || "The local Open SWE agent stopped unexpectedly."}
-              </AlertDescription>
-            </Alert>
+          <div className="mx-auto w-full max-w-3xl px-space-4 pt-space-3">
+            <Banner intent="error">
+              {shownError || "The local Open SWE agent stopped unexpectedly."}
+            </Banner>
           </div>
         )}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -499,31 +513,31 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           <AgentComposerDock>
             <ThreadPullRequests
               pullRequests={composerPr ? [composerPr] : []}
-              compact
               healthUnavailable
             />
             {terminalContexts.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-1.5">
+              <div className="mb-space-2 flex flex-wrap gap-space-2">
                 {terminalContexts.map((text, index) => (
                   <span
                     key={`${text.slice(0, 24)}:${index}`}
-                    className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground"
+                    className="inline-flex max-w-full items-center gap-space-1 rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xxs text-secondary"
                     title={text}
                   >
                     <span className="max-w-64 truncate">
                       Terminal selection
                     </span>
-                    <button
-                      type="button"
-                      aria-label="Remove terminal selection"
+                    <IconButton
+                      icon={XIcon}
+                      label="Remove terminal selection"
+                      size="xxs"
+                      color="secondary"
+                      variant="plain"
                       onClick={() =>
                         setTerminalContexts((current) =>
                           current.filter((_, itemIndex) => itemIndex !== index)
                         )
                       }
-                    >
-                      <X className="size-3" />
-                    </button>
+                    />
                   </span>
                 ))}
               </div>

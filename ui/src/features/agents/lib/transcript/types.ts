@@ -30,7 +30,10 @@ export type MessageRole = "human" | "ai"
 
 export type ToolCallStatus = "in_progress" | "completed" | "error"
 
-export type NoticeKind = "model_routed" | "conversation_offloading"
+export type NoticeKind =
+  | "model_routed"
+  | "conversation_offloading"
+  | "workspace_stale"
 
 /**
  * A file attached to a message. The log stores metadata only — never base64
@@ -50,6 +53,8 @@ export interface TranscriptUsage {
   input_tokens?: number | null
   output_tokens?: number | null
   total_tokens?: number | null
+  model?: string | null
+  invocation_id?: string | null
 }
 
 /** A subagent's position in the run tree: `[]` at the root, `[task_tool_call_id, …]` below it. */

@@ -8,8 +8,8 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent.middleware.client_tools import ClientToolsMiddleware
-from agent.openai_responses.client_tools import ClientToolSpec
+from openswe.middleware.client_tools import ClientToolsMiddleware
+from openswe.openai_responses.client_tools import ClientToolSpec
 
 
 class ScriptedModel(BaseChatModel):
