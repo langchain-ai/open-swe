@@ -215,6 +215,7 @@ export function WorkspaceSettingsPanel({
     }
     qc.setQueryData(workspaceRecordKey(slug), saved)
     void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
+    void qc.invalidateQueries({ queryKey: ["workspaceRepositories", slug] })
   }
   const onRebuildStarted = async () => {
     // Show the run as underway at once, then let the poll confirm it, so a
