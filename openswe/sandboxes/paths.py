@@ -3,7 +3,7 @@
 import logging
 import posixpath
 import shlex
-from collections.abc import AsyncIterable, Iterable, Mapping
+from collections.abc import AsyncIterable, Iterable
 from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -13,7 +13,6 @@ from openswe.bridge.constants import SANDBOX_ID_PREFIX
 logger = logging.getLogger(__name__)
 
 _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
-WORK_DIR_METADATA_KEY = "sandbox_work_dir"
 _PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox", "_backend")
 WORKSPACE_DIR = "/workspace"
 
@@ -167,31 +166,9 @@ def forget_work_dir(sandbox_backend: object) -> None:
     vars(sandbox_backend).pop(_WORK_DIR_CACHE_ATTR, None)
 
 
-def recorded_work_dir(sandbox_backend: SandboxBackendProtocol) -> dict[str, str] | None:
-    """The resolved work dir as thread metadata, so other workers skip re-probing this sandbox."""
-    work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
-    sandbox_id = getattr(sandbox_backend, "id", None)
-    if isinstance(work_dir, str) and work_dir and isinstance(sandbox_id, str) and sandbox_id:
-        return {"sandbox_id": sandbox_id, "path": work_dir}
-    return None
-
-
-def adopt_recorded_work_dir(
-    sandbox_backend: SandboxBackendProtocol, metadata: Mapping[str, object]
-) -> None:
-    """Reuse the work dir a run on another worker resolved for this same sandbox."""
-    recorded = metadata.get(WORK_DIR_METADATA_KEY)
-    if not isinstance(recorded, Mapping) or recorded.get("sandbox_id") != getattr(
-        sandbox_backend, "id", None
-    ):
-        return
-    path = recorded.get("path")
-    if (
-        isinstance(path, str)
-        and path
-        and getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None) is None
-    ):
-        _cache_work_dir(sandbox_backend, path)
+def declared_work_dir(sandbox_backend: SandboxBackendProtocol) -> str | None:
+    """The work dir the sandbox's provider names, before any probing."""
+    return next(iter(_iter_provider_paths(sandbox_backend, "get_work_dir")), None)
 
 
 def remember_work_dir(sandbox_backend: SandboxBackendProtocol, work_dir: str) -> None:

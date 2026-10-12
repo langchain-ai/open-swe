@@ -21,7 +21,7 @@ from langsmith.sandbox import (
 from pydantic import BaseModel
 
 from openswe.config import ENV
-from openswe.sandboxes.paths import WORKSPACE_DIR, remember_work_dir
+from openswe.sandboxes.paths import WORKSPACE_DIR
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.startup_trace import asubphase
@@ -537,6 +537,7 @@ async def create_langsmith_sandbox(
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
     create_params: dict[str, Any] | None = None,
+    prepare_work_dir: bool = True,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -555,6 +556,7 @@ async def create_langsmith_sandbox(
         vcpus: Optional virtual CPU count override for a newly-created sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
         create_params: Optional additional fields merged into the sandbox create body.
+        prepare_work_dir: Whether a new sandbox creates ``/workspace`` before returning.
 
     Returns:
         SandboxBackendProtocol instance
@@ -590,12 +592,8 @@ async def create_langsmith_sandbox(
         create_params=create_params,
     )
 
-    if sandbox_id is None:
-        # Proving it writable here is the same check the work-dir probe makes, so
-        # the run that follows skips that probe's round trip.
-        created = await backend.aexecute(f"mkdir -p {WORKSPACE_DIR} && test -w {WORKSPACE_DIR}")
-        if created.exit_code == 0:
-            remember_work_dir(backend, WORKSPACE_DIR)
+    if sandbox_id is None and prepare_work_dir:
+        await backend.aexecute(f"mkdir -p {WORKSPACE_DIR}")
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:

@@ -172,11 +172,7 @@ from openswe.sandboxes.lifecycle import (
     get_cached_sandbox_backend,
     take_stale_boot,
 )
-from openswe.sandboxes.paths import (
-    WORK_DIR_METADATA_KEY,
-    recorded_work_dir,
-    resolve_sandbox_work_dir,
-)
+from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import service_identity_jwks_url
 from openswe.sandboxes.read_only_backend import ReadOnlyBackend
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
@@ -1321,7 +1317,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
-                work_dir_record = recorded_work_dir(sandbox_backend)
                 await client.threads.update(
                     thread_id=self._thread_id,
                     metadata={
@@ -1332,11 +1327,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         **(
                             {"model_route": attribution_route}
                             if attribution_route is not None
-                            else {}
-                        ),
-                        **(
-                            {WORK_DIR_METADATA_KEY: work_dir_record}
-                            if work_dir_record is not None
                             else {}
                         ),
                     },

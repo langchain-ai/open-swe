@@ -6,6 +6,7 @@ recreate rebind. The registry itself lives in ``state``.
 
 import asyncio
 import logging
+import shlex
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -20,7 +21,7 @@ from openswe.config import ENV
 from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from openswe.github.sandbox_access import SandboxGitHubAccess, workspace_token
 from openswe.sandboxes.handoff import complete_handoff
-from openswe.sandboxes.paths import adopt_recorded_work_dir
+from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from openswe.sandboxes.state import (
@@ -125,9 +126,13 @@ class SandboxCreateConfig:
             return await create_sandbox(
                 snapshot_id=self.snapshot_id,
                 create_params=self.create_params,
+                prepare_work_dir=False,
                 **self.resources,
             )
-        return await create_sandbox(snapshot_id=self.snapshot_id, **self.resources)
+        # The git identity write right after boot readies the work dir in its own round trip.
+        return await create_sandbox(
+            snapshot_id=self.snapshot_id, prepare_work_dir=False, **self.resources
+        )
 
 
 async def _proxy_token(
@@ -294,11 +299,29 @@ async def _refresh_github_proxy_or_fail(
     return sandbox_backend
 
 
+_WORK_DIR_READY = "__open_swe_work_dir_ready__"
+
+
 async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await sandbox_backend.aexecute(
+    """Write the bot identity, and ready the provider's work dir in the same round trip.
+
+    Creating the work dir and proving it writable is the check the work-dir probe
+    makes, so every connection that runs this spares the run that probe.
+    """
+    identity = (
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
-        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
+        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
     )
+    work_dir = declared_work_dir(sandbox_backend)
+    if work_dir is None:
+        await sandbox_backend.aexecute(identity)
+        return
+    quoted = shlex.quote(work_dir)
+    result = await sandbox_backend.aexecute(
+        f"{{ mkdir -p {quoted} && test -w {quoted} && echo {_WORK_DIR_READY}; }}; {identity}"
+    )
+    if _WORK_DIR_READY in result.output:
+        remember_work_dir(sandbox_backend, work_dir)
 
 
 @asynccontextmanager
@@ -605,8 +628,6 @@ async def ensure_sandbox_for_thread(
     from openswe.sandboxes.tool_access import provision_tool_url
     from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 
-    if not created:
-        adopt_recorded_work_dir(sandbox_backend, sandbox_metadata)
     async with aphase(thread_id, "sandbox.handoff"):
         await complete_handoff(thread_id, sandbox_metadata, sandbox_backend)
     await provision_tool_url(thread_id, sandbox_backend)
