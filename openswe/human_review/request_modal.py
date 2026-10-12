@@ -45,6 +45,7 @@ class ReviewRequestContext(BaseModel):
     thread_ts: str = Field(max_length=32)
     target_channel: str = Field(default="", max_length=80)
     thread_id: str = Field(default="", max_length=36)
+    inline_summary: str | None = Field(default=None, max_length=280)
 
     async def open(self, trigger_id: str) -> bool:
         metadata = self.model_dump_json()
@@ -63,10 +64,13 @@ class ReviewRequestContext(BaseModel):
                     action_id=DESCRIPTION,
                     label="What should reviewers know?",
                     multiline=True,
+                    optional=True,
                     max_length=DESCRIPTION_MAX_CHARS,
                     placeholder="Explain what changed, why it matters, and where you want attention.",
                 ),
-                context("Your words will be shared with the review channel."),
+                context(
+                    "Your words will be shared with the review channel. Leave blank to use the generated summary."
+                ),
             ],
         )
         return bool(trigger_id) and await open_slack_modal(trigger_id, view_payload(view))
@@ -77,7 +81,7 @@ class ReviewRequestContext(BaseModel):
         )
         if len(value) > 2000:
             raise ValueError("Review description context exceeds Slack's button limit")
-        text = "Write a description to request human review. Your words will lead the review-channel message."
+        text = "Request human review with an optional description. Leave it blank to use the generated summary."
         await post_slack_ephemeral_message(
             self.channel_id,
             self.user_id,
@@ -129,7 +133,8 @@ class ReviewRequestContext(BaseModel):
                         slack_thread_ts=self.thread_ts,
                     ),
                     channel=self.target_channel,
-                    human_description=description,
+                    inline_summary=self.inline_summary,
+                    human_description=description if description.strip() else None,
                 )
                 if result.success:
                     return
@@ -168,11 +173,11 @@ async def handle_submission(
     if request.user_id != interaction.user.id:
         return ignored("Review description belongs to another person")
     description = interaction.view.state.input(DESCRIPTION, DESCRIPTION).value or ""
-    if not description.strip() or len(description) > DESCRIPTION_MAX_CHARS:
+    if len(description) > DESCRIPTION_MAX_CHARS:
         return {
             "response_action": "errors",
             "errors": {
-                DESCRIPTION: "Describe the change and what you want reviewed (up to 1,500 characters)."
+                DESCRIPTION: "Keep your description within 1,500 characters, or leave it blank."
             },
         }
     background_tasks.add_task(request.post, description)

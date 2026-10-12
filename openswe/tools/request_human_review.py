@@ -22,6 +22,7 @@ from openswe.human_review.standard import (
     request_review,
     review_blockers,
     start_auto_assign,
+    summary_line,
 )
 from openswe.run_config import RunConfig
 from openswe.slack.cards import run_slack_location
@@ -113,10 +114,11 @@ async def request_human_review(
             thread_ts=own_thread,
             target_channel=channel,
             thread_id=thread_id,
+            inline_summary=summary_line(inline_summary),
         ).offer()
         return {
             "success": True,
-            "next": "The person was offered a required description modal. No review card has been posted yet. Wait for them to submit it; do not post an announcement.",
+            "next": "The person was offered an optional description modal; leaving it blank uses the generated summary. No review card has been posted yet. Wait for them to submit it; do not post an announcement.",
         }
     origin = Origin(
         requester=await User.for_login("github", login) if login else None,

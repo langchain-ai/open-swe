@@ -75,11 +75,16 @@ async def test_accepting_a_suggestion_asks_the_slack_threads_agent_once(
 @pytest.mark.parametrize(
     "description", ["", "   ", "x" * 1501, "Fix auth checks.\n\nPlease look at permissions."]
 )
+@pytest.mark.parametrize("inline_summary", [None, "Generated summary of the change."])
 async def test_review_description_validates_before_posting(
-    description: str, monkeypatch: pytest.MonkeyPatch
+    description: str, inline_summary: str | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     context = request_modal.ReviewRequestContext(
-        pr_url="https://github.com/lc/repo/pull/7", user_id="U1", channel_id="C1", thread_ts="1.0"
+        pr_url="https://github.com/lc/repo/pull/7",
+        user_id="U1",
+        channel_id="C1",
+        thread_ts="1.0",
+        inline_summary=inline_summary,
     )
     interaction = SlackInteraction.model_validate(
         {
@@ -94,7 +99,7 @@ async def test_review_description_validates_before_posting(
     )
     tasks = BackgroundTasks()
     response = await request_modal.handle_submission(interaction, tasks)
-    if not description.strip() or len(description) > 1500:
+    if len(description) > 1500:
         assert response["response_action"] == "errors"
         assert not tasks.tasks
         return
@@ -113,7 +118,10 @@ async def test_review_description_validates_before_posting(
     monkeypatch.setattr(request_modal, "request_review", post)
     assert response == {}
     await tasks()
-    assert post.call_args.kwargs["human_description"] == description
+    assert post.call_args.kwargs["human_description"] == (
+        description if description.strip() else None
+    )
+    assert post.call_args.kwargs["inline_summary"] == inline_summary
     assert post.call_args.args[1].requester is user
     assert post.call_args.args[1].thread_id == "thread-1"
     assert post.call_args.args[1].run_config["workspace"] == "default"
