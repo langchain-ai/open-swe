@@ -258,13 +258,14 @@ export function WorkEntryRow({
 
           <div className="flex shrink-0 items-center gap-space-1 text-secondary">
             {trailing}
-            {entry.status === "in_progress" && (
+            {entry.status === "in_progress" ? (
               <ElapsedSeconds since={timestamp} />
-            )}
-            {hoverTimestamp && (
-              <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-hover/entry:opacity-100">
-                {hoverTimestamp}
-              </time>
+            ) : (
+              hoverTimestamp && (
+                <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-hover/entry:opacity-100">
+                  {hoverTimestamp}
+                </time>
+              )
             )}
             <span
               className="flex size-4 shrink-0 items-center justify-center"
