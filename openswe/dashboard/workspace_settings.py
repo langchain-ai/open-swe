@@ -83,6 +83,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     gateway_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    gateway_allowed_providers: (
+        list[Literal["openai", "anthropic", "baseten", "fireworks", "google_genai"]] | None
+    ) = None
     fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     expedited_review_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
@@ -221,6 +224,18 @@ class WorkspaceSettingsUpdate(BaseModel):
         )
         return self
 
+    def apply_gateway_policy(self, inherited: WorkspaceSettings) -> None:
+        values = {**dict(inherited), **self.model_dump(exclude_none=True)}
+        policy = WorkspaceSettings(values)
+        for model_field, effort_field in _MODEL_PAIR_FIELDS:
+            model = getattr(self, model_field)
+            if model is not None and model not in SUPPORTED_MODEL_IDS:
+                if not policy.allows_unlisted_model(model):
+                    raise ValueError(
+                        f"unsupported model: {model}; enable its gateway provider first"
+                    )
+                setattr(self, effort_field, "none")
+
     def apply_fable_policy(self, *, fable_enabled: bool) -> None:
         """Enforce the Fable rules against the toggle this record resolves to.
 
@@ -273,7 +288,9 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
     if model is None:
         raise ValueError(f"{role} reasoning effort set without a model")
     if model not in SUPPORTED_MODEL_IDS:
-        raise ValueError(f"unsupported {role} model: {model}")
+        if effort not in (None, "none"):
+            raise ValueError(f"unlisted {role} models must use provider-default reasoning")
+        return
     if effort is None or not model_supports_effort(model, effort):
         raise ValueError(f"effort {effort!r} not supported by {role} model {model!r}")
 
@@ -341,6 +358,7 @@ def _default_settings() -> dict[str, Any]:
         "review_trace_links": True,
         "model_routing_enabled": None,
         "gateway_enabled": None,
+        "gateway_allowed_providers": [],
         "fable_enabled": False,
         "expedited_review_enabled": False,
         "human_review_auto_assign_minutes": 120,
@@ -541,6 +559,7 @@ def _bind_settings_changes(
 
 async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
     """Replace the instance record. Raises ``ValueError`` for a Fable model saved as a default."""
+    update.apply_gateway_policy(WorkspaceSettings(_default_settings()))
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
     changes = await _settings_changes(value)
@@ -558,6 +577,7 @@ async def upsert_workspace_overrides(
     Raises ``ValueError`` for a Fable model saved as a default while Fable is on,
     whether the workspace sets that toggle itself or inherits it.
     """
+    update.apply_gateway_policy(await get_instance_settings())
     fable_enabled = update.fable_enabled
     if fable_enabled is None:
         fable_enabled = (await get_instance_settings()).fable_enabled
@@ -637,6 +657,39 @@ class WorkspaceSettings(Mapping[str, Any]):
     def __repr__(self) -> str:
         return f"WorkspaceSettings({self._values!r})"
 
+    def allows_unlisted_model(self, model: object) -> bool:
+        if not isinstance(model, str) or model in DEPRECATED_MODEL_IDS:
+            return False
+        provider, separator, name = model.partition(":")
+        return bool(
+            separator
+            and name
+            and len(model) <= 256
+            and not any(character.isspace() for character in model)
+            and provider in (self.get("gateway_allowed_providers") or [])
+            and self.effective_gateway_enabled
+            and gateway_overrides(model) is not None
+        )
+
+    def normalize_model_choice(
+        self, model: object, effort: object
+    ) -> tuple[str | None, str | None]:
+        if (
+            isinstance(model, str)
+            and model not in SUPPORTED_MODEL_IDS
+            and self.allows_unlisted_model(model)
+        ):
+            return str(model), "none"
+        from openswe.dashboard.options import normalize_model_choice
+
+        return normalize_model_choice(model, effort)
+
+    def _resolve_default_pair(self, model: object, effort: object) -> tuple[str, str]:
+        chosen, chosen_effort = self.normalize_model_choice(model, effort)
+        if chosen and chosen_effort and chosen not in NON_DEFAULT_MODEL_IDS:
+            return chosen, chosen_effort
+        return _resolve_default_pair(model, effort)
+
     @property
     def default_repo(self) -> dict[str, str] | None:
         return _parse_repo(self.get("default_repo"))
@@ -653,6 +706,8 @@ class WorkspaceSettings(Mapping[str, Any]):
         ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
         setting is unset/invalid it inherits the **agent** default.
         """
+        if role == "chat" and self.allows_unlisted_model(self.get("default_chat_model")):
+            return self._resolve_default_pair(self.get("default_chat_model"), None)
         if role == "chat":
             model = self.get("default_chat_model")
             effort = self.get("default_chat_reasoning_effort")
@@ -662,7 +717,7 @@ class WorkspaceSettings(Mapping[str, Any]):
                 and model in SUPPORTED_MODEL_IDS
                 and model_supports_effort(model, effort)
             ):
-                return _resolve_default_pair(model, effort)
+                return self._resolve_default_pair(model, effort)
             # Inherit the Agent default when no chat-specific model is configured.
             model = self.get("default_agent_model")
             effort = self.get("default_agent_reasoning_effort")
@@ -672,7 +727,7 @@ class WorkspaceSettings(Mapping[str, Any]):
         else:
             model = self.get("default_reviewer_model")
             effort = self.get("default_reviewer_reasoning_effort")
-        return _resolve_default_pair(model, effort)
+        return self._resolve_default_pair(model, effort)
 
     def default_subagent_model(self, role: Literal["agent", "reviewer"]) -> tuple[str, str]:
         """The default subagent ``(model_id, reasoning_effort)`` for ``role``."""
@@ -682,7 +737,7 @@ class WorkspaceSettings(Mapping[str, Any]):
         else:
             model = self.get("default_reviewer_subagent_model")
             effort = self.get("default_reviewer_subagent_reasoning_effort")
-        return _resolve_default_pair(model, effort)
+        return self._resolve_default_pair(model, effort)
 
     def default_model_pair(
         self, role: Literal["agent", "reviewer"]
@@ -693,7 +748,7 @@ class WorkspaceSettings(Mapping[str, Any]):
     @property
     def agent_routing_models(self) -> dict[str, tuple[str, str]]:
         return {
-            tier: _resolve_default_pair(
+            tier: self._resolve_default_pair(
                 self.get(f"default_agent_routing_{tier}_model"),
                 self.get(f"default_agent_routing_{tier}_reasoning_effort"),
             )
@@ -704,6 +759,8 @@ class WorkspaceSettings(Mapping[str, Any]):
     def review_scout_model(self) -> tuple[str, str]:
         """The review scout's ``(model_id, reasoning_effort)``: model routing's balanced tier."""
         model = self.get("default_agent_routing_balanced_model")
+        if self.allows_unlisted_model(model):
+            return str(model), "none"
         effort = self.get("default_agent_routing_balanced_reasoning_effort")
         if (
             isinstance(model, str)
@@ -718,6 +775,8 @@ class WorkspaceSettings(Mapping[str, Any]):
     @property
     def default_thread_title_model(self) -> tuple[str, str]:
         model = self.get("default_thread_title_model")
+        if self.allows_unlisted_model(model):
+            return str(model), "none"
         effort = self.get("default_thread_title_reasoning_effort")
         if (
             isinstance(model, str)

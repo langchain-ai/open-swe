@@ -3,7 +3,11 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 from langchain.chat_models import init_chat_model
 
 from openswe.config import ENV
-from openswe.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
+from openswe.dashboard.options import (
+    DEFAULT_MODEL_ID,
+    SUPPORTED_MODEL_IDS,
+    model_profile_with_context_override,
+)
 from openswe.utils.gateway import gateway_env_default, gateway_overrides
 from openswe.utils.openai_oauth import (
     build_desktop_openai_oauth_model,
@@ -127,6 +131,9 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         if overrides is not None:
             model_kwargs.update(overrides)
             gateway_applied = True
+
+    if enabled and model_id not in SUPPORTED_MODEL_IDS and not gateway_applied:
+        raise ValueError("Unlisted models require authenticated gateway routing")
 
     if (
         model_id.startswith("openai:")
@@ -274,6 +281,8 @@ def provider_model_kwargs(
 ) -> ModelKwargs:
     """Build provider-specific kwargs for ``make_model`` from a model id and effort."""
     kwargs: ModelKwargs = {"max_tokens": max_tokens}
+    if model_id not in SUPPORTED_MODEL_IDS and profile_effort == "none":
+        return kwargs
     if model_id.startswith("openai:"):
         reasoning = openai_reasoning_for(profile_effort)
         if reasoning is not None:

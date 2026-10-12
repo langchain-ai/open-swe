@@ -82,7 +82,6 @@ from openswe.dashboard.options import (
     available_requested_models,
     default_vision_model_pair,
     gate_fable_model,
-    model_supports_effort,
     model_supports_images,
 )
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
@@ -1609,9 +1608,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         )
         and isinstance(per_thread_model, str)
         and (not reset_model_selection or cfg.model_override_reason == "image_input")
-        and per_thread_model in SUPPORTED_MODEL_IDS
-        and isinstance(per_thread_effort, str)
-        and model_supports_effort(per_thread_model, per_thread_effort)
+        and settings is not None
+        and settings.normalize_model_choice(per_thread_model, per_thread_effort)[0] is not None
     ):
         logger.info(
             "Applying per-thread model override",
@@ -1620,12 +1618,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if (
             thread_settings.get("requested_model") or reset_model_selection
         ) and cfg.model_override_reason == "image_input":
-            image_model_override = (per_thread_model, per_thread_effort)
+            image_model_override = (per_thread_model, per_thread_effort or "none")
         else:
             model_id = per_thread_model
-            profile_effort = per_thread_effort
+            profile_effort = settings.normalize_model_choice(per_thread_model, per_thread_effort)[1]
             subagent_model_id = per_thread_model
-            subagent_effort = per_thread_effort
+            subagent_effort = profile_effort
 
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
@@ -1685,6 +1683,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     title_model_id, title_effort = gate_fable_model(
         title_model_id, title_effort, fable_enabled=fable_enabled
     )
+
+    for selected_model in (model_id, subagent_model_id):
+        if selected_model not in SUPPORTED_MODEL_IDS and (
+            settings is None or not settings.allows_unlisted_model(selected_model)
+        ):
+            raise ValueError(f"gateway provider permission is required for {selected_model}")
 
     model_kwargs = provider_model_kwargs(
         model_id,
