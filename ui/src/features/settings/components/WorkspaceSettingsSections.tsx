@@ -134,7 +134,7 @@ export function DefaultRepoSection({
   const scoped = scope.kind === "workspace"
   return (
     <SettingsSection
-      title="Default repository"
+      title="Default Repository"
       description={
         scoped
           ? "Where a run in this workspace lands when nothing names a repository. Any repository the GitHub App can access will do."
@@ -156,7 +156,7 @@ export function DefaultRepoSection({
                 onRepoChange={(repo) => settings.save({ default_repo: repo })}
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-1.5 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
                 dropdownClassName="w-56"
                 disabled={!settings.data}
               />
@@ -243,7 +243,7 @@ export function ModelDefaultsSection({
 
   return (
     <SettingsSection
-      title="Model defaults"
+      title="Model Defaults"
       description={
         scoped
           ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."

@@ -3,12 +3,7 @@
 import logging
 from typing import Any
 
-from openswe.dashboard.options import (
-    NON_DEFAULT_MODEL_IDS,
-    SUPPORTED_MODEL_IDS,
-    model_supports_effort,
-    provider_fallback_pair,
-)
+from openswe.dashboard.options import SUPPORTED_MODEL_IDS
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.users import User
@@ -70,59 +65,6 @@ def profile_draft_prs(profile: dict[str, Any] | None) -> bool:
     return value if isinstance(value, bool) else True
 
 
-def profile_model_routing_enabled(profile: dict[str, Any] | None) -> bool | None:
-    """The user's adaptive model routing preference, or ``None`` to inherit the org default."""
-    value = profile.get("model_routing_enabled") if isinstance(profile, dict) else None
-    return value if isinstance(value, bool) else None
-
-
-def _normalize_profile_model_pair(
-    profile: dict[str, Any],
-    *,
-    model_key: str,
-    effort_key: str,
-) -> tuple[str | None, str | None]:
-    model_id = profile.get(model_key)
-    effort = profile.get(effort_key)
-    if (
-        isinstance(model_id, str)
-        and model_id in SUPPORTED_MODEL_IDS
-        and model_id not in NON_DEFAULT_MODEL_IDS
-        and isinstance(effort, str)
-        and model_supports_effort(model_id, effort)
-    ):
-        return model_id, effort
-    # A stored selection whose exact id dropped out of the supported set (e.g. an
-    # Opus minor-version bump) stays on its provider rather than being discarded
-    # and silently deferring to the workspace default. An absent/unknown-provider
-    # selection still returns (None, None) so the workspace default applies.
-    if isinstance(model_id, str):
-        provider_pair = provider_fallback_pair(model_id, effort)
-        if provider_pair is not None:
-            return provider_pair
-    return None, None
-
-
-def normalize_profile_overrides(profile: dict[str, Any]) -> tuple[str | None, str | None]:
-    """Return ``(model_id, reasoning_effort)`` if both are valid, else ``(None, None)``."""
-    return _normalize_profile_model_pair(
-        profile,
-        model_key="default_model",
-        effort_key="reasoning_effort",
-    )
-
-
-def normalize_profile_subagent_overrides(
-    profile: dict[str, Any],
-) -> tuple[str | None, str | None]:
-    """Return the profile's subagent model pair if valid, else ``(None, None)``."""
-    return _normalize_profile_model_pair(
-        profile,
-        model_key="default_subagent_model",
-        effort_key="subagent_reasoning_effort",
-    )
-
-
 async def resolve_agent_model_id(
     github_login: str | None,
     per_thread_model_id: str | None = None,
@@ -130,19 +72,13 @@ async def resolve_agent_model_id(
 ) -> str:
     """Resolve the agent model ID using the same precedence as ``get_agent``.
 
-    Order: per-thread override → profile override → the workspace's default.
+    Order: per-thread override → the workspace's default.
 
     ``workspace`` is the workspace the run will land in, whose default
     applies; omitting it reads ``default``'s, which is only right for a run
     that lands there.
     """
     model_id, _effort = (await get_workspace_settings(workspace)).default_model("agent")
-    if github_login:
-        profile = await load_profile(github_login)
-        if profile:
-            overridden_model, _ = normalize_profile_overrides(profile)
-            if overridden_model:
-                model_id = overridden_model
     if isinstance(per_thread_model_id, str) and per_thread_model_id in SUPPORTED_MODEL_IDS:
         model_id = per_thread_model_id
     return model_id

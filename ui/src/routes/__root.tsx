@@ -17,6 +17,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
+import { Text } from "@langchain/macaw-components/Text"
 import { Toaster } from "@/components/Toaster"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
@@ -76,8 +77,10 @@ export const Route = createRootRouteWithContext<{
     ],
   }),
   notFoundComponent: () => (
-    <main className="container mx-auto p-4 pt-16">
-      <h1 className="text-2xl font-medium text-primary">404</h1>
+    <main className="container mx-auto p-space-4 pt-space-9">
+      <Text as="h1" variant="h1" weight="medium" color="primary">
+        404
+      </Text>
       <p className="text-secondary">The requested page could not be found.</p>
     </main>
   ),

@@ -1,3 +1,4 @@
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useEffect, useState } from "react"
 
 import { cn } from "@/lib/utils"
@@ -62,23 +63,21 @@ export function MessageImage({
   if (failed || !src)
     return (
       <div
-        className={cn(
-          className,
-          "h-32 w-48 max-w-full bg-surface-level-2",
-          !failed && "animate-pulse"
-        )}
+        className={cn(className, "h-32 w-48 max-w-full bg-surface-level-2")}
         data-testid={failed ? "message-image-error" : "message-image-loading"}
         role="img"
         aria-label={
           failed ? `${label} could not be loaded` : `Loading ${label}`
         }
-      />
+      >
+        {!failed && <Skeleton className="size-full" />}
+      </div>
     )
   return (
     <img
       src={src}
       alt={label}
-      className={cn(className, "duration-300 animate-in fade-in")}
+      className={cn(className, "duration-slow animate-in fade-in")}
     />
   )
 }

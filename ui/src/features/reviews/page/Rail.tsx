@@ -1,3 +1,4 @@
+import { XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
@@ -9,7 +10,6 @@ import {
   TabPanels,
 } from "@langchain/macaw-components/Tabs"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"
@@ -29,6 +29,7 @@ import {
   type PullRequestRef,
 } from "./queries"
 import { useReviewPage, type RailTab } from "./store"
+import { ASK_SELECTION_SHORTCUT } from "./useDiffKeys"
 
 const TABS: ReadonlyArray<RailTab> = ["chat", "discussion"]
 
@@ -115,7 +116,7 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
   const status = useReviewStatus(pr).data
   const open = useOpenConversations(pr)?.threads.length ?? 0
   const askInChat = useReviewPage((state) => state.askInChat)
-  const askShortcut = useShortcutLabel("mod+l")
+  const askShortcut = useShortcutLabel(ASK_SELECTION_SHORTCUT)
   const bugs = detail ? openFindingCounts(detail.findings).bugs : 0
   const starters = [
     "Walk me through this pull request: what changed, and why?",
@@ -132,22 +133,22 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
     "Is anything here untested?",
   ].filter((text): text is string => text !== null)
   return (
-    <div className="w-full max-w-sm px-4">
-      <p className="flex items-center gap-1.5 text-[13px] font-medium text-primary">
+    <div className="w-full max-w-sm px-space-4">
+      <p className="flex items-center gap-space-2 text-xs font-medium text-primary">
         <AgentMark />
         Ask about this pull request
       </p>
-      <p className="mt-1 text-xs text-secondary">
+      <p className="mt-space-1 text-xs text-secondary">
         Or select code in the diff and press {askShortcut} to ask about those
         lines.
       </p>
-      <ul className="mt-3 flex flex-col gap-1.5">
+      <ul className="mt-space-3 flex flex-col gap-space-2">
         {starters.slice(0, 4).map((text) => (
           <li key={text}>
             <button
               type="button"
               onClick={() => askInChat(text)}
-              className="w-full rounded-lg border border-default px-3 py-2 text-left text-xs text-primary transition-colors hover:border-strong hover:bg-surface-level-1-hover"
+              className="w-full rounded-lg border border-default px-space-3 py-space-2 text-left text-xs text-primary transition-colors hover:border-strong hover:bg-surface-level-1-hover"
             >
               {text}
             </button>
@@ -198,7 +199,7 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
   )
   if (meta.isPending)
     return (
-      <div className="flex h-full flex-col justify-end gap-3 p-4">
+      <div className="flex h-full flex-col justify-end gap-space-3 p-space-4">
         <Skeleton className="h-16 w-3/4" />
         <Skeleton className="ml-auto h-10 w-1/2" />
         <Skeleton className="h-24 w-full" />
@@ -206,7 +207,7 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
     )
   if (meta.isError || !meta.data.available)
     return (
-      <p className="p-4 text-xs text-secondary">
+      <p className="p-space-4 text-xs text-secondary">
         Chat is unavailable right now. Reload the page to try again.
       </p>
     )

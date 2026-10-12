@@ -1,6 +1,6 @@
+import { CheckIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { ThumbsDownIcon } from "@phosphor-icons/react/dist/ssr/ThumbsDown"
 import { ThumbsUpIcon } from "@phosphor-icons/react/dist/ssr/ThumbsUp"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -87,10 +87,10 @@ function AssessmentCard({
     <section
       id="assessment-feedback"
       aria-label="Review assessment"
-      className="mt-4 rounded-lg border border-default bg-surface-level-1 p-4 text-sm"
+      className="mt-space-4 rounded-lg border border-default bg-surface-level-1 p-space-4 text-sm"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-space-3">
+        <div className="flex flex-wrap items-center gap-space-2">
           <span className="font-medium">Risk {assessment.risk_score}/5</span>
           <span className="text-secondary">·</span>
           <span>
@@ -118,11 +118,11 @@ function AssessmentCard({
           </span>
         </div>
         {!editing && login && feedback.isSuccess && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-space-2">
             {feedback.data && (
               <span
                 role="status"
-                className="flex items-center gap-1 text-xs text-secondary"
+                className="flex items-center gap-space-1 text-xs text-secondary"
               >
                 <CheckIcon weight="regular" className="size-3.5" /> Feedback
                 saved
@@ -142,44 +142,45 @@ function AssessmentCard({
           </div>
         )}
       </div>
-      <details className="mt-2 text-xs text-secondary">
+      <details className="mt-space-2 text-xs text-secondary">
         <summary className="cursor-pointer">Why this assessment?</summary>
-        <p className="mt-2 text-sm whitespace-pre-wrap text-primary">
+        <p className="mt-space-2 text-sm whitespace-pre-wrap text-primary">
           {assessment.explanation}
         </p>
-        <p className="mt-2">
+        <p className="mt-space-2">
           Reviewed commit {assessment.head_sha.slice(0, 7)}. Risk ranges from 1
           (low) to 5 (high).
         </p>
       </details>
       {headSha !== assessment.head_sha && (
-        <p className="mt-2 text-xs text-warning-secondary">
+        <p className="mt-space-2 text-xs text-warning-secondary">
           This assessment is for an earlier commit.
         </p>
       )}
       {feedback.isError && (
-        <p role="alert" className="mt-3 text-xs text-error-secondary">
+        <p role="alert" className="mt-space-3 text-xs text-error-secondary">
           Could not load your feedback.{" "}
-          <button
-            type="button"
-            className="underline"
+          <Button
+            size="xs"
+            variant="underlined"
+            color="secondary"
             onClick={() => void feedback.refetch()}
           >
             Retry
-          </button>
+          </Button>
         </p>
       )}
       {editing && login && feedback.isSuccess && (
         <form
-          className="mt-3 space-y-3 border-t border-default pt-3"
+          className="mt-space-3 space-y-space-3 border-t border-default pt-space-3"
           onSubmit={(event) => {
             event.preventDefault()
             if (value?.rating && !save.isPending)
               save.mutate({ rating: value.rating, comment: value.comment })
           }}
         >
-          <fieldset disabled={save.isPending} className="space-y-3">
-            <legend className="mb-2 text-xs font-medium">
+          <fieldset disabled={save.isPending} className="space-y-space-3">
+            <legend className="mb-space-2 text-xs font-medium">
               Was this assessment helpful?
             </legend>
             <div className="flex gap-space-2">

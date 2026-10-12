@@ -15,6 +15,7 @@ from openswe.skill_store.store import (
     update_skill,
 )
 from openswe.tools.access import Policy, access, unchanged
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.json_types import as_json_object
 
 _OWN = Policy(trusted="private", actor="owner", sole=unchanged)
@@ -24,6 +25,7 @@ async def _login() -> str | None:
     return await resolve_github_login(as_json_object(get_config()))
 
 
+@expose_mcp()
 @audit_tool()
 @access(_OWN)
 async def save_user_skill(name: str, description: str, instructions: str = "") -> dict[str, Any]:
@@ -44,6 +46,7 @@ async def save_user_skill(name: str, description: str, instructions: str = "") -
     return {"ok": True, "skill": skill}
 
 
+@expose_mcp()
 @audit_tool()
 @access(_OWN)
 async def delete_user_skill(name: str) -> dict[str, Any]:

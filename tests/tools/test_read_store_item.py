@@ -22,7 +22,7 @@ async def test_store_read_requires_current_admin_and_private_surface(
             )
         )
     )
-    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: client)
+    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
     config = {
         "configurable": {
             "thread_id": "t-1",

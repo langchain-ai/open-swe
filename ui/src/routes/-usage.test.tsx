@@ -116,7 +116,7 @@ it("labels the shared date range and changes it independently of usage scope", a
   const onPeriodChange = vi.fn()
   mountReport(onPeriodChange)
   const range = screen.getByRole("combobox", { name: "Date range" })
-  const outcomes = screen.getByText("PR outcomes", { selector: "h2" })
+  const outcomes = screen.getByText("PR Outcomes", { selector: "h2" })
   expect(
     range.compareDocumentPosition(outcomes) & Node.DOCUMENT_POSITION_FOLLOWING
   ).toBeTruthy()

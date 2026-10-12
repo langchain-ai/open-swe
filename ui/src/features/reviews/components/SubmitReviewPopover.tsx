@@ -1,16 +1,14 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@langchain/macaw-components/RadioGroup"
+import { RadioButton } from "@langchain/macaw-components/RadioButton"
+import { RadioGroup } from "@langchain/macaw-components/RadioGroup"
 import { Text } from "@langchain/macaw-components/Text"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
@@ -19,7 +17,6 @@ import type { OpenPullRequest, PullRequestReviewEvent } from "@/lib/api"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
 import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
 import {
   standingReview,
@@ -208,31 +205,22 @@ export function SubmitReviewPopover({
               {VERDICTS.map((verdict) => {
                 const alreadyGiven = approved && verdict.event === "APPROVE"
                 return (
-                  <label
+                  <RadioButton
                     key={verdict.event}
-                    className={cn(
-                      "flex items-start gap-space-2 text-xs",
-                      alreadyGiven
-                        ? "cursor-not-allowed opacity-60"
-                        : "cursor-pointer"
-                    )}
-                  >
-                    <RadioGroupItem
-                      value={verdict.event}
-                      disabled={alreadyGiven}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      <span className="font-medium text-primary">
-                        {verdict.label}
-                      </span>
-                      <span className="block text-secondary">
-                        {alreadyGiven
-                          ? "You approved these changes."
-                          : verdict.description}
-                      </span>
-                    </span>
-                  </label>
+                    value={verdict.event}
+                    disabled={alreadyGiven}
+                    className="items-start"
+                    label={
+                      <>
+                        <span className="font-medium">{verdict.label}</span>
+                        <span className="block text-xs text-secondary">
+                          {alreadyGiven
+                            ? "You approved these changes."
+                            : verdict.description}
+                        </span>
+                      </>
+                    }
+                  />
                 )
               })}
             </RadioGroup>

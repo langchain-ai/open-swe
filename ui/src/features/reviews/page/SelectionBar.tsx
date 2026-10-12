@@ -6,6 +6,7 @@ import { useEffect, useReducer } from "react"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { readDiffSelection } from "@/features/agents/utils/diffSelection"
 import { AgentMark } from "./AgentMark"
+import { ASK_SELECTION_SHORTCUT } from "./useDiffKeys"
 
 export interface TextSelection {
   path: string
@@ -56,7 +57,7 @@ export function SelectionBar({
   onAsk: () => void
   onComment: () => void
 }) {
-  const askShortcut = useShortcutLabel("mod+l")
+  const askShortcut = useShortcutLabel(ASK_SELECTION_SHORTCUT)
   // Placement reads the live layout, so a scroll or resize only needs a re-render.
   const [, follow] = useReducer((frame: number) => frame + 1, 0)
   useEffect(() => {
@@ -85,12 +86,12 @@ export function SelectionBar({
       data-add-to-chat
       onPointerDown={(event) => event.stopPropagation()}
       style={{ left: position.left, top: position.top }}
-      className="fixed z-50 flex items-center gap-0.5 rounded-lg border border-subtle bg-elevated p-0.5 font-sans text-xs shadow-md"
+      className="fixed z-selection-action-bar flex items-center gap-0.5 rounded-lg border border-subtle bg-elevated p-0.5 font-sans text-xs shadow-md"
     >
       <button
         type="button"
         onClick={onAsk}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 font-medium hover:bg-elevated-hover"
+        className="flex items-center gap-space-2 rounded-md px-space-2 py-space-1 font-medium hover:bg-elevated-hover"
       >
         <AgentMark />
         Ask Open SWE
@@ -99,9 +100,9 @@ export function SelectionBar({
       <button
         type="button"
         onClick={onComment}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-elevated-hover"
+        className="flex items-center gap-space-2 rounded-md px-space-2 py-space-1 hover:bg-elevated-hover"
       >
-        <ChatTextIcon className="size-3.5" />
+        <ChatTextIcon className="size-3.5" weight="regular" />
         Comment
       </button>
     </div>

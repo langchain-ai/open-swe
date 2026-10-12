@@ -1,8 +1,10 @@
 """Helpers for collaborative commit and PR attribution."""
 
+import hashlib
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import timedelta
 from typing import Any
 
 import httpx2
@@ -19,6 +21,10 @@ _GITHUB_API_HEADERS = {
     "X-GitHub-Api-Version": "2022-11-28",
 }
 _PUBLIC_PROFILE_CACHE_TTL_SECONDS = 3600.0
+_INSTALLATION_TOKEN_PREFIX = "ghs_"
+# Shared across workers, unlike ttl_cache: a thread's runs land on any of them.
+# Never served stale, so a revoked token stops resolving within this window.
+_TOKEN_IDENTITY_CACHE_TTL = timedelta(hours=1)
 _GITHUB_LOGIN_MAX_CHARS = 39
 _GITHUB_LOGIN_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -136,9 +142,34 @@ def _github_noreply_email(login: str, user_id: Any = None) -> str:
 
 
 async def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
-    if not github_token:
+    # An installation token (GitHub's `ghs_` prefix) acts for no user, so `/user`
+    # always answers 403; asking cost every bot-authenticated run a round trip.
+    if not github_token or github_token.startswith(_INSTALLATION_TOKEN_PREFIX):
         return None
 
+    from langgraph_api.cache import cache_get, cache_set
+
+    key = "openswe:github-token-identity:v1:" + hashlib.sha256(github_token.encode()).hexdigest()
+    try:
+        cached = await cache_get(key)
+    except Exception:
+        logger.warning("GitHub identity cache read failed", exc_info=True)
+        cached = None
+    if isinstance(cached, dict):
+        try:
+            return CollaboratorIdentity(**cached)
+        except TypeError:
+            logger.warning("Ignoring a GitHub identity cached in an older shape", exc_info=True)
+    identity = await _fetch_identity_from_github_token(github_token)
+    if identity is not None:
+        try:
+            await cache_set(key, asdict(identity), _TOKEN_IDENTITY_CACHE_TTL)
+        except Exception:
+            logger.warning("GitHub identity cache write failed", exc_info=True)
+    return identity
+
+
+async def _fetch_identity_from_github_token(github_token: str) -> CollaboratorIdentity | None:
     try:
         async with httpx2.AsyncClient(timeout=5.0) as client:
             response = await client.get(

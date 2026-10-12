@@ -1,13 +1,15 @@
+import {
+  CaretDownIcon,
+  CheckIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Input } from "@langchain/macaw-components/Input"
 import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/ssr/FolderSimple"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -119,7 +121,7 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
         )}
         {files && (
           <>
-            <div className="flex items-center gap-space-2 text-[11px] text-secondary tabular-nums">
+            <div className="flex items-center gap-space-2 text-xxs text-secondary tabular-nums">
               <ProgressBar
                 aria-label="Files viewed"
                 size="sm"
@@ -134,7 +136,7 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
         )}
       </div>
       {!files ? (
-        <div className="flex flex-col gap-2 px-3">
+        <div className="flex flex-col gap-space-2 px-space-3">
           {Array.from({ length: 8 }, (_, i) => (
             <Skeleton
               key={i}
@@ -197,12 +199,12 @@ function StepList({
   }, [files, walkthrough, fileFilter])
   if (groups.length === 0)
     return (
-      <p className="px-4 py-2 text-xs text-secondary">
+      <p className="px-space-4 py-space-2 text-xs text-secondary">
         No step touches a matching file.
       </p>
     )
   return (
-    <ol className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+    <ol className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-4">
       {groups.map(({ step, entries }) => {
         const active = entries.some((entry) => entry.id === activeEntry)
         return (
@@ -212,13 +214,13 @@ function StepList({
               aria-current={active ? "step" : undefined}
               onClick={() => jumpTo({ kind: "entry", id: entries[0]!.id })}
               className={cn(
-                "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs leading-5 hover:bg-surface-level-1-hover",
+                "flex w-full items-start gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs leading-5 hover:bg-surface-level-1-hover",
                 active && "bg-selected"
               )}
             >
               <span
                 className={cn(
-                  "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold tabular-nums",
+                  "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full text-xxs font-semibold tabular-nums",
                   active
                     ? "bg-brand text-brand-on-fill"
                     : "bg-surface-level-3 text-secondary"
@@ -233,7 +235,7 @@ function StepList({
                 )}
               >
                 <InlineCode text={step.title} />
-                <span className="block text-[11px] text-secondary tabular-nums">
+                <span className="block text-xxs text-secondary tabular-nums">
                   {stepProgress(entries, viewed)}
                 </span>
               </span>
@@ -252,7 +254,7 @@ function FileFilter() {
   return (
     <Input
       size="sm"
-      leftIcon={MagnifyingGlassIcon}
+      leftIcon={MagnifyingGlassRegularIcon}
       aria-label="Filter files"
       placeholder="Filter files"
       debounceMs={0}
@@ -298,7 +300,7 @@ function FileTree({
     <ul
       ref={list}
       aria-label="Changed files"
-      className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-4"
+      className="min-h-0 flex-1 overflow-y-auto px-space-1 pb-space-4"
     >
       {tree.map((node) => (
         <TreeRow
@@ -349,7 +351,7 @@ const TreeRow = memo(function TreeRow({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         style={{ paddingLeft: 6 + depth * 12 }}
-        className="flex h-6 w-full items-center gap-1 rounded-md pr-2 text-left text-xs text-secondary hover:bg-surface-level-1-hover"
+        className="flex h-6 w-full items-center gap-space-1 rounded-md pr-space-2 text-left text-xs text-secondary hover:bg-surface-level-1-hover"
       >
         <CaretDownIcon
           className={cn(
@@ -357,7 +359,7 @@ const TreeRow = memo(function TreeRow({
             !open && "-rotate-90"
           )}
         />
-        <FolderSimpleIcon className="size-3.5 shrink-0" />
+        <FolderSimpleIcon className="size-3.5 shrink-0" weight="regular" />
         <span className="truncate">{node.name}</span>
       </button>
       {open && (
@@ -419,7 +421,7 @@ function FileRow({
         title={file.path}
         style={{ paddingLeft: 22 + depth * 12 }}
         className={cn(
-          "relative flex h-6 w-full items-center gap-1.5 rounded-md pr-2 text-left text-xs hover:bg-surface-level-1-hover",
+          "relative flex h-6 w-full items-center gap-space-2 rounded-md pr-space-2 text-left text-xs hover:bg-surface-level-1-hover",
           active
             ? "bg-selected text-primary"
             : viewed
@@ -439,7 +441,7 @@ function FileRow({
         <span
           className={cn(
             "min-w-0 flex-1 truncate",
-            viewed && "line-through decoration-[var(--border-strong)]"
+            viewed && "line-through decoration-text-tertiary"
           )}
         >
           {name}
@@ -452,8 +454,8 @@ function FileRow({
           />
         )}
         {threads > 0 && (
-          <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-secondary">
-            <ChatCircleIcon className="size-3" />
+          <span className="flex shrink-0 items-center gap-0.5 text-xxs text-secondary">
+            <ChatCircleIcon className="size-3" weight="regular" />
             {threads}
           </span>
         )}
@@ -463,7 +465,7 @@ function FileRow({
             className="size-3 shrink-0 text-brand-primary"
           />
         ) : (
-          <span className="shrink-0 font-mono text-[10px] text-secondary tabular-nums">
+          <span className="shrink-0 font-mono text-xxs text-secondary tabular-nums">
             {changed}
           </span>
         )}

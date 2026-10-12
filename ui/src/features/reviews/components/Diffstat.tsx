@@ -10,7 +10,7 @@ export function Diffstat({ pr }: { pr: OpenPullRequest }) {
       className="min-w-24"
       aria-label={`${pr.additions} lines added, ${pr.deletions} lines deleted`}
     >
-      <div className="flex gap-2 font-mono text-xs tabular-nums">
+      <div className="flex gap-space-2 font-mono text-xs tabular-nums">
         <span className="text-success-secondary">
           +{pr.additions.toLocaleString()}
         </span>
@@ -19,7 +19,7 @@ export function Diffstat({ pr }: { pr: OpenPullRequest }) {
         </span>
       </div>
       <div
-        className="mt-1.5 flex h-1 w-20 overflow-hidden rounded-full bg-surface-level-2"
+        className="mt-space-1 flex h-1 w-20 overflow-hidden rounded-full bg-surface-level-2"
         aria-hidden="true"
       >
         {total > 0 && (

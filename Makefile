@@ -80,12 +80,6 @@ cli:
 	pnpm --filter open-swe-cli run build
 	@echo "Built $(CURDIR)/cli/dist/oswe"
 
-CLI_SOURCES := $(wildcard cli/src/*.ts) desktop/src/shared-config.ts cli/package.json pnpm-lock.yaml
-
-# `make cli`, but only when a source is newer than the binary.
-cli/dist/oswe: $(CLI_SOURCES)
-	@$(MAKE) --no-print-directory cli
-
 ######################
 # TESTING
 ######################

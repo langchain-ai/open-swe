@@ -1,7 +1,7 @@
+import { CheckIcon } from "@langchain/macaw-components/icons"
 import type { ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useParams } from "@tanstack/react-router"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { PlugsConnectedIcon } from "@phosphor-icons/react/dist/ssr/PlugsConnected"
 
 import { ConnectLangSmithButton } from "@/features/settings/components/ConnectionsSection"
@@ -31,7 +31,7 @@ export function ManagedToolsConnectionCard({
 
   if (offer.status === "langsmith_required") {
     return (
-      <Card title="Managed tools">
+      <Card title="Managed Tools">
         <p className="text-secondary">
           Managed tools run with your own LangSmith account. Connect LangSmith,
           then ask again to connect the services they need.

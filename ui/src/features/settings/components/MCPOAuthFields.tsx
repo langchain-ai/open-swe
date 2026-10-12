@@ -76,7 +76,7 @@ export function MCPOAuthFields({
 }) {
   const [revealed, setRevealed] = useState(false)
   return (
-    <div className="space-y-3 rounded-md border border-default p-space-3">
+    <div className="space-y-space-3 rounded-md border border-default p-space-3">
       <p className="text-xs text-secondary">
         Use an OAuth application to obtain and renew access tokens
         automatically. No redirect URI is needed for client credentials.
@@ -99,7 +99,7 @@ export function MCPOAuthFields({
         value={value.client_id}
         onChange={(client_id) => onChange({ ...value, client_id })}
       />
-      <div className="space-y-1">
+      <div className="space-y-space-1">
         <span className="block text-sm font-medium text-primary">
           Client secret
         </span>
@@ -131,7 +131,7 @@ export function MCPOAuthFields({
         value={value.scope ?? ""}
         onChange={(scope) => onChange({ ...value, scope })}
       />
-      <div className="space-y-1">
+      <div className="space-y-space-1">
         <span className="block text-sm font-medium text-primary">
           Client authentication
         </span>

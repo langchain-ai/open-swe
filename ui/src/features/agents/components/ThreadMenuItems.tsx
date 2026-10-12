@@ -1,9 +1,11 @@
+import { PushPinRegularIcon } from "@langchain/macaw-components/icons"
 import { ContextMenuItem } from "@langchain/macaw-components/ContextMenu"
 import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
-import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
+import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
+import { Link } from "@tanstack/react-router"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
@@ -78,11 +80,22 @@ export function ThreadMenuItems({
           </a>
         </Item>
       )}
+      {thread?.automationId && (
+        <Item asChild className="gap-space-2">
+          <Link
+            to="/agents/automations/$scheduleId"
+            params={{ scheduleId: thread.automationId }}
+          >
+            <LightningIcon size={ICON_SIZE} weight="regular" />
+            Open automation
+          </Link>
+        </Item>
+      )}
       <Item className="gap-space-2" onSelect={onTogglePin}>
         {pinned ? (
           <PushPinSlashIcon size={ICON_SIZE} weight="regular" />
         ) : (
-          <PushPinIcon size={ICON_SIZE} weight="regular" />
+          <PushPinRegularIcon size={ICON_SIZE} />
         )}
         {pinned ? "Unpin thread" : "Pin thread"}
       </Item>

@@ -116,6 +116,12 @@ async def control_reset() -> JSONResponse:
     await _reset_durable_pr_state()
     from langgraph_api.cache import cache_set
 
+    from openswe.store import delete_value, search_all_entries
+    from openswe.threads.pins import THREAD_PINS_NAMESPACE
+
+    for entry in await search_all_entries([THREAD_PINS_NAMESPACE]):
+        if entry.namespace is not None:
+            await delete_value(entry.namespace, entry.key)
     for owner, repo in ((OWNER, REPO), (SECOND_OWNER, SECOND_REPO)):
         await cache_set(f"__lg_swr__:repo-settings:{owner}/{repo}".lower(), None)
     return JSONResponse({"ok": True})
@@ -260,6 +266,23 @@ async def control_repo_merge_methods(request: Request) -> JSONResponse:
         owner, name, {flag: flag in enabled for flag in fakes.MERGE_METHOD_FLAGS}
     )
     return JSONResponse({"ok": True, "repo": f"{owner}/{name}", **flags})
+
+
+@app.post("/control/session-upload")
+async def control_reserve_session_upload(request: Request) -> JSONResponse:
+    """Reserve an upload thread as the remote MCP's ``upload_session`` tool does.
+
+    The E2E deployment mounts no remote MCP, so a spec reserves here and then
+    posts to the returned ``upload_url`` with ``upload_token`` as the agent's curl does."""
+    from openswe.threads.session_upload import SessionUploadHeader, reserve_session_upload
+
+    body = await request.json()
+    login = str(body.pop("login"))
+    email = body.pop("email", None)
+    reservation = await reserve_session_upload(
+        SessionUploadHeader.model_validate(body), login, email=email
+    )
+    return JSONResponse(reservation.model_dump())
 
 
 @app.post("/control/pull-request")

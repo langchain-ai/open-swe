@@ -1,3 +1,7 @@
+import {
+  LaptopRegularIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   Command,
@@ -17,8 +21,6 @@ import { Spinner } from "@langchain/macaw-components/Spinner"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CommandIcon } from "@phosphor-icons/react/dist/ssr/Command"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 
@@ -284,10 +286,9 @@ export function AppCommandPalette({
             autoFocus
             className="h-12 shrink-0 rounded-none border-0 border-b border-default bg-transparent px-space-4 focus-within:border-default"
             leftDecorator={
-              <MagnifyingGlassIcon
+              <MagnifyingGlassRegularIcon
                 className="text-icon-secondary"
                 size={16}
-                weight="regular"
               />
             }
             onValueChange={setQuery}
@@ -299,16 +300,16 @@ export function AppCommandPalette({
           />
           <CommandList className="max-h-none min-h-20 flex-1 p-space-2">
             {showLoading ? (
-              <div className="flex items-center justify-center gap-space-2 py-10 text-xs text-secondary">
+              <div className="flex items-center justify-center gap-space-2 py-space-7 text-xs text-secondary">
                 <Spinner size="xs" />
                 Searching threads and pull requests…
               </div>
             ) : showError ? (
-              <p className="py-10 text-center text-xs text-error-secondary">
+              <p className="py-space-7 text-center text-xs text-error-secondary">
                 Thread search is unavailable.
               </p>
             ) : results.length === 0 ? (
-              <p className="py-10 text-center text-xs text-secondary">
+              <p className="py-space-7 text-center text-xs text-secondary">
                 No commands, threads, or pull requests found.
               </p>
             ) : (
@@ -322,7 +323,7 @@ export function AppCommandPalette({
                         result.kind === "command"
                           ? CommandIcon
                           : result.kind === "local-thread"
-                            ? LaptopIcon
+                            ? LaptopRegularIcon
                             : result.kind === "pull-request"
                               ? GitPullRequestIcon
                               : ChatCircleIcon
@@ -341,7 +342,7 @@ export function AppCommandPalette({
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
                             {result.kind === "pull-request" && (
-                              <span className="ml-2 text-xs text-secondary">
+                              <span className="ml-space-2 text-xs text-secondary">
                                 {result.pr.repo} #{result.pr.number} ·{" "}
                                 {result.pr.state}
                               </span>

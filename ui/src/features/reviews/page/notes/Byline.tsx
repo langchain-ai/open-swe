@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
+import { CheckCircleFillIcon } from "@langchain/macaw-components/icons"
 import { Avatar as MacawAvatar } from "@langchain/macaw-components/Avatar"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
-import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 
 import type {
@@ -46,10 +46,9 @@ export const reviewStateWords: Record<ConversationReviewState, string> = {
 export function ReviewStateMark({ state }: { state: ConversationReviewState }) {
   if (state === "APPROVED")
     return (
-      <CheckCircleIcon
+      <CheckCircleFillIcon
         aria-hidden
         size={14}
-        weight="fill"
         className="shrink-0 text-icon-success"
       />
     )
@@ -132,7 +131,7 @@ export function Byline({
 }) {
   const when = formatWhen(createdAt)
   return (
-    <span className="flex min-w-0 items-center gap-1.5 text-xs">
+    <span className="flex min-w-0 items-center gap-space-2 text-xs">
       <span className="truncate font-medium text-primary">
         {displayName(author)}
       </span>

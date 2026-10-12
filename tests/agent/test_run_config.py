@@ -19,13 +19,11 @@ def test_bools_are_not_accepted_as_integers():
         {
             "pr_number": True,
             "chat_pr_number": False,
-            "review_style_prs_sampled": True,
             "thread_id": "t1",
         }
     )
     assert cfg.pr_number is None
     assert cfg.chat_pr_number is None
-    assert cfg.review_style_prs_sampled is None
     assert cfg.thread_id == "t1"
 
 

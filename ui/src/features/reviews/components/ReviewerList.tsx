@@ -1,4 +1,4 @@
-import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { CheckCircleFillIcon } from "@langchain/macaw-components/icons"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { ProhibitIcon } from "@phosphor-icons/react/dist/ssr/Prohibit"
@@ -18,7 +18,7 @@ const STATES: Record<
 > = {
   approved: {
     label: "Approved",
-    icon: <CheckCircleIcon aria-hidden size={14} weight="fill" />,
+    icon: <CheckCircleFillIcon aria-hidden size={14} />,
     className: "text-icon-success",
   },
   changes_requested: {
