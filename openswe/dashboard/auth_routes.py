@@ -15,6 +15,8 @@ from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.dev_login import GhUnavailable, dev_login_enabled, gh_credentials
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
+    GITHUB_CALLBACK_PATH,
+    MCP_SIGN_IN_CALLBACK_PATH,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
     GithubUser,
@@ -28,6 +30,7 @@ from openswe.dashboard.oauth import (
     fetch_github_user,
     frontend_base_url,
     hash_state_nonce,
+    is_dashboard_state,
     issue_desktop_handoff,
     issue_session,
     issue_state,
@@ -93,7 +96,7 @@ async def auth_login(
         forwarded_proto = request.headers.get("x-forwarded-proto", "").partition(",")[0].strip()
         scheme = forwarded_proto if forwarded_proto in {"http", "https"} else request.url.scheme
         api_base_url = str(request.base_url.replace(scheme=scheme)).rstrip("/")
-    redirect_uri = f"{api_base_url}/dashboard/api/auth/callback"
+    redirect_uri = f"{api_base_url}{GITHUB_CALLBACK_PATH}"
     query = urlencode(
         {
             "client_id": client_id,
@@ -145,7 +148,12 @@ async def auth_dev_login(redirect_to: str | None = None) -> Response:
 
 
 @router.get("/auth/callback")
-async def auth_callback(request: Request, code: str, state: str) -> Response:
+async def auth_callback(request: Request, state: str, code: str | None = None) -> Response:
+    if not is_dashboard_state(state):
+        # The GitHub App has this one callback, so MCP sign-ins return here too.
+        return RedirectResponse(f"{MCP_SIGN_IN_CALLBACK_PATH}?{request.url.query}", 302)
+    if code is None:
+        raise HTTPException(400, "GitHub sign-in was cancelled — please retry login")
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)

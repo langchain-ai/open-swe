@@ -244,11 +244,16 @@ export function PullRequestFiles({
               onToggle={() => toggle(file.path)}
             />
             {open && (
-              <div className="mt-1 mb-2 overflow-hidden rounded-md border border-default">
+              <div className="mt-space-1 mb-space-2 overflow-hidden rounded-md border border-default">
                 {diff.isPending ? (
-                  <p className="p-3 text-xs text-secondary">Loading diff…</p>
+                  <p className="p-space-3 text-xs text-secondary">
+                    Loading diff…
+                  </p>
                 ) : diff.error ? (
-                  <p role="alert" className="p-3 text-xs text-error-secondary">
+                  <p
+                    role="alert"
+                    className="p-space-3 text-xs text-error-secondary"
+                  >
                     {diff.error.message}
                   </p>
                 ) : (
@@ -283,7 +288,7 @@ function FileRow({
       type="button"
       aria-expanded={open}
       onClick={onToggle}
-      className="flex w-full items-baseline gap-2.5 rounded px-1 py-1 text-left font-mono text-xs hover:bg-surface-level-2-hover"
+      className="flex w-full items-baseline gap-space-3 rounded-sm px-space-1 py-space-1 text-left font-mono text-xs hover:bg-surface-level-2-hover"
     >
       <CaretRightIcon
         aria-hidden="true"
@@ -406,7 +411,7 @@ function FileDiff({
         return (
           <CommentCard
             label={
-              <span className="inline-flex items-center gap-1">
+              <span className="inline-flex items-center gap-space-1">
                 <GithubLogoIcon weight="regular" className="size-3" />
                 Commented on GitHub
               </span>
@@ -442,7 +447,7 @@ function FileDiff({
   )
   if (!file || file.unrenderable || !file.patch) {
     return (
-      <p className="p-3 text-center text-xs text-secondary">
+      <p className="p-space-3 text-center text-xs text-secondary">
         {file
           ? "Binary or large file — diff not shown."
           : "This file is not in the loaded diff."}
@@ -450,7 +455,7 @@ function FileDiff({
     )
   }
   return (
-    <div className="overflow-x-auto bg-surface-level-1 font-mono text-[11px] leading-5">
+    <div className="overflow-x-auto bg-surface-level-1 font-mono text-xxs leading-5">
       <PatchDiff<FileAnnotation>
         patch={file.patch}
         // Pierre's worker pool highlights partial diffs out of step with the
@@ -481,9 +486,9 @@ function Composer({
   }, [])
   const empty = !body.trim()
   return (
-    <div className="px-2 py-1 font-sans">
+    <div className="px-space-2 py-space-1 font-sans">
       <div className="overflow-hidden rounded-md border border-default bg-surface-level-1">
-        <div className="flex items-center border-b border-default px-2 py-1 text-xxs">
+        <div className="flex items-center border-b border-default px-space-2 py-space-1 text-xxs">
           <span className="font-medium">
             Comment on line {commentRangeLabel(draft.range)}
           </span>
@@ -497,7 +502,7 @@ function Composer({
             onClick={onClose}
           />
         </div>
-        <div className="p-2">
+        <div className="p-space-2">
           <Textarea
             ref={textareaRef}
             size="md"
@@ -554,9 +559,9 @@ function CommentCard({
   onRemove?: () => void
 }) {
   return (
-    <div className="px-2 py-1 font-sans">
-      <div className="rounded-md border border-default bg-surface-level-1 px-2.5 py-2 text-xs">
-        <div className="mb-1 flex items-center gap-1.5 text-xxs text-secondary">
+    <div className="px-space-2 py-space-1 font-sans">
+      <div className="rounded-md border border-default bg-surface-level-1 px-space-2 py-space-2 text-xs">
+        <div className="mb-space-1 flex items-center gap-space-2 text-xxs text-secondary">
           {href ? (
             <a
               href={href}

@@ -15,7 +15,7 @@ export function ReviewCounts({
     <>
       <span
         className={cn(
-          "inline-flex items-center gap-1",
+          "inline-flex items-center gap-space-1",
           counts.bugs > 0 ? "text-error-secondary" : "text-secondary"
         )}
       >
@@ -27,7 +27,7 @@ export function ReviewCounts({
         {counts.bugs}
         {withLabels && " bugs"}
       </span>
-      <span className="inline-flex items-center gap-1 text-secondary">
+      <span className="inline-flex items-center gap-space-1 text-secondary">
         <FlagRegularIcon aria-hidden="true" className="size-3.5" />
         {counts.flags}
         {withLabels && " flags"}

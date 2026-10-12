@@ -92,7 +92,7 @@ function FilePreview(props: {
   return (
     <>
       {data.truncated ? (
-        <div className="shrink-0 border-b border-default px-space-3 py-1.5 text-xxs text-secondary">
+        <div className="shrink-0 border-b border-default px-space-3 py-space-1 text-xxs text-secondary">
           Preview limited to the first 1 MB of a {data.size.toLocaleString()}{" "}
           byte file.
         </div>

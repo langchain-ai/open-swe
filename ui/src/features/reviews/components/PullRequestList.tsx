@@ -82,7 +82,7 @@ export function PullRequestList({
           ))}
         </ul>
       ) : (
-        <ul className={compact ? undefined : "space-y-3"}>
+        <ul className={compact ? undefined : "space-y-space-3"}>
           {rows.map((pr) => (
             <li key={pullRequestKey(pr)}>{children(pr)}</li>
           ))}

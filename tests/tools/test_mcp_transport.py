@@ -1,4 +1,4 @@
-import httpx
+import httpx2
 import pytest
 
 from openswe.mcp import transport as mcp_transport
@@ -17,12 +17,12 @@ async def test_public_address_is_pinned_and_tls_hostname_preserved(monkeypatch):
 
     async def remote(request):
         seen.append(request)
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
     transport = mcp_transport.MCPTransport("https://example.com/mcp")
     await transport._transport.aclose()
-    transport._transport = httpx.MockTransport(remote)
-    async with httpx.AsyncClient(transport=transport) as client:
+    transport._transport = httpx2.MockTransport(remote)
+    async with httpx2.AsyncClient(transport=transport) as client:
         await client.post("https://example.com/mcp", headers={"Authorization": "test-key"})
     assert seen[0].url.host == "93.184.216.34"
     assert seen[0].headers["Host"] == "example.com"
@@ -60,12 +60,12 @@ async def test_connection_failure_tries_next_validated_address(monkeypatch):
     async def remote(request):
         seen.append(request.url.host)
         if len(seen) == 1:
-            raise httpx.ConnectError("IPv6 unavailable")
-        return httpx.Response(200)
+            raise httpx2.ConnectError("IPv6 unavailable")
+        return httpx2.Response(200)
 
     transport = mcp_transport.MCPTransport("https://example.com/mcp")
     await transport._transport.aclose()
-    transport._transport = httpx.MockTransport(remote)
-    async with httpx.AsyncClient(transport=transport) as client:
+    transport._transport = httpx2.MockTransport(remote)
+    async with httpx2.AsyncClient(transport=transport) as client:
         assert (await client.get("https://example.com/mcp")).status_code == 200
     assert seen == ["2606:4700:4700::1111", "93.184.216.34"]

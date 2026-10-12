@@ -10,6 +10,7 @@ from langgraph.config import get_config
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard import repo_access
 from openswe.github.token import resolve_github_token
+from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import (
@@ -27,8 +28,10 @@ from openswe.slack.client import (
     fetch_slack_thread_message_by_ts,
     parse_github_pr_url,
 )
+from openswe.slack.dm import send_dm
 from openswe.slack.payloads import SlackMessage
 from openswe.tools.manage_baby_sit import dispatch_run_config
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 
 
@@ -36,22 +39,32 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
-async def _repository_refusal(pr_ref: GitHubPrRef, thread_id: str) -> str | None:
-    """Why this run may not act on the pull request's repository, judged by its own GitHub access."""
+async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None:
+    """Why this caller may not act on the pull request's repository, judged by its own GitHub access."""
+    repo = f"{pr_ref.owner}/{pr_ref.repo}"
+    if caller := cfg.mcp_caller:
+        try:
+            await repo_access.require_repo_access_for_user(caller, repo)
+        except HTTPException as exc:
+            return f"You cannot access {repo}: {exc.detail}"
+        return None
+    if not cfg.thread_id:
+        return "No executable agent thread is available"
     config = get_config()
     try:
         token, _ = await resolve_github_token(
-            config if isinstance(config, Mapping) else {}, thread_id
+            config if isinstance(config, Mapping) else {}, cfg.thread_id
         )
     except Exception as exc:
         return f"GitHub authentication failed: {exc}"
     try:
-        await repo_access.assert_repo_access(f"{pr_ref.owner}/{pr_ref.repo}", token)
+        await repo_access.assert_repo_access(repo, token)
     except HTTPException as exc:
-        return f"This thread cannot access {pr_ref.owner}/{pr_ref.repo}: {exc.detail}"
+        return f"This thread cannot access {repo}: {exc.detail}"
     return None
 
 
+@expose_mcp()
 @audit_tool()
 async def request_human_review(
     pr_url: str, inline_summary: str, channel: str = ""
@@ -65,13 +78,13 @@ async def request_human_review(
             "inline_summary is required: one or two sentences on what the change does and why."
         )
     cfg = RunConfig.from_config(get_config())
-    thread_id = cfg.thread_id
-    if not thread_id:
-        return _failure("No executable agent thread is available")
-    if refusal := await _repository_refusal(pr_ref, thread_id):
+    if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
-    own_channel, own_thread = await run_slack_location(cfg, thread_id)
+    if caller := cfg.mcp_caller:
+        return await _request_for_mcp_caller(pr_ref, caller, inline_summary, channel)
     login = cfg.github_login or ""
+    thread_id = cfg.thread_id or ""
+    own_channel, own_thread = await run_slack_location(cfg, thread_id)
     origin = Origin(
         requester=await User.for_login("github", login) if login else None,
         thread_id=thread_id,
@@ -97,6 +110,38 @@ async def request_human_review(
     }
 
 
+async def _request_for_mcp_caller(
+    pr_ref: GitHubPrRef, login: str, inline_summary: str, channel: str
+) -> dict[str, Any]:
+    """Request review as a person calling over MCP, who has no thread to point at the card."""
+    requester = await User.for_login("github", login)
+    if requester is None:
+        return _failure("Sign in to the Open SWE dashboard before requesting a review")
+    result = await request_review(
+        pr_ref, Origin(requester=requester), channel=channel, inline_summary=inline_summary
+    )
+    if not result.success:
+        return _failure(result.error)
+    if result.reused or result.summary_updated:
+        posted = "This pull request already had an open review request; no new card was posted."
+    elif requester.slack_user_id and await send_dm(
+        requester.slack_user_id,
+        f"Review requested for <{pr_ref.url}|{pr_ref.repo}#{pr_ref.number}> "
+        f"in <#{result.channel}>.",
+    ):
+        posted = "The review card is posted and the person was sent a Slack DM pointing to it."
+    else:
+        posted = "The review card is posted."
+    return {
+        "success": True,
+        "request_id": result.request_id,
+        "permalink": result.permalink,
+        "next": f"{posted} People sign up from the card and it merges on its own once they "
+        "approve. If nobody signs up, Open SWE picks a reviewer. Do not poll.",
+    }
+
+
+@expose_mcp()
 @audit_tool()
 async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[str, Any]:
     """Implement the `dismiss_human_review_request` tool."""
@@ -106,12 +151,14 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None:
         return _failure("This pull request has no open review request to dismiss.")
-    thread_id = RunConfig.from_config(get_config()).thread_id
-    if not thread_id:
-        return _failure("No executable agent thread is available")
-    if refusal := await _repository_refusal(pr_ref, thread_id):
+    cfg = RunConfig.from_config(get_config())
+    if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
-    if not await ReviewCard(request).dismiss_by("Open SWE", reason):
+    by = "Open SWE"
+    if caller := cfg.mcp_caller:
+        person = await User.for_login("github", caller)
+        by = mention(person) if person is not None else f"@{caller}"
+    if not await ReviewCard(request).dismiss_by(by, reason):
         return _failure("This review request is already closed.")
     return {
         "success": True,
@@ -119,6 +166,7 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
     }
 
 
+@expose_mcp()
 @audit_tool()
 async def assign_human_reviewer(
     pr_url: str, github_login: str, reason: str = "", named_by_person: bool = False
@@ -133,7 +181,17 @@ async def assign_human_reviewer(
     cfg = RunConfig.from_config(get_config())
     thread_id = cfg.thread_id or ""
     login = github_login.strip().lstrip("@")
-    if named_by_person:
+    if caller := cfg.mcp_caller:
+        person = await User.for_login("github", caller)
+        if person is None or not (
+            request.is_author(person.id, caller) or request.requested_by_user_id == person.id
+        ):
+            return _failure(
+                "Only the pull request's author or whoever requested the review may name its "
+                "reviewer."
+            )
+        named_by_person = True
+    elif named_by_person:
         if not await _named_by_trigger(cfg, login):
             return _failure(
                 "named_by_person needs the Slack message that started this run to be a "
@@ -142,7 +200,7 @@ async def assign_human_reviewer(
     # Unprompted picks come only from the thread woken to make one.
     elif not await request.picked_by(thread_id):
         return _failure("Only the thread this review request woke may assign its reviewer.")
-    if refusal := await _repository_refusal(pr_ref, thread_id):
+    if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     result = await assign(request, login, reason, replace=named_by_person)
     if not result.success:
@@ -186,13 +244,13 @@ async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
     return re.search(rf"@{re.escape(github_login)}(?![\w-])", text, re.IGNORECASE) is not None
 
 
+@expose_mcp()
 async def get_human_review_status(pr_url: str) -> dict[str, Any]:
     """Implement the `get_human_review_status` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
-    thread_id = RunConfig.from_config(get_config()).thread_id or ""
-    if refusal := await _repository_refusal(pr_ref, thread_id):
+    if refusal := await _repository_refusal(pr_ref, RunConfig.from_config(get_config())):
         return _failure(refusal)
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None or request.kind == "expedited":
@@ -201,6 +259,7 @@ async def get_human_review_status(pr_url: str) -> dict[str, Any]:
     return {"success": True, "open_review_request": True, **status.model_dump(mode="json")}
 
 
+@expose_mcp()
 @audit_tool()
 async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
     """Implement the `auto_assign_human_reviewer` tool."""
@@ -210,10 +269,7 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None or request.kind == "expedited":
         return _failure("This pull request has no open review request to assign a reviewer to.")
-    thread_id = RunConfig.from_config(get_config()).thread_id
-    if not thread_id:
-        return _failure("No executable agent thread is available")
-    if refusal := await _repository_refusal(pr_ref, thread_id):
+    if refusal := await _repository_refusal(pr_ref, RunConfig.from_config(get_config())):
         return _failure(refusal)
     started = await start_auto_assign(request, asked=True)
     if started.status == "failed":

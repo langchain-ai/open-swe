@@ -4,6 +4,8 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
+import { CircularProgress } from "@langchain/macaw-components/CircularProgress"
+import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
 
 import {
   formatCost,
@@ -18,8 +20,6 @@ export interface ContextWindowMeterProps {
   costUsd?: number | null
 }
 
-const RADIUS = 9.75
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 const OVERLOADED_PERCENTAGE = 90
 
 function cleanTokenCount(value: number | null | undefined): number | null {
@@ -50,9 +50,7 @@ export function ContextWindowMeter({
     limit != null ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0
   const hasPercentage = limit != null
   const isOverloaded = hasPercentage && percentage >= OVERLOADED_PERCENTAGE
-  const usageColor = isOverloaded
-    ? "var(--text-error-secondary)"
-    : "color-mix(in oklab, var(--text-secondary) 72%, transparent)"
+  const usageVariant = isOverloaded ? "error" : "brand"
   const label = hasPercentage
     ? `Context window ${formatPercentage(percentage)} used`
     : `Context window ${formatTokenCount(used)} tokens`
@@ -77,37 +75,15 @@ export function ContextWindowMeter({
           onClick={() => setOpen(true)}
           type="button"
         >
-          <span className="relative flex size-5 items-center justify-center">
-            <svg
-              aria-hidden="true"
-              className="absolute inset-0 size-full -rotate-90 transform-gpu"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                cx="12"
-                cy="12"
-                fill="none"
-                r={RADIUS}
-                stroke="color-mix(in oklab, var(--text-secondary) 24%, transparent)"
-                strokeDasharray={hasPercentage ? undefined : "3 3"}
-                strokeWidth="3"
-              />
-              {hasPercentage && (
-                <circle
-                  className="transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none"
-                  cx="12"
-                  cy="12"
-                  fill="none"
-                  r={RADIUS}
-                  stroke={usageColor}
-                  strokeDasharray={CIRCUMFERENCE}
-                  strokeDashoffset={CIRCUMFERENCE * (1 - percentage / 100)}
-                  strokeLinecap="round"
-                  strokeWidth="3"
-                />
-              )}
-            </svg>
-          </span>
+          <CircularProgress
+            segments={
+              hasPercentage
+                ? [{ variant: usageVariant, percentage: percentage / 100 }]
+                : []
+            }
+            size={20}
+            strokeWidth={3}
+          />
         </button>
       </HoverCardTrigger>
       <HoverCardContent
@@ -124,7 +100,7 @@ export function ContextWindowMeter({
               {hasPercentage ? (
                 <>
                   <span>{formatPercentage(percentage)}</span>
-                  <span className="mx-1">·</span>
+                  <span className="mx-space-1">·</span>
                   <span>
                     {formatTokenCount(used)}/{formatTokenCount(limit)}
                   </span>
@@ -135,19 +111,12 @@ export function ContextWindowMeter({
             </div>
           </div>
           {hasPercentage && (
-            <div
+            <ProgressBar
               aria-label="Context window usage"
-              aria-valuemax={100}
-              aria-valuemin={0}
-              aria-valuenow={Math.round(percentage)}
-              className="h-1.5 w-full overflow-hidden rounded-full bg-surface-level-2/60"
-              role="progressbar"
-            >
-              <div
-                className="h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"
-                style={{ backgroundColor: usageColor, width: `${percentage}%` }}
-              />
-            </div>
+              color={usageVariant}
+              size="sm"
+              value={percentage}
+            />
           )}
           {!hasPercentage && (
             <p className="text-xxs leading-4 text-tertiary">
@@ -155,7 +124,7 @@ export function ContextWindowMeter({
             </p>
           )}
           {(model || costUsd != null) && (
-            <div className="flex items-center justify-between gap-3 text-xxs text-tertiary">
+            <div className="flex items-center justify-between gap-space-3 text-xxs text-tertiary">
               <span className="truncate">{model}</span>
               {costUsd != null && (
                 <span className="tabular-nums">

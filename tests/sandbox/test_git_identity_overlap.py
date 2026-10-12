@@ -126,3 +126,32 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
     # Cancelled with the sandbox, rather than left behind to report into a run
     # that has already given up on the box.
     assert not release.is_set()
+
+
+@pytest.mark.asyncio
+async def test_proxy_token_is_minted_while_the_sandbox_boots() -> None:
+    minting = asyncio.Event()
+    backend = MagicMock(id="sandbox-new", aexecute=AsyncMock(return_value="ok"))
+
+    async def boot(*_args: object, **_kwargs: object) -> MagicMock:
+        # A token minted only after boot returns would never set this.
+        await asyncio.wait_for(minting.wait(), timeout=2)
+        return backend
+
+    async def mint(*_args: object, **_kwargs: object) -> SandboxGitHubAccess:
+        minting.set()
+        return SandboxGitHubAccess("token")
+
+    with (
+        patch("openswe.sandboxes.lifecycle.create_sandbox", side_effect=boot),
+        patch.object(
+            SandboxCreateConfig,
+            "resolve",
+            new_callable=AsyncMock,
+            return_value=SandboxCreateConfig(snapshot_id="snap"),
+        ),
+        patch("openswe.sandboxes.lifecycle.workspace_token", side_effect=mint),
+        patch("openswe.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.record_proxy_token_expiry"),
+    ):
+        assert await _create_sandbox_with_proxy(thread_id="thread-token-overlap") is backend

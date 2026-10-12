@@ -117,7 +117,7 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
 
   return (
     <div className="my-[0.65rem] max-w-full overflow-hidden rounded-lg border border-subtle bg-surface-level-2">
-      <div className="flex items-center justify-between gap-space-2 pt-space-1 pr-space-1 pl-2.5 select-none">
+      <div className="flex items-center justify-between gap-space-2 pt-space-1 pr-space-1 pl-space-2 select-none">
         <span className="truncate font-mono text-xxs text-secondary">
           {title || displayLanguage}
         </span>
@@ -141,7 +141,7 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
       </div>
       <pre
         className={cn(
-          "max-w-full overflow-x-auto px-2.5 pt-0.5 pb-2.5 font-mono text-xxs leading-[1.55]",
+          "max-w-full overflow-x-auto px-space-2 pt-0.5 pb-space-2 font-mono text-xxs leading-[1.55]",
           wrapped && "whitespace-pre-wrap"
         )}
       >

@@ -88,7 +88,7 @@ const STEP_CLASS: Record<WorkspaceRefreshStep["status"], string> = {
 // thing that separates slow from wedged while it is still going.
 function RefreshSteps({ steps }: { steps: Array<WorkspaceRefreshStep> }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-space-2">
       {steps.map((step) => (
         <span
           key={step.label}
@@ -127,10 +127,10 @@ function WorkspaceRow({
   return (
     <div
       data-workspace-row
-      className="flex flex-col gap-space-2 px-space-4 py-3.5"
+      className="flex flex-col gap-space-2 px-space-4 py-space-3"
     >
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-        <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-space-1 sm:flex-row sm:items-center sm:justify-between sm:gap-space-6">
+        <div className="flex flex-col gap-space-1">
           <span className="flex items-center gap-space-2 text-sm/none font-medium text-primary">
             {workspace.name}
             {isDefault && (
@@ -141,7 +141,7 @@ function WorkspaceRow({
           </span>
           <span className="text-xs/relaxed text-secondary">{detail}</span>
         </div>
-        <div className="flex items-center gap-3 sm:shrink-0">
+        <div className="flex items-center gap-space-3 sm:shrink-0">
           <span
             className={cn("text-xs", REFRESH_CLASS[status])}
             title={
@@ -249,15 +249,15 @@ export function WorkspacesSection({
       }
     >
       {workspaces.isLoading ? (
-        <div className="px-space-4 py-3.5">
+        <div className="px-space-4 py-space-3">
           <Skeleton className="h-8 w-full" />
         </div>
       ) : workspaces.isError ? (
-        <div className="px-space-4 py-3.5">
+        <div className="px-space-4 py-space-3">
           <Banner intent="error" title="Could not load workspaces." />
         </div>
       ) : !options || options.workspaces.length === 0 ? (
-        <p className="px-space-4 py-3.5 text-xs text-secondary">
+        <p className="px-space-4 py-space-3 text-xs text-secondary">
           No workspaces are configured.
         </p>
       ) : (
@@ -283,7 +283,7 @@ export function WorkspacesSection({
               workspaces={options?.workspaces ?? []}
               channelLabel={channelLabel}
             />
-            <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-3.5">
+            <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-space-3">
               {createError && (
                 <p role="alert" className="text-xs text-error-secondary">
                   {createError}
@@ -317,7 +317,7 @@ export function WorkspacesSection({
             </div>
           </div>
         ) : (
-          <div className="px-space-4 py-3.5">
+          <div className="px-space-4 py-space-3">
             <Button size="xs" color="primary" onClick={() => setAdding(true)}>
               Add workspace
             </Button>

@@ -77,7 +77,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       }}
       style={{ height: FILE_HEADER_HEIGHT }}
       className={cn(
-        "group/header flex items-center gap-2 border-b border-default bg-surface-level-2 px-2.5 font-sans text-xs",
+        "group/header flex items-center gap-space-2 border-b border-default bg-surface-level-2 px-space-2 font-sans text-xs",
         folded && "border-b-transparent"
       )}
     >
@@ -94,13 +94,13 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       {entry.step && (
         <span
           title={`Step ${entry.step.index}: ${entry.step.title}`}
-          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-[10px] font-semibold text-brand-primary tabular-nums"
+          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-xxs font-semibold text-brand-primary tabular-nums"
         >
           {entry.step.index}
         </span>
       )}
       <span
-        className="flex min-w-0 items-baseline overflow-hidden font-mono text-[12px]"
+        className="flex min-w-0 items-baseline overflow-hidden font-mono text-xxs"
         title={path}
       >
         <span className="truncate text-left text-secondary [direction:rtl] max-sm:hidden">
@@ -124,7 +124,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         size="xxs"
       />
       {status && <Tag className="max-sm:hidden">{status}</Tag>}
-      <span className="flex shrink-0 gap-1.5 font-mono text-[11px] tabular-nums">
+      <span className="flex shrink-0 gap-space-2 font-mono text-xxs tabular-nums">
         {entry.additions > 0 && (
           <span className="text-success-secondary">+{entry.additions}</span>
         )}
@@ -136,7 +136,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         <button
           type="button"
           onClick={() => showFinding(worst.id, findingTarget(worst))}
-          className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] hover:bg-surface-level-1-hover"
+          className="flex shrink-0 items-center gap-space-1 rounded-sm px-space-1 text-xxs hover:bg-surface-level-1-hover"
           style={{ color: findingGroupColor[worst.group] }}
           title={`${plural(findings.length, "open finding")} from Open SWE; go to the worst`}
         >
@@ -148,10 +148,10 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         <button
           type="button"
           onClick={() => jumpTo(threadTarget(firstThread))}
-          className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+          className="flex shrink-0 items-center gap-space-1 rounded-sm px-space-1 text-xxs text-secondary hover:bg-surface-level-1-hover hover:text-primary"
           title={`${plural(threads.length, "open conversation")}; go to the first`}
         >
-          <ChatCircleIcon className="size-3" />
+          <ChatCircleIcon className="size-3" weight="regular" />
           {threads.length}
         </button>
       )}
@@ -192,7 +192,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         aria-label={`Viewed ${path}`}
         onClick={() => markViewed(id)}
         className={cn(
-          "flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors",
+          "flex shrink-0 items-center gap-space-2 rounded-md border px-space-2 py-space-1 text-xxs transition-colors",
           viewed
             ? "border-transparent bg-brand-subtle text-brand-primary"
             : "border-default text-secondary hover:text-primary"

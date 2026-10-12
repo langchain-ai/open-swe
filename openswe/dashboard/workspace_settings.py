@@ -468,8 +468,7 @@ async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSetti
     defaults = _default_settings()
     slug = resolve_settings_workspace(workspace)
     try:
-        instance = await _instance_record()
-        overrides = await _workspace_record(slug)
+        instance, overrides = await asyncio.gather(_instance_record(), _workspace_record(slug))
     except Exception:
         logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
         return WorkspaceSettings(defaults)

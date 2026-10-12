@@ -17,7 +17,7 @@ export const Route = createFileRoute("/review")({
 function ReviewPage() {
   return (
     <SettingsPage
-      title="Code review"
+      title="Code Review"
       description="Open SWE Review checks pull requests for bugs on demand, or automatically on the repositories you choose. Runs are billed by underlying agent usage."
     >
       <RepositoriesSection />
@@ -62,12 +62,12 @@ function RepositoriesSection() {
     >
       <div className="divide-y divide-default">
         {loading && (
-          <div className="p-4">
+          <div className="p-space-4">
             <Skeleton className="h-16 w-full" />
           </div>
         )}
         {!loading && grouped.length === 0 && (
-          <p className="px-4 py-3 text-xs text-secondary">
+          <p className="px-space-4 py-space-3 text-xs text-secondary">
             No GitHub App installations found. Install the Open SWE GitHub App
             on an account or org to manage repos here.
           </p>
@@ -81,21 +81,21 @@ function RepositoriesSection() {
               key={owner}
               to="/review/repositories/$owner"
               params={{ owner }}
-              className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-surface-level-1-hover"
+              className="flex items-center justify-between gap-space-4 px-space-4 py-space-3 hover:bg-surface-level-2-hover"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-space-3">
                 <GithubLogoIcon
                   weight="regular"
                   className="size-5 shrink-0 text-icon-secondary"
                 />
                 <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex items-center gap-space-2 text-xs">
                     <span className="font-medium text-primary">{owner}</span>
                   </div>
                   <span className="text-xs text-secondary">GitHub</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-xs text-secondary">
+              <div className="flex items-center gap-space-2 text-xs text-secondary">
                 <span>
                   {autoReviewCount}/{list.length} Run Automatically
                 </span>

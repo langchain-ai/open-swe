@@ -18,7 +18,7 @@ export function PullRequestActionButton({
 }) {
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-space-2">
         {children}
         <Button
           size="xs"
@@ -34,7 +34,11 @@ export function PullRequestActionButton({
       {errors.map(
         (error, index) =>
           error && (
-            <p key={index} role="alert" className="mt-1 text-error-secondary">
+            <p
+              key={index}
+              role="alert"
+              className="mt-space-1 text-error-secondary"
+            >
               {error.message}
             </p>
           )

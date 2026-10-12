@@ -2,9 +2,7 @@
 
 Every time a published finding is resolved (a later commit fixed it),
 dismissed (false positive / human pushback), or gets a 👍/👎 reaction, we
-upsert one labelled example into a single LangSmith dataset. The ``analyzer``
-graph reads these per-repo to refine its review-style prompts: confirmed
-findings teach what to hunt for, dismissed ones teach what to skip.
+upsert one labelled example into a single LangSmith dataset.
 
 Writes are best-effort and deterministic (one example id per
 ``finding_id`` + ``label_source``) so re-processing the same transition
@@ -86,7 +84,7 @@ async def _ensure_dataset(client: AsyncLangSmithClient) -> Any:
         dataset_name=OUTCOMES_DATASET_NAME,
         description=(
             "Open SWE reviewer finding outcomes (resolved / dismissed / 👍👎) "
-            "captured in production for per-repo continual learning."
+            "captured in production."
         ),
     )
     return ds.id
@@ -214,8 +212,7 @@ async def upsert_run_outcome(
 ) -> bool:
     """Upsert a coarse run-level outcome (e.g. a Slack 👍/👎 on a review).
 
-    These have no finding/diff anchor, so they are tagged
-    ``granularity="run"`` and ignored by the per-repo analyzer reader.
+    These have no finding/diff anchor, so they are tagged ``granularity="run"``.
     """
     if not run_id:
         return False
@@ -280,44 +277,3 @@ async def emit_finding_status_outcome(
         head_sha=head_sha,
         thread_id=thread_id,
     )
-
-
-async def read_outcomes_for_repo(repo: str, *, limit: int = 100) -> dict[str, list[dict[str, Any]]]:
-    """Return confirmed (true-positive) and dismissed (false-positive) findings
-    for ``repo`` from the outcomes dataset. Best-effort; returns empty on error."""
-    confirmed: list[dict[str, Any]] = []
-    dismissed: list[dict[str, Any]] = []
-    credentials = _outcomes_credentials()
-    if credentials is None or not repo:
-        return {"confirmed": confirmed, "dismissed": dismissed}
-    try:
-        client = async_langsmith_client(*credentials)
-        existing = await _find_dataset(client)
-        if existing is None:
-            return {"confirmed": confirmed, "dismissed": dismissed}
-        async for example in client.list_examples(dataset_id=existing.id):
-            metadata = getattr(example, "metadata", None) or {}
-            if metadata.get("granularity") != "finding" or metadata.get("repo") != repo:
-                continue
-            outputs = getattr(example, "outputs", None) or {}
-            inputs = getattr(example, "inputs", None) or {}
-            finding = outputs.get("finding") or {}
-            row = {
-                "file": inputs.get("file"),
-                "title": finding.get("title"),
-                "description": finding.get("description"),
-                "severity": finding.get("severity"),
-                "category": finding.get("category"),
-                "label_source": outputs.get("label_source"),
-                "diff_hunk": inputs.get("diff_hunk"),
-                "resolution_note": outputs.get("resolution_note"),
-            }
-            if outputs.get("label") == TRUE_POSITIVE:
-                confirmed.append(row)
-            elif outputs.get("label") == FALSE_POSITIVE:
-                dismissed.append(row)
-            if len(confirmed) + len(dismissed) >= limit:
-                break
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to read outcomes for repo %s", repo)
-    return {"confirmed": confirmed, "dismissed": dismissed}

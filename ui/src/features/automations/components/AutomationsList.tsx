@@ -1,4 +1,5 @@
 import { PlusIcon, StackRegularIcon } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -66,9 +67,11 @@ export function AutomationsList({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        <h1 className="text-base font-medium text-primary">Automations</h1>
-        <p className="mt-1 text-xs text-secondary">
+      <div className="mx-auto w-full max-w-4xl px-space-5 py-space-6 max-md:pt-space-9">
+        <Text as="h1" variant="h3" weight="medium" color="primary">
+          Automations
+        </Text>
+        <p className="mt-space-1 text-xs text-secondary">
           Run Open SWE on a schedule or on GitHub, Slack, and Linear events.
           Each run starts a fresh agent thread.{" "}
           {!canManage && "Workspace admins manage automation setup."}
@@ -88,12 +91,12 @@ export function AutomationsList({
         />
 
         {tab === "runs" ? (
-          <div className="mt-6">
+          <div className="mt-space-5">
             <AutomationRuns />
           </div>
         ) : (
           <>
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-space-5 grid grid-cols-2 gap-space-3 sm:grid-cols-4">
               <StatCard label="Total" value={total} />
               <StatCard label="Active" value={active} />
               <StatCard label="Paused" value={paused} />
@@ -104,16 +107,16 @@ export function AutomationsList({
               />
             </div>
 
-            <div className="mt-8 flex items-center justify-between">
+            <div className="mt-space-6 flex items-center justify-between">
               <span className="text-xs font-medium text-secondary">
                 {total} {total === 1 ? "automation" : "automations"}
               </span>
               {canManage && <NewAutomationButton />}
             </div>
 
-            <div className="mt-3">
+            <div className="mt-space-3">
               {schedulesQuery.isLoading ? (
-                <div className="space-y-2">
+                <div className="space-y-space-2">
                   <Skeleton className="h-16 w-full rounded-xl" />
                   <Skeleton className="h-16 w-full rounded-xl" />
                 </div>
@@ -126,7 +129,7 @@ export function AutomationsList({
                   action={canManage && <NewAutomationButton />}
                 />
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-space-2">
                   {schedules.map((schedule) => (
                     <AutomationRow
                       key={schedule.id}
@@ -172,7 +175,7 @@ function StatCard({
       <div className="text-xs text-tertiary">{label}</div>
       <div
         className={cn(
-          "mt-1 text-lg font-medium",
+          "mt-space-1 text-lg font-medium",
           highlight ? "text-error-secondary" : "text-primary"
         )}
       >
@@ -227,11 +230,11 @@ function AutomationRow({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:bg-surface-level-1-hover">
+    <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3 transition-colors hover:bg-surface-level-1-hover">
       <Link
         to="/agents/automations/$scheduleId"
         params={{ scheduleId: schedule.id }}
-        className="flex min-w-0 flex-1 items-center gap-3"
+        className="flex min-w-0 flex-1 items-center gap-space-3"
       >
         <span
           className={cn(
@@ -240,7 +243,7 @@ function AutomationRow({
           )}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 items-center gap-space-2">
             <span className="truncate text-sm font-medium text-primary">
               {schedule.name}
             </span>
@@ -255,13 +258,13 @@ function AutomationRow({
               </WarningCircleIcon>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-tertiary">
-            <span className="flex items-center gap-1">
+          <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-tertiary">
+            <span className="flex items-center gap-space-1">
               <ClockIcon size={14} weight="regular" />
               {describeTriggers(schedule)}
             </span>
             {workspaces.length > 1 && (
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-space-1">
                 <StackRegularIcon size={14} />
                 {workspaceName}
               </span>

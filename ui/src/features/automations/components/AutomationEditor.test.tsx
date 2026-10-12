@@ -188,8 +188,10 @@ describe("AutomationEditor", () => {
       wrapper: TooltipProvider,
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
-    fireEvent.click(screen.getByRole("button", { name: /^Core/ }))
+    fireEvent.keyDown(screen.getByRole("button", { name: "Workspace" }), {
+      key: "Enter",
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Core/ }))
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
 
     expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
@@ -224,8 +226,10 @@ describe("AutomationEditor", () => {
       )
 
       expect(screen.getByText(/gone.*no longer exists/)).toBeTruthy()
-      fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
-      expect(screen.getByRole("button", { name: /^Default/ })).toBeTruthy()
+      fireEvent.keyDown(screen.getByRole("button", { name: "Workspace" }), {
+        key: "Enter",
+      })
+      expect(screen.getByRole("menuitem", { name: /^Default/ })).toBeTruthy()
     } finally {
       mocks.workspaces = previous
     }

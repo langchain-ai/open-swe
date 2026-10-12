@@ -300,16 +300,16 @@ export function AppCommandPalette({
           />
           <CommandList className="max-h-none min-h-20 flex-1 p-space-2">
             {showLoading ? (
-              <div className="flex items-center justify-center gap-space-2 py-10 text-xs text-secondary">
+              <div className="flex items-center justify-center gap-space-2 py-space-7 text-xs text-secondary">
                 <Spinner size="xs" />
                 Searching threads and pull requests…
               </div>
             ) : showError ? (
-              <p className="py-10 text-center text-xs text-error-secondary">
+              <p className="py-space-7 text-center text-xs text-error-secondary">
                 Thread search is unavailable.
               </p>
             ) : results.length === 0 ? (
-              <p className="py-10 text-center text-xs text-secondary">
+              <p className="py-space-7 text-center text-xs text-secondary">
                 No commands, threads, or pull requests found.
               </p>
             ) : (
@@ -342,7 +342,7 @@ export function AppCommandPalette({
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
                             {result.kind === "pull-request" && (
-                              <span className="ml-2 text-xs text-secondary">
+                              <span className="ml-space-2 text-xs text-secondary">
                                 {result.pr.repo} #{result.pr.number} ·{" "}
                                 {result.pr.state}
                               </span>

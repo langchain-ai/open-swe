@@ -11,7 +11,7 @@ const USER_TOKEN = /<@([UW][A-Z0-9]{2,})>/g
 const MARKDOWN_TOKEN =
   /(```[\s\S]*?```|`[^`\n]*`)|<([^<>\s|]+)(?:\|([^<>\n]*))?>/g
 const LINK_CLASS =
-  "text-primary underline decoration-[color:var(--text-tertiary)] break-words [overflow-wrap:anywhere]"
+  "text-primary underline decoration-text-tertiary break-words [overflow-wrap:anywhere]"
 
 function decodeSlackText(text: string): string {
   return text.replace(/&(?:amp|lt|gt);/g, (entity) => {

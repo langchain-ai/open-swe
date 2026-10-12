@@ -34,7 +34,7 @@ export function ReplyBox({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-md border border-default bg-surface-level-1 px-2.5 py-1.5 text-left text-xs text-placeholder hover:border-strong"
+        className="w-full rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-left text-xs text-placeholder hover:border-strong"
       >
         {placeholder}
       </button>

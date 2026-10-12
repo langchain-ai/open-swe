@@ -3,6 +3,7 @@ import {
   ClockCounterClockwiseRegularIcon,
   MagnifyingGlassRegularIcon,
 } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { Link } from "@tanstack/react-router"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
@@ -66,11 +67,17 @@ export function IncidentList({
   const items = incidents.data?.pages.flatMap((page) => page.items) ?? []
   const filtered = Boolean(search.trim())
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-10 sm:py-10">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-primary">
+    <div className="mx-auto w-full max-w-6xl px-space-4 py-space-6 sm:px-space-7 sm:py-space-7">
+      <div className="flex flex-wrap items-center justify-between gap-space-3">
+        <Text
+          as="h1"
+          variant="h1"
+          weight="semibold"
+          color="primary"
+          className="tracking-tight"
+        >
           {view === "history" ? "Incident history" : "Incidents"}
-        </h1>
+        </Text>
         <Button
           color="secondary"
           variant="plain"
@@ -80,10 +87,10 @@ export function IncidentList({
           {view === "history" ? "Current incidents" : "Incident history"}
         </Button>
       </div>
-      <p className="mt-2 mb-6 text-sm text-secondary">
+      <p className="mt-space-2 mb-space-5 text-sm text-secondary">
         Investigations, findings, and the context to act.
       </p>
-      <div className="mb-5 flex flex-wrap items-center gap-4">
+      <div className="mb-space-4 flex flex-wrap items-center gap-space-4">
         {view !== "history" && (
           <div role="group" aria-label="Agent activity filters">
             <GroupedTabs
@@ -112,7 +119,7 @@ export function IncidentList({
           className="min-w-0 flex-1 basis-56"
         />
       </div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-secondary">
+      <div className="mb-space-3 flex flex-wrap items-center justify-between gap-space-2 text-xs text-secondary">
         <span>
           {view === "inactive"
             ? "Paused or completed agent activity"
@@ -132,7 +139,7 @@ export function IncidentList({
         {incidents.isPending ? (
           <LoadingState />
         ) : incidents.error ? (
-          <div className="p-4">
+          <div className="p-space-4">
             <ErrorState
               error={incidents.error}
               retry={() => void incidents.refetch()}
@@ -169,34 +176,34 @@ export function IncidentList({
                 key={item.id}
                 to="/incidents/$incidentId"
                 params={{ incidentId: item.id }}
-                className="group flex flex-wrap items-start gap-4 px-2 py-5 transition-colors hover:bg-surface-level-1-hover/40"
+                className="group flex flex-wrap items-start gap-space-4 px-space-2 py-space-4 transition-colors hover:bg-surface-level-1-hover/40"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-sm font-medium">
+                  <div className="flex flex-wrap items-center gap-space-2">
+                    <Text as="h2" variant="h5" weight="medium">
                       {item.title || item.channel_name}
-                    </h2>
+                    </Text>
                     {item.is_archived && (
                       <span className="text-xxs text-secondary">
                         Channel archived
                       </span>
                     )}
                   </div>
-                  <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-secondary">
+                  <p className="mt-space-2 line-clamp-2 text-sm leading-relaxed text-secondary">
                     {item.latest_finding
                       ? citationPreview(item.latest_finding)
                       : "Gathering incident context. Findings will appear here."}
                   </p>
-                  <p className="mt-3 text-xs text-secondary">
+                  <p className="mt-space-3 text-xs text-secondary">
                     #{item.channel_name}
                   </p>
                   {item.reason && (
-                    <p className="mt-2 text-xs text-warning-secondary">
+                    <p className="mt-space-2 text-xs text-warning-secondary">
                       {humanize(item.reason)}
                     </p>
                   )}
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-3 text-xxs text-secondary">
+                <div className="flex shrink-0 flex-col items-end gap-space-3 text-xxs text-secondary">
                   <StatusBadge status={item.status} />
                   <time>{formatTime(item.updated_at)}</time>
                   <ArrowRightIcon
@@ -210,7 +217,7 @@ export function IncidentList({
           </div>
         )}
         {incidents.hasNextPage && !incidents.error && (
-          <div className="border-t border-default p-4 text-center">
+          <div className="border-t border-default p-space-4 text-center">
             <Button
               color="secondary"
               variant="outlined"

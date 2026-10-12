@@ -441,7 +441,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
 
   if (!thread) {
     return (
-      <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-xs text-secondary">
+      <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-space-3 text-xs text-secondary">
         {threadQuery.isPending
           ? "Loading local Open SWE session…"
           : threadQuery.error
@@ -492,7 +492,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           panelCollapsed={panelCollapsed}
         />
         {(shownError || activity === "error") && (
-          <div className="mx-auto w-full max-w-3xl px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl px-space-4 pt-space-3">
             <Banner intent="error">
               {shownError || "The local Open SWE agent stopped unexpectedly."}
             </Banner>
@@ -516,11 +516,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               healthUnavailable
             />
             {terminalContexts.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-1.5">
+              <div className="mb-space-2 flex flex-wrap gap-space-2">
                 {terminalContexts.map((text, index) => (
                   <span
                     key={`${text.slice(0, 24)}:${index}`}
-                    className="inline-flex max-w-full items-center gap-1 rounded-md border border-default bg-surface-level-1 px-2 py-1 text-[11px] text-secondary"
+                    className="inline-flex max-w-full items-center gap-space-1 rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xxs text-secondary"
                     title={text}
                   >
                     <span className="max-w-64 truncate">

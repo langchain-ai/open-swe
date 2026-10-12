@@ -35,7 +35,7 @@ const NAV = [
 ] as const
 
 const ROW =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
+  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
 const SELECTED_ROW = "bg-selected font-medium hover:bg-selected-hover"
 
 export function SidebarNav({

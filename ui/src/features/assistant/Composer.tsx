@@ -30,7 +30,7 @@ function Attachment() {
   )
   const image = attachment.content?.find((part) => part.type === "image")
   return (
-    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-xl border border-default p-2 text-xs">
+    <AttachmentPrimitive.Root className="flex items-center gap-space-2 rounded-xl border border-default p-space-2 text-xs">
       {(file || image?.image) && (
         <img
           ref={previewRef}
@@ -107,8 +107,8 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
 
   return (
     <ComposerPrimitive.Root className="w-full">
-      <ComposerPrimitive.AttachmentDropzone className="rounded-3xl border border-default bg-surface-level-1 p-3 shadow-xs data-[dragging=true]:border-brand">
-        <div className="flex flex-wrap gap-2 empty:hidden">
+      <ComposerPrimitive.AttachmentDropzone className="rounded-xl border border-default bg-surface-level-1 p-space-3 shadow-sm data-[dragging=true]:border-brand">
+        <div className="flex flex-wrap gap-space-2 empty:hidden">
           <ComposerPrimitive.Attachments>
             {() => <Attachment />}
           </ComposerPrimitive.Attachments>
@@ -123,9 +123,9 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                 : "Send a message…"
           }
           rows={2}
-          className="max-h-48 min-h-14 w-full resize-none bg-transparent px-2 py-2 text-sm leading-6 text-primary outline-none placeholder:text-placeholder"
+          className="max-h-48 min-h-14 w-full resize-none bg-transparent px-space-2 py-space-2 text-sm leading-6 text-primary outline-none placeholder:text-placeholder"
         />
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-space-2">
           <ComposerPrimitive.AddAttachment asChild>
             <IconButton
               icon={PlusIcon}
@@ -150,7 +150,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             }
             disabled={disabled}
             requireImageSupport={hasAttachments}
-            triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-xs text-secondary hover:bg-surface-level-2"
+            triggerClassName="max-w-48 rounded-full px-space-2 py-space-1 text-xs text-secondary hover:bg-surface-level-2"
           />
           {!thread && (
             <>

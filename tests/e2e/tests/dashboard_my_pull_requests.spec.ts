@@ -210,7 +210,7 @@ test.describe("my pull requests", () => {
     expect(closed.ok()).toBeTruthy();
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
-      page.getByText("No pending GitHub review requests."),
+      page.getByText("No pending GitHub review requests"),
     ).toBeVisible();
   });
 

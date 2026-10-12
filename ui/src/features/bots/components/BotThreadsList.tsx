@@ -2,6 +2,7 @@ import {
   ArrowLeftIcon,
   CaretRightIcon,
 } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { Avatar } from "@langchain/macaw-components/Avatar"
@@ -55,7 +56,7 @@ export function BotThreadsList({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
+      <div className="mx-auto w-full max-w-4xl px-space-5 py-space-6 max-md:pt-space-9">
         {bot && (
           <Button
             color="secondary"
@@ -67,10 +68,10 @@ export function BotThreadsList({
             Bots
           </Button>
         )}
-        <h1 className="text-base font-medium text-primary">
+        <Text as="h1" variant="h3" weight="medium" color="primary">
           {bot ? `${botsByKey.get(bot)?.name ?? "Bot"} threads` : "Bots"}
-        </h1>
-        <p className="mt-1 text-xs text-secondary">
+        </Text>
+        <p className="mt-space-1 text-xs text-secondary">
           Threads started by Slack bots on the allowlist. They are read-only
           here: reply in the Slack thread to steer one.
           {!isAdmin && " Workspace admins manage which bots are allowed."}
@@ -78,13 +79,13 @@ export function BotThreadsList({
 
         {!bot &&
           (isAdmin ? (
-            <div className="mt-4 rounded-xl border border-default bg-surface-level-1">
+            <div className="mt-space-4 rounded-xl border border-default bg-surface-level-1">
               <AllowedSlackBotsSection onBotChange={onBotChange} />
             </div>
           ) : (
-            <div className="mt-4 divide-y divide-default rounded-xl border border-default bg-surface-level-1">
+            <div className="mt-space-4 divide-y divide-default rounded-xl border border-default bg-surface-level-1">
               {directory.isPending ? (
-                <p className="p-4 text-xs text-secondary">
+                <p className="p-space-4 text-xs text-secondary">
                   Loading enabled bots…
                 </p>
               ) : directory.isError ? (
@@ -115,7 +116,7 @@ export function BotThreadsList({
                     key={entry.key}
                     type="button"
                     onClick={() => onBotChange(entry.key)}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                    className="flex w-full items-center gap-space-3 px-space-4 py-space-3 text-left hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                   >
                     <BotAvatar entry={entry} />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
@@ -137,9 +138,9 @@ export function BotThreadsList({
           ))}
 
         {bot && (
-          <div className="mt-6">
+          <div className="mt-space-5">
             {threadsQuery.isLoading ? (
-              <div className="space-y-2">
+              <div className="space-y-space-2">
                 <Skeleton className="h-16 w-full rounded-xl" />
                 <Skeleton className="h-16 w-full rounded-xl" />
               </div>
@@ -167,7 +168,7 @@ export function BotThreadsList({
                 className="rounded-xl border border-dashed border-default"
               />
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-space-2">
                 {threads.map((thread) => (
                   <BotThreadRow
                     key={thread.id}
@@ -180,7 +181,7 @@ export function BotThreadsList({
                   />
                 ))}
                 {threadsQuery.data?.hasMore && (
-                  <p className="pt-4 text-center text-xs text-secondary">
+                  <p className="pt-space-4 text-center text-xs text-secondary">
                     Showing the {THREAD_LIMIT} most recent threads.
                   </p>
                 )}
@@ -214,11 +215,11 @@ function BotThreadRow({
 }) {
   const slackUrl = thread.sourceAppUrl ?? thread.sourceUrl
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:bg-surface-level-1-hover">
+    <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3 transition-colors hover:bg-surface-level-1-hover">
       <Link
         to="/agents/$threadId"
         params={{ threadId: thread.id }}
-        className="flex min-w-0 flex-1 items-center gap-3"
+        className="flex min-w-0 flex-1 items-center gap-space-3"
       >
         {thread.status === "running" ? (
           <Spinner size="xs" className="shrink-0 text-icon-brand" />
@@ -238,10 +239,10 @@ function BotThreadRow({
           <p className="truncate text-sm font-medium text-primary">
             {thread.title}
           </p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-tertiary">
+          <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-tertiary">
             <span>{STATUS_LABELS[thread.status]}</span>
             {thread.triggeringBot && (
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-space-1">
                 {entry && <BotAvatar entry={entry} />}
                 {entry?.name ?? thread.triggeringBot.name}
               </span>

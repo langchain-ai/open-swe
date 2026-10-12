@@ -196,7 +196,7 @@ export function WorkEntryRow({
       )}
       {...rowToggleProps}
     >
-      <div className="flex items-center gap-1.5 select-none">
+      <div className="flex items-center gap-space-2 select-none">
         <span
           className={cn(
             "flex size-5 shrink-0 items-center justify-center",
@@ -210,9 +210,9 @@ export function WorkEntryRow({
           <WorkEntryIcon name={entry.icon} />
         </span>
 
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 items-center gap-space-2">
           <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-xs leading-5">
+            <p className="flex w-full min-w-0 items-baseline gap-space-2 text-xs leading-5">
               <span
                 className={cn(
                   "shrink-0 truncate font-medium",
@@ -242,7 +242,7 @@ export function WorkEntryRow({
                   </span>
                 ))}
               {entry.diffStats && (
-                <span className="flex shrink-0 items-center gap-1 font-mono text-xxs text-secondary tabular-nums">
+                <span className="flex shrink-0 items-center gap-space-1 font-mono text-xxs text-secondary tabular-nums">
                   <span className="transition-colors group-focus-within/entry:text-success-secondary group-hover/entry:text-success-secondary">
                     +{entry.diffStats.additions}
                   </span>
@@ -255,7 +255,7 @@ export function WorkEntryRow({
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 text-secondary">
+          <div className="flex shrink-0 items-center gap-space-1 text-secondary">
             {trailing}
             {hoverTimestamp && (
               <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-hover/entry:opacity-100">
@@ -287,7 +287,7 @@ export function WorkEntryRow({
 
       {expanded && canExpand && (
         <div
-          className="ms-7 mt-1 cursor-default border-s border-subtle ps-3 pt-0.5"
+          className="ms-space-5 mt-space-1 cursor-default border-s border-subtle ps-space-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
