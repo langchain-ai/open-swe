@@ -346,16 +346,15 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-space-3">
-          {TargetIcon && (
-            <span
-              role="img"
-              aria-label={`Runs on ${target}`}
-              title={target}
-              className="text-icon-secondary"
-            >
-              <TargetIcon size={16} weight="regular" />
-            </span>
-          )}
+          <span
+            role="img"
+            aria-label={`Runs on ${target}`}
+            title={target}
+            hidden={!TargetIcon}
+            className="text-icon-secondary"
+          >
+            {TargetIcon && <TargetIcon size={16} weight="regular" />}
+          </span>
           {!localThread && visibilityMenu}
         </div>
       </div>
