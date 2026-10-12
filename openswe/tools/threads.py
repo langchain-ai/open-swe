@@ -42,6 +42,7 @@ from openswe.threads.handlers import (
 )
 from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
+from openswe.threads.pr_handoff import summary_matches_pr
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
 from openswe.threads.summary import thread_is_owner
@@ -354,7 +355,7 @@ async def list_threads(
         return _failure("Could not list threads")
     items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
     if pr_ref:
-        items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
+        items = [item for item in items if summary_matches_pr(item, pr_ref.url)]
     return {
         "success": True,
         "items": [_list_item(item) for item in items],
@@ -718,28 +719,6 @@ async def _authorized_locator(
     ):
         raise HTTPException(404, "thread not found")
     return thread_id, summary
-
-
-def _summary_matches_pr(summary: Mapping[str, Any], locator: str) -> bool:
-    expected = parse_github_pr_url(locator)
-    if expected is None:
-        return False
-    pr = summary.get("pr")
-    pull_requests = summary.get("pullRequests")
-    records = [pr] if isinstance(pr, Mapping) else []
-    if isinstance(pull_requests, list):
-        records.extend(record for record in pull_requests if isinstance(record, Mapping))
-    for record in records:
-        url = record.get("url")
-        actual = parse_github_pr_url(url) if isinstance(url, str) else None
-        if (
-            actual is not None
-            and actual.owner.lower() == expected.owner.lower()
-            and actual.repo.lower() == expected.repo.lower()
-            and actual.number == expected.number
-        ):
-            return True
-    return False
 
 
 def _available_actions(

@@ -61,6 +61,7 @@ from openswe.threads.access import (
     resolve_run_email,
 )
 from openswe.threads.creation import create_thread
+from openswe.threads.pr_handoff import pr_handoff_message
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
@@ -827,6 +828,11 @@ async def _attributed_run_messages(
                 injected_dynamic_context_hashes={system["id"]},
             )[0],
         )
+    handoff = await pr_handoff_message(
+        content, current_thread_id=thread_id, login=login, email=email
+    )
+    if handoff is not None:
+        structured.append(handoff)
     return structured, injected, persisted_message_ids
 
 

@@ -55,6 +55,7 @@ from openswe.remote_runtime.client import (
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
+from openswe.threads.pr_handoff import pr_handoff_message
 from openswe.ui_invalidations import Topic
 from openswe.users import User
 
@@ -474,6 +475,16 @@ async def dispatch_agent_run(
             if context is not None
             else await _dispatch_input(content, source, configurable)
         )
+        if assistant_id == "agent":
+            cfg = RunConfig.parse(configurable)
+            handoff = await pr_handoff_message(
+                content,
+                current_thread_id=thread_id,
+                login=cfg.github_login,
+                email=cfg.user_email,
+            )
+            if handoff is not None:
+                input["messages"].append(handoff)
     client = client or dispatch_client()
     return await create_durable_run(
         thread_id,
