@@ -17,6 +17,7 @@ def requester(grant_tool_access: Callable[..., None]):
             return_value={"configurable": {"github_login": "admin"}},
         ),
         patch("openswe.tools.github_workflows.require_repo_access_for_user", AsyncMock()),
+        patch("openswe.github.workflows.WorkflowPolicies.require_repository", AsyncMock()),
     ):
         yield
 
@@ -65,3 +66,11 @@ async def test_dispatch_respects_fixed_ref_inputs_and_repo_access(fake_store: Fa
         with pytest.raises(ValueError, match="write access"):
             await trigger_github_workflow("o/r", "deploy.yml")
         repo.dispatch_workflow.assert_not_awaited()
+
+
+async def test_policies_do_not_cross_workspaces(fake_store: FakeStore):
+    from openswe.github.workflows import WorkflowPolicies, WorkflowRule
+
+    await WorkflowPolicies("one").set("o/r", "deploy.yml", WorkflowRule(ref="main"))
+    assert await WorkflowPolicies("two").read("o/r", "deploy.yml") is None
+    assert await WorkflowPolicies("one").read("o/r", "deploy.yml") is not None

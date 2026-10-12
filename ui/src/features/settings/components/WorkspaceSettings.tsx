@@ -8,6 +8,7 @@ import { Spinner } from "@langchain/macaw-components/Spinner"
 import { SettingsSection } from "@/components/AppShell"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
+import { WorkspaceWorkflowsSection } from "./WorkspaceWorkflowsSection"
 import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
 import {
   useWorkspaceOptions,
@@ -297,6 +298,11 @@ export function WorkspaceSettingsPanel({
         repositories={repositories.data?.repositories ?? []}
       />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
+      <WorkspaceWorkflowsSection
+        key={`workflows:${slug}`}
+        slug={slug}
+        canEdit={canEdit}
+      />
       {canEdit && (
         <WorkspaceApiKeysSection key={`api-keys:${slug}`} slug={slug} />
       )}

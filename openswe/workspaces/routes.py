@@ -30,10 +30,12 @@ from openswe.workspaces.store import (
     list_workspace_options,
     slugify,
 )
+from openswe.workspaces.workflow_routes import router as workflow_router
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["workspaces"])
+router.include_router(workflow_router)
 
 
 def _normalized_slug(raw: str) -> str:

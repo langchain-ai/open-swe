@@ -893,6 +893,14 @@ export interface WorkspaceRecord {
 }
 
 /** How one repository is configured inside a workspace. */
+export interface WorkflowPolicy {
+  repository: string
+  workflow: string
+  ref: string
+  fixed_inputs: Record<string, string>
+  allow_bot_inputs: boolean
+}
+
 export interface RepositorySettings {
   repo: string
   may_start_threads: boolean
@@ -1601,6 +1609,27 @@ export const api = {
     request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "DELETE",
     }),
+  listWorkflowPolicies: (slug: string) =>
+    request<WorkflowPolicy[]>(
+      `/workspaces/${encodeURIComponent(slug)}/workflow-policies`
+    ),
+  saveWorkflowPolicy: (slug: string, policy: WorkflowPolicy) =>
+    request<WorkflowPolicy>(
+      `/workspaces/${encodeURIComponent(slug)}/workflow-policies/${policy.repository.split("/").map(encodeURIComponent).join("/")}/${encodeURIComponent(policy.workflow)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          ref: policy.ref,
+          fixed_inputs: policy.fixed_inputs,
+          allow_bot_inputs: policy.allow_bot_inputs,
+        }),
+      }
+    ),
+  removeWorkflowPolicy: (slug: string, policy: WorkflowPolicy) =>
+    request<void>(
+      `/workspaces/${encodeURIComponent(slug)}/workflow-policies/${policy.repository.split("/").map(encodeURIComponent).join("/")}/${encodeURIComponent(policy.workflow)}`,
+      { method: "DELETE" }
+    ),
   listWorkspaceRepositories: (slug: string) =>
     request<RepositorySettings[]>(
       `/workspaces/${encodeURIComponent(slug)}/repositories`
