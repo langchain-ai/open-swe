@@ -1,6 +1,7 @@
 import base64
 import json
 from contextlib import asynccontextmanager
+from importlib import import_module
 from types import SimpleNamespace
 from typing import Literal, cast
 from unittest.mock import AsyncMock
@@ -17,6 +18,8 @@ from openswe.dashboard.workspace_settings import (
     upsert_workspace_overrides,
 )
 from openswe.message_queue import QueuedMessage
+from openswe.run_config import RunConfig
+from openswe.server import _initial_reply_surface
 from openswe.tasks.store import SidebarTaskMembership
 from openswe.threads import diffs as thread_diffs
 from openswe.threads import handlers
@@ -435,7 +438,11 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
     assert exc_info.value.status_code == 413
 
 
-async def test_enrich_run_start_command_allowlists_client_configurable(monkeypatch) -> None:
+@pytest.mark.parametrize("relay_from_thread_id", [None, "worker-thread"])
+@pytest.mark.parametrize("queued", [True, False])
+async def test_enrich_run_start_command_allowlists_client_configurable(
+    monkeypatch, relay_from_thread_id: str | None, queued: bool
+) -> None:
     updates: list[dict[str, object]] = []
 
     class FakeThreads:
@@ -474,11 +481,13 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
                     "invocation_id": "stolen",
                 },
             },
+            "input": {"messages": [{"type": "human", "content": "PR is ready"}]},
             "config": {
                 "configurable": {
                     "github_login": "attacker",
                     "user_email": "attacker@example.com",
                     "source": "github",
+                    "relay_from_thread_id": relay_from_thread_id,
                     "invocation_id": "stolen",
                     "prepare_run_id": "stolen",
                     "repo": {"owner": "evil", "name": "repo"},
@@ -489,22 +498,39 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         },
     }
 
-    enriched = await thread_runs._enrich_run_start_command(
-        "tid",
-        "octocat",
-        command,
-        metadata={
-            "source": "dashboard",
-            "github_login": "octocat",
-            "repo_owner": "octo",
-            "repo_name": "repo",
+    metadata = {
+        "source": "slack",
+        "source_context": {
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"}
         },
-    )
+        "github_login": "octocat",
+        "repo_owner": "octo",
+        "repo_name": "repo",
+    }
+    if queued:
+        create_run = AsyncMock(return_value={"run_id": "run-2"})
+        monkeypatch.setattr(thread_runs, "create_durable_run", create_run)
+        await thread_runs.queue_follow_up_run("tid", "octocat", command, metadata=metadata)
+        assert create_run.await_args is not None
+        cfg = RunConfig.from_config(create_run.await_args.kwargs["config"])
+        assert _initial_reply_surface(cfg) == ("slack" if relay_from_thread_id else "web")
+        enriched = command
+    else:
+        enriched = await thread_runs._enrich_run_start_command(
+            "tid", "octocat", command, metadata=metadata
+        )
 
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["github_login"] == "octocat"
     assert configurable["user_email"] == "octocat@example.com"
     assert configurable["source"] == "dashboard"
+    cfg = RunConfig.parse(configurable)
+    assert cfg.relay_from_thread_id == relay_from_thread_id
+    assert _initial_reply_surface(cfg) == ("slack" if relay_from_thread_id else "web")
+    messages = str(enriched["params"]["input"])
+    assert ("system:dashboard-handoff" in messages) is (relay_from_thread_id is None)
+    assert all("relay_from_thread_id" not in update for update in updates)
+    assert ("source" in updates[-1]) is (relay_from_thread_id is None)
     assert configurable["invocation_id"] != "stolen"
     assert not (
         {"owner_login", "owner_type", "visibility", "system_authorization"}
@@ -525,6 +551,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         metadata=updates[-1],
     )
     assert offloaded["params"]["config"]["configurable"]["model_selection"] == "explicit"
+    assert RunConfig.from_config(offloaded["params"]["config"]).relay_from_thread_id is None
     assert updates[-1]["model_selection"] == "explicit"
 
 
@@ -668,6 +695,69 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
         b'{"method": "input.respond"}',
         b'{"method": "agent.getTree"}',
     ]
+
+
+@pytest.mark.parametrize("relay", [True, False])
+async def test_report_back_uses_slack_without_announcing_a_dashboard_handoff(
+    monkeypatch: pytest.MonkeyPatch, relay: bool
+) -> None:
+    threads_tool = import_module("openswe.tools.threads")
+    metadata = {
+        "source": "slack",
+        "visibility": "public",
+        "owner_login": "octocat",
+        "source_context": {"slack_thread": {"channel_id": "C123", "thread_ts": "1"}},
+    }
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(return_value={"thread_id": "tid", "metadata": metadata}),
+            get_state=AsyncMock(return_value={"values": {"messages": []}}),
+            update=AsyncMock(),
+        )
+    )
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "get_profile", AsyncMock(return_value={}))
+    patch_thread_module(
+        monkeypatch, "resolve_run_email", AsyncMock(return_value="octocat@test.com")
+    )
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", AsyncMock())
+    handoff = AsyncMock()
+    monkeypatch.setattr(thread_proxy, "_notify_slack_web_handoff", handoff)
+    monkeypatch.setattr(thread_proxy, "_observe_dashboard_run_ttft", AsyncMock())
+    http = AsyncMock()
+    http.__aenter__.return_value = http
+    http.post.return_value = SimpleNamespace(
+        status_code=200,
+        content=b'{"type":"success","result":{"run_id":"run-1"}}',
+        headers={"content-type": "application/json"},
+    )
+    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", lambda **kwargs: http)
+    if relay:
+        monkeypatch.setattr(
+            threads_tool, "get_config", lambda: {"configurable": {"thread_id": "worker-thread"}}
+        )
+        result = await threads_tool._send_message(
+            "tid",
+            threads_tool._Actor(login="octocat", email=None, name="octocat"),
+            "PR is ready",
+            model_id=None,
+            effort=None,
+        )
+        assert result["success"] is True
+    else:
+        status, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+            "tid",
+            "octocat",
+            b'{"method":"run.start","params":{"input":{"messages":[{"type":"human","content":"PR is ready"}]}}}',
+        )
+        assert status == 200
+
+    assert http.post.await_args is not None
+    command = json.loads(http.post.await_args.kwargs["content"])
+    cfg = RunConfig.from_config(command["params"]["config"])
+    assert _initial_reply_surface(cfg) == ("slack" if relay else "web")
+    assert ("system:dashboard-handoff" in str(command["params"]["input"])) is (not relay)
+    assert handoff.await_count == (0 if relay else 1)
 
 
 @pytest.mark.parametrize("open_turn", [True, False])
@@ -1370,8 +1460,50 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     assert exc_info.value.status_code == 403
 
 
+@pytest.mark.parametrize("human_last", [True, False])
+async def test_pickup_run_preserves_only_the_pending_relays_provenance(
+    monkeypatch: pytest.MonkeyPatch, human_last: bool
+) -> None:
+    contents = [
+        {"text": "PR is ready", "relay_from_thread_id": "worker-thread"},
+        {"text": "human follow-up", "source": "dashboard"},
+    ]
+    if not human_last:
+        contents.reverse()
+    monkeypatch.setattr(
+        QueuedMessage,
+        "for_thread",
+        AsyncMock(
+            return_value=[QueuedMessage(thread_id="tid", content=content) for content in contents]
+        ),
+    )
+    patch_thread_module(monkeypatch, "get_profile", AsyncMock(return_value={}))
+    patch_thread_module(
+        monkeypatch, "resolve_run_email", AsyncMock(return_value="octocat@test.com")
+    )
+    dispatch = AsyncMock(return_value={"run_id": "run-2"})
+    monkeypatch.setattr(thread_runs, "dispatch_agent_run", dispatch)
+
+    run_id = await thread_runs.dispatch_pending_follow_ups(
+        "tid",
+        "octocat",
+        {
+            "source": "dashboard",
+            "source_context": {"slack_thread": {"channel_id": "C123", "thread_ts": "1"}},
+        },
+        client=SimpleNamespace(),
+    )
+
+    assert run_id == "run-2"
+    assert dispatch.await_args is not None
+    cfg = RunConfig.parse(dispatch.await_args.args[2])
+    assert cfg.relay_from_thread_id == (None if human_last else "worker-thread")
+    assert _initial_reply_surface(cfg) == ("web" if human_last else "slack")
+
+
+@pytest.mark.parametrize("relay_from_thread_id", [None, "worker-thread"])
 async def test_steer_running_thread_records_and_delivers_the_follow_up(
-    monkeypatch, registry_db: None
+    monkeypatch, registry_db: None, relay_from_thread_id: str | None
 ) -> None:
     updates: list[dict[str, object]] = []
     turn = uuid7()
@@ -1411,9 +1543,10 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
             "id": 7,
             "method": "run.start",
             "params": {
+                "config": {"configurable": {"relay_from_thread_id": relay_from_thread_id}},
                 "input": {
                     "messages": [{"role": "user", "content": "also check the tests", "id": "msg-1"}]
-                }
+                },
             },
         },
         metadata={
@@ -1444,6 +1577,7 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     assert queued.content["text"] == "also check the tests"
     assert queued.content["sender"]["github_login"] == "teammate"
     assert "source" not in queued.content
+    assert RunConfig.parse(queued.content).relay_from_thread_id == relay_from_thread_id
     # The transcript shows it on the live turn right away, under the id the
     # middleware will record it with, so the two writes deduplicate.
     [command] = appended

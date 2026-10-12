@@ -414,11 +414,12 @@ async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPat
 @pytest.mark.parametrize(
     ("result", "mode"),
     [
+        ({"run_id": "run-1"}, "started"),
         ({"run_id": "run-2", "queued": True}, "queued"),
         ({"run_id": "run-1", "message_id": "m-1", "steered": True}, "steered"),
     ],
 )
-async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
+async def test_manage_thread_marks_relays_in_each_delivery_mode(
     monkeypatch: pytest.MonkeyPatch, result: dict[str, object], mode: str
 ) -> None:
     reply = json.dumps({"id": 1, "type": "success", "result": result}).encode()
@@ -430,10 +431,16 @@ async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
         AsyncMock(return_value={"id": "thread-1", "planMode": False}),
     )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    monkeypatch.setattr(
+        threads_tool, "get_config", lambda: {"configurable": {"thread_id": "worker-thread"}}
+    )
 
     sent = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
     assert sent == {"success": True, "mode": mode, "run_id": result["run_id"]}
+    assert proxy.await_args is not None
+    command = json.loads(proxy.await_args.args[2])
+    assert command["params"]["config"]["configurable"]["relay_from_thread_id"] == "worker-thread"
 
 
 async def test_manage_thread_starts_idle_message_with_fixed_command(

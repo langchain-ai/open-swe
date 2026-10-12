@@ -1,5 +1,5 @@
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -78,3 +78,47 @@ async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
     assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
         {"text": "queued during the image fetch"}
     ]
+
+
+@pytest.mark.parametrize("slack_enabled", [True, False])
+@pytest.mark.parametrize("human_last", [True, False])
+async def test_queued_relay_routes_to_slack_without_a_web_handoff(
+    monkeypatch: pytest.MonkeyPatch, slack_enabled: bool, human_last: bool
+) -> None:
+    contents = [
+        {"text": "PR is ready", "source": "dashboard", "relay_from_thread_id": "worker-thread"},
+        {"text": "human follow-up", "source": "dashboard"},
+    ]
+    if not human_last:
+        contents.reverse()
+    monkeypatch.setattr(
+        QueuedMessage,
+        "for_thread",
+        AsyncMock(
+            return_value=[
+                QueuedMessage(thread_id="thread-1", content=content) for content in contents
+            ]
+        ),
+    )
+    monkeypatch.setattr(QueuedMessage, "remove", AsyncMock())
+    with patch(
+        "openswe.middleware.check_message_queue.get_config",
+        return_value={
+            "configurable": {
+                "thread_id": "thread-1",
+                "source": "dashboard",
+                "slack_thread": {"channel_id": "C123", "thread_ts": "1"} if slack_enabled else None,
+            }
+        },
+    ):
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": [], "reply_surface": "web"}), MagicMock()
+        )
+    assert result is not None
+    assert result["reply_surface"] == ("slack" if slack_enabled and not human_last else "web")
+    envelopes = [_envelope(message) for message in result["messages"]]
+    assert any("PR is ready" in envelope for envelope in envelopes)
+    assert any("human follow-up" in envelope for envelope in envelopes)
+    assert any("system:dashboard-handoff" in envelope for envelope in envelopes) is (
+        slack_enabled and human_last
+    )

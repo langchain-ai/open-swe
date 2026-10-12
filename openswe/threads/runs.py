@@ -50,6 +50,7 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -755,12 +756,9 @@ async def _attributed_run_messages(
     client: Any,
     sandbox_handoff: Mapping[str, Any] | None = None,
     review_chat_pr_url: str | None = None,
+    relay_from_thread_id: str | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
-    """The human message a dashboard command carries, attributed to its sender.
-
-    Returns the structured messages, the dynamic-context hashes already in the
-    conversation, and the ids of the messages the graph already holds.
-    """
+    """Attribute a command's messages and recover their persisted context and ids."""
     if content is None:
         content = ""
     sender_id = f"github:{login}"
@@ -789,7 +787,7 @@ async def _attributed_run_messages(
         person["email"] = email
     sender_id = (await User.canonical_person(person))["id"]
     notices: list[tuple[SystemIdentity, str]] = []
-    if metadata.get("source") == "slack":
+    if metadata.get("source") == "slack" and not relay_from_thread_id:
         notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
     if sandbox_handoff is not None:
         to_cloud = sandbox_handoff.get("sandbox_id") is None
@@ -857,6 +855,8 @@ async def _enrich_run_start_command(
     if not isinstance(client_configurable, dict):
         client_configurable = {}
 
+    relay_from_thread_id = RunConfig.parse(client_configurable).relay_from_thread_id
+
     chosen_model, chosen_effort = normalize_model_choice(
         client_configurable.get("agent_model_id"),
         client_configurable.get("agent_effort"),
@@ -891,6 +891,9 @@ async def _enrich_run_start_command(
     invocation_started_at = datetime.now(UTC).isoformat()
     overrides = with_invocation_id(None, invocation_id)
     overrides["invocation_started_at"] = invocation_started_at
+    if relay_from_thread_id:
+        overrides["relay_from_thread_id"] = relay_from_thread_id
+        overrides["source"] = DASHBOARD_SOURCE
     run_model: str | None = None
     run_effort: str | None = None
 
@@ -951,6 +954,7 @@ async def _enrich_run_start_command(
         client=client,
         sandbox_handoff=sandbox_handoff,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
+        relay_from_thread_id=relay_from_thread_id,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
@@ -969,9 +973,7 @@ async def _enrich_run_start_command(
     if isinstance(run_input, dict):
         run_input["messages"] = structured
     metadata_update: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
-        # Continuing on the web promotes a `/oswe` question thread for good.
-        "unlisted": False,
+        **({"source": DASHBOARD_SOURCE, "unlisted": False} if not relay_from_thread_id else {}),
         "model_selection": model_selection,
         **await participant_metadata(metadata, login=login, email=email),
         "injected_dynamic_context_hashes": sorted(injected),
@@ -1143,16 +1145,11 @@ async def steer_running_thread(
     turn: OpenTurn | None,
     email: str | None = None,
 ) -> dict[str, Any]:
-    """Deliver a ``run.start`` sent while a run is live into that run.
-
-    The message joins ``turn`` instead of opening a new one: it is recorded on
-    the transcript right away and left for the run to pick up before its next
-    model call. The reply mirrors the protocol's success envelope so the caller
-    cannot tell a steer from a start.
-    """
+    """Record a follow-up on the live turn and queue it for the next model call."""
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
+    relay_from_thread_id = RunConfig.from_config(params.get("config")).relay_from_thread_id
     content = _command_message_content(params)
     command_images = _dashboard_images_from_content(content)
     if not _command_prompt_text(content) and not command_images:
@@ -1180,6 +1177,7 @@ async def steer_running_thread(
         creating=False,
         email=email,
         client=client,
+        relay_from_thread_id=relay_from_thread_id,
     )
     client_message_id = _command_message_id(params)
     message_id = (
@@ -1226,7 +1224,9 @@ async def steer_running_thread(
         "surface": "web",
         "created_at_ms": _now_ms(),
     }
-    if metadata.get("source") == "slack":
+    if relay_from_thread_id:
+        payload["relay_from_thread_id"] = relay_from_thread_id
+    elif metadata.get("source") == "slack":
         payload["source"] = DASHBOARD_SOURCE
     if not await queue_message_for_thread(thread_id, payload):
         raise HTTPException(502, "failed to deliver the follow-up to the running agent")
@@ -1256,10 +1256,13 @@ async def steer_running_thread(
             **await participant_metadata(metadata, login=login, email=email),
         },
     )
-    try:
-        await _notify_slack_web_handoff(thread_id, metadata, client)
-    except Exception:
-        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
+    if not relay_from_thread_id:
+        try:
+            await _notify_slack_web_handoff(thread_id, metadata, client)
+        except Exception:
+            logger.exception(
+                "Failed to update Slack message for dashboard handoff on %s", thread_id
+            )
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1405,15 +1408,14 @@ async def dispatch_pending_follow_ups(
     client: Any,
     multitask_strategy: str = "interrupt",
 ) -> str | None:
-    """Start a run for follow-ups a finished run never got to.
-
-    A message steered into a run after its last model call is still waiting in
-    the store; the new run's first model call picks it up. Returns the run id,
-    or ``None`` when nothing was waiting.
-    """
-    if not await QueuedMessage.for_thread(thread_id):
+    """Start a pickup run for follow-ups a finished run never got to."""
+    queued = await QueuedMessage.for_thread(thread_id)
+    if not queued:
         return None
-    configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+    relay_from_thread_id = RunConfig.parse(queued[-1].content).relay_from_thread_id
+    configurable = await _build_dashboard_configurable(
+        thread_id, login, metadata, overrides={"relay_from_thread_id": relay_from_thread_id}
+    )
     run = await dispatch_agent_run(
         thread_id,
         None,

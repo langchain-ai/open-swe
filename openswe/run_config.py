@@ -96,6 +96,7 @@ class RunConfig(BaseModel):
     offload_conversation: bool = False
     client_tools: list[ClientToolSpec] = Field(default_factory=list)
     source: str | None = None
+    relay_from_thread_id: str | None = None
     task: str | None = None
     environment: str | None = None
     workspace: str | None = None
@@ -187,6 +188,21 @@ class RunConfig(BaseModel):
     watch_key: str | None = None
     schedule_id: str | None = None
     background_task_completion: bool | None = None
+
+    @property
+    def slack_tools_enabled(self) -> bool:
+        """Whether this run has usable, trusted Slack source context."""
+        if self.source not in {"slack", "schedule", "incidents_agent", "dashboard"}:
+            return False
+        if self.slack_thread is None or not self.slack_thread.channel_id.strip():
+            return False
+        if (
+            self.source == "slack"
+            and self.slack_ask is True
+            and self.slack_thread.triggering_user_id.strip()
+        ):
+            return True
+        return bool(self.slack_thread.thread_ts.strip())
 
     @classmethod
     def parse(cls, raw: Any) -> Self:

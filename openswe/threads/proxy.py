@@ -14,6 +14,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.config import ENV
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from openswe.run_config import RunConfig
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -298,7 +299,11 @@ async def proxy_dashboard_thread_commands(
             return 200, json.dumps(requeued).encode(), "application/json"
         if response.status_code >= 400:
             await _fail_requested_turn(thread_id, enriched)
-    if run_start_succeeded and not creating:
+    if (
+        run_start_succeeded
+        and not creating
+        and not RunConfig.from_config(enriched["params"].get("config")).relay_from_thread_id
+    ):
         try:
             await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
         except Exception:

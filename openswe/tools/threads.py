@@ -889,9 +889,7 @@ async def _send_message(
     model_id: str | None,
     effort: str | None,
 ) -> dict[str, Any]:
-    # The dashboard's own send: a busy thread gets the message steered into its
-    # open turn or queued as a follow-up run, both shown on the transcript at once.
-    configurable: dict[str, Any] = {}
+    configurable = RunConfig(relay_from_thread_id=RunConfig.from_config(_config()).thread_id).dump()
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
     command = {

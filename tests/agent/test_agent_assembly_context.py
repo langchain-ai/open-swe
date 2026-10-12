@@ -495,15 +495,23 @@ SLACK_TOOL_NAMES = {
 
 
 @pytest.mark.asyncio
-async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
-    """The tool set cannot move with the surface: that invalidates the cached prefix."""
+@pytest.mark.parametrize(
+    ("relay_from_thread_id", "slack_enabled", "reply_surface"),
+    [(None, True, "web"), ("worker-thread", True, "slack"), ("worker-thread", False, "web")],
+)
+async def test_dashboard_turn_selects_the_surface_without_changing_slack_tools(
+    relay_from_thread_id: str | None, slack_enabled: bool, reply_surface: str
+) -> None:
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
     configurable.update(
         {
             "source": "dashboard",
-            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+            "relay_from_thread_id": relay_from_thread_id,
+            "slack_thread": (
+                {"channel_id": "C123", "thread_ts": "1700000000.000100"} if slack_enabled else None
+            ),
         }
     )
 
@@ -512,13 +520,13 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
     assert isinstance(tools, list)
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
-    assert SLACK_TOOL_NAMES <= tool_names
+    assert (SLACK_TOOL_NAMES <= tool_names) is slack_enabled
     middleware = captured["middleware"]
     assert isinstance(middleware, list)
     require_reply = next(
         item for item in middleware if type(item).__name__ == "RequireUserReplyMiddleware"
     )
-    assert require_reply.before_agent({}, MagicMock())["reply_surface"] == "web"
+    assert require_reply.before_agent({}, MagicMock())["reply_surface"] == reply_surface
 
 
 @pytest.mark.asyncio

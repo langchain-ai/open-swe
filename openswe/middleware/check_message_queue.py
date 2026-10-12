@@ -30,6 +30,7 @@ from openswe.middleware.require_user_reply import (
     current_reply_surface,
 )
 from openswe.middleware.trace import scrub_middleware_inputs
+from openswe.run_config import RunConfig
 from openswe.users import User
 from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -161,15 +162,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
     state: LinearNotifyState,
     runtime: Runtime,  # noqa: ARG001
 ) -> dict[str, Any] | None:
-    """Middleware that checks for queued messages before each model call.
-
-    If messages are found in the queue for this thread, it extracts all messages,
-    adds them to the conversation state as new human messages, and clears the queue.
-    Messages are processed in FIFO order (oldest first).
-
-    This enables handling of follow-up comments that arrive while the agent is busy.
-    The agent will see the new messages and can incorporate them into its response.
-    """
+    """Inject queued follow-ups in FIFO order and select their reply surface."""
     try:
         config = get_config()
         configurable = config.get("configurable", {})
@@ -221,7 +214,13 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         surface = current_reply_surface(state)
         moved_surface: ReplySurface | None = None
         for content in contents:
-            if _is_dashboard_queued_message(content):
+            if RunConfig.parse(content).relay_from_thread_id:
+                surface = moved_surface = (
+                    SLACK_REPLY_SURFACE
+                    if RunConfig.parse(configurable).slack_tools_enabled
+                    else WEB_REPLY_SURFACE
+                )
+            elif _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on
                 # every later web follow-up stacks identical handoff notices in
