@@ -1610,6 +1610,10 @@ export const api = {
     request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "DELETE",
     }),
+  workflowOptions: (slug: string, repo: string) =>
+    request<{ workflows: string[]; refs: string[] }>(
+      `/workspaces/${encodeURIComponent(slug)}/workflow-options/${repo.split("/").map(encodeURIComponent).join("/")}`
+    ),
   listWorkflowPolicies: (slug: string) =>
     request<WorkflowPolicy[]>(
       `/workspaces/${encodeURIComponent(slug)}/workflow-policies`

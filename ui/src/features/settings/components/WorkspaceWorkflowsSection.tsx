@@ -28,6 +28,11 @@ export function WorkspaceWorkflowsSection({
     queryFn: () => api.listWorkspaceRepositories(slug),
   })
   const [repository, setRepository] = useState("")
+  const options = useQuery({
+    queryKey: ["workflowOptions", slug, repository],
+    queryFn: () => api.workflowOptions(slug, repository),
+    enabled: Boolean(repository),
+  })
   const [workflow, setWorkflow] = useState("")
   const [ref, setRef] = useState("main")
   const [fixedInputs, setFixedInputs] = useState("{}")
@@ -197,6 +202,7 @@ export function WorkspaceWorkflowsSection({
                 />
               </div>
               <Input
+                list="workflow-filenames"
                 label="Workflow Filename"
                 size="sm"
                 variant="outlined"
@@ -207,6 +213,7 @@ export function WorkspaceWorkflowsSection({
               />
             </div>
             <Input
+              list="workflow-refs"
               label="Fixed Ref"
               size="sm"
               value={ref}
@@ -214,6 +221,27 @@ export function WorkspaceWorkflowsSection({
               debounceMs={0}
               hintText="Use a protected branch or tag. Open SWE cannot choose another ref."
             />
+            <datalist id="workflow-filenames">
+              {options.data?.workflows.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            <datalist id="workflow-refs">
+              {options.data?.refs.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            {repository && options.isFetching && (
+              <p className="text-xs text-secondary">
+                Loading workflow and ref suggestions…
+              </p>
+            )}
+            {options.isError && (
+              <p className="text-xs text-error-primary">
+                Couldn’t load suggestions. You can still enter a filename and
+                ref manually.
+              </p>
+            )}
             <Textarea
               label="Fixed Inputs (JSON)"
               size="sm"

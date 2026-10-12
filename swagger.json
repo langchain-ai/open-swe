@@ -20212,6 +20212,80 @@
         ]
       }
     },
+    "/dashboard/api/workspaces/{slug}/workflow-options/{owner}/{name}": {
+      "get": {
+        "operationId": "workflow_options_dashboard_api_workspaces__slug__workflow_options__owner___name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "title": "Response Workflow Options Dashboard Api Workspaces  Slug  Workflow Options  Owner   Name  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Workflow Options",
+        "tags": [
+          "dashboard",
+          "workspaces",
+          "workspaces"
+        ]
+      }
+    },
     "/dashboard/api/workspaces/{slug}/workflow-policies": {
       "get": {
         "operationId": "list_workflow_policies_dashboard_api_workspaces__slug__workflow_policies_get",

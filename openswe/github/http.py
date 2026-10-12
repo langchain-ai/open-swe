@@ -523,6 +523,24 @@ class RepoClient:
             {"ref": ref, "inputs": dict(inputs)},
         )
 
+    async def workflow_options(self) -> dict[str, list[str]]:
+        workflows = await self.pages("actions/workflows", key="workflows")
+        branches = await self.pages("branches")
+        tags = await self.pages("tags")
+        return {
+            "workflows": sorted(
+                {
+                    path.rsplit("/", 1)[-1]
+                    for row in workflows
+                    if isinstance(path := row.get("path"), str)
+                    and path.startswith(".github/workflows/")
+                }
+            ),
+            "refs": sorted(
+                {name for row in [*branches, *tags] if isinstance(name := row.get("name"), str)}
+            ),
+        }
+
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")
 
