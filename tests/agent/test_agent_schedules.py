@@ -1024,6 +1024,7 @@ async def test_the_startup_import_moves_store_automations_into_postgres(
         "kind": "github",
         "repo": "langchain-ai/open-swe",
         "events": ["issues.opened"],
+        "base_branches": None,
     }
     # A record whose workspace is gone is dropped along with its cron.
     assert await schedules.get_agent_schedule(SCHED_GONE) is None
