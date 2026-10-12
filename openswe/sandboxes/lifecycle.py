@@ -130,6 +130,13 @@ class SandboxCreateConfig:
         return await create_sandbox(snapshot_id=self.snapshot_id, **self.resources)
 
 
+async def _proxy_token(
+    thread_id: str | None, workspace_slug: str | None, repositories: Sequence[str] | None
+) -> SandboxGitHubAccess:
+    async with aphase(thread_id, "sandbox.proxy_token"):
+        return await workspace_token(workspace_slug, repositories=repositories)
+
+
 async def _create_sandbox_with_proxy(
     *,
     thread_id: str | None = None,
@@ -144,15 +151,25 @@ async def _create_sandbox_with_proxy(
         config = await SandboxCreateConfig.resolve(
             workspace_slug, source=source, owner_login=owner_login
         )
-    async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
-        sandbox_backend = await config.boot()
+    # The proxy token does not depend on the sandbox, so it is minted while the box boots.
+    token = (
+        asyncio.ensure_future(_proxy_token(thread_id, workspace_slug, github_proxy_repositories))
+        if ENV.SANDBOX_TYPE.get() == "langsmith"
+        else None
+    )
+    if token is not None:
+        token.add_done_callback(lambda minted: minted.cancelled() or minted.exception())
+    try:
+        async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
+            sandbox_backend = await config.boot()
+    except BaseException:
+        if token is not None:
+            token.cancel()
+        raise
 
     async with git_identity(thread_id, sandbox_backend):
-        if ENV.SANDBOX_TYPE.get() == "langsmith":
-            async with aphase(thread_id, "sandbox.proxy_token"):
-                access = await workspace_token(
-                    workspace_slug, repositories=github_proxy_repositories
-                )
+        if token is not None:
+            access = await token
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
                 await _configure_proxy(
