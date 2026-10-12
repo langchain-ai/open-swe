@@ -75,8 +75,6 @@ def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> s
     if pr.additions is not None and pr.deletions is not None:
         files = f" in {pr.changed_files} files" if pr.changed_files else ""
         parts.append(f"+{pr.additions} −{pr.deletions}{files}")
-    if pr.head_ref and pr.base_ref:
-        parts.append(f"`{escape(pr.head_ref)}` → `{escape(pr.base_ref)}`")
     if requester is not None and requester != author:
         parts.append(f"Requested by {requester}")
     return "  ·  ".join(parts)
@@ -154,8 +152,6 @@ def open_card(
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
     blocks.extend(_reviewers(request, review_states))
-    if request.detail:
-        blocks.append(context(f"Waiting on: {escape(request.detail)}."))
     blocks.append(actions(*_buttons(request)))
     return f"Review requested for {_label(request)}: {title}", blocks
 
@@ -170,8 +166,11 @@ def closed_card(
 ) -> tuple[str, list[Block]]:
     """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
     pr = request.pull_request
-    if outcome == "merged" and (approvers := _approvers(request, review_states)):
-        outcome = f"merged — approved by {approvers}"
+    if outcome == "merged":
+        line = f":merged: <{pr.url}|{escape(title)}> — by {author}"
+        if approvers := _approvers(request, review_states):
+            line += f" — approved by {approvers}"
+        return line, [section(line)]
     return f"Review request: {outcome} — {pr.url} — by {author}", [
         section(
             f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)} — by {author}"
