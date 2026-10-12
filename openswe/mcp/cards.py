@@ -64,7 +64,12 @@ async def _consented(login: str, gateway: str, auth_id: str) -> bool:
     if outcome != "completed":
         logger.info("Managed tools consent not completed", extra={"outcome": outcome})
         return False
-    await refresh_tools(login, gateway)
+    try:
+        await refresh_tools(login, gateway)
+    except Exception:
+        # Best effort: a gateway still missing services refuses to list, and a stale
+        # list expires on its own; neither may stop the thread from resuming.
+        logger.warning("Managed tools refresh after consent failed", exc_info=True)
     return True
 
 

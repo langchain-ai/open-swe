@@ -223,7 +223,8 @@ async def test_card_resumes_once_its_own_services_are_connected(monkeypatch, car
         services=["linear", "pylon"],
     )
     monkeypatch.setattr(cards, "consent_outcome", AsyncMock(return_value="completed"))
-    refresh = AsyncMock()
+    # Re-listing is best effort; a gateway refusing it must not keep the thread waiting.
+    refresh = AsyncMock(side_effect=ValueError("MCP tool discovery failed (HTTP 428)"))
     monkeypatch.setattr(cards, "refresh_tools", refresh)
     unconnected = {"notion", "linear", "pylon"}
 
