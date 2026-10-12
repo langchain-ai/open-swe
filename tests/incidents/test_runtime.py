@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import langgraph_sdk
 import pytest
 from langchain.agents.middleware.types import ModelRequest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, convert_to_messages
 
-from openswe.incidents import documents, runtime, service
+from openswe.incidents import documents, runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.slack.channels import SlackChannel
@@ -112,6 +112,43 @@ async def test_paused_incidents_stop_automatic_turns_but_answer_questions(incide
     await service.POLICIES.put(IncidentPolicy(enabled=False, workspace_id="T1"))
     with pytest.raises(PermissionError, match="disabled"):
         await runtime.IncidentMiddleware(session).awrap_model_call(request(), AsyncMock())
+
+
+async def test_responder_requests_do_not_change_the_model_system_prompt(incident):
+    system_prompts = []
+    for explicit_request in (None, "Check the gateway", "Open a fix PR", None):
+        session = await runtime.load_incident_session(config(incident_request=explicit_request))
+        handler = AsyncMock()
+        await runtime.IncidentMiddleware(session).awrap_model_call(request(), handler)
+        system_prompts.append(handler.await_args.args[0].system_message.text)
+
+    assert all(system_prompt == system_prompts[0] for system_prompt in system_prompts)
+
+
+async def test_incident_request_is_persisted_and_replayed_in_model_input(incident):
+    explicit_request = 'Check the "gateway"\nand report its failure rate'
+    turn_input = turns._input(incident.record, request=explicit_request, requester=None)
+    messages = convert_to_messages(turn_input["messages"])
+    session = await runtime.load_incident_session(config(incident_request=explicit_request))
+    handler = AsyncMock()
+    await runtime.IncidentMiddleware(session).awrap_model_call(request(*messages), handler)
+
+    request_block = f"<incident-request>{json.dumps(explicit_request)}</incident-request>"
+    model_messages = handler.await_args.args[0].messages
+    assert model_messages[-1].text.endswith(request_block)
+    assert model_messages == messages
+
+    automatic_input = turns._input(incident.record, request=None, requester=None)
+    automatic_messages = convert_to_messages(automatic_input["messages"])
+    automatic_session = await runtime.load_incident_session(config(incident_request=None))
+    replay_handler = AsyncMock()
+    await runtime.IncidentMiddleware(automatic_session).awrap_model_call(
+        request(*messages, *automatic_messages), replay_handler
+    )
+
+    replayed_messages = replay_handler.await_args.args[0].messages
+    assert replayed_messages[: len(messages)] == model_messages
+    assert replayed_messages[-1].text.endswith("<incident-request>null</incident-request>")
 
 
 async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
