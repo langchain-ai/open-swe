@@ -28,8 +28,8 @@ from openswe.slack.client import (
     post_slack_ephemeral_message,
     remove_slack_reaction,
     replace_slack_command_message,
-    strip_bot_mention,
 )
+from openswe.slack.parsed_message import SlackAction
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
 from openswe.slack.thinking import settle_slack_thread_status
 from openswe.slack.webhook import workspace_scoped_default_repo
@@ -41,8 +41,7 @@ from openswe.workspaces.routing import resolve_workspace
 logger = logging.getLogger(__name__)
 
 ASK_COMMAND = "/oswe"
-BY_THE_WAY_COMMAND = "/btw"
-_BY_THE_WAY_RE = re.compile(r"/btw(?:\s+(?P<question>.*))?", re.DOTALL | re.IGNORECASE)
+BY_THE_WAY_COMMAND = SlackAction.BY_THE_WAY.value
 _CONTEXT_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_context)", re.IGNORECASE)
 MAX_QUESTION_CHARS = 2000
 CHANNEL_CONTEXT_MESSAGE_LIMIT = 30
@@ -72,13 +71,6 @@ class SlackAskRequest(BaseModel):
     # `/btw` only: the Slack thread the public answer goes to, and the mention's own ts.
     reply_thread_ts: str = ""
     message_ts: str = ""
-
-    @staticmethod
-    def by_the_way_question(text: str, bot_user_id: str) -> str | None:
-        """The question in an `@Open SWE /btw ...` mention; None when it is not one."""
-        clean = strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
-        match = _BY_THE_WAY_RE.fullmatch(clean)
-        return None if match is None else (match.group("question") or "").strip()
 
     @property
     def by_the_way(self) -> bool:

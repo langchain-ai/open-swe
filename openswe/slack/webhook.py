@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
+from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
     ChannelIdentity,
@@ -33,13 +34,15 @@ from openswe.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from openswe.slack.channels import SlackChannel
-from openswe.slack.dm import dm_thread_title, is_concierge_thread, is_dm_channel
+from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
+from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import (
@@ -51,21 +54,26 @@ from openswe.slack.thinking import (
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User, persist_display_name
 from openswe.utils.json_types import as_json_object
-from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.langsmith import create_langsmith_feedback, get_langsmith_trace_url
 from openswe.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
 from openswe.utils.thread_ops import queue_message_for_thread
+from openswe.utils.thread_participants import slack_participant_ids
 from openswe.utils.thread_settings import load_thread_settings
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace, workspace_for_repo
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
-_CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
-_CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
-_KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
-_NON_KITCHEN_CONTEXT = load_prompt("runs/slack-non-kitchen.md")
-_MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
+_CODE_CHANNEL_CONTEXT = prompt("runs/slack-code-channel")
+# Slack opens a new code channel by quoting its origin message on the requester's behalf.
+_CODE_CHANNEL_ORIGIN_QUOTE = re.compile(
+    r"<https://[^|>\s]+/archives/[A-Z0-9]+/p\d+\|Context> from <#"
+)
+_CONCIERGE_CONTEXT = prompt("runs/slack-concierge")
+_KITCHEN_CONTEXT = prompt("runs/slack-kitchen")
+_NON_KITCHEN_CONTEXT = prompt("runs/slack-non-kitchen")
+_MESSAGE_UPDATE_PREAMBLE = prompt("runs/slack-message-update")
 
 
 def _is_explicit_slack_request(
@@ -353,6 +361,19 @@ def _slack_person(
     return person
 
 
+def _slack_bot_system_identity(bot_id: str, name: str) -> SystemIdentity:
+    return {
+        "id": f"system:slack-bot-{bot_id}",
+        "display_name": name,
+        "platform": "slack",
+        "sender_type": "bot",
+    }
+
+
+def _slack_bot_identity(bot: AllowedSlackBot) -> SystemIdentity:
+    return _slack_bot_system_identity(bot.bot_id, bot.name.strip() or "Bot")
+
+
 def _slack_sender(
     message: dict[str, Any],
     user_names_by_id: dict[str, str],
@@ -366,12 +387,7 @@ def _slack_sender(
     """
     bot_id = slack_utils.slack_message_bot_id(message)
     if bot_id:
-        bot: SystemIdentity = {
-            "id": f"system:slack-bot-{bot_id}",
-            "display_name": slack_utils.slack_message_bot_name(message),
-            "platform": "slack",
-            "sender_type": "bot",
-        }
+        bot = _slack_bot_system_identity(bot_id, slack_utils.slack_message_bot_name(message))
         return bot["id"], bot, "system"
     user_id = str(message.get("user"))
     person = _slack_person(
@@ -444,7 +460,7 @@ def _slack_context_input(
     dispatched_timestamps: set[str] | None = None,
     run_described_person_ids: set[str] | None = None,
     visible_context_hashes: set[str] | None = None,
-    trigger_bot: AllowedSlackBot | None = None,
+    trigger_system: SystemIdentity | None = None,
     explicit_mention: bool = False,
     web_only: bool = False,
 ) -> RunInput:
@@ -564,13 +580,11 @@ def _slack_context_input(
         )
     trigger_sender_id = trigger_person["id"]
     trigger_kind: MessageKind = "human"
-    if trigger_bot is not None:
-        trigger_sender_id, bot_identity, trigger_kind = _slack_sender(
-            {"bot_id": trigger_bot.bot_id, "bot_profile": {"name": trigger_bot.name}}, {}, {}
-        )
+    if trigger_system is not None:
+        trigger_sender_id, trigger_kind = trigger_system["id"], "system"
         if trigger_sender_id not in described:
             described.add(trigger_sender_id)
-            add_context(system_introduction(cast(SystemIdentity, bot_identity)))
+            add_context(system_introduction(trigger_system))
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
@@ -589,7 +603,7 @@ def _slack_context_input(
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
     run_messages.append(
-        (system_input if trigger_bot is not None else human_input)(
+        (system_input if trigger_system is not None else human_input)(
             request_blocks,
             {
                 "sender_id": trigger_sender_id,
@@ -651,6 +665,11 @@ async def process_slack_mention(
         if show_status:
             await _clear_early_status_if_idle(request, status_ts)
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
+
+
+async def start_slack_run(request: SlackRequest, repo: common.SlackRepoResolution | None) -> bool:
+    """Process ``request`` without the error reply ``process_slack_mention`` posts; whether a run started."""
+    return await _process_slack_mention_impl(request, repo)
 
 
 async def _notify_slack_processing_error(
@@ -957,31 +976,39 @@ async def _process_slack_mention_impl(
         ]
         if not message_update:
             source_messages = context_messages
+    parsed = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
+    performance_command = (
+        parsed.performance_model
+        and not message_update
+        and allowed_bot is None
+        and not concierge_mode
+    )
+    is_first_mention = not await common.thread_exists(thread_id)
+    # A `/workspace:<name>` command on the message that opens a thread is one
+    # input to which workspace its sandbox boots from — resolved below, once the
+    # triggering user's GitHub login is known. Only the opening message can pick
+    # it: the sandbox is created once, so honoring a later one would change the
+    # prompt but not the image. It is stripped only when it names a real
+    # workspace, so a typo stays visible in the transcript instead of vanishing.
+    tagged_slug: str | None = None
+    if is_first_mention and parsed.workspace:
+        if await WORKSPACES.get(parsed.workspace) is not None:
+            tagged_slug = parsed.workspace
+        else:
+            common.logger.info(
+                "Slack thread tagged an unknown workspace",
+                extra={"slack_thread_id": thread_id, "tagged_workspace": parsed.workspace},
+            )
     clean_text = (
         slack_utils.replace_bot_mention_with_username(
-            text, bot_user_id, common.SLACK_BOT_USERNAME
+            parsed.without(
+                performance_model=performance_command, workspace=tagged_slug is not None
+            ),
+            bot_user_id,
+            common.SLACK_BOT_USERNAME,
         ).strip()
         or "(no text in mention)"
     )
-    is_first_mention = not await common.thread_exists(thread_id)
-    # A `workspace:<name>` (or legacy `env:<name>`) tag on the message that opens
-    # a thread is one input to which workspace its sandbox boots from — resolved
-    # below, once the triggering user's GitHub login is known. Only the opening
-    # message can pick it: the sandbox is created once, so honoring a later tag
-    # would change the prompt but not the image. The tag is stripped only when it
-    # names a real workspace, so a typo stays visible in the transcript instead
-    # of vanishing.
-    tagged_slug: str | None = None
-    if is_first_mention:
-        parsed_slug, text_without_tag = parse_workspace_tag(clean_text)
-        if parsed_slug and await WORKSPACES.get(parsed_slug) is not None:
-            tagged_slug = parsed_slug
-            clean_text = text_without_tag or "(no text in mention)"
-        elif parsed_slug:
-            common.logger.info(
-                "Slack thread tagged an unknown workspace",
-                extra={"slack_thread_id": thread_id, "tagged_workspace": parsed_slug},
-            )
     # Auto-resolve cross-posted Slack message links in context
     resolved_links_section, image_urls_from_links = await common.resolve_slack_links_in_context(
         source_messages, user_names_by_id
@@ -1039,6 +1066,15 @@ async def _process_slack_mention_impl(
         thread_workspace = await common.get_thread_workspace(thread_id)
 
     image_model_override: tuple[str, str] | None = None
+    if performance_command:
+        stored_settings = await load_thread_settings(langgraph_client, thread_id)
+        stored_performance = stored_settings.get("routing_models", {}).get("performance")
+        if stored_performance:
+            thread_model_choice = (stored_performance["model_id"], stored_performance["effort"])
+        else:
+            settings = await cached_workspace_settings(thread_workspace)
+            thread_model_choice = settings.agent_routing_models["performance"]
+
     if image_urls:
         resolved_model_id = thread_model_choice[0] if thread_model_choice else None
         if resolved_model_id is None:
@@ -1143,22 +1179,48 @@ async def _process_slack_mention_impl(
     channel_identity = await _slack_channel_identity(
         channel_id, thread_ts, channel_context, thread_id=thread_id, repo=repo
     )
+    guide = await ReviewGuideSession.get(thread_id) if code_channel else None
+    review_guide = guide is not None
     # Guidance that holds for the whole thread, deduped by content so the model
     # is told once; only what this turn adds travels as a message.
     constant_context = "\n\n".join(
         section
         for section in (
-            _CODE_CHANNEL_CONTEXT if code_channel else "",
+            _CODE_CHANNEL_CONTEXT if code_channel and not review_guide else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
             _KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT,
         )
         if section
     )
+    # A thread started under a DM Open SWE sent for another thread is about that thread's work.
+    dm_origin = (
+        await DmOrigin.of(channel_id, thread_ts)
+        if is_first_mention
+        and not concierge_mode
+        and event_ts != thread_ts
+        and is_dm_channel(channel_context)
+        else None
+    )
+    dm_origin_section = (
+        prompt(
+            "slack/dm-origin",
+            origin=dm_origin,
+            permalink=await slack_utils.get_slack_permalink(*dm_origin.location) or "",
+            agent_thread_id=await common.lookup_slack_thread_id(
+                langgraph_client, *dm_origin.location
+            )
+            or "",
+        )
+        if dm_origin is not None
+        else ""
+    )
     turn_context = "\n\n".join(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
-            load_prompt("runs/slack-review-request.md")
+            dm_origin_section,
+            request.turn_context,
+            prompt("runs/slack-review-request")
             if event_ts != thread_ts
             and context_thread_ts == thread_ts
             and any(
@@ -1183,6 +1245,9 @@ async def _process_slack_mention_impl(
         "source": "slack",
         "slack_kickoff_eligible": False,
     }
+    if review_guide:
+        # The thread keeps the last run's configurable, which may be a click's.
+        configurable["review_guide_approve_ts"] = ""
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login
@@ -1243,7 +1308,9 @@ async def _process_slack_mention_impl(
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.
-        slack_participant_user_ids=[*logins_by_user_id] if not is_first_mention else [],
+        slack_participant_user_ids=slack_participant_ids(context_messages)
+        if not is_first_mention
+        else [],
         visibility=visibility,
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",
@@ -1252,6 +1319,16 @@ async def _process_slack_mention_impl(
         # Dispatch would create the thread itself, with no metadata and so public.
         raise RuntimeError("could not persist thread authorization metadata")
 
+    # The guide starts its own first turn; this quote would only queue a second one behind it.
+    if review_guide and _CODE_CHANNEL_ORIGIN_QUOTE.match(text):
+        common.logger.info(
+            "Ignoring the code channel's origin quote in a review guide",
+            extra={"agent_thread_id": thread_id},
+        )
+        return False
+    # A person writing in a closed guide wants it back.
+    if guide is not None and guide.closed:
+        await guide.set_closed(False)
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
     # queue while the thread is idle; an edit made after the agent finished waits
@@ -1274,15 +1351,19 @@ async def _process_slack_mention_impl(
 
     # Anything said in a DM is said to Open SWE, and the person expects the next
     # thing they type to redirect the work in front of them rather than queue
-    # behind it.
-    explicitly_tagged = concierge_mode or _interrupts_active_run(
-        text,
-        bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions
-        and not request.kitchen_channel,
-        code_channel=code_channel,
-        message_update=message_update,
-        explicit_request=request.explicit_request,
+    # behind it. A review guide's turns wait instead: interrupting one mid-post
+    # loses the chunk it was showing.
+    explicitly_tagged = not review_guide and (
+        concierge_mode
+        or _interrupts_active_run(
+            text,
+            bot_user_id,
+            treat_all_messages_as_mentions=treat_all_messages_as_mentions
+            and not request.kitchen_channel,
+            code_channel=code_channel,
+            message_update=message_update,
+            explicit_request=request.explicit_request or performance_command,
+        )
     )
     visible_context_hashes, dispatched_timestamps = await _dispatched_slack_context(
         langgraph_client, thread_id
@@ -1314,7 +1395,9 @@ async def _process_slack_mention_impl(
             if (person_id := person_ids_by_user_id.get(slack_id))
         },
         visible_context_hashes=visible_context_hashes,
-        trigger_bot=allowed_bot,
+        trigger_system=_slack_bot_identity(allowed_bot)
+        if allowed_bot is not None
+        else request.trigger_system,
         explicit_mention=request.explicit_mention or _mentions_open_swe(text, bot_user_id),
     )
     if code_channel:
@@ -1347,7 +1430,23 @@ async def _process_slack_mention_impl(
         common.run_id_for_logging(run),
         thread_id,
     )
+    if performance_command and thread_model_choice:
+        selected_model = image_model_override or thread_model_choice
+        await slack_utils.post_slack_ephemeral_message(
+            channel_id,
+            user_id,
+            f"Switched to {selected_model[0]} (reasoning effort: {selected_model[1] or 'default'}).",
+            thread_ts=reply_thread_ts or thread_ts,
+        )
     run_id = run.get("run_id")
+    if performance_command and thread_model_choice and isinstance(run_id, str) and run_id:
+        selected_model = image_model_override or thread_model_choice
+        await create_langsmith_feedback(
+            run_id,
+            "performance_model_switch_slack",
+            score=1,
+            source_info={"model_id": selected_model[0], "effort": selected_model[1]},
+        )
     if code_channel and isinstance(run_id, str) and run_id:
         stream_thread_ts = reply_thread_ts or thread_ts
         await stream_slack_thinking_steps(

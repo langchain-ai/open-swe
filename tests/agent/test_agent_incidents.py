@@ -87,10 +87,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     remote = StructuredTool.from_function(
         coroutine=update_incident, name="incident_update", description="Update incident status"
     )
-    with (
-        patch("openswe.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps,
-        patch("openswe.server._notion_tools_for", AsyncMock(return_value=[])) as notion,
-    ):
+    with patch("openswe.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps:
         result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(_incident_config()))
     mcps.assert_awaited_once()
     # System runs load the instance tier and the default workspace's, never a person's.
@@ -98,7 +95,6 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         instance_mcp_source().namespace,
         workspace_mcp_source(DEFAULT_WORKSPACE_SLUG).namespace,
     ]
-    notion.assert_awaited_once_with(None)
     assert isinstance(result["backend"].default, SandboxBackendProxy)
     names = {_registered_tool_name(tool) for tool in result["tools"]}
     write_tools = {
@@ -164,7 +160,7 @@ async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread
 
 @pytest.mark.parametrize("requested_action", [False, True])
 async def test_main_agent_records_the_incident_report_through_the_tool(
-    fake_store, monkeypatch, saved_thread_scope, requested_action
+    fake_store, registry_db, monkeypatch, saved_thread_scope, requested_action
 ):
     from deepagents import create_deep_agent
     from langgraph.checkpoint.memory import InMemorySaver

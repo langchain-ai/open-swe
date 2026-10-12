@@ -8,6 +8,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from openswe.analytics.usage import record_reviewer_publication
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
 from openswe.github.pull_requests import PullRequest
@@ -79,6 +80,7 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
         logger.debug("Failed to record reviewer usage", exc_info=True)
 
 
+@audit_tool()
 async def publish_review(
     ranking: list[str],
     severity_threshold: Severity = "medium",

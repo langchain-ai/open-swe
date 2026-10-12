@@ -555,10 +555,12 @@ def test_existing_pr_does_not_record_later_run_as_opening(
 @pytest.mark.parametrize(
     "retitle_thread,record_opening", [(True, True), (False, True), (True, False)]
 )
+@pytest.mark.parametrize("concierge", [False, True])
 async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
     retitle_thread: bool,
     record_opening: bool,
+    concierge: bool,
 ) -> None:
     _set_config(
         monkeypatch,
@@ -568,7 +570,11 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
             "github_login": "octo",
             "resolved_agent_model_id": "openai:gpt-5.6-sol",
             "run_id": "run-1",
-            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            "slack_thread": {
+                "channel_id": "D1" if concierge else "C1",
+                "thread_ts": "0" if concierge else "1.0",
+                "channel_context": {"is_im": concierge},
+            },
         },
     )
     monkeypatch.setattr(opr, "record_agent_pr_usage", AsyncMock())
@@ -602,6 +608,10 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
         record_opening=record_opening,
     )
 
+    if concierge:
+        langgraph.threads.update.assert_not_awaited()
+        mirror_metadata.assert_not_awaited()
+        return
     assert langgraph.threads.update.await_args is not None
     metadata = langgraph.threads.update.await_args.kwargs["metadata"]
     if retitle_thread and record_opening:
@@ -611,6 +621,31 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
     else:
         assert "title" not in metadata
         mirror_metadata.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_link_pull_request_rejects_concierge_before_github(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "thread_id": "dm-thread",
+            "slack_thread": {
+                "channel_id": "D1",
+                "thread_ts": "0",
+                "channel_context": {"is_im": True},
+            },
+        },
+    )
+    token = AsyncMock()
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", token)
+
+    result = await opr.link_pull_request("https://github.com/langchain-ai/open-swe/pull/3")
+
+    assert result["success"] is False
+    assert "concierge DM" in result["error"]
+    token.assert_not_awaited()
 
 
 def test_updating_pr_preserves_original_feedback_run() -> None:
@@ -630,7 +665,7 @@ def test_updating_pr_preserves_original_feedback_run() -> None:
     assert result[0]["state"] == "open"
 
 
-def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, fake_store) -> None:
+def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, user_records) -> None:
     from cryptography.fernet import Fernet
 
     from openswe.dashboard import profiles

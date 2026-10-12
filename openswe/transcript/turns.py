@@ -8,6 +8,7 @@ other is deduplicated by its receipt.
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
@@ -73,11 +74,59 @@ async def settle_run_turn(
     return turn_id
 
 
-async def open_turn_id(thread_id: str, run_id: str | None) -> UUID | None:
-    """The open turn ``run_id`` serves, or the thread's newest open turn without one."""
+async def fail_unstarted_turn(thread_id: str, turn_id: UUID, *, error: str) -> None:
+    """Close a turn no run will ever start; left open, it reads as queued forever."""
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"turn:{turn_id}:failed",
+                event=TurnFailed(turn_id=turn_id, error=error),
+                actor_kind="system",
+                turn_id=turn_id,
+            )
+        ],
+    )
+
+
+@dataclass(frozen=True)
+class OpenTurn:
+    turn_id: UUID
+    run_id: str | None
+
+
+async def steer_target(thread_id: str) -> OpenTurn | None:
+    """The turn a follow-up joins: the running one, else the newest still waiting to start.
+
+    Only turns requested after the thread's newest closed one count: an older
+    open turn was stranded by a start that never ran or a settlement that failed.
+    Modeled in ``docs/tla/SteerRace.tla`` as ``JoinTarget``.
+    """
     if not postgres.configured():
         return None
-    return await _open_turn(thread_id, run_id)
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT turn_id, run_id FROM thread_turn
+                WHERE thread_id = :thread_id
+                  AND state IN ('requested', 'running')
+                  AND requested_at > COALESCE(
+                      (
+                          SELECT max(requested_at) FROM thread_turn
+                          WHERE thread_id = :thread_id
+                            AND state NOT IN ('requested', 'running')
+                      ),
+                      '-infinity'
+                  )
+                ORDER BY state = 'running' DESC, requested_at DESC, turn_id DESC
+                LIMIT 1
+                """
+            ),
+            {"thread_id": thread_id},
+        )
+        row = result.mappings().one_or_none()
+    return None if row is None else OpenTurn(turn_id=row["turn_id"], run_id=row["run_id"])
 
 
 async def recorded_turn_id(thread_id: str, command_id: str) -> UUID | None:

@@ -4,8 +4,8 @@ Each record holds a user-authored instruction prompt (edited in the dashboard
 Profile tab, or by the agent itself via ``save_user_instructions``) that is
 appended to the main agent's system prompt for runs that user triggers.
 
-Stored in its own namespace rather than on the ``["profiles"]`` record so
-agent-written updates and dashboard profile saves can't clobber each other.
+Stored as its own record rather than on the profile so agent-written
+updates and dashboard profile saves can't clobber each other.
 """
 
 from typing import Any
@@ -13,10 +13,12 @@ from typing import Any
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.store import delete_value, get_value, now_iso, put_value
+from openswe.store import now_iso
+from openswe.users.records import UserRecords
 
-USER_INSTRUCTIONS_NAMESPACE: list[str] = ["user_instructions"]
+USER_INSTRUCTIONS = UserRecords("instructions")
 
 MAX_USER_INSTRUCTIONS_CHARS = 20_000
 
@@ -26,7 +28,7 @@ class UserInstructionsUpdate(BaseModel):
 
 
 async def get_user_instructions(login: str) -> dict[str, Any] | None:
-    return await get_value(USER_INSTRUCTIONS_NAMESPACE, login)
+    return await USER_INSTRUCTIONS.get(login)
 
 
 async def set_user_instructions(
@@ -43,12 +45,12 @@ async def set_user_instructions(
         "updated_at": now_iso(),
         "updated_by": updated_by or login,
     }
-    await put_value(USER_INSTRUCTIONS_NAMESPACE, login, value)
+    await USER_INSTRUCTIONS.put(login, value)
     return value
 
 
 async def delete_user_instructions(login: str) -> None:
-    await delete_value(USER_INSTRUCTIONS_NAMESPACE, login)
+    await USER_INSTRUCTIONS.delete(login)
 
 
 async def get_user_custom_instructions(login: str | None) -> str | None:
@@ -77,6 +79,7 @@ async def api_get_my_instructions(
 
 
 @router.put("/me/instructions")
+@audit_endpoint
 async def api_put_my_instructions(
     body: UserInstructionsUpdate,
     session: dict[str, Any] = SESSION_DEP,
@@ -86,6 +89,7 @@ async def api_put_my_instructions(
 
 
 @router.delete("/me/instructions")
+@audit_endpoint
 async def api_delete_my_instructions(
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:

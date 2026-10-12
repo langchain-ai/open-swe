@@ -2,12 +2,13 @@
 
 from collections.abc import Awaitable, Callable
 from types import FunctionType
-from typing import Literal, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
+
+from openswe.mcp.caller import Access
 
 P = ParamSpec("P")
 R = TypeVar("R")
 
-Access = Literal["session", "admin"]
 EXPOSED_TOOLS: dict[str, tuple[Callable[..., Awaitable[object]], Access]] = {}
 
 

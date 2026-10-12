@@ -82,7 +82,7 @@ async def require_consent(
     if token_kind != "user" or not thread_id:
         return None
     thread = await ThreadActAs.load(thread_id)
-    if not thread.is_shared:
+    if not thread.is_shared():
         return None
     login = await pr_author_login(author)
     if not login:

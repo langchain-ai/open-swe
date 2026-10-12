@@ -4,8 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Self
 
+from openswe.github.http import RepoClient
 from openswe.github.org_membership import team_members
-from openswe.github.repo_files import fetch_repo_file
 
 CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 CODEOWNERS_MAX_CHARS = 3_000_000
@@ -92,14 +92,10 @@ class CodeOwners:
         return True
 
     @classmethod
-    async def fetch(
-        cls, owner: str, repo: str, ref: str | None, *, token: str, strict: bool = False
-    ) -> Self | None:
+    async def fetch(cls, repo: RepoClient, ref: str | None, *, strict: bool = False) -> Self | None:
         """The first CODEOWNERS file GitHub would read at ``ref``; ``None`` when there is none."""
         for path in CODEOWNERS_PATHS:
-            content = await fetch_repo_file(
-                owner, repo, path, ref, token=token, max_chars=CODEOWNERS_MAX_CHARS, strict=strict
-            )
+            content = await repo.read_file(path, ref, max_chars=CODEOWNERS_MAX_CHARS, strict=strict)
             if content is not None:
                 return cls.parse(content)
         return None

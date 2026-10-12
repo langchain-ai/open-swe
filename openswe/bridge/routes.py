@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.bridge import listener
 from openswe.bridge.constants import (
     ALIVE_THRESHOLD_SECONDS,
@@ -92,6 +93,7 @@ async def _touch(bridge_id: str, owner_id: str) -> None:
 
 
 @router.post("/bridges")
+@audit_endpoint
 async def api_open_bridge(
     body: BridgeOpenBody,
     principal: PrincipalDep,
@@ -185,6 +187,7 @@ async def api_answer_bridge_request(
 
 
 @router.delete("/bridges/{bridge_id}")
+@audit_endpoint
 async def api_close_bridge(
     bridge_id: str,
     principal: PrincipalDep,

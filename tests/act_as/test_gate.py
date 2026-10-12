@@ -12,7 +12,11 @@ from openswe.act_as.records import ThreadActAs
 from openswe.slack.http import SlackRequestError
 from openswe.users import User, UserPreferences
 from openswe.utils.json_types import JsonObject
-from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from openswe.utils.thread_participants import (
+    PARTICIPANT_EMAILS_KEY,
+    PARTICIPANT_LOGINS_KEY,
+    participant_metadata,
+)
 
 
 @pytest.fixture
@@ -96,6 +100,9 @@ async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monke
 async def test_single_participant_thread_never_asks(dm, thread_metadata, monkeypatch):
     _alice(monkeypatch, "U-ALICE")
     thread_metadata[PARTICIPANT_LOGINS_KEY] = {"alice": True}
+    thread_metadata[PARTICIPANT_EMAILS_KEY] = {"alice@example.com": True}
+    monkeypatch.setattr(User, "for_person", AsyncMock(return_value=User()))
+    thread_metadata.update(await participant_metadata(thread_metadata))
 
     assert await _open() is None
     dm.assert_not_awaited()

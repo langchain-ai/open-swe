@@ -8,6 +8,8 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
+from openswe.agent_cost import RUN_COST_KEY_PREFIX
+from openswe.bridge.store import BridgeStore
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
@@ -33,6 +35,8 @@ from openswe.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SOURCE = "dashboard"
+# Set on a thread the upload_session tool reserved until its transcript is posted.
+SESSION_UPLOAD_PENDING_KEY = "session_upload_pending"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
@@ -106,8 +110,8 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
-    """A `/oswe` question thread: readable and promptable, but kept out of thread lists."""
-    return metadata.get("unlisted") is True
+    """Threads that remain accessible directly but stay out of thread lists."""
+    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
 
 
 def thread_is_readable(
@@ -161,6 +165,9 @@ def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
     _assert_thread_promptable(metadata, login)
+    # A run here would start without the history the upload is about to seed.
+    if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
+        raise HTTPException(409, "this thread is waiting for its session upload")
     if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
         email, login=login
     ):
@@ -400,11 +407,33 @@ async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
         pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
 
 
+async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bool:
+    """Whether a "This Mac" thread's Mac is serving its checkout, so it can run from anywhere."""
+    if metadata.get("sandbox_bridge_client") != "desktop":
+        return False
+    try:
+        return await BridgeStore.is_connected(sandbox_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read the thread's sandbox bridge", exc_info=True)
+        return False
+
+
+def _run_costs(metadata: Mapping[str, Any]) -> dict[str, float]:
+    return {
+        key.removeprefix(RUN_COST_KEY_PREFIX): float(cost)
+        for key, cost in metadata.items()
+        if key.startswith(RUN_COST_KEY_PREFIX)
+        and isinstance(cost, (int, float))
+        and not isinstance(cost, bool)
+    }
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
+    bridge_status: bool = True,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
@@ -445,6 +474,7 @@ async def _thread_summary(
         else None
     )
 
+    run_costs = _run_costs(metadata)
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
@@ -496,6 +526,8 @@ async def _thread_summary(
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
+        "costUsd": sum(run_costs.values()) if run_costs else None,
+        "runCosts": run_costs,
         "sourceUrl": thread_source_url(metadata),
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
@@ -507,6 +539,8 @@ async def _thread_summary(
             if metadata.get("sandbox_kind") == "bridge"
             else None
         ),
+        # Lists skip it: one bridge lookup per thread would cost a query each.
+        "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id) if bridge_status else None,
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

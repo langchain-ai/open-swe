@@ -7,7 +7,11 @@ import pytest
 from openswe.act_as.records import ActAsRequest, ThreadActAs
 from openswe.users import User, UserPreferences, UserPreferencesPatch
 from openswe.utils.json_types import JsonObject
-from openswe.utils.thread_participants import PARTICIPANT_EMAILS_KEY, PARTICIPANT_LOGINS_KEY
+from openswe.utils.thread_participants import (
+    PARTICIPANT_EMAILS_KEY,
+    PARTICIPANT_LOGINS_KEY,
+    participant_metadata,
+)
 
 _PR = {"owner": "o", "repo": "r", "head": "h", "base": "b", "title": "t"}
 
@@ -37,16 +41,44 @@ async def test_one_request_per_person_survives_a_reload(thread_metadata: JsonObj
     [
         ({"alice": True}, {}, False),
         ({"alice": True, "bob": True}, {}, True),
+        ({"alice": True}, {"alice@example.com": True}, False),
+        ({"alice": True}, {"bob@example.com": True}, True),
         ({"alice": True}, {"carol@example.com": True}, True),
     ],
 )
-async def test_unlinked_participants_make_a_thread_shared(
-    thread_metadata: JsonObject, logins: JsonObject, emails: JsonObject, shared: bool
+async def test_distinct_participants_make_a_thread_shared(
+    thread_metadata: JsonObject,
+    monkeypatch: pytest.MonkeyPatch,
+    logins: JsonObject,
+    emails: JsonObject,
+    shared: bool,
 ) -> None:
+    alice, bob = User(), User()
+    monkeypatch.setattr(
+        User,
+        "for_login",
+        AsyncMock(side_effect=lambda _, login: {"alice": alice, "bob": bob}.get(login)),
+    )
+    monkeypatch.setattr(
+        User,
+        "for_email",
+        AsyncMock(
+            side_effect=lambda email: {"alice@example.com": alice, "bob@example.com": bob}.get(
+                email
+            )
+        ),
+    )
     thread_metadata[PARTICIPANT_LOGINS_KEY] = logins
     thread_metadata[PARTICIPANT_EMAILS_KEY] = emails
+    thread_metadata.update(await participant_metadata(thread_metadata))
+    monkeypatch.setattr(
+        User,
+        "for_person",
+        AsyncMock(side_effect=AssertionError("Consent must use stored identities")),
+    )
 
-    assert (await ThreadActAs.load("thread-1")).is_shared is shared
+    thread = await ThreadActAs.load("thread-1")
+    assert thread.is_shared() is shared
 
 
 @pytest.mark.asyncio
@@ -57,7 +89,13 @@ async def test_an_unreadable_stored_record_is_dropped(thread_metadata: JsonObjec
 
 
 @pytest.mark.asyncio
-async def test_the_first_answer_stands(thread_metadata: JsonObject) -> None:
+async def test_the_first_answer_stands(
+    thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    thread_metadata[PARTICIPANT_EMAILS_KEY] = {"alice@example.com": True}
+    monkeypatch.setattr(
+        User, "for_person", AsyncMock(side_effect=RuntimeError("Identity lookup unavailable"))
+    )
     thread = await ThreadActAs.load("thread-1")
     request = await thread.request("alice", **_PR)
     assert await thread.decide(request, approved=False, always_allow=False)

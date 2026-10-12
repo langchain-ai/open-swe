@@ -9,9 +9,9 @@ from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
-from openswe.review.walkthrough import WalkthroughView
 from openswe.thread_ids import review_scout_thread_id
 from openswe.utils.thread_ops import thread_run_error
+from openswe.walkthrough.record import WalkthroughView
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class _ScoutRun(BaseModel):
     metadata: dict[str, object] = {}
 
 
-_COMMIT_STEP_TOOL = "commit_walkthrough_step"
+_PLAN_CHUNK_TOOL = "walkthrough_plan_chunk"
 
 
 _RECENT_ACTIONS = 5
@@ -56,7 +56,7 @@ class _ToolCall(BaseModel):
         return ScoutAction(tool=self.name, target=target[:_ACTION_TARGET_CHARS] if target else None)
 
 
-class _CommitResult(BaseModel):
+class _PlanResult(BaseModel):
     success: bool = False
 
 
@@ -67,17 +67,17 @@ class _ScoutMessage(BaseModel):
     tool_call_id: str | None = None
     tool_calls: list[_ToolCall] = []
 
-    def committed(self) -> bool:
+    def planned(self) -> bool:
         if (
             self.type != "tool"
-            or self.name != _COMMIT_STEP_TOOL
+            or self.name != _PLAN_CHUNK_TOOL
             or not isinstance(self.content, str)
         ):
             return False
         try:
-            return _CommitResult.model_validate_json(self.content).success
+            return _PlanResult.model_validate_json(self.content).success
         except ValidationError:
-            logger.warning("Unparseable review scout commit result", exc_info=True)
+            logger.warning("Unparseable review scout plan result", exc_info=True)
             return False
 
 
@@ -153,12 +153,7 @@ class ReviewScoutTarget(BaseModel):
         calls = [
             call for message in messages if message.type == "ai" for call in message.tool_calls
         ]
-        other_calls = {call.id for call in calls if call.args.get("other") is True}
-        steps = sum(
-            1
-            for message in messages
-            if message.committed() and message.tool_call_id not in other_calls
-        )
+        steps = sum(1 for message in messages if message.planned())
         last = messages[-1] if messages else None
         return ScoutProgress(
             steps=steps,

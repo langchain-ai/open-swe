@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe import completion
+from openswe.message_queue import QueuedMessage
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
@@ -115,14 +116,15 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
 async def test_leftover_follow_ups_get_one_pickup_run(
     monkeypatch: pytest.MonkeyPatch,
     fake_store: FakeStore,
+    registry_db: None,
     status: str,
     metadata: dict[str, object],
     worker: bool,
     cancelled: bool,
     picks_up: bool,
 ) -> None:
-    pending = {"messages": [{"content": {"text": "Check logout too", "source": "dashboard"}}]}
-    fake_store.seed(("queue", "t1"), "pending_messages", pending)
+    pending = {"text": "Check logout too", "source": "dashboard"}
+    await QueuedMessage.put("t1", pending)
     client = SimpleNamespace(
         threads=_FakeThreads({"source": "dashboard", "owner_login": "owner"}),
         runs=SimpleNamespace(list=AsyncMock(return_value=[])),
@@ -170,7 +172,7 @@ async def test_leftover_follow_ups_get_one_pickup_run(
         if picks_up
         else []
     )
-    assert fake_store.values(("queue", "t1"))["pending_messages"] == pending
+    assert [message.content for message in await QueuedMessage.for_thread("t1")] == [pending]
 
 
 @pytest.mark.asyncio

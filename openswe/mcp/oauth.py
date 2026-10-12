@@ -6,7 +6,7 @@ from functools import lru_cache
 from time import monotonic
 from urllib.parse import quote_plus
 
-import httpx
+import httpx2
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from openswe.encryption import decrypt_token
@@ -26,7 +26,7 @@ class _Token(BaseModel):
     expires_in: float = Field(default=300, gt=0)
 
 
-class _ClientCredentialsAuth(httpx.Auth):
+class _ClientCredentialsAuth(httpx2.Auth):
     requires_request_body = True
 
     def __init__(self, settings: MCPOAuth, encrypted_secret: str) -> None:
@@ -50,7 +50,7 @@ class _ClientCredentialsAuth(httpx.Auth):
                     body["scope"] = settings.scope
                 auth = None
                 if settings.token_endpoint_auth_method == "client_secret_basic":
-                    auth = httpx.BasicAuth(quote_plus(settings.client_id), quote_plus(secret))
+                    auth = httpx2.BasicAuth(quote_plus(settings.client_id), quote_plus(secret))
                 else:
                     body.update(client_id=settings.client_id, client_secret=secret)
                 async with mcp_http_client(settings.token_url, auth=auth) as client:
@@ -78,8 +78,8 @@ class _ClientCredentialsAuth(httpx.Auth):
             return access_token
 
     async def async_auth_flow(
-        self, request: httpx.Request
-    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        self, request: httpx2.Request
+    ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
         token = await self._access_token()
         request.headers["Authorization"] = f"Bearer {token}"
         response = yield request
@@ -92,12 +92,12 @@ class _ClientCredentialsAuth(httpx.Auth):
 @lru_cache(maxsize=128)
 def _cached_auth(
     _identity: tuple[str, ...], settings: MCPOAuth, encrypted_secret: str
-) -> httpx.Auth:
+) -> httpx2.Auth:
     # Credentials and settings identify the cache entry, so rotation cannot reuse old tokens.
     return _ClientCredentialsAuth(settings, encrypted_secret)
 
 
-def connection_auth(record: MCPConnection, namespace: tuple[str, ...]) -> httpx.Auth | None:
+def connection_auth(record: MCPConnection, namespace: tuple[str, ...]) -> httpx2.Auth | None:
     if record.oauth is None:
         return None
     return _cached_auth((*namespace, record.name), record.oauth, record.encrypted_client_secret)

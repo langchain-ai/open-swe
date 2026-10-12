@@ -22,7 +22,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                 }
             )
 
-        description = load_prompt("tools/load_integration_tools.md")
+        description = prompt("tools/load_integration_tools")
         if self._group_of:
             example_name = (
                 "analyzePlan" if "analyzePlan" in self._group_of else next(iter(self._group_of))

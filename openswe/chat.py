@@ -30,6 +30,7 @@ from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from openswe.dashboard.options import (
@@ -92,6 +93,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 SanitizeOpenAIResponsesMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
@@ -162,7 +164,13 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     cfg = RunConfig.parse(configurable)
 
     if cfg.thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
+        return create_deep_agent(
+            system_prompt="",
+            tools=[],
+            middleware=[
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
+            ],
+        ).with_config(bindable_config(config))
 
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = await _resolve_chat_model(cfg)
@@ -194,6 +202,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareChatRunMiddleware(config=config),
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),

@@ -26,7 +26,7 @@ function IncidentsLayout() {
   if (session.isPending) return <LoadingState />
   if (session.error)
     return (
-      <div className="mx-auto max-w-xl p-8">
+      <div className="mx-auto max-w-xl p-space-6">
         <ErrorState
           error={session.error}
           retry={() => void session.refetch()}

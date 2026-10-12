@@ -44,7 +44,6 @@ from openswe.github.checks import (  # noqa: F401
     complete_review_check_run,
     create_review_check_run,
 )
-from openswe.github.ci import fetch_open_pr_for_branch as github_fetch_open_pr_for_branch
 from openswe.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
@@ -60,6 +59,7 @@ from openswe.github.comments import (
     sanitize_github_comment_body,  # noqa: F401
     verify_github_signature,
 )
+from openswe.github.http import GitHubClient
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from openswe.github.pull_requests import PullRequestEvent
 from openswe.github.thread_token import (
@@ -70,6 +70,7 @@ from openswe.github.token import (
     is_bot_token_only_mode,
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
+from openswe.input_messages import PersonIdentity
 from openswe.linear.comments import get_recent_comments  # noqa: F401
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
@@ -84,6 +85,7 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from openswe.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from openswe.rollout_events import ROLLOUT_CHECK_REQUESTED, subscribe_merged_thread
 from openswe.run_config import Repo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -153,11 +155,7 @@ from openswe.utils.multimodal import (
 )
 from openswe.utils.repo import extract_repo_from_text
 from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
-from openswe.utils.thread_participants import (
-    PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    merge_participants,
-)
+from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
@@ -605,25 +603,24 @@ async def upsert_agent_thread_metadata(
         ):
             return False
     sender_login = github_login or await User.login_for_email(user_email) or ""
-    if sender_login:
-        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
-            existing_meta.get(PARTICIPANT_LOGINS_KEY), sender_login
+    slack_ids = set(slack_participant_user_ids)
+    triggering_slack = source_context.slack_thread if source_context else None
+    if triggering_slack and triggering_slack.triggering_user_id:
+        slack_ids.add(triggering_slack.triggering_user_id)
+    slack_logins = await asyncio.gather(*(User.login_for_slack(user_id) for user_id in slack_ids))
+    people: list[PersonIdentity] = []
+    for user_id, login in zip(slack_ids, slack_logins, strict=True):
+        person: PersonIdentity = {"id": f"slack:{user_id}"}
+        if triggering_slack and user_id == triggering_slack.triggering_user_id:
+            login = login or sender_login
+        if isinstance(login, str) and login:
+            person["github_login"] = login
+        people.append(person)
+    metadata.update(
+        await participant_metadata(
+            existing_meta, login=sender_login, email=user_email, people=people
         )
-    # Slack human senders with linked Open SWE accounts join the thread as
-    # participants on every event, so later conversations credit everyone.
-    slack_logins = await asyncio.gather(
-        *(User.login_for_slack(user_id) for user_id in slack_participant_user_ids)
     )
-    resolved_slack_logins = [login for login in slack_logins if isinstance(login, str) and login]
-    if resolved_slack_logins:
-        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
-            metadata.get(PARTICIPANT_LOGINS_KEY, existing_meta.get(PARTICIPANT_LOGINS_KEY)),
-            *resolved_slack_logins,
-        )
-    if user_email:
-        metadata[PARTICIPANT_EMAILS_KEY] = merge_participants(
-            existing_meta.get(PARTICIPANT_EMAILS_KEY), user_email
-        )
     # The context that opened the thread identifies it; later messages arrive
     # through the same surface and must not repoint it.
     if not existing_context.is_empty:
@@ -1320,12 +1317,10 @@ async def fetch_open_pr_for_branch(
     repo_config: dict[str, str], head_ref: str, *, token: str
 ) -> dict[str, Any] | None:
     """Find the open PR whose head ref matches ``head_ref``, if one exists."""
-    return await github_fetch_open_pr_for_branch(
-        owner=repo_config.get("owner", ""),
-        repo=repo_config.get("name", ""),
-        branch=head_ref,
-        token=token,
-    )
+    async with GitHubClient.connect(token=token) as github:
+        return await github.repo(
+            repo_config.get("owner", ""), repo_config.get("name", "")
+        ).open_pull_for_branch(head_ref)
 
 
 def _normalized_diff_hash(diff_text: str) -> str:
@@ -1455,6 +1450,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         thread_ids = list(await pull_request.discover_threads() or [])
 
     for thread_id in thread_ids:
+        metadata: dict[str, Any] | None = None
+        newly_merged = False
         try:
             async with agent_thread_pr_state_lock(langgraph_client, thread_id):
                 current = await langgraph_client.threads.get(thread_id)
@@ -1484,6 +1481,11 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if not updated_pull_requests and metadata.get("pr_url") == pr_url:
                     previous_state = metadata.get("pr_state")
                 state_changed = previous_state != new_state
+                newly_merged = (
+                    state_changed
+                    and new_state == "merged"
+                    and bool((event.pull_request.merge_commit_sha or "").strip())
+                )
                 if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
                     metadata_update["pr_state"] = new_state
 
@@ -1533,6 +1535,21 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from openswe.analytics.emitter import task_rework
 
             await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
+        if (
+            newly_merged
+            and event.identity is not None
+            and isinstance(metadata, dict)
+            and metadata.get(ROLLOUT_CHECK_REQUESTED) is True
+        ):
+            owner, repo, number = event.identity
+            await subscribe_merged_thread(
+                thread_id,
+                owner=owner,
+                repo=repo,
+                number=number,
+                sha=event.pull_request.merge_commit_sha or "",
+                metadata=metadata if isinstance(metadata, dict) else {},
+            )
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:

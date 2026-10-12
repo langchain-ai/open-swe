@@ -18,7 +18,7 @@ export function SubagentGroup({
   const columns = Math.min(Math.max(chunks.length, 1), MAX_SUBAGENT_COLUMNS)
   return (
     <div
-      className="grid gap-2"
+      className="grid gap-space-2"
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
       {chunks.map((chunk) => (

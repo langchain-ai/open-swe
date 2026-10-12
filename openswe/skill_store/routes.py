@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.skill_store.store import (
     DEFAULT_SKILLS_PAGE_SIZE,
@@ -34,6 +35,7 @@ async def api_list_skills(
 
 
 @router.post("/skills")
+@audit_endpoint
 async def api_create_skill(
     body: SkillCreate,
     session: dict[str, Any] = SESSION_DEP,
@@ -42,6 +44,7 @@ async def api_create_skill(
 
 
 @router.put("/skills/{name}")
+@audit_endpoint
 async def api_update_skill(
     name: str,
     body: SkillUpdate,
@@ -51,6 +54,7 @@ async def api_update_skill(
 
 
 @router.delete("/skills/{name}")
+@audit_endpoint
 async def api_delete_skill(
     name: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -69,6 +73,7 @@ async def api_list_organization_skills(
 
 
 @router.post("/organization-skills")
+@audit_endpoint
 async def api_create_organization_skill(
     body: SkillCreate,
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -77,6 +82,7 @@ async def api_create_organization_skill(
 
 
 @router.put("/organization-skills/{name}")
+@audit_endpoint
 async def api_update_organization_skill(
     name: str,
     body: SkillUpdate,
@@ -86,6 +92,7 @@ async def api_update_organization_skill(
 
 
 @router.delete("/organization-skills/{name}")
+@audit_endpoint
 async def api_delete_organization_skill(
     name: str,
     _admin: dict[str, Any] = ADMIN_DEP,

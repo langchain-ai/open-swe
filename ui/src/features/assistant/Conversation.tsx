@@ -1,7 +1,12 @@
+import { ArrowDownIcon } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { useEffect, useState } from "react"
 import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
-import { ArrowDown } from "lucide-react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Link } from "@langchain/macaw-components/Link"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
@@ -56,17 +61,25 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         data-testid="assistant-ui-conversation"
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
-        <header className="flex items-center gap-3 border-b border-border px-5 py-3">
-          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
+        <header className="flex items-center gap-space-3 border-b border-default px-space-4 py-space-3">
+          <Text
+            as="h1"
+            variant="h5"
+            weight="medium"
+            color="primary"
+            className="min-w-0 flex-1 truncate"
+          >
             {thread?.title ?? "New conversation"}
-          </h1>
+          </Text>
           {thread && (
-            <button
-              className="text-xs"
+            <Button
+              color="secondary"
+              variant="plain"
+              aria-expanded={!panelCollapsed}
               onClick={() => setPanelCollapsed(!panelCollapsed)}
             >
               Files and terminal
-            </button>
+            </Button>
           )}
         </header>
         <ThreadPrimitive.Viewport
@@ -74,20 +87,25 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
           aria-label="Conversation messages"
           className="min-h-0 flex-1 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto"
         >
-          <div className="mx-auto w-full max-w-3xl px-5 py-6 sm:px-8">
+          <div className="mx-auto w-full max-w-3xl px-space-4 py-space-5 sm:px-space-6">
             {loading && empty ? (
               <p
                 role="status"
-                className="py-16 text-center text-sm text-muted-foreground"
+                className="py-space-9 text-center text-sm text-secondary"
               >
                 Loading conversation…
               </p>
             ) : (
               empty &&
               !running && (
-                <h2 className="py-16 text-center text-2xl">
+                <Text
+                  as="h2"
+                  variant="h1"
+                  color="primary"
+                  className="py-space-9 text-center"
+                >
                   What are we working on?
-                </h2>
+                </Text>
               )
             )}
             <ThreadPrimitive.Messages>
@@ -106,17 +124,22 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
               )}
           </div>
         </ThreadPrimitive.Viewport>
-        <div className="relative mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
-          <ThreadPrimitive.ScrollToBottom
-            aria-label="Scroll to bottom"
-            className="absolute -top-10 left-1/2 rounded-full border border-border bg-background p-2 shadow-sm disabled:invisible"
-          >
-            <ArrowDown className="size-4" />
+        <div className="relative mx-auto w-full max-w-3xl px-space-4 pt-space-2 pb-space-4">
+          <ThreadPrimitive.ScrollToBottom asChild>
+            <IconButton
+              icon={ArrowDownIcon}
+              label="Scroll to bottom"
+              color="secondary"
+              variant="outlined"
+              size="md"
+              round
+              className="absolute -top-10 left-1/2 shadow-sm disabled:invisible"
+            />
           </ThreadPrimitive.ScrollToBottom>
           {error && (
-            <p role="alert" className="mb-3 text-sm text-destructive">
-              {error}
-            </p>
+            <div role="alert" className="mb-space-3">
+              <Banner intent="error">{error}</Banner>
+            </div>
           )}
           {thread && (
             <>
@@ -127,14 +150,15 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
                 />
               )}
               {thread.codeChannelUrl && (
-                <a
+                <Link
                   href={thread.codeChannelUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="mb-2 block text-xs underline"
+                  variant="xs"
+                  className="mb-space-2 block"
                 >
                   Open code channel
-                </a>
+                </Link>
               )}
               <ThreadPullRequests
                 pullRequests={thread.pullRequests ?? []}

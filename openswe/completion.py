@@ -21,14 +21,13 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
-from openswe.dispatch import FOLLOW_UP_PICKUP_KIND
+from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.publish import settle_review_check_run
-from openswe.review.style_jobs import settle_review_style_run
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import post_slack_thread_reply
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
@@ -37,6 +36,7 @@ from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.thread_feedback import schedule_answer_feedback
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
+from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import get_langsmith_trace_url
@@ -528,7 +528,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             raise
     payload_metadata = payload.get("metadata")
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
-        await settle_review_style_run(payload_metadata)
+        if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
+            await Topic.PULL_REQUESTS.invalidate(key=pull_request)
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
     if status == "success" and not (
@@ -543,6 +544,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         if pickup_allowed:
             await _start_run_for_pending_follow_ups(thread_id)
     if is_worker:
+        await sync_slack_background_status(langgraph_client(), thread_id)
         if status in _TERMINAL_FAILURE_STATUSES:
             _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}

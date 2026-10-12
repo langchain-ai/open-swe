@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from langchain_core.tools import tool
 
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
 from openswe.tools.create_sandbox_file_download_url import (
     create_sandbox_file_download_url,
     resolve_sandbox_file,
@@ -91,6 +91,6 @@ async def _output_iframe(
 
 output_iframe = tool(
     "output_iframe",
-    description=load_prompt("tools/output_iframe.md"),
+    description=prompt("tools/output_iframe"),
     response_format="content_and_artifact",
 )(_output_iframe)

@@ -1,5 +1,6 @@
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import Editor from "@monaco-editor/react"
-import { Textarea } from "@/components/ui/textarea"
+
 import { useIsHydrated } from "@/lib/hydration"
 
 interface InstructionsEditorProps {
@@ -21,9 +22,11 @@ export function InstructionsEditor({
   if (!mounted) {
     return (
       <Textarea
-        className="min-h-[360px] w-full font-mono text-xs"
+        inputClassName="min-h-[360px] font-mono text-xs"
+        resize="none"
+        size="md"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         placeholder={placeholder}
         disabled={disabled}
       />
@@ -31,7 +34,7 @@ export function InstructionsEditor({
   }
 
   return (
-    <div className="overflow-hidden rounded-md border border-border">
+    <div className="overflow-hidden rounded-md border border-default">
       <Editor
         height="360px"
         language="markdown"

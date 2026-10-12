@@ -41,7 +41,7 @@ export function toolKind(name: string): ToolKind {
   if (lowered === "task") return "task"
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
-  if (lowered === "request_service_connection") return "service-connection"
+  if (lowered === "connect_managed_tools") return "managed-tools"
   if (lowered === "linear_comment") return "linear"
   if (
     EDIT_TOOLS.has(lowered) ||
@@ -96,6 +96,7 @@ type AgentTurn = {
   author: Message["author"]
   timestamp: string
   turnKey?: string
+  invocationIds: Array<string>
   startedAt: string
   timestampIsFallback?: boolean
   chunks: Array<Chunk>
@@ -291,7 +292,8 @@ export function streamMessagesToUi(
     msgId: string,
     timestamp: string,
     timestampIsFallback: boolean,
-    chunks: Array<Chunk>
+    chunks: Array<Chunk>,
+    invocationId?: string
   ) => {
     if (!agentTurn) {
       agentTurn = {
@@ -299,12 +301,15 @@ export function streamMessagesToUi(
         author: "agent",
         timestamp,
         turnKey,
+        invocationIds: invocationId ? [invocationId] : [],
         startedAt: timestamp,
         timestampIsFallback,
         chunks: [...chunks],
       }
     } else {
       agentTurn.timestamp = timestamp
+      if (invocationId && !agentTurn.invocationIds.includes(invocationId))
+        agentTurn.invocationIds.push(invocationId)
       agentTurn.timestampIsFallback =
         agentTurn.timestampIsFallback || timestampIsFallback
       agentTurn.chunks.push(...chunks)
@@ -396,7 +401,14 @@ export function streamMessagesToUi(
       }
 
       if (chunks.length) {
-        appendAgentChunks(msgId, timestamp, timestampIsFallback, chunks)
+        const invocationId = raw.response_metadata?.open_swe_invocation_id
+        appendAgentChunks(
+          msgId,
+          timestamp,
+          timestampIsFallback,
+          chunks,
+          typeof invocationId === "string" ? invocationId : undefined
+        )
       }
     }
 

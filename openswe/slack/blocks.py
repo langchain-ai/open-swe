@@ -13,6 +13,7 @@ dictionaries the Slack SDK takes; every other module should pass ``Block``
 values around instead of raw dictionaries.
 """
 
+import json
 from collections.abc import Sequence
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
@@ -163,7 +164,7 @@ class InputBlock(TypedDict):
     type: Literal["input"]
     block_id: str
     label: PlainText
-    element: PlainTextInput | ConversationsSelect
+    element: PlainTextInput | ConversationsSelect | StaticSelect
     optional: NotRequired[bool]
 
 
@@ -394,6 +395,27 @@ def block_payload(blocks: Sequence[Block]) -> list[dict[str, Any]]:
     so callers build ``Block`` values and convert once, here.
     """
     return [cast(dict[str, Any], block) for block in blocks]
+
+
+def option_actions(options: list[str] | None) -> list[dict[str, Any]]:
+    """Up to five option buttons; a click arrives as a message carrying the option's text."""
+    clean_options = [option.strip() for option in options or [] if option.strip()]
+    if not clean_options:
+        return []
+    return [
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": option[:75], "emoji": True},
+                    "value": json.dumps({"type": "open_swe_option", "response": option}),
+                    "action_id": f"open_swe_option_select_{index}",
+                }
+                for index, option in enumerate(clean_options[:5])
+            ],
+        }
+    ]
 
 
 def view_payload(view: ModalView) -> dict[str, Any]:

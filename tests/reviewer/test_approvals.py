@@ -20,12 +20,16 @@ from tests.conftest import FakeStore
 
 
 def _github(status: int, text: str = "") -> AsyncMock:
-    return AsyncMock(return_value=httpx2.Response(status, text=text))
+    return AsyncMock(
+        return_value=httpx2.Response(
+            status, text=text, request=httpx2.Request("GET", "https://api.github.com")
+        )
+    )
 
 
 async def test_fetch_reads_the_file_at_the_requested_ref() -> None:
     request = _github(200, "  Docs-only changes may be approved.\n")
-    with patch("openswe.github.repo_files.github_request", request):
+    with patch("openswe.github.http.github_request", request):
         policy = await fetch_approvals_md("o", "r", "a" * 40, token="t")
     assert policy == "Docs-only changes may be approved."
     _client, method, url = request.await_args.args
@@ -42,13 +46,13 @@ async def test_fetch_reads_the_file_at_the_requested_ref() -> None:
     ids=["missing", "empty", "oversized", "error"],
 )
 async def test_fetch_yields_no_policy_for_unusable_files(status: int, text: str) -> None:
-    with patch("openswe.github.repo_files.github_request", _github(status, text)):
+    with patch("openswe.github.http.github_request", _github(status, text)):
         assert await fetch_approvals_md("o", "r", "main", token="t") is None
 
 
 async def test_fetch_yields_no_policy_when_github_is_unreachable() -> None:
     failing = AsyncMock(side_effect=httpx2.ConnectError("down"))
-    with patch("openswe.github.repo_files.github_request", failing):
+    with patch("openswe.github.http.github_request", failing):
         assert await fetch_approvals_md("o", "r", "main", token="t") is None
 
 

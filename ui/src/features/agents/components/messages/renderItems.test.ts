@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildRenderItems,
+  collapsedWorkItems,
   countWorkActions,
-  selectCollapsedTurnItems,
-  splitWorkAndReply,
+  segmentTurn,
 } from "./renderItems"
 import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
 
@@ -28,27 +28,28 @@ function iframeChunk(): ToolExecutionChunk {
 }
 
 describe("buildRenderItems", () => {
-  it("keeps a connection card visible outside folded work", () => {
+  it("shows a managed tools offer as a card, and a failed one as a tool call", () => {
+    const offer = {
+      status: "connection_required",
+      gateway: { id: "gw-1", name: "Engineering" },
+      missing: [{ slug: "linear", display_name: "Linear", kind: "oauth" }],
+    }
     const card: ToolExecutionChunk = {
       kind: "tool-execution",
-      toolCallId: "connect-1",
-      title: "Request service connection",
-      toolKind: "service-connection",
-      input: { service: "notion" },
+      toolCallId: "managed-1",
+      title: "Connect managed tools",
+      toolKind: "managed-tools",
       status: "completed",
+      output: JSON.stringify({ success: true, ...offer }),
     }
-    const items = buildRenderItems([
-      card,
-      {
-        kind: "tool-execution",
-        toolCallId: "read-1",
-        title: "Read file",
-        toolKind: "read",
-        status: "completed",
-      },
-    ])
-    expect(selectCollapsedTurnItems(items)).toEqual([
-      { type: "connection-item", key: "tool-connect-1", chunk: card },
+    const failed: ToolExecutionChunk = {
+      ...card,
+      toolCallId: "managed-2",
+      output: JSON.stringify({ success: false, error: "Not private" }),
+    }
+    expect(buildRenderItems([card, failed])).toEqual([
+      { type: "managed-tools-item", key: "tool-managed-1", chunk: card, offer },
+      { type: "tool-item", key: "tool-managed-2", chunk: failed },
     ])
   })
 
@@ -77,8 +78,8 @@ describe("buildRenderItems", () => {
       { type: "sql-item", key: "tool-call-sql", chunk },
     ])
     const items = buildRenderItems([chunk])
-    expect(selectCollapsedTurnItems(items)).toEqual([])
-    expect(countWorkActions(splitWorkAndReply(items).workItems)).toBe(1)
+    expect(collapsedWorkItems(items)).toEqual([])
+    expect(countWorkActions(items)).toBe(1)
   })
 
   it.each([
@@ -103,7 +104,7 @@ describe("buildRenderItems", () => {
     }
   )
 
-  it("keeps sent replies visible when later work runs", () => {
+  it("splits work into separate folds at each sent reply", () => {
     const sentReply: ToolExecutionChunk = {
       kind: "tool-execution",
       toolCallId: "call-reply",
@@ -125,16 +126,16 @@ describe("buildRenderItems", () => {
       { kind: "text", text: "Done" },
     ])
 
-    const { workItems, replyItems } = splitWorkAndReply(items)
-    expect(workItems.map((item) => item.type)).toEqual(["tool-item"])
-    expect(replyItems.map((item) => item.type)).toEqual([
-      "reply-item",
-      "iframe-item",
-      "text-chunk",
-    ])
+    expect(
+      segmentTurn(items).map((segment) =>
+        segment.type === "reply"
+          ? segment.item.type
+          : segment.items.map((item) => item.type)
+      )
+    ).toEqual(["reply-item", "iframe-item", ["tool-item"], "text-chunk"])
   })
 
-  it("keeps tool failures collapsed while preserving approvals and final output", () => {
+  it("keeps tool failures collapsed while preserving approvals", () => {
     const chunks: Array<Chunk> = [
       { kind: "reasoning", text: "Inspecting the code" },
       {
@@ -162,12 +163,9 @@ describe("buildRenderItems", () => {
     ]
     const items = buildRenderItems(chunks)
 
-    const collapsed = selectCollapsedTurnItems(items)
+    const collapsed = collapsedWorkItems(items)
 
-    expect(collapsed.map((item) => item.type)).toEqual([
-      "tool-item",
-      "text-chunk",
-    ])
+    expect(collapsed.map((item) => item.type)).toEqual(["tool-item"])
     expect(
       collapsed.flatMap((item) =>
         "chunk" in item && item.chunk.kind === "tool-execution"
@@ -188,8 +186,8 @@ describe("buildRenderItems", () => {
       },
     ])
 
-    expect(selectCollapsedTurnItems(items)).toEqual([])
-    expect(selectCollapsedTurnItems(items, true)).toEqual(items)
+    expect(collapsedWorkItems(items)).toEqual([])
+    expect(collapsedWorkItems(items, true)).toEqual(items)
   })
 
   it("counts tool actions without counting reasoning or final output", () => {
@@ -218,8 +216,6 @@ describe("buildRenderItems", () => {
       },
       { kind: "text", text: "Done" },
     ])
-    const { workItems } = splitWorkAndReply(items)
-
-    expect(countWorkActions(workItems)).toBe(3)
+    expect(countWorkActions(items)).toBe(3)
   })
 })

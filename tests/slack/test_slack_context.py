@@ -16,7 +16,9 @@ from openswe.slack.client import (
 from openswe.slack.payloads import SlackChannelContext, SlackChannelPayload
 from openswe.slack.request import SlackRequest
 from openswe.source_context import SourceContext
+from openswe.users import User
 from openswe.utils.run_usage import RunUsageSummary
+from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -122,6 +124,56 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == "private"
     assert metadata["owner_login"] == "Alice"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("linked_slack", [True, False])
+async def test_upsert_counts_linked_and_unregistered_slack_participants(
+    monkeypatch: pytest.MonkeyPatch,
+    linked_slack: bool,
+) -> None:
+    threads = _FakeThreadsClient(thread={"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    alice = User()
+
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=alice))
+    monkeypatch.setattr(User, "for_email", AsyncMock(return_value=alice))
+    monkeypatch.setattr(User, "login_for_email", AsyncMock(return_value="alice"))
+    monkeypatch.setattr(
+        User,
+        "for_identity",
+        AsyncMock(
+            side_effect=lambda provider, uid: alice if linked_slack and uid == "U1" else None
+        ),
+    )
+    monkeypatch.setattr(
+        User,
+        "login_for_slack",
+        AsyncMock(side_effect=lambda uid: "alice" if linked_slack and uid == "U1" else None),
+    )
+    for slack_ids, expected in [
+        (["U1"], {f"user:{alice.id}"}),
+        (["U1", "U2"], {f"user:{alice.id}", "slack:U2"}),
+    ]:
+        assert await webhook_common.upsert_agent_thread_metadata(
+            "thread-id",
+            source="slack",
+            github_login="alice" if linked_slack else "",
+            user_email="alice@example.com",
+            source_context=SourceContext.parse(
+                {
+                    "slack_thread": {
+                        "channel_id": "C1",
+                        "thread_ts": "1.0",
+                        "triggering_user_id": "U1",
+                        "permalink": "https://slack.example/thread",
+                    }
+                }
+            ),
+            slack_participant_user_ids=slack_ids,
+            title="Thread",
+        )
+        assert participant_ids(cast(dict, threads.thread)["metadata"]) == expected
 
 
 def test_upsert_records_a_token_scope_only_on_creation(
@@ -928,6 +980,26 @@ def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
     assert "/breakout" not in inputs[1][0]["text"]
 
 
+def test_background_event_is_not_attributed_to_the_person_it_acts_for() -> None:
+    run_input = slack_webhooks._slack_context_input(
+        [],
+        {"U123": "Mukil"},
+        {},
+        channel={"id": "slack:C123", "platform": "slack"},
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        trigger_user_id="U123",
+        request_text="Pick a reviewer",
+        request_blocks=[{"type": "text", "text": "Pick a reviewer"}],
+        trigger_system={"id": "system:background-event", "display_name": "Open SWE"},
+    )
+    request = str(run_input["messages"][-1]["content"])
+
+    assert 'kind="system"' in request
+    assert "system:background-event" in request
+    assert "slack:U123" not in request
+
+
 def test_slack_context_never_replays_open_swes_own_replies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1128,3 +1200,70 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
         "Working on it",
         None,
     )
+
+
+@pytest.mark.parametrize("first_message", [True, False])
+@pytest.mark.parametrize(
+    "text,concierge,switches",
+    [
+        ("<@UBOT> /model:perf please continue", False, True),
+        ("<@UBOT> `/model:perf` please continue", False, False),
+        ("<@UBOT> please continue /model:perf", False, True),
+        ("<@UBOT> /model:perf please continue", True, False),
+    ],
+)
+async def test_performance_directive_switches_unless_quoted(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store,
+    registry_db,
+    first_message: bool,
+    text: str,
+    concierge: bool,
+    switches: bool,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=not first_message))
+    monkeypatch.setattr(webhook_common, "get_thread_model_choice", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_webhooks,
+        "load_thread_settings",
+        AsyncMock(
+            return_value={
+                "routing_models": {
+                    "performance": {"model_id": "openai:gpt-6-astra", "effort": "low"}
+                }
+            }
+        ),
+    )
+    feedback = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhooks, "create_langsmith_feedback", feedback)
+    notice = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
+    dispatch = AsyncMock(return_value={"run_id": "run-perf"})
+    monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
+    await slack_webhooks.process_slack_mention(
+        SlackRequest(
+            channel_id="C123",
+            thread_ts="1700000000.000100",
+            event_ts="1700000000.000100" if first_message else "1700000000.000200",
+            thread_id="mapped-thread",
+            user_id="U123",
+            text=text,
+            bot_user_id="UBOT",
+            concierge_mode=concierge,
+        ),
+        repo=None,
+    )
+    configurable = dispatch.call_args.args[3]
+    if not switches:
+        assert "agent_model_id" not in configurable
+        notice.assert_not_awaited()
+        feedback.assert_not_awaited()
+    else:
+        assert feedback.call_args.args == ("run-perf", "performance_model_switch_slack")
+        assert configurable["agent_model_id"] == "openai:gpt-6-astra"
+        assert configurable["model_selection"] == "explicit"
+        assert notice.call_args.args[:2] == ("C123", "U123")
+        assert "openai:gpt-6-astra" in notice.call_args.args[2]
+        assert notice.call_args.kwargs["thread_ts"] == "1700000000.000100"

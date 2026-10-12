@@ -1,6 +1,7 @@
 """Deterministic reviewer picks: code owners and recent authors of the changed files.
 
-Each candidate scores the changed files they own plus those they changed within
+Candidates come from one CODEOWNERS area at a time, the one owning the most changed
+files first. Each scores the changed files they own plus those they changed within
 ``HISTORY_WINDOW``, divided by one more than the open reviews they already have.
 Only people inside their work hours are picked; when nobody is, the pick waits
 for whoever's work day starts first. Anyone already on the request, or rotated
@@ -10,6 +11,7 @@ away from it for not accepting, is skipped.
 import asyncio
 import logging
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Self
@@ -18,12 +20,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx2
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
-from openswe.expedited_review.eligibility import ChangedFile, fetch_changed_files
-from openswe.github.ci import has_repo_write_permission
+from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github.codeowners import CodeOwners
-from openswe.github.http import GITHUB_API_BASE, github_client, github_request
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
 from openswe.github.org_membership import team_members
-from openswe.human_review.people import repo_token
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.client import get_slack_user_info
 from openswe.users import User
@@ -162,49 +163,102 @@ class Wait:
     until: datetime
 
 
-async def _owned(codeowners: CodeOwners, files: list[ChangedFile]) -> Counter[str]:
-    teams: dict[str, list[str]] = {}
-    owned: Counter[str] = Counter()
-    for changed in files:
-        logins: set[str] = set()
-        for owner in codeowners.owners_for(changed.filename):
-            handle = owner.removeprefix("@")
-            if "/" not in handle:
-                logins.add(handle.lower())
-                continue
-            if handle not in teams:
-                org, slug = handle.split("/", 1)
-                teams[handle] = await team_members(org, slug) or []
-                logger.info(
-                    "Expanded a CODEOWNERS team",
-                    extra={"github_team": handle, "members": len(teams[handle])},
-                )
-            logins.update(login.lower() for login in teams[handle])
-        owned.update(logins)
-    return owned
+@dataclass(frozen=True, slots=True)
+class Area:
+    """Changed files that share one set of CODEOWNERS owners."""
+
+    handles: tuple[str, ...]
+    owners: frozenset[str]
+    files: tuple[str, ...]
 
 
-async def _touched(
-    owner: str, repo: str, ref: str | None, files: list[ChangedFile], token: str
-) -> Counter[str]:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits"
+@dataclass(frozen=True, slots=True)
+class Coverage:
+    """A pull request's owned changed files split by owners, the largest area first.
+
+    The first reviewer comes from the largest area; the rest get one reviewer each after an approval.
+    """
+
+    areas: tuple[Area, ...]
+
+    def uncovered(self, logins: Collection[str]) -> list[Area]:
+        """Areas none of ``logins`` owns."""
+        lowered = {login.lower() for login in logins}
+        return [area for area in self.areas if not area.owners & lowered]
+
+    def of(self, login: str) -> list[Area]:
+        return [area for area in self.areas if login.lower() in area.owners]
+
+    def owned(self) -> Counter[str]:
+        """How many changed files each owner owns."""
+        counts: Counter[str] = Counter()
+        for area in self.areas:
+            for login in area.owners:
+                counts[login] += len(area.files)
+        return counts
+
+    @classmethod
+    async def build(cls, codeowners: CodeOwners, paths: list[str]) -> Self:
+        grouped: dict[tuple[str, ...], list[str]] = {}
+        for path in paths:
+            if handles := codeowners.owners_for(path):
+                grouped.setdefault(handles, []).append(path)
+        teams: dict[str, list[str]] = {}
+        areas: list[Area] = []
+        for handles, files in grouped.items():
+            owners: set[str] = set()
+            for owner in handles:
+                handle = owner.removeprefix("@")
+                if "/" not in handle:
+                    owners.add(handle.lower())
+                    continue
+                if handle not in teams:
+                    org, slug = handle.split("/", 1)
+                    teams[handle] = await team_members(org, slug) or []
+                    logger.info(
+                        "Expanded a CODEOWNERS team",
+                        extra={"github_team": handle, "members": len(teams[handle])},
+                    )
+                owners.update(login.lower() for login in teams[handle])
+            areas.append(Area(handles, frozenset(owners), tuple(files)))
+        return cls(tuple(sorted(areas, key=lambda area: (-len(area.files), area.handles))))
+
+    @classmethod
+    async def load(cls, request: HumanReviewRequest) -> Self | None:
+        """The request's coverage; ``None`` without CODEOWNERS or when GitHub cannot be read."""
+        pr = request.pull_request
+        try:
+            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+                files = await ChangedFile.of_pull(pull)
+                if not files:
+                    return None
+                codeowners = await CodeOwners.fetch(pull.repo, pr.base_ref or None)
+        except GitHubAppUnavailable:
+            logger.warning(
+                "No GitHub App token to read code-owner coverage",
+                extra={"request_id": str(request.id)},
+            )
+            return None
+        if codeowners is None:
+            return None
+        return await cls.build(codeowners, [changed.filename for changed in files])
+
+
+async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) -> Counter[str]:
     since = (datetime.now(UTC) - HISTORY_WINDOW).isoformat()
     busiest = sorted(files, key=lambda f: (-f.changed_lines, f.filename))[:HISTORY_MAX_FILES]
     gate = asyncio.Semaphore(_HISTORY_CONCURRENCY)
 
-    async def authors(client: httpx2.AsyncClient, path: str) -> set[str]:
-        params = {"path": path, "since": since, "per_page": "100"}
-        if ref:
-            params["sha"] = ref
+    async def authors(path: str) -> set[str]:
         async with gate:
             try:
-                response = await github_request(client, "GET", url, params=params)
-                response.raise_for_status()
-                commits = _COMMITS.validate_json(response.content)
-            except httpx2.HTTPError, ValidationError:
+                commits = _COMMITS.validate_python(
+                    await repo.commits(path=path, since=since, ref=ref)
+                )
+            except httpx2.HTTPError, ValueError, ValidationError:
                 logger.warning(
                     "Could not read a changed file's history",
-                    extra={"repository": f"{owner}/{repo}", "path": path},
+                    extra={"repository": repo.full_name, "path": path},
                     exc_info=True,
                 )
                 return set()
@@ -215,14 +269,19 @@ async def _touched(
         }
 
     touched: Counter[str] = Counter()
-    async with github_client(token=token) as client:
-        for logins in await asyncio.gather(*(authors(client, f.filename) for f in busiest)):
-            touched.update(logins)
+    for logins in await asyncio.gather(*(authors(f.filename) for f in busiest)):
+        touched.update(logins)
     return touched
 
 
-async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
-    """The best on-shift reviewer, when to try again, or ``None`` when nobody qualifies."""
+async def choose_reviewer(
+    request: HumanReviewRequest, *, area: Area | None = None
+) -> Pick | Wait | None:
+    """The best on-shift owner of ``area``, when to try again, or ``None`` when nobody qualifies.
+
+    Without ``area`` it is the first area nobody on the request owns, the largest first, falling
+    back to anyone who changed the files; ``None`` once every area has someone.
+    """
     pr = request.pull_request
     extra = {
         "request_id": str(request.id),
@@ -230,22 +289,37 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
         "pr_number": pr.number,
     }
     logger.info("Picking a reviewer", extra={**extra, "base_ref": pr.base_ref})
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
+    try:
+        async with GitHubClient.as_app(pr.owner, pr.repo) as github:
+            return await _choose_reviewer(
+                request, github.repo(pr.owner, pr.repo).pull_request(pr.number), area, extra
+            )
+    except GitHubAppUnavailable:
         logger.warning("No GitHub App token to pick a reviewer", extra=extra)
         return None
-    files = await fetch_changed_files(
-        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
-    )
+
+
+async def _choose_reviewer(
+    request: HumanReviewRequest,
+    pull: PullRequestClient,
+    area: Area | None,
+    extra: dict[str, object],
+) -> Pick | Wait | None:
+    pr = request.pull_request
+    files = await ChangedFile.of_pull(pull)
     if not files:
         logger.warning("Could not read the changed files to pick a reviewer", extra=extra)
         return None
     ref = pr.base_ref or None
     codeowners, touched = await asyncio.gather(
-        CodeOwners.fetch(pr.owner, pr.repo, ref, token=token),
-        _touched(pr.owner, pr.repo, ref, files, token),
+        CodeOwners.fetch(pull.repo, ref), _touched(pull.repo, ref, files)
     )
-    owned = await _owned(codeowners, files) if codeowners is not None else Counter[str]()
+    coverage = (
+        await Coverage.build(codeowners, [changed.filename for changed in files])
+        if codeowners is not None
+        else Coverage(())
+    )
+    owned = coverage.owned()
     logger.info(
         "Gathered reviewer candidates",
         extra={
@@ -281,6 +355,21 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
         "Filtered reviewer candidates",
         extra={**extra, "eligible": sorted(people), "skipped": skipped},
     )
+    fallback = False
+    if area is None and coverage.areas:
+        on_request = [p.github_login for p in request.participants if p.decision != "expired"]
+        if not (open_areas := coverage.uncovered(on_request)):
+            logger.info("Every code owner area already has a reviewer", extra=extra)
+            return None
+        area, fallback = open_areas[0], True
+    if area is not None:
+        owners = {login: user for login, user in people.items() if login in area.owners}
+        logger.info(
+            "Narrowed reviewer candidates to a code owner area",
+            extra={**extra, "code_owners": list(area.handles), "eligible": sorted(owners)},
+        )
+        if owners or not fallback:
+            people = owners
     if not people:
         logger.info("No Open SWE user owns or recently changed these files", extra=extra)
         return None
@@ -322,9 +411,7 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
     )
     by_start = sorted(ranked, key=lambda c: hours[c.login].next_start(now))
     for candidate in by_start:
-        if not await has_repo_write_permission(
-            owner=pr.owner, repo=pr.repo, username=candidate.login, token=token
-        ):
+        if not await pull.repo.can_write(candidate.login):
             logger.info(
                 "Skipped a reviewer candidate without write access",
                 extra={**extra, "github_login": candidate.login},

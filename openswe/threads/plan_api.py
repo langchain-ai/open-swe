@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, model_validator
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
@@ -114,6 +115,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
 
 
 @plan_router.put("/{thread_id}")
+@audit_endpoint
 async def update_plan(
     thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
@@ -167,6 +169,7 @@ async def get_plan_comments(
 
 
 @plan_router.post("/{thread_id}/comments")
+@audit_endpoint
 async def post_plan_comment(
     thread_id: str, body: CommentBody, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
@@ -186,6 +189,7 @@ async def post_plan_comment(
 
 
 @plan_router.post("/{thread_id}/comments/submit")
+@audit_endpoint
 async def submit_plan_comments(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, str]:
@@ -210,6 +214,7 @@ async def submit_plan_comments(
 
 
 @plan_router.delete("/{thread_id}/comments/{comment_id}")
+@audit_endpoint
 async def remove_plan_comment(
     thread_id: str, comment_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:

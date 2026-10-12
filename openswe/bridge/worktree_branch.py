@@ -20,7 +20,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from openswe.input_messages import dynamic_context_hash, input_message_text
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ _TEMPORARY_BRANCH = re.compile(rf"^{re.escape(TEMPORARY_BRANCH_PREFIX)}-[0-9a-f]
 _background_tasks: set[asyncio.Task[None]] = set()
 _inflight_threads: set[str] = set()
 
-_BRANCH_SYSTEM_PROMPT = load_prompt("worktree-branch.md")
+_BRANCH_SYSTEM_PROMPT = prompt("worktree-branch")
 
 
 class _BranchName(BaseModel):

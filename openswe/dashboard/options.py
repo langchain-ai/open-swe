@@ -34,6 +34,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "anthropic:claude-haiku-5-5",
+        "label": "Haiku 5.5",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "medium",
+        "supports_images": True,
+    },
+    {
         "id": "anthropic:claude-fable-5-1",
         "label": "Fable 5.1",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
@@ -140,6 +147,7 @@ CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
 _PROFILE_ALIASES = {"gpt-6.1-sol": "gpt-6-sol", "gpt-6-luna": "gpt-5.6-luna"}
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "anthropic:claude-sonnet-5-5": 1_000_000,
+    "anthropic:claude-haiku-5-5": 1_000_000,
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
 }
 
