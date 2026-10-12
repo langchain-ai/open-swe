@@ -142,25 +142,9 @@ def _pr_ref(owner: str, repo: str, number: int) -> GitHubPrRef:
     )
 
 
-class HumanReviewStatus(BaseModel):
-    active: bool
-
-
-@router.get("/repos/{owner}/{repo}/pulls/{number}/human-review/status")
-async def api_human_review_status(
-    owner: str,
-    repo: str,
-    number: int,
-    session: dict[str, object] = SESSION_DEP,
-) -> HumanReviewStatus:
-    pr_ref = _pr_ref(owner, repo, number)
-    await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
-    request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    return HumanReviewStatus(active=request is not None)
-
-
 class HumanReviewAvailability(BaseModel):
     available: bool
+    active: bool
     blockers: list[str] = []
 
 
@@ -179,7 +163,9 @@ async def api_human_review_availability(
         channel = await settings.channel_for_pr(pull)
         active = await HumanReviewRequest.active_for(owner, repo, number)
         blockers = None if active is not None else await review_blockers(pull)
-    return HumanReviewAvailability(available=bool(channel), blockers=blockers or [])
+    return HumanReviewAvailability(
+        available=bool(channel), active=active is not None, blockers=blockers or []
+    )
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review")

@@ -17,27 +17,22 @@ import { PullRequestActionButton } from "./PullRequestActionButton"
 
 /** Posts a review card in the repository's Slack review channel. */
 export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
+  const queryClient = useQueryClient()
+  const queryKey = ["human-review-availability", pr]
   const availability = useQuery({
-    queryKey: ["human-review-availability", pr],
+    queryKey,
     queryFn: () => api.humanReviewAvailability(pr),
     enabled: pr.reviewDecision !== "approved",
     staleTime: 60_000,
   })
   const [channel, setChannel] = useState<string | null>(null)
-  const needsChannel = availability.isSuccess && !availability.data.available
+  const active = availability.data?.active ?? false
+  const needsChannel =
+    availability.isSuccess && !availability.data.available && !active
   const blockers = availability.data?.blockers ?? []
   const reason = blockers.length
     ? `A review can't be requested yet: ${blockers.join("; ")}.`
     : null
-  const queryClient = useQueryClient()
-  const queryKey = ["humanReviewStatus", pr.repo, pr.number]
-  const status = useQuery({
-    queryKey,
-    queryFn: () => api.humanReviewStatus(pr.repo, pr.number),
-    enabled: pr.reviewDecision !== "approved",
-    refetchOnMount: "always",
-    refetchOnWindowFocus: "always",
-  })
   const requestReview = useMutation({
     mutationFn: () =>
       api.requestHumanReview(pr, needsChannel ? (channel ?? "") : ""),
@@ -46,7 +41,11 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     },
     onSuccess: async (result) => {
       await queryClient.cancelQueries({ queryKey })
-      queryClient.setQueryData(queryKey, { active: true })
+      queryClient.setQueryData<
+        Awaited<ReturnType<typeof api.humanReviewAvailability>>
+      >(queryKey, (previous) =>
+        previous ? { ...previous, active: true, blockers: [] } : previous
+      )
       toast.success(
         result.reused
           ? `${pullRequestKey(pr)} already has a review request in Slack`
@@ -69,17 +68,16 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     retry: false,
   })
   if (pr.reviewDecision === "approved") return null
-  if (status.isPending) return null
-  if (!status.data)
+  if (availability.isError && !availability.data)
     return (
       <PullRequestActionButton
         label="Retry review status"
-        disabled={status.isFetching}
-        onClick={() => void status.refetch()}
+        disabled={availability.isFetching}
+        onClick={() => void availability.refetch()}
       />
     )
   const label =
-    requestReview.isPending || status.data.active
+    requestReview.isPending || active
       ? "Review requested"
       : requestReview.isError
         ? "Retry review request"
@@ -107,7 +105,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           availability.isPending ||
           (needsChannel && !channel) ||
           requestReview.isPending ||
-          status.data.active
+          active
         }
         onClick={() => requestReview.mutate()}
       />
