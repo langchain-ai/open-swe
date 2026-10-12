@@ -672,7 +672,11 @@ def test_broadcast_preserves_description_without_reciting_title() -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada", title="Unhelpful PR title")
     description = "Fix <permissions> & *literal text*.\n\nPlease check access controls."
     request = HumanReviewRequest(
-        pull_request_id=pr.id, head_sha="abc", kind="standard", tldr=description
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        tldr=description,
+        run_config={"human_description": True},
     )
     request.pull_request = pr
     text, blocks = open_card(
@@ -684,3 +688,16 @@ def test_broadcast_preserves_description_without_reciting_title() -> None:
         "type": "section",
         "text": {"type": "plain_text", "text": description, "emoji": False},
     }
+
+
+def test_broadcast_without_description_retains_pr_title() -> None:
+    from openswe.human_review.card import open_card
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada", title="Fix permissions")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    text, blocks = open_card(
+        request, title=pr.title, author="@ada", requester="@ada", review_states={}
+    )
+    assert pr.title in text
+    assert pr.title in blocks[0]["text"]["text"]

@@ -158,7 +158,10 @@ def open_card(
     ``author`` and ``requester`` are Slack mentions; ``review_states`` maps each
     GitHub login to its latest review state.
     """
-    blocks: list[Block] = [section(_heading(request, review_states))]
+    heading = _heading(request, review_states)
+    if not request.run_config.get("human_description"):
+        heading += f"\n*{escape(title)}*"
+    blocks: list[Block] = [section(heading)]
     if request.tldr:
         blocks.append({"type": "section", "text": plain_text(request.tldr, emoji=False)})
     blocks.append(context(_stats(request, author, requester)))
@@ -166,7 +169,7 @@ def open_card(
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))
     blocks.append(actions(*_buttons(request)))
-    return f"Review requested for {_label(request)}: {request.tldr}", blocks
+    return f"Review requested for {_label(request)}: {request.tldr or title}", blocks
 
 
 def closed_card(

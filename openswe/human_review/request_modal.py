@@ -77,7 +77,9 @@ class ReviewRequestContext(BaseModel):
 
     async def offer(self) -> None:
         value = json.dumps(
-            {"type": BUTTON_TYPE, "action": "describe", "subject": self.model_dump_json()}
+            {"type": BUTTON_TYPE, "action": "describe", "subject": self.model_dump_json()},
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
         if len(value) > 2000:
             raise ValueError("Review description context exceeds Slack's button limit")
@@ -137,8 +139,15 @@ class ReviewRequestContext(BaseModel):
                     human_description=description if description.strip() else None,
                 )
                 if result.success:
-                    return
-                error = result.error
+                    if not result.reused or result.summary_updated:
+                        return
+                    error = (
+                        "This PR already has an open review request; no description was changed."
+                    )
+                    if result.permalink:
+                        error += f" <{result.permalink}|Open the review request>."
+                else:
+                    error = result.error
         except HTTPException as exc:
             error = str(exc.detail)
         except Exception:

@@ -101,12 +101,14 @@ async def request_human_review(
             return _failure(
                 "A Slack person and thread are required to describe this review request."
             )
-        async with PullRequestClient.as_app(pr_ref.owner, pr_ref.repo, pr_ref.number) as pull:
-            blockers = await review_blockers(pull)
-        if blockers is None:
-            return _failure("GitHub was unavailable while checking the pull request.")
-        if blockers:
-            return _failure(f"{pr_ref.url} cannot be put up for review: " + "; ".join(blockers))
+        active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        if active is None:
+            async with PullRequestClient.as_app(pr_ref.owner, pr_ref.repo, pr_ref.number) as pull:
+                blockers = await review_blockers(pull)
+            if blockers is None:
+                return _failure("GitHub was unavailable while checking the pull request.")
+            if blockers:
+                return _failure(f"{pr_ref.url} cannot be put up for review: " + "; ".join(blockers))
         await ReviewRequestContext(
             pr_url=pr_ref.url,
             user_id=slack.triggering_user_id,
