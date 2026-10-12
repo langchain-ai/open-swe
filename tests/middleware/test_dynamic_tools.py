@@ -14,6 +14,7 @@ from langchain_openai.chatgpt_oauth import _ChatGPTToken  # noqa: PLC2701
 from langgraph.types import Command
 from pydantic import SecretStr
 
+from openswe.mcp.runtime import incident_tools
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
 
 
@@ -63,6 +64,33 @@ class _TokenProvider:
 
     async def aget_access_token(self) -> str:
         return "test"
+
+
+@pytest.mark.asyncio
+async def test_incident_catalog_excludes_unpublishable_status_page_tool() -> None:
+    status_page = _tool("mcp_incident_status_page_update_1234567890")
+    alert = _tool("mcp_incident_alert_show_1234567890")
+    other = _tool("mcp_other_status_page_update_1234567890")
+    tools = [status_page, alert, other]
+    middleware = DynamicToolMiddleware({"MCPs": incident_tools(tools)})
+
+    assert status_page.name not in middleware.tools[0].description
+    assert alert.name in middleware.tools[0].description
+    assert await middleware.catalog_tools() == [alert, other]
+    loader = cast(StructuredTool, middleware.tools[0])
+    result = await loader.ainvoke(
+        {
+            "name": "load_integration_tools",
+            "type": "tool_call",
+            "id": "blocked",
+            "args": {"tool_names": [status_page.name], "state": None},
+        }
+    )
+    assert isinstance(result, Command)
+    assert result.update["messages"][0].status == "error"
+    assert "loaded_integration_tools" not in result.update
+    ordinary = DynamicToolMiddleware({"MCPs": tools})
+    assert await ordinary.catalog_tools() == tools
 
 
 def _docs() -> DynamicToolMiddleware:

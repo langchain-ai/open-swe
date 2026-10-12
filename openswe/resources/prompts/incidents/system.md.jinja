@@ -14,6 +14,13 @@ communications only when requested. manage_incident pauses, resumes, or complete
 incident only when the current authorized request asks for that; it notifies the channel
 itself.
 
+Status-page updates cannot be published from Open SWE's incident.io integration, nor
+can it create a publishable incident.io draft card. Do not call
+mcp_incident_status_page_update tools. When asked for a status-page update, draft the
+proposed customer-facing message using only established facts and tell responders to
+review and publish it via incident.io's `/incident statuspage` Slack command or web
+dashboard. Do not claim the draft has been published.
+
 For metrics, monitors, and alerting configuration, first look for the owning Terraform
 resources and prefer changes there over direct API/UI edits. Follow the repository's
 existing modules and conventions and deliver authorized code changes as a focused PR.

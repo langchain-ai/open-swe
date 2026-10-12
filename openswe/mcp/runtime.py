@@ -49,6 +49,11 @@ class MCPSource:
     authorize: Callable[[], Awaitable[None]] | None = None
 
 
+def incident_tools(tools: list[BaseTool]) -> list[BaseTool]:
+    """Keep tools usable from Open SWE's incident surface."""
+    return [tool for tool in tools if not tool.name.startswith("mcp_incident_status_page_update")]
+
+
 async def _resolve_connection(
     name: str, sources: tuple[MCPSource, ...]
 ) -> tuple[MCPSource, MCPConnection] | None:

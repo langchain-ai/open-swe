@@ -103,6 +103,7 @@ from openswe.input_messages import (
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.managed import managed_mcp_source
+from openswe.mcp.runtime import incident_tools
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
@@ -1743,6 +1744,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     if not stop_summary_mode and not local_run and credential_scope_known:
         async with aphase(thread_id, "factory.mcp_tools"):
             mcp_tools = await _mcp_tools_for(credential_login, workspace, managed_gateway)
+            if incident_session is not None:
+                mcp_tools = incident_tools(mcp_tools)
 
     slack_tools = [
         manage_code_channel,
