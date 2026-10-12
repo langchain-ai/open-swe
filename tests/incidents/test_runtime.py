@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import langgraph_sdk
 import pytest
 from langchain.agents.middleware.types import ModelRequest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, convert_to_messages
 
-from openswe.incidents import documents, runtime, service
+from openswe.incidents import documents, runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.slack.channels import SlackChannel
@@ -70,6 +70,30 @@ def request(*messages) -> ModelRequest:
     return ModelRequest(
         model=MagicMock(), messages=list(messages), tools=[], state={"messages": []}
     )
+
+
+async def test_request_turns_preserve_the_system_prompt_and_replay_request_bytes(incident):
+    automatic = await runtime.load_incident_session(config())
+    question = 'What changed?\nCheck "gateway".'
+    asked = await runtime.load_incident_session(config(incident_request=question))
+    assert automatic.prompt == asked.prompt
+
+    inputs = turns._input(incident.record, request=question, requester=None)
+    messages = convert_to_messages(inputs["messages"])
+    original = messages[-1].text
+    assert f"<incident-request>{json.dumps(question)}</incident-request>" in original
+    handler = AsyncMock()
+    await runtime.IncidentMiddleware(asked).awrap_model_call(request(*messages), handler)
+    first = handler.await_args.args[0]
+    assert first.messages[-1].text == original
+
+    inputs = turns._input(incident.record, request=None, requester=None)
+    messages.extend(convert_to_messages(inputs["messages"]))
+    await runtime.IncidentMiddleware(automatic).awrap_model_call(request(*messages), handler)
+    replay = handler.await_args.args[0]
+    assert replay.system_message.text == first.system_message.text
+    assert replay.messages[0].text == original
+    assert replay.messages[-1].text.endswith("<incident-request>null</incident-request>")
 
 
 async def test_forged_source_on_a_normal_thread_is_refused(incident):

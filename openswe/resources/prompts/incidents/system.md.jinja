@@ -21,4 +21,5 @@ If Terraform is unavailable or cannot represent the change, explain the limitati
 propose an alternative within the current request's scope. Do not run terraform apply
 without explicit authorization.
 
-Current authorized responder request (null means automatic investigation): {{ explicit_request }}
+The current authorized responder request is given in the latest <incident-request> block
+of the conversation; null means automatic investigation.
