@@ -12,7 +12,7 @@ The HTTP middleware still creates request-local context before authentication so
 | MCP | Connection changes, managed connection, explicit secret-header reveal | Discovery and CLI invocation of arbitrary external tools |
 | Administration | Workspace creation/configuration/deletion/refresh, automation CRUD/trigger, incident settings/commands, organization skills | Listing/status reads, inbound service webhooks |
 | Threads | Uploads, lifecycle/run actions, sharing, pinning, commands, terminal access, artifact edits/comments, workflow-push decisions, explicit feedback | History, event streams, batched PR-check reads |
-| Reviews and GitHub | PR actions, review requests/assignment, comments and pending-review edits, submission/discard, labels, re-review/scout, review-style analysis/control | Summary queries, viewed telemetry, chat history/streams |
+| Reviews and GitHub | PR actions, review requests/assignment, comments and pending-review edits, submission/discard, labels, re-review/scout, review-style edits | Summary queries, viewed telemetry, chat history/streams |
 | Bridges | Open and close | Heartbeats, claims and request replies (transport/liveness traffic) |
 | Analytics | None | Page views and client-error reports; Segment analytics remains unchanged |
 | Agent tools | User settings/instructions/skills, shared flags/approval mode, workspace/automation administration, PR opening/linking/readiness/approval/review publication, human/expedited review actions, thread lifecycle, sandbox recreation, thread feedback | Reads/search, sandbox file/command operations, previews/downloads, polling/watches, wakeups/subscriptions, Slack delivery, internal finding/walkthrough bookkeeping, assessment ratings and draft review proposals |

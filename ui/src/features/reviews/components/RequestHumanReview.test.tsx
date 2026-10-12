@@ -53,6 +53,7 @@ const pr: OpenPullRequest = {
 it("requires a chosen channel when the repository has no review destination", async () => {
   vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
     available: false,
+    blockers: [],
   })
   const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
     success: true,

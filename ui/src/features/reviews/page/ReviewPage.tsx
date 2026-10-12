@@ -77,8 +77,8 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const leftInset = sidebar?.collapsed
     ? isDesktop
       ? "pl-32"
-      : "pl-14"
-    : "pl-3"
+      : "pl-space-8"
+    : "pl-space-3"
 
   const navigatorInline = navigatorOpen && roomForNavigator
 
@@ -131,7 +131,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
             title="Files"
             open={navigatorOverlay}
             onClose={() => setNavigatorOverlay(false)}
-            className="w-[min(88vw,300px)] pt-10"
+            className="w-[min(88vw,300px)] pt-space-7"
           >
             <Navigator pr={pr} />
           </SideSheet>
@@ -151,9 +151,9 @@ function PullRequestUnavailable({
   return (
     <div
       role="alert"
-      className="mx-auto flex max-w-md flex-1 flex-col items-start justify-center gap-3 px-6"
+      className="mx-auto flex max-w-md flex-1 flex-col items-start justify-center gap-space-3 px-space-5"
     >
-      <p className="text-[17px] font-semibold text-primary">
+      <p className="text-lg font-semibold text-primary">
         Can&apos;t open {pr.owner}/{pr.repo}#{pr.number}
       </p>
       <p className="text-sm text-secondary">

@@ -490,3 +490,19 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [row.number for row in result.pull_requests] == [1]
+
+
+@pytest.mark.parametrize(("user", "blocked"), [(User(), False), (None, True)])
+async def test_review_blockers_refuse_authors_without_an_open_swe_account(
+    user: User | None, blocked: bool
+) -> None:
+    from openswe.expedited_review.readiness import Readiness
+    from openswe.human_review.standard import review_blockers
+
+    readiness = Readiness(snapshot=_snapshot(), blockers=[])
+    with (
+        patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+    ):
+        blockers = await review_blockers(MagicMock())
+    assert blockers == (["its author is not an Open SWE user"] if blocked else [])

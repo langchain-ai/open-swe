@@ -1,3 +1,7 @@
+import {
+  MagnifyingGlassRegularIcon,
+  TagRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { Input } from "@langchain/macaw-components/Input"
@@ -6,8 +10,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
-import { TagIcon } from "@phosphor-icons/react/dist/ssr/Tag"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
@@ -73,7 +75,7 @@ export function PullRequestLabels({
       {shown.map((label) => (
         <span
           key={label.name}
-          className="inline-flex h-5 items-center gap-space-1 rounded-full border border-default px-1.5 text-[11px]"
+          className="inline-flex h-5 items-center gap-space-1 rounded-full border border-default px-space-1 text-xxs"
           title={label.description ?? undefined}
         >
           <span
@@ -89,7 +91,7 @@ export function PullRequestLabels({
             size="xs"
             color="secondary"
             variant="plain"
-            leftDecorator={TagIcon}
+            leftDecorator={TagRegularIcon}
             aria-label="Labels"
             onPointerEnter={() => setWanted(true)}
             onFocus={() => setWanted(true)}
@@ -100,7 +102,7 @@ export function PullRequestLabels({
         <PopoverContent align="end" className="w-72 p-space-2">
           <Input
             size="sm"
-            leftIcon={MagnifyingGlassIcon}
+            leftIcon={MagnifyingGlassRegularIcon}
             aria-label="Search labels"
             placeholder="Search labels…"
             value={search}

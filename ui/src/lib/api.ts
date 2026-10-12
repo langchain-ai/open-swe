@@ -301,15 +301,10 @@ export interface Profile {
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
-  default_model?: string
-  reasoning_effort?: string
-  default_subagent_model?: string | null
-  subagent_reasoning_effort?: string | null
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
@@ -328,15 +323,10 @@ export interface ProfileUpdate {
   experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
-  default_model: string
-  reasoning_effort: string
-  default_subagent_model?: string | null
-  subagent_reasoning_effort?: string | null
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean | null
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
@@ -380,7 +370,7 @@ export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
-  /** Tri-state adaptive model routing toggle; user preference overrides this org default. */
+  /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
@@ -702,8 +692,6 @@ export interface ReposPayload {
   repositories: Array<Repository>
 }
 
-export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
-
 /** What a positive approval assessment does; `null` is the `dry_run` default. */
 export type ReviewApprovalMode = "off" | "dry_run" | "approve"
 
@@ -715,16 +703,8 @@ export interface ReviewStyle {
   full_name: string
   owner?: string
   name?: string
-  status: ReviewStyleStatus
   custom_prompt: string | null
   approval_mode?: ReviewApprovalMode | null
-  analysis_summary: string | null
-  top_reviewers: Array<string>
-  prs_sampled: number
-  reviews_sampled: number
-  analysis_thread_id: string | null
-  analysis_run_id: string | null
-  error: string | null
   created_by?: string
   created_at?: string
   updated_at?: string
@@ -1500,20 +1480,6 @@ export const api = {
     request<ApprovalsFileStatus>(
       `/review-styles/${encodeURIComponent(full_name)}/approvals-file`
     ),
-  analyzeReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/analyze`,
-      {
-        method: "POST",
-      }
-    ),
-  cancelReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/cancel`,
-      {
-        method: "POST",
-      }
-    ),
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
@@ -1901,7 +1867,7 @@ export const api = {
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
   humanReviewAvailability: (pr: OpenPullRequest) =>
-    request<{ available: boolean }>(
+    request<{ available: boolean; blockers: string[] }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
   requestHumanReview: (pr: OpenPullRequest, channel = "") =>

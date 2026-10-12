@@ -91,6 +91,83 @@ async def test_list_threads_intersects_participant_and_admin_filters(
     assert awaited.kwargs["admin_threads"] is True
 
 
+_AUTOMATION_ID = "706242c0-edba-4ab7-a342-154c354f9946"
+
+
+def _automation_run(
+    monkeypatch: pytest.MonkeyPatch, thread_metadata: dict[str, object]
+) -> AsyncMock:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "source": "schedule",
+                "schedule_id": _AUTOMATION_ID,
+                "thread_id": "automation-thread",
+            }
+        },
+    )
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(
+                return_value={"thread_id": "automation-thread", "metadata": thread_metadata}
+            )
+        )
+    )
+    monkeypatch.setattr(threads_tool.schedules, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        threads_tool.schedules,
+        "get_agent_schedule",
+        AsyncMock(return_value={"id": _AUTOMATION_ID, "name": "CI watch"}),
+    )
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    return page
+
+
+async def test_automation_run_reads_public_threads_but_cannot_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+    )
+
+    listed = await threads_tool.list_threads(scope="automation", automation_id=_AUTOMATION_ID)
+    sent = await threads_tool.manage_thread(
+        action="send_message", thread_id="dm-thread", message="digest"
+    )
+
+    assert listed["success"] is True
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["include_all"] is True
+    assert awaited.kwargs["include_private"] is False
+    assert sent["success"] is False
+    assert "cannot message" in sent["error"]
+
+
+@pytest.mark.parametrize(
+    "thread_metadata",
+    [
+        {"owner_type": "system", "visibility": "public", "schedule_id": "another-automation"},
+        {"owner_type": "user", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+        {"owner_type": "system", "visibility": "private", "schedule_id": _AUTOMATION_ID},
+    ],
+)
+async def test_automation_reader_requires_the_automations_own_thread(
+    monkeypatch: pytest.MonkeyPatch, thread_metadata: dict[str, object]
+) -> None:
+    page = _automation_run(monkeypatch, thread_metadata)
+
+    result = await threads_tool.list_threads(scope="automation")
+
+    assert result == {"success": False, "error": "No verified triggering user is available"}
+    page.assert_not_awaited()
+
+
 class _DetailClient:
     def __init__(self) -> None:
         self.threads = SimpleNamespace(

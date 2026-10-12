@@ -1,3 +1,4 @@
+import { Text } from "@langchain/macaw-components/Text"
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
@@ -77,7 +78,7 @@ export function PullRequestCard({
           }
         }}
         className={cn(
-          "flex w-full gap-2.5 rounded-md py-2 pr-2.5 pl-2 text-left transition-colors",
+          "flex w-full gap-space-3 rounded-md py-space-2 pr-space-2 pl-space-2 text-left transition-colors",
           selected ? "bg-selected" : "hover:bg-surface-level-1-hover",
           outcome && "opacity-60"
         )}
@@ -90,7 +91,7 @@ export function PullRequestCard({
           )}
         />
         <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-1.5 text-xs text-secondary">
+          <span className="flex items-baseline gap-space-2 text-xs text-secondary">
             <span className="min-w-0 truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
           </span>
@@ -103,7 +104,7 @@ export function PullRequestCard({
             </span>
           ) : (
             <>
-              <span className="mt-1 flex flex-wrap gap-1">
+              <span className="mt-space-1 flex flex-wrap gap-space-1">
                 {reviewRequest}
                 {statusLabels(pr).map((status) => (
                   <StatusPill key={status} status={status} />
@@ -135,16 +136,16 @@ export function PullRequestCard({
     <div
       onClick={openFromCard}
       className={cn(
-        "cursor-pointer rounded-lg border bg-surface-level-1 p-4 transition-colors",
+        "cursor-pointer rounded-lg border bg-surface-level-1 p-space-4 transition-colors",
         selected
           ? "border-brand"
           : "border-default hover:bg-surface-level-1-hover",
         outcome && "opacity-60"
       )}
     >
-      <div className="min-w-0 space-y-3">
+      <div className="min-w-0 space-y-space-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-secondary">
+          <div className="flex flex-wrap items-center gap-x-space-2 gap-y-space-2 text-xs text-secondary">
             <span>
               {pr.repo}{" "}
               <span className="font-mono tabular-nums">#{pr.number}</span>
@@ -154,7 +155,12 @@ export function PullRequestCard({
               <StatusPill key={status} status={status} />
             ))}
           </div>
-          <h3 className="mt-1 text-sm font-medium break-words">
+          <Text
+            as="h3"
+            variant="h5"
+            weight="medium"
+            className="mt-space-1 break-words"
+          >
             <button
               type="button"
               className="text-left hover:underline"
@@ -162,9 +168,9 @@ export function PullRequestCard({
             >
               {pr.title}
             </button>
-          </h3>
+          </Text>
         </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-secondary">
+        <div className="flex flex-wrap items-center gap-x-space-5 gap-y-space-2 text-xs text-secondary">
           <Diffstat pr={pr} />
           {review}
           <span>

@@ -67,7 +67,7 @@ export interface ComposerPromptEditorHandle {
 
 const EMPTY_SKILL_NAMES = new Set<string>()
 const MENTION_CHIP_CLASS_NAME =
-  "inline-flex max-w-full select-none items-center gap-1 rounded-md border border-subtle bg-surface-level-1-hover/40 px-1.5 py-px align-middle text-xxs font-medium leading-[1.1] text-primary"
+  "inline-flex max-w-full select-none items-center gap-space-1 rounded-md border border-subtle bg-surface-level-1-hover/40 px-space-1 py-px align-middle text-xxs font-medium leading-[1.1] text-primary"
 
 type SerializedComposerMentionNode = Spread<
   { path: string; source: string; type: "composer-mention"; version: 1 },
@@ -757,7 +757,7 @@ function ComposerPromptEditorInner({
             aria-label="Message"
             aria-placeholder={placeholder}
             className={cn(
-              "block max-h-50 w-full overflow-y-auto bg-transparent text-[14px] leading-relaxed break-words whitespace-pre-wrap text-primary focus:outline-none",
+              "block max-h-50 w-full overflow-y-auto bg-transparent text-sm leading-relaxed break-words whitespace-pre-wrap text-primary focus:outline-none",
               className
             )}
             data-testid="composer-editor"
@@ -766,7 +766,7 @@ function ComposerPromptEditorInner({
           />
         }
         placeholder={
-          <div className="pointer-events-none absolute inset-0 text-[14px] leading-relaxed text-placeholder">
+          <div className="pointer-events-none absolute inset-0 text-sm leading-relaxed text-placeholder">
             {placeholder}
           </div>
         }

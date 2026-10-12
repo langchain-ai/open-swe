@@ -1,9 +1,11 @@
+import {
+  CheckIcon,
+  InfoFillIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
 import { Icon } from "@langchain/macaw-components/Icon"
 import { Spinner } from "@langchain/macaw-components/Spinner"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { ExclamationMarkIcon } from "@phosphor-icons/react/dist/ssr/ExclamationMark"
-import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
 import { useResolvedTheme } from "@/lib/theme"
@@ -17,9 +19,7 @@ export function Toaster(props: ToasterProps) {
       theme={theme}
       icons={{
         success: <Icon icon={CheckIcon} size="sm" rounded color="success" />,
-        info: (
-          <Icon icon={InfoIcon} weight="fill" size="sm" rounded color="info" />
-        ),
+        info: <Icon icon={InfoFillIcon} size="sm" rounded color="info" />,
         warning: (
           <Icon
             icon={ExclamationMarkIcon}

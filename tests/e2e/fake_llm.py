@@ -258,6 +258,7 @@ DELEGATE_MARKER = "E2E_DELEGATE"
 SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
 SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
+SLACK_REPLY_SEGMENTS_MARKER = "E2E_SLACK_REPLY_SEGMENTS"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -1090,6 +1091,39 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Finished the long task."),
     ),
+    "slack_reply_segments": (
+        _tool_step(
+            "Acknowledging the Slack request before starting work.",
+            "slack_reply",
+            {"message": "On it!", "response_type": "progress"},
+            "call-segments-ack",
+        ),
+        _tool_step(
+            "Exploring before reporting progress.",
+            "execute",
+            {"command": "sleep 1"},
+            "call-segments-explore",
+        ),
+        _tool_step(
+            "Reporting progress mid-run.",
+            "slack_reply",
+            {"message": "Found the cause.", "response_type": "progress"},
+            "call-segments-progress",
+        ),
+        _tool_step(
+            "Running a long fix while the progress reply is on screen.",
+            "execute",
+            {"command": "sleep 10"},
+            "call-segments-fix",
+        ),
+        _tool_step(
+            "Reporting the outcome.",
+            "slack_reply",
+            {"message": "Fixed it."},
+            "call-segments-done",
+        ),
+        StepSpec(content="Finished the fix."),
+    ),
     "slack_reply_grouped_order": (
         _tool_step(
             "Acknowledging the Slack request before delegating work.",
@@ -1434,6 +1468,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "slack_reply_grouped_order",
         lambda ctx: SLACK_REPLY_GROUPED_ORDER_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
+        "slack_reply_segments",
+        lambda ctx: SLACK_REPLY_SEGMENTS_MARKER in ctx.first_text,
     ),
     ScriptRule(
         "slack_reply_order",

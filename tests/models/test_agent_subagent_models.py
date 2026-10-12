@@ -35,7 +35,7 @@ class _DummyAgent:
 
 
 @pytest.mark.asyncio
-async def test_agent_subagent_inherits_profile_model_override_without_explicit_pair() -> None:
+async def test_agent_subagent_uses_workspace_defaults_despite_profile_override() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -92,17 +92,14 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     assert subagents[0]["model"] is subagent_model
-    assert make_model.call_args_list[0].args == ("anthropic:claude-opus-5-5",)
-    assert make_model.call_args_list[1].args == ("anthropic:claude-opus-5-5",)
-    assert make_model.call_args_list[1].kwargs["thinking"] == {
-        "type": "adaptive",
-        "display": "summarized",
-    }
-    assert make_model.call_args_list[1].kwargs["effort"] == "high"
+    assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
+    assert make_model.call_args_list[1].args == ("openai:gpt-6.1-sol",)
+    assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
+    assert make_model.call_args_list[1].kwargs["reasoning"]["effort"] == "low"
 
 
 @pytest.mark.asyncio
-async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
+async def test_agent_ignores_disabled_fable_profile() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -157,7 +154,6 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
     ):
         await get_agent(config)
 
-    # Fable was scrubbed to Opus for both main and subagent; effort preserved.
-    assert make_model.call_args_list[0].args == ("anthropic:claude-opus-5-5",)
-    assert make_model.call_args_list[0].kwargs["effort"] == "high"
-    assert make_model.call_args_list[1].args == ("anthropic:claude-opus-5-5",)
+    assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
+    assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
+    assert make_model.call_args_list[1].args == ("openai:gpt-6.1-sol",)

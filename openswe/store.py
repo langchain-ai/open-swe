@@ -102,6 +102,13 @@ async def put_value(namespace: Namespace, key: str, value: Mapping[str, Any]) ->
     await store_client().store.put_item(list(namespace), key, value)
 
 
+async def put_expiring_value(
+    namespace: Namespace, key: str, value: Mapping[str, Any], *, ttl_minutes: int
+) -> None:
+    """Store an item the Store sweeps once ``ttl_minutes`` have passed."""
+    await store_client().store.put_item(list(namespace), key, value, ttl=ttl_minutes)
+
+
 async def delete_value(namespace: Namespace, key: str) -> None:
     """Delete an item. Deleting one that is already gone is not an error."""
     try:

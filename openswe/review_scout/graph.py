@@ -21,6 +21,7 @@ from langchain.agents.middleware.types import (
     ModelResponse,
     hook_config,
 )
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
@@ -273,7 +274,13 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     thread_id = cfg.thread_id
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
+        return create_deep_agent(
+            system_prompt="",
+            tools=[],
+            middleware=[
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
+            ],
+        ).with_config(bindable_config(config))
 
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = settings.review_scout_model
@@ -310,6 +317,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),

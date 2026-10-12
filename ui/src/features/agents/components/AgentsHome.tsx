@@ -583,8 +583,8 @@ export function AgentsHome({
             contentWidthClass="max-w-3xl"
           />
         ) : (
-          <div className="flex min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-6">
+          <div className="flex min-h-0 flex-1 overflow-y-auto px-space-3 py-space-5 sm:px-space-5 sm:py-space-6">
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-space-5">
               <img
                 src={`${import.meta.env.BASE_URL}logo-mark.png`}
                 alt=""

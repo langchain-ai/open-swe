@@ -1,3 +1,4 @@
+import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,
   ReviewExcerptChips,
@@ -19,7 +20,6 @@ import { Icon } from "@langchain/macaw-components/Icon"
 import { Link } from "@langchain/macaw-components/Link"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { formatRelativeTime } from "@/lib/utils"
@@ -34,16 +34,11 @@ import type {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
-import {
-  type ThreadTarget,
-  ThreadTargetMenu,
-} from "@/features/agents/components/ThreadTargetMenu"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -77,6 +72,7 @@ import type {
   RestoredDraft,
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
+import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
   localThreadKeys,
@@ -154,7 +150,7 @@ export function AgentThreadView({
   const runsElsewhere =
     runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
   // A move takes effect with the next message, whose run carries the checkout over.
-  const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
+  const [handoff, setHandoff] = useState<RunTarget | null>(null)
   // A thread its Mac isn't serving can still move to the cloud, from its pushed work.
   const macOffline = runsElsewhere && handoff !== "cloud"
   // A Slack bot's thread is steered from its Slack thread, never from here.
@@ -220,7 +216,7 @@ export function AgentThreadView({
         ? localBridge.error.message
         : "This Mac could not be reached"
       : null
-  const runsHere: ThreadTarget = runsOnAMac(thread) ? "local" : "cloud"
+  const runsHere: RunTarget = runsOnAMac(thread) ? "local" : "cloud"
   const canMove =
     (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
@@ -770,29 +766,17 @@ export function AgentThreadView({
                   ? "Local CLI"
                   : "Cloud"
             }
-            targetMenu={
-              canMove ? (
-                <ThreadTargetMenu
-                  value={handoff ?? runsHere}
-                  pending={handoff !== null}
-                  disabled={isStreaming}
-                  onChange={(next) =>
-                    setHandoff(next === runsHere ? null : next)
-                  }
-                />
-              ) : undefined
-            }
             panelCollapsed={panelCollapsed}
             thread={thread}
           />
         )}
         {(macOffline || bridgeError) && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent={bridgeError ? "error" : "info"}
               icon={
                 <Icon
-                  icon={LaptopIcon}
+                  icon={LaptopRegularIcon}
                   size="md"
                   className={
                     bridgeError ? "text-icon-error" : "text-icon-brand"
@@ -807,7 +791,7 @@ export function AgentThreadView({
           </div>
         )}
         {thread.status === "error" && !reconnect.label && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent="error"
               action={
@@ -831,7 +815,7 @@ export function AgentThreadView({
         {source.kind === "transcript" && source.workspaceStale && (
           <div
             hidden={dismissedWarning === workspaceWarningKey}
-            className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
+            className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3"
           >
             <Banner
               key={workspaceWarningKey}
@@ -848,7 +832,7 @@ export function AgentThreadView({
           </div>
         )}
         {thread.attentionReason === "prs_closed" && !thread.resolved && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent="info"
               icon={
@@ -902,10 +886,14 @@ export function AgentThreadView({
               }
             />
           ) : isHydrating ? (
-            <div className="flex flex-1 items-center justify-center px-6">
+            <div
+              role="status"
+              aria-label="Loading conversation"
+              className="flex flex-1 items-center justify-center px-space-5"
+            >
               <img
                 src={`${import.meta.env.BASE_URL}logo-mark.png`}
-                alt="Loading conversation"
+                alt=""
                 className="size-12 animate-pulse"
               />
             </div>
@@ -961,17 +949,6 @@ export function AgentThreadView({
                   settingUpSandbox={settingUpSandbox}
                   pollWorkflowApprovalsWhileActive={isStreaming}
                   contentWidthClass="max-w-3xl"
-                  footer={
-                    !isStreaming &&
-                    !sendMessage.isPending &&
-                    queuedRows.length === 0 && (
-                      <ThreadFeedbackCard
-                        key={`${thread.id}:${session.data?.login ?? ""}`}
-                        threadId={thread.id}
-                        login={session.data?.login ?? null}
-                      />
-                    )
-                  }
                 />
               </Profiler>
             </PullRequestPreviewProvider>
@@ -1042,6 +1019,14 @@ export function AgentThreadView({
                       localWorktreeLabel: "Worktree",
                     }
                   : {})}
+                {...(canMove && {
+                  runTarget: handoff ?? runsHere,
+                  runTargetPending: handoff !== null,
+                  onRunTargetChange: isStreaming
+                    ? undefined
+                    : (next: RunTarget) =>
+                        setHandoff(next === runsHere ? null : next),
+                })}
                 contextUsage={{
                   usedTokens: contextUsage?.tokens,
                   contextWindow: activeModel?.context_window ?? null,

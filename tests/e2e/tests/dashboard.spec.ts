@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import {
   OTHER_USER,
   SAME_USER,
@@ -256,6 +256,48 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         await liveGroupedWork.elementHandle(),
       ),
     ).toBe(true);
+  });
+
+  test("keeps the live activity row below a Slack reply sent mid-run", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+    const threadId = await sendSegmentedReplies(page);
+
+    await page.goto(`/agents/${threadId}`);
+    await expectInDocumentOrder([
+      page.getByText("On it!", { exact: true }),
+      page.getByRole("button", { name: /^Worked(?: for .*)? · 1 action$/ }),
+      page.getByText("Found the cause.", { exact: true }),
+      page.getByRole("button", { name: /^Running · sleep 10 · 1 action$/ }),
+    ]);
+  });
+
+  test("folds each stretch of settled work between its replies", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+    const threadId = await sendSegmentedReplies(page);
+
+    await page.goto(`/agents/${threadId}`);
+    await expect(page.getByText("Fixed it.", { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await waitForThreadIdle(page, threadId);
+
+    const folds = page.getByRole("button", {
+      name: /^Worked(?: for .*)? · 1 action$/,
+    });
+    await expect(folds).toHaveCount(2);
+    await expectInDocumentOrder([
+      page.getByText("On it!", { exact: true }),
+      folds.first(),
+      page.getByText("Found the cause.", { exact: true }),
+      folds.last(),
+      page.getByText("Fixed it.", { exact: true }),
+    ]);
   });
 
   test("keeps follow-ups visible across the queued-to-transcript handoff", async ({
@@ -828,3 +870,32 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     release();
   });
 });
+
+async function sendSegmentedReplies(page: Page): Promise<string> {
+  const send = await page.request.post("/mock/slack/send", {
+    data: { text: "<@U0BOT> E2E_SLACK_REPLY_SEGMENTS report progress mid-run" },
+  });
+  expect(send.ok()).toBeTruthy();
+  return ((await send.json()) as { thread_id: string }).thread_id;
+}
+
+async function expectInDocumentOrder(locators: Array<Locator>) {
+  for (const locator of locators) await expect(locator).toBeVisible();
+  const [first, ...rest] = await Promise.all(
+    locators.map((locator) => locator.elementHandle()),
+  );
+  expect(
+    await first!.evaluate(
+      (head, tail) =>
+        [head, ...tail].every(
+          (node, index, nodes) =>
+            index === 0 ||
+            Boolean(
+              nodes[index - 1]!.compareDocumentPosition(node!) &
+              Node.DOCUMENT_POSITION_FOLLOWING,
+            ),
+        ),
+      rest,
+    ),
+  ).toBe(true);
+}

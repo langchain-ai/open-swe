@@ -1,3 +1,4 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import type { ComponentProps, ReactNode } from "react"
 import { Button } from "@langchain/macaw-components/Button"
 import { ButtonGroup } from "@langchain/macaw-components/ButtonGroup"
@@ -7,7 +8,6 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 
 type ButtonProps = ComponentProps<typeof Button>
 
@@ -77,6 +77,9 @@ export function SplitButton({
         <DropdownMenuTrigger asChild>
           <IconButton
             icon={CaretDownIcon}
+            color={color}
+            variant={variant}
+            size={size}
             label={menuLabel}
             disabled={menuDisabled}
             tooltipProps={{ disabled: true }}

@@ -1,7 +1,7 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, formatRelativeTime } from "@/lib/utils"
@@ -40,11 +40,11 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
     return (
       <div
         aria-hidden
-        className="flex w-full max-w-[920px] flex-col gap-4 px-4 pt-5 pb-8"
+        className="flex w-full max-w-[920px] flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6"
       >
         <Skeleton className="h-[236px] rounded-xl" />
         <Skeleton className="h-4 w-48" />
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-space-2">
           {[92, 100, 84, 96, 60].map((width) => (
             <Skeleton
               key={width}
@@ -56,14 +56,14 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       </div>
     )
   return (
-    <div className="flex w-full max-w-[920px] flex-col gap-4 px-4 pt-5 pb-8">
+    <div className="flex w-full max-w-[920px] flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
       <StandingPanel pr={pr} />
       {detail.walkthrough?.human_input && (
         <section
           aria-label="Human input"
-          className="rounded-xl border border-dashed border-default px-4 py-3"
+          className="rounded-xl border border-dashed border-default px-space-4 py-space-3"
         >
-          <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-secondary">
+          <p className="mb-space-1 flex items-center gap-space-2 text-xs font-medium text-secondary">
             <AgentMark />
             What people asked for
           </p>
@@ -121,7 +121,7 @@ function Description({
   const clamped = overflows && !expanded
   return (
     <article aria-label="Description" className="group/description">
-      <header className="mb-2 flex items-center gap-2 text-xs text-secondary">
+      <header className="mb-space-2 flex items-center gap-space-2 text-xs text-secondary">
         {author?.avatar_url && (
           <img
             src={author.avatar_url}
@@ -145,7 +145,7 @@ function Description({
       <div
         ref={ref}
         className={cn(
-          "relative text-[13.5px] leading-[1.65]",
+          "relative text-xs leading-[1.65]",
           clamped && "overflow-hidden"
         )}
         style={clamped ? { maxHeight: CLAMP_PX } : undefined}
@@ -167,7 +167,7 @@ function Description({
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-secondary hover:text-primary"
+          className="mt-space-1 inline-flex items-center gap-space-1 text-xs font-medium text-secondary hover:text-primary"
         >
           <CaretDownIcon
             className={cn(

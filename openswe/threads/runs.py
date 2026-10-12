@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
-from openswe.dashboard.agent_overrides import normalize_profile_overrides
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -53,7 +52,6 @@ from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import (
     lookup_slack_thread_run_mapping,
-    post_slack_thread_reply_with_ts,
     update_slack_trace_reply_for_web_handoff,
 )
 from openswe.source_context import SourceContext
@@ -161,9 +159,6 @@ async def _resolve_agent_model_choice(
     settings = await get_workspace_settings(workspace)
     resolved_model, resolved_effort = settings.default_model("agent")
     if model_id not in DEPRECATED_MODEL_IDS:
-        profile_model, profile_effort = normalize_profile_overrides(profile)
-        if profile_model and profile_effort:
-            resolved_model, resolved_effort = profile_model, profile_effort
         chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
         if chosen_model and chosen_effort:
             resolved_model, resolved_effort = chosen_model, chosen_effort
@@ -282,8 +277,8 @@ async def create_dashboard_thread_record(
     )
     _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
-    metadata_model = chosen_model or profile.get("default_model") or "Default"
-    metadata_effort = chosen_effort or profile.get("reasoning_effort")
+    metadata_model = chosen_model or "Default"
+    metadata_effort = chosen_effort
     if images and not model_supports_images(str(metadata_model)):
         metadata_model = resolved_model
         metadata_effort = resolved_effort
@@ -334,7 +329,7 @@ async def create_dashboard_thread_record(
         client,
         thread_id,
         title=initial_title,
-        metadata={**metadata, "feedback_initiator_login": login},
+        metadata=metadata,
         if_exists="raise",
     )
     thread = await client.threads.get(thread_id)
@@ -996,7 +991,6 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
-    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(client, thread_id):
@@ -1257,7 +1251,6 @@ async def steer_running_thread(
         thread_id=thread_id,
         metadata={
             "updated_at_ms": now_ms,
-            "feedback_last_activity_at_ms": now_ms,
             **await participant_metadata(metadata, login=login, email=email),
         },
     )
@@ -1455,26 +1448,6 @@ async def _notify_slack_web_handoff(
         return
     if not isinstance(thread_ts, str) or not thread_ts:
         return
-
-    thread = await client.threads.get(thread_id)
-    current_metadata = thread.get("metadata") or {}
-    if not current_metadata.get("slack_web_handoff_notified"):
-        await client.threads.update(
-            thread_id=thread_id, metadata={"slack_web_handoff_notified": True}
-        )
-        message_ts, error = await post_slack_thread_reply_with_ts(
-            channel_id,
-            thread_ts,
-            "This conversation has moved to Web; subsequent replies will appear in the dashboard.",
-            agent_thread_id=thread_id,
-            unfurl_links=False,
-            unfurl_media=False,
-        )
-        if not message_ts:
-            await client.threads.update(
-                thread_id=thread_id, metadata={"slack_web_handoff_notified": False}
-            )
-            logger.warning("Failed to post Web handoff notice", extra={"slack_error": error})
 
     trace_message_ts = slack_thread.get("trace_message_ts")
     if not isinstance(trace_message_ts, str) or not trace_message_ts:

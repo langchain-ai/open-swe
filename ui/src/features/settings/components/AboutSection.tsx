@@ -30,7 +30,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
           }
         />
       ) : null}
-      <div className="space-y-2 p-4 text-xs break-words text-secondary">
+      <div className="space-y-space-2 p-space-4 text-xs break-words text-secondary">
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
         </p>

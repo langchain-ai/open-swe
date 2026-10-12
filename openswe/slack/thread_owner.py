@@ -3,6 +3,7 @@
 import logging
 import time
 
+from openswe.input_messages import SystemIdentity
 from openswe.prompts import prompt
 from openswe.slack import webhook
 from openswe.slack.channels import SlackChannel
@@ -12,6 +13,11 @@ from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
+_BACKGROUND_EVENT: SystemIdentity = {
+    "id": "system:background-event",
+    "display_name": "Open SWE background event",
+    "platform": "open-swe",
+}
 
 
 class ThreadOwnerWakeError(Exception):
@@ -45,6 +51,7 @@ async def wake_thread_owner(channel_id: str, thread_ts: str, slack_user_id: str,
             # After every message in the thread, so the agent reads all of them first.
             event_ts=f"{time.time():.6f}",
             user_id=slack_user_id,
+            trigger_system=_BACKGROUND_EVENT,
             text=prompt("slack/thread-owner-event", event=event),
             bot_user_id=common.SLACK_BOT_USER_ID,
             thread_id=thread_id,

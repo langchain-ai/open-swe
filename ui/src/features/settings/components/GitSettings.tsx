@@ -121,7 +121,7 @@ export function GitSettings() {
         description="Where runs work when a request doesn't name a repository or branch."
       >
         <SettingsRow
-          label="Default repository"
+          label="Default Repository"
           description="Used when a request doesn't name a repository."
           control={
             <div className="w-56">
@@ -132,7 +132,7 @@ export function GitSettings() {
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
                 disabled={!ready}
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-1.5 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
                 dropdownClassName="w-56"
               />
             </div>
@@ -153,7 +153,7 @@ export function GitSettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="Pull requests"
+        title="Pull Requests"
         description="How pull requests you trigger are opened and reviewed."
       >
         <ProfileSwitchRow

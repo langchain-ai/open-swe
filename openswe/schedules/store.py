@@ -710,8 +710,8 @@ async def create_agent_schedule(
                     "name": (body.name or _derive_name(body.prompt)).strip(),
                     "prompt": body.prompt.strip(),
                     "admin_thread": body.admin_thread,
-                    "model": chosen_model or profile.get("default_model") or "Default",
-                    "effort": chosen_effort or profile.get("reasoning_effort"),
+                    "model": chosen_model or "Default",
+                    "effort": chosen_effort,
                     "base_branch": profile.get("base_branch") or "main",
                     "branch_prefix": profile.get("branch_prefix"),
                     "login": login,
@@ -992,19 +992,32 @@ def _admin_thread_enabled(record: dict[str, Any]) -> bool:
     )
 
 
-async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
-    """Verify a system admin grant against its saved invocation and current schedule."""
-    if (
-        cfg.source != "schedule"
-        or cfg.admin_thread is not True
-        or not cfg.thread_id
-        or not cfg.invocation_id
-        or cfg.github_login
-        or cfg.user_email
-    ):
+async def _schedule_thread_metadata(cfg: RunConfig) -> dict[str, Any] | None:
+    """Metadata of the public system thread an automation run executes on, if it is one."""
+    if cfg.source != "schedule" or not cfg.thread_id or cfg.github_login or cfg.user_email:
         return None
     metadata = thread_metadata(await langgraph_client().threads.get(cfg.thread_id))
     if metadata.get("owner_type") != "system" or metadata.get("visibility") != "public":
+        return None
+    return metadata
+
+
+async def authorized_schedule_run(cfg: RunConfig) -> dict[str, Any] | None:
+    """The automation whose own thread this run executes on, or ``None`` for any other run."""
+    if not cfg.schedule_id:
+        return None
+    metadata = await _schedule_thread_metadata(cfg)
+    if metadata is None or metadata.get("schedule_id") != cfg.schedule_id:
+        return None
+    return await get_agent_schedule(cfg.schedule_id)
+
+
+async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
+    """Verify a system admin grant against its saved invocation and current schedule."""
+    if cfg.admin_thread is not True or not cfg.invocation_id:
+        return None
+    metadata = await _schedule_thread_metadata(cfg)
+    if metadata is None:
         return None
     grant = metadata.get("system_authorization")
     if (

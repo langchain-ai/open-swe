@@ -1,3 +1,7 @@
+import {
+  CaretRightIcon,
+  CheckCircleFillIcon,
+} from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
@@ -6,9 +10,7 @@ import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCircleText"
-import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { CircleDashedIcon } from "@phosphor-icons/react/dist/ssr/CircleDashed"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
@@ -155,15 +157,15 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
       aria-label="Pull request status"
       className="overflow-hidden rounded-xl border border-default bg-surface-level-1"
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-4">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
+      <div className="flex flex-wrap items-center gap-x-space-4 gap-y-space-2 px-space-4 py-space-4">
+        <div className="flex min-w-0 flex-1 items-start gap-space-3">
           <StandingDot tone={standing.tone} className="mt-[7px]" />
           <div className="min-w-0">
-            <p className="text-[17px] leading-6 font-semibold tracking-[-0.015em] text-primary">
+            <p className="text-lg leading-6 font-semibold tracking-[-0.015em] text-primary">
               {standing.headline}
             </p>
             {standing.details.length > 0 && (
-              <p className="mt-0.5 flex flex-wrap gap-x-3 text-[12.5px] leading-5">
+              <p className="mt-0.5 flex flex-wrap gap-x-space-3 text-xxs leading-5">
                 {standing.details.map((fact) => (
                   <button
                     key={fact.text}
@@ -298,29 +300,29 @@ function Row({
     </>
   )
   return (
-    <div className="flex min-h-10 items-center gap-3 px-4 py-1.5">
+    <div className="flex min-h-10 items-center gap-space-3 px-space-4 py-space-1">
       {expandable ? (
         <button
           type="button"
           aria-expanded={expanded}
           onClick={onToggle}
-          className="-my-1.5 flex min-w-0 flex-1 items-center gap-3 self-stretch py-1.5 text-left"
+          className="-my-space-1 flex min-w-0 flex-1 items-center gap-space-3 self-stretch py-space-1 text-left"
         >
           {body}
         </button>
       ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-3">{body}</div>
+        <div className="flex min-w-0 flex-1 items-center gap-space-3">
+          {body}
+        </div>
       )}
       {action && (
-        <div className="flex shrink-0 items-center gap-2">{action}</div>
+        <div className="flex shrink-0 items-center gap-space-2">{action}</div>
       )}
     </div>
   )
 }
 
-const passIcon = (
-  <CheckCircleIcon size={16} weight="fill" className="text-icon-success" />
-)
+const passIcon = <CheckCircleFillIcon size={16} className="text-icon-success" />
 const failIcon = (
   <XCircleIcon size={16} weight="fill" className="text-icon-error" />
 )
@@ -417,11 +419,11 @@ function ChecksRow({
         {summary}
       </Row>
       {expanded && (
-        <ul className="max-h-64 overflow-y-auto pr-4 pb-2 pl-11">
+        <ul className="max-h-64 overflow-y-auto pr-space-4 pb-space-2 pl-space-7">
           {sorted.map(({ check, state }) => (
             <li
               key={check.name}
-              className="group flex h-7 items-center gap-2 text-xs"
+              className="group flex h-7 items-center gap-space-2 text-xs"
             >
               {state === "fail" ? (
                 <XCircleIcon
@@ -436,9 +438,8 @@ function ChecksRow({
                   className="text-icon-warning"
                 />
               ) : (
-                <CheckCircleIcon
+                <CheckCircleFillIcon
                   size={14}
-                  weight="fill"
                   className={
                     state === "skip"
                       ? "text-icon-tertiary"
@@ -553,7 +554,10 @@ function ReviewsRow({
         {decision}
       </Row>
       {expanded && (
-        <ReviewerList rows={reviewers} className="pr-4 pb-3 pl-11" />
+        <ReviewerList
+          rows={reviewers}
+          className="pr-space-4 pb-space-3 pl-space-7"
+        />
       )}
     </div>
   )
@@ -755,7 +759,7 @@ function OpenSweRow({
           // Remounting replays the flash each time something asks for the findings.
           key={findingsKey}
           className={cn(
-            "pr-4 pb-3 pl-11",
+            "pr-space-4 pb-space-3 pl-space-7",
             findingsKey > 0 && "motion-safe:animate-attention-flash"
           )}
         >
@@ -763,7 +767,7 @@ function OpenSweRow({
             <FindingQueue findings={detail.findings} />
           )}
           {assessment && (
-            <div className="mt-2 [&>section]:mt-0 [&>section]:border-dashed [&>section]:bg-transparent [&>section]:p-3 [&>section]:text-xs">
+            <div className="mt-space-2 [&>section]:mt-0 [&>section]:border-dashed [&>section]:bg-transparent [&>section]:p-space-3 [&>section]:text-xs">
               <ReviewAssessmentCard
                 assessment={assessment}
                 owner={pr.owner}
@@ -792,12 +796,12 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
           <li
             key={finding.id}
             className={cn(
-              "group relative border-l-2 py-1.5 pl-3",
+              "group relative border-l-2 py-space-1 pl-space-3",
               settled && "opacity-55"
             )}
             style={{ borderLeftColor: findingGroupColor[finding.group] }}
           >
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+            <div className="flex flex-wrap items-baseline gap-x-space-2 gap-y-0.5 text-xs">
               <span
                 className="shrink-0 font-medium"
                 style={{ color: findingGroupTextColor[finding.group] }}
@@ -810,12 +814,12 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 onClick={() => setOpenId(open ? null : finding.id)}
                 className={cn(
                   "min-w-[16ch] flex-1 text-left leading-5 text-primary hover:underline",
-                  settled && "line-through decoration-[var(--border-strong)]"
+                  settled && "line-through decoration-text-tertiary"
                 )}
               >
                 <InlineCode text={finding.title} />
               </button>
-              <span className="ml-auto flex shrink-0 items-baseline gap-1 text-[11px] text-secondary">
+              <span className="ml-auto flex shrink-0 items-baseline gap-space-1 text-xxs text-secondary">
                 <button
                   type="button"
                   disabled={!isAnchored(finding)}
@@ -823,37 +827,39 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                     if (isAnchored(finding))
                       showFinding(finding.id, findingTarget(finding))
                   }}
-                  className="rounded px-1 py-0.5 font-mono hover:bg-surface-level-1-hover hover:text-primary disabled:hover:bg-transparent disabled:hover:text-secondary"
+                  className="rounded-sm px-space-1 py-0.5 font-mono hover:bg-surface-level-1-hover hover:text-primary disabled:hover:bg-transparent disabled:hover:text-secondary"
                   title={finding.file}
                 >
                   {findingLocation(finding)}
                 </button>
-                <button
-                  type="button"
+                <Button
+                  size="xs"
+                  variant="plain"
+                  color="secondary"
                   aria-label={`Ask Open SWE about: ${finding.title}`}
-                  className="rounded px-1 py-0.5 hover:bg-surface-level-1-hover hover:text-primary"
                   onClick={() => askInChat(askAboutFinding(finding))}
                 >
                   Ask
-                </button>
+                </Button>
                 {!settled && (
-                  <button
-                    type="button"
+                  <Button
+                    size="xs"
+                    variant="plain"
+                    color="secondary"
                     aria-label={`Ask Open SWE to fix: ${finding.title}`}
-                    className="rounded px-1 py-0.5 hover:bg-surface-level-1-hover hover:text-primary"
                     onClick={() => askInChat(fixFinding(finding))}
                   >
                     Fix it
-                  </button>
+                  </Button>
                 )}
               </span>
             </div>
             {open && (
-              <div className="markdown-body mt-1.5 max-w-prose text-xs text-secondary">
+              <div className="markdown-body mt-space-1 max-w-prose text-xs text-secondary">
                 <Markdown content={finding.description} />
                 {finding.resolution_note && (
-                  <p className="mt-1 flex items-center gap-1">
-                    <ChatCircleTextIcon className="size-3" />
+                  <p className="mt-space-1 flex items-center gap-space-1">
+                    <ChatCircleTextIcon className="size-3" weight="regular" />
                     {finding.resolution_note}
                   </p>
                 )}

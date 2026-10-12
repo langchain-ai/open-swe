@@ -133,7 +133,7 @@ describe("UsersSection", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), {
       target: { value: "nobody" },
     })
-    expect(await screen.findByText("No users match your search.")).toBeTruthy()
+    expect(await screen.findByText("No users match your search")).toBeTruthy()
     client.clear()
   })
 })

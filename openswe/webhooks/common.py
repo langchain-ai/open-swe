@@ -1528,9 +1528,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
             await task_marked_complete(thread_id, source="github", auto=True)
             await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
-            from openswe.thread_feedback import schedule_pr_feedback
-
-            await schedule_pr_feedback(thread_id, metadata, pr_url)
         elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
             from openswe.analytics.emitter import task_rework
 
