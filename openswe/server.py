@@ -1714,6 +1714,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     managed_gateway, mcp_tools = (
         await mcp_tools_task if mcp_tools_task is not None else (None, list[Any]())
     )
+    if incident_session is not None:
+        # incident.io refuses publishing from this MCP client (surface_cannot_publish).
+        mcp_tools = [
+            tool
+            for tool in mcp_tools
+            if not tool.name.startswith("mcp_incident_status_page_update")
+        ]
 
     slack_tools = [
         manage_code_channel,
