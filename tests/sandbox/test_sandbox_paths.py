@@ -3,12 +3,8 @@ from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-from openswe.sandboxes.paths import (
-    adopt_recorded_work_dir,
-    recorded_work_dir,
-    resolve_repo_dir,
-    resolve_sandbox_work_dir,
-)
+from openswe.sandboxes.lifecycle import configure_git_identity
+from openswe.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
 
 
 class _FakeProvider:
@@ -95,29 +91,37 @@ async def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_
     ]
 
 
-async def test_a_work_dir_resolved_on_one_worker_is_reused_for_the_same_sandbox() -> None:
-    first = _FakeSandboxBackend(
+class _IdentityBackend(_FakeSandboxBackend):
+    """Answers the git identity write, which also readies the provider's work dir."""
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        if "git config --global" not in command:
+            return await super().aexecute(command, timeout=timeout)
+        self.commands.append(command)
+        ready = "/workspace" in self.writable_dirs
+        return ExecuteResponse(
+            output="__open_swe_work_dir_ready__\n" if ready else "", exit_code=0, truncated=False
+        )
+
+
+async def test_the_identity_write_readies_the_work_dir_so_no_probe_follows() -> None:
+    backend = _IdentityBackend(
         provider=_FakeProvider(work_dir="/workspace"), writable_dirs={"/workspace"}
     )
-    await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, first))
-    metadata = {"sandbox_work_dir": recorded_work_dir(cast(SandboxBackendProtocol, first))}
 
-    other_worker = _FakeSandboxBackend(provider=_FakeProvider(work_dir="/workspace"))
-    adopt_recorded_work_dir(cast(SandboxBackendProtocol, other_worker), metadata)
-
-    assert (
-        await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, other_worker)) == "/workspace"
-    )
-    assert other_worker.commands == []
-
-
-async def test_a_work_dir_recorded_for_another_sandbox_is_probed_again() -> None:
-    backend = _FakeSandboxBackend(
-        provider=_FakeProvider(work_dir="/workspace"), writable_dirs={"/workspace"}
-    )
-    metadata = {"sandbox_work_dir": {"sandbox_id": "replaced-sandbox", "path": "/elsewhere"}}
-
-    adopt_recorded_work_dir(cast(SandboxBackendProtocol, backend), metadata)
+    await configure_git_identity(cast(SandboxBackendProtocol, backend))
 
     assert await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend)) == "/workspace"
-    assert backend.commands == ["test -d /workspace && test -w /workspace"]
+    assert len(backend.commands) == 1
+
+
+async def test_a_work_dir_the_identity_write_could_not_ready_is_still_probed() -> None:
+    backend = _IdentityBackend(
+        provider=_FakeProvider(work_dir="/workspace", home_dir="/home/daytona"),
+        shell_paths={"pwd": "/workspace", "printf '%s' \"$HOME\"": "/home/daytona"},
+        writable_dirs={"/home/daytona"},
+    )
+
+    await configure_git_identity(cast(SandboxBackendProtocol, backend))
+
+    assert await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend)) == "/home/daytona"
