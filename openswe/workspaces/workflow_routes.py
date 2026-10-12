@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from openswe.audit_logs.context import bind_workspace
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP
-from openswe.github.http import GitHubClient
+from openswe.github.http import GitHubClient, WorkflowOptions
 from openswe.github.workflows import WorkflowPolicies, WorkflowPolicy, WorkflowRule
 from openswe.workspaces.store import slugify
 
@@ -15,7 +15,7 @@ router = APIRouter(tags=["workspaces"])
 @router.get("/workspaces/{slug}/workflow-options/{owner}/{name}")
 async def workflow_options(
     slug: str, owner: str, name: str, admin: dict[str, object] = ADMIN_DEP
-) -> dict[str, list[str]]:
+) -> WorkflowOptions:
     await WorkflowPolicies(slugify(slug)).require_repository(f"{owner}/{name}")
     login = admin.get("sub")
     if not isinstance(login, str) or not login:

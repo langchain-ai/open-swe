@@ -893,6 +893,11 @@ export interface WorkspaceRecord {
 }
 
 /** How one repository is configured inside a workspace. */
+export interface WorkflowOptions {
+  workflows: string[]
+  refs: string[]
+}
+
 export interface WorkflowPolicy {
   repository: string
   workflow: string
@@ -1611,7 +1616,7 @@ export const api = {
       method: "DELETE",
     }),
   workflowOptions: (slug: string, repo: string) =>
-    request<{ workflows: string[]; refs: string[] }>(
+    request<WorkflowOptions>(
       `/workspaces/${encodeURIComponent(slug)}/workflow-options/${repo.split("/").map(encodeURIComponent).join("/")}`
     ),
   listWorkflowPolicies: (slug: string) =>

@@ -6964,6 +6964,31 @@
         "title": "WebhookResponse",
         "type": "object"
       },
+      "WorkflowOptions": {
+        "description": "What a workflow policy may name: workflow filenames and branch or tag refs.",
+        "properties": {
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refs",
+            "type": "array"
+          },
+          "workflows": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workflows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "workflows",
+          "refs"
+        ],
+        "title": "WorkflowOptions",
+        "type": "object"
+      },
       "WorkflowPolicy": {
         "additionalProperties": false,
         "properties": {
@@ -20249,14 +20274,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "title": "Response Workflow Options Dashboard Api Workspaces  Slug  Workflow Options  Owner   Name  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkflowOptions"
                 }
               }
             },

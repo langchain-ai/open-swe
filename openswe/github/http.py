@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import quote
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient
@@ -382,6 +382,28 @@ class GitHubClient:
         return data
 
 
+_WORKFLOWS_DIR = ".github/workflows/"
+
+
+class _WorkflowRow(BaseModel):
+    path: str
+
+
+class _NamedRow(BaseModel):
+    name: str
+
+
+_WORKFLOW_ROWS = TypeAdapter(list[_WorkflowRow])
+_NAMED_ROWS = TypeAdapter(list[_NamedRow])
+
+
+class WorkflowOptions(BaseModel):
+    """What a workflow policy may name: workflow filenames and branch or tag refs."""
+
+    workflows: list[str]
+    refs: list[str]
+
+
 @dataclass(frozen=True, slots=True)
 class RepoClient:
     """One repository's calls; REST paths are relative to ``repos/<owner>/<name>/``.
@@ -523,23 +545,24 @@ class RepoClient:
             {"ref": ref, "inputs": dict(inputs)},
         )
 
-    async def workflow_options(self) -> dict[str, list[str]]:
-        workflows = await self.pages("actions/workflows", key="workflows")
-        branches = await self.pages("branches")
-        tags = await self.pages("tags")
-        return {
-            "workflows": sorted(
+    async def workflow_options(self) -> WorkflowOptions:
+        """Workflow files and the branches and tags they could run on."""
+        workflows = _WORKFLOW_ROWS.validate_python(
+            await self.pages("actions/workflows", key="workflows")
+        )
+        refs = _NAMED_ROWS.validate_python(
+            [*await self.pages("branches"), *await self.pages("tags")]
+        )
+        return WorkflowOptions(
+            workflows=sorted(
                 {
-                    path.rsplit("/", 1)[-1]
+                    row.path.removeprefix(_WORKFLOWS_DIR)
                     for row in workflows
-                    if isinstance(path := row.get("path"), str)
-                    and path.startswith(".github/workflows/")
+                    if row.path.startswith(_WORKFLOWS_DIR)
                 }
             ),
-            "refs": sorted(
-                {name for row in [*branches, *tags] if isinstance(name := row.get("name"), str)}
-            ),
-        }
+            refs=sorted({row.name for row in refs}),
+        )
 
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")
