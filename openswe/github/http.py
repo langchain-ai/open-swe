@@ -517,6 +517,12 @@ class RepoClient:
             raise ValueError("GitHub answered the repository without an object")
         return payload
 
+    async def dispatch_workflow(self, workflow: str, ref: str, inputs: Mapping[str, str]) -> None:
+        await self.post(
+            f"actions/workflows/{quote(workflow, safe='')}/dispatches",
+            {"ref": ref, "inputs": dict(inputs)},
+        )
+
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")
 

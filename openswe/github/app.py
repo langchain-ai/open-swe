@@ -178,6 +178,24 @@ async def get_github_app_installation_token_with_expiry(
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
 
+    if not permissions:
+        async with github_sdk(_app_auth()) as client:
+            installation = await client.rest(GITHUB_API_VERSION).apps.async_get_installation(
+                int(resolved_installation_id)
+            )
+        granted = installation.json().get("permissions")
+        if not isinstance(granted, dict) or not granted:
+            raise ValueError("Could not resolve installation permissions safely")
+        permissions = {
+            name: level
+            for name, level in granted.items()
+            if isinstance(name, str) and isinstance(level, str) and name != "actions"
+        }
+        if granted.get("actions") in {"read", "write"}:
+            permissions = {**permissions, "actions": "read"}
+        if not permissions:
+            permissions = {"metadata": "read"}
+
     key = _scope_key(resolved_installation_id, repository_ids, repositories, permissions)
     now = datetime.now(UTC)
     cached = _cached_token(key, now=now)
