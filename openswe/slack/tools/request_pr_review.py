@@ -1,7 +1,9 @@
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.dashboard_links import dashboard_review_url
 
 
@@ -13,6 +15,7 @@ async def trigger_pr_review_from_ref(
     github_user_id: int | None = None,
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
+    use_mda: bool = False,
 ) -> dict[str, object]:
     from openswe.github.webhook import trigger_pr_review_from_ref as _trigger_pr_review_from_ref
 
@@ -23,10 +26,13 @@ async def trigger_pr_review_from_ref(
         github_user_id=github_user_id,
         slack_channel_id=slack_channel_id,
         slack_thread_ts=slack_thread_ts,
+        use_mda=use_mda,
     )
 
 
-async def request_pr_review(pr_url: str) -> dict[str, object]:
+@expose_mcp()
+@audit_tool()
+async def request_pr_review(pr_url: str, use_mda: bool = False) -> dict[str, object]:
     """Implement the `request_pr_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if not pr_ref:
@@ -52,6 +58,7 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
         github_user_id=configurable.get("github_user_id"),
         slack_channel_id=slack_thread.get("channel_id", ""),
         slack_thread_ts=slack_thread.get("thread_ts", ""),
+        use_mda=use_mda,
     )
     if result.get("success") and (
         review_url := dashboard_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number)

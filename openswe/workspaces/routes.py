@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from openswe.audit_logs.context import bind_workspace
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
 from openswe.slack.channels import SlackChannel
@@ -78,6 +79,7 @@ async def api_list_workspaces(
 
 
 @router.post("/workspaces")
+@audit_endpoint
 async def api_create_workspace(
     body: WorkspaceCreate,
     request: Request,
@@ -138,6 +140,7 @@ async def api_get_workspace(
 
 
 @router.put("/workspaces/{slug}")
+@audit_endpoint
 async def api_update_workspace(
     slug: str,
     body: WorkspaceUpdate,
@@ -197,6 +200,7 @@ async def api_list_workspace_repositories(
 
 
 @router.put("/workspaces/{slug}/repositories/{owner}/{name}")
+@audit_endpoint
 async def api_configure_workspace_repository(
     slug: str,
     owner: str,
@@ -227,6 +231,7 @@ async def api_configure_workspace_repository(
 
 
 @router.post("/workspaces/{slug}/refresh")
+@audit_endpoint
 async def api_refresh_workspace(
     slug: str,
     request: Request,
@@ -253,6 +258,7 @@ async def api_refresh_workspace(
 
 
 @router.delete("/workspaces/{slug}")
+@audit_endpoint
 async def api_delete_workspace(
     slug: str,
     request: Request,

@@ -19,6 +19,7 @@ from openswe.slack.blocks import (
     MESSAGE_MAX_BLOCKS,
     SECTION_TEXT_MAX_CHARS,
     block_payload,
+    option_actions,
     section,
 )
 from openswe.slack.client import (
@@ -196,7 +197,7 @@ async def slack_reply(
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
-    return {"success": True}
+    return {"success": True, "message_ts": message_ts}
 
 
 async def _stale_reply_guard(
@@ -489,31 +490,11 @@ def _reply_blocks(
     message: str, options: list[str] | None, *, reserve: int
 ) -> list[dict[str, Any]] | None:
     """``message`` then option buttons; ``None`` when they cannot fit in one message."""
-    actions = _option_actions(options)
+    actions = option_actions(options)
     body = markdown_blocks(message)
     if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
         return None
     return [*block_payload(body), *actions]
-
-
-def _option_actions(options: list[str] | None) -> list[dict[str, Any]]:
-    clean_options = [option.strip() for option in options or [] if option.strip()]
-    if not clean_options:
-        return []
-    return [
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": option[:75], "emoji": True},
-                    "value": json.dumps({"type": "open_swe_option", "response": option}),
-                    "action_id": f"open_swe_option_select_{index}",
-                }
-                for index, option in enumerate(clean_options[:5])
-            ],
-        }
-    ]
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:

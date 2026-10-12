@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.merge import merge_approved
 from openswe.human_review.requests import HumanReviewRequest
@@ -11,6 +12,7 @@ from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
 
 
+@audit_tool()
 async def merge_expedited_pr(pr_url: str, keep_approval_reason: str = "") -> dict[str, Any]:
     """Implement the `merge_expedited_pr` tool."""
     pr_ref = parse_github_pr_url(pr_url)

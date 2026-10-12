@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Literal, cast
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
@@ -51,9 +51,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     saved_thread_scope["visibility"] = "public"
     config = _base_config()
     config["configurable"]["source"] = "dashboard"
-    with patch(
-        "openswe.server._notion_tools_for", new_callable=AsyncMock, return_value=[]
-    ) as notion:
+    with patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]) as mcps:
         captured = await _capture_create_deep_agent_kwargs(config)
     assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
     assert "/skills/" not in captured["backend"].routes
@@ -69,7 +67,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
             "read_user_settings",
         }
     )
-    notion.assert_awaited_once_with(None)
+    mcps.assert_awaited_once_with(None, ANY, None)
     from openswe.middleware import WorkspaceSkillsMiddleware
 
     middleware = cast(list[object], captured["middleware"])
@@ -100,13 +98,13 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
     ("enabled", "binding", "available"),
     [
         (False, {}, False),
-        (True, {}, True),
-        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True),
+        (True, {}, False),
+        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, False),
         (True, {"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False),
         (True, {"sandbox_id": "bridge:legacy-cli"}, False),
     ],
 )
-async def test_task_tools_require_owner_opt_in_and_supported_sandbox(
+async def test_task_tools_remain_disabled_regardless_of_owner_opt_in_and_sandbox(
     saved_thread_scope: dict[str, object],
     enabled: bool,
     binding: dict[str, str],
@@ -164,11 +162,9 @@ async def test_unknown_scope_omits_workspace_and_personal_mcps():
     with (
         patch("openswe.server.private_credential_login", side_effect=TimeoutError),
         patch("openswe.server._mcp_tools_for", new_callable=AsyncMock) as mcps,
-        patch("openswe.server._notion_tools_for", new_callable=AsyncMock) as notion,
     ):
         await _capture_create_deep_agent_kwargs()
     mcps.assert_not_awaited()
-    notion.assert_not_awaited()
 
 
 class _DummyAgent:
@@ -317,7 +313,6 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("openswe.server.cached_workspace_settings", side_effect=load_defaults),
         patch("openswe.server._cached_profile", new_callable=AsyncMock, return_value=None),
         patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
-        patch("openswe.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("openswe.server.make_model", return_value=MagicMock()),
         patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.create_deep_agent", return_value=_DummyAgent()),
@@ -334,7 +329,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 @pytest.mark.asyncio
 async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     config = _base_config()
-    config["configurable"]["thread_id"] = "thread-1"
+    config["configurable"].update(thread_id="thread-1", source="dashboard", model_selection="auto")
     profile = {
         "default_model": "anthropic:claude-opus-5-5",
         "reasoning_effort": "high",
@@ -423,6 +418,11 @@ async def test_personal_settings_tool_not_exposed_to_unauthorized_runs(
     assert "save_user_settings" not in {_registered_tool_name(tool) for tool in tools}
 
 
+def _tool_names(tools: object) -> set[str]:
+    assert isinstance(tools, list)
+    return {_registered_tool_name(tool) for tool in tools}
+
+
 @pytest.mark.asyncio
 async def test_agent_includes_sql_only_on_private_admin_surfaces(
     monkeypatch: pytest.MonkeyPatch,
@@ -432,10 +432,9 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     from openswe.tools.manage_feature_flags import manage_feature_flags
 
     captured = await _capture_create_deep_agent_kwargs()
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
     config = _base_config()
@@ -443,15 +442,14 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     assert isinstance(configurable, dict)
     configurable["admin_thread"] = True
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql in tools
-    assert manage_feature_flags in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ in tools
+    assert manage_feature_flags.__name__ in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    assert read_only_sql in general_purpose["tools"]
-    assert manage_feature_flags in general_purpose["tools"]
+    assert read_only_sql.__name__ in _tool_names(general_purpose["tools"])
+    assert manage_feature_flags.__name__ in _tool_names(general_purpose["tools"])
 
     configurable["source"] = "slack"
     configurable["slack_thread"] = {
@@ -461,28 +459,25 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
         "channel_context": {"is_im": True},
     }
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql in tools
-    assert manage_feature_flags in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ in tools
+    assert manage_feature_flags.__name__ in tools
 
-    assert all(tool in tools for tool in ADMIN_TOOLS)
+    assert all(tool.__name__ in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "not-an-admin"
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
-    assert all(tool not in tools for tool in ADMIN_TOOLS)
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
+    assert all(tool.__name__ not in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "octocat"
     configurable["source"] = "schedule"
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
 
 
 SLACK_TOOL_NAMES = {
@@ -784,7 +779,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     assert snapshot["model_handoff_complete"] is True
     assert snapshot["model_id"] == expected_model
     assert snapshot["effort"] == expected_effort
-    assert snapshot["subagent_model_id"] == (expected_model if profile else "openai:gpt-6.1-sol")
+    assert snapshot["subagent_model_id"] == "openai:gpt-6.1-sol"
     assert snapshot["subagent_effort"] == "low"
 
     followup = _base_config()
@@ -837,10 +832,12 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
         )
 
 
-async def test_queued_images_reach_vision_fallback_for_text_only_main_model() -> None:
+async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
+    registry_db: None,
+) -> None:
     from langchain_core.messages import convert_to_messages
-    from langgraph.store.memory import InMemoryStore
 
+    from openswe.message_queue import QueuedMessage
     from openswe.middleware.check_message_queue import (
         LinearNotifyState,
         check_message_queue_before_model,
@@ -853,18 +850,11 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model() ->
         thread_settings={"model_id": "fireworks:accounts/fireworks/models/kimi-k3"},
         make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
-    store = InMemoryStore()
-    namespace = ("queue", "thread-ctx")
     url = "https://example.com/image.png"
     image = {"type": "image_url", "image_url": {"url": url}}
-    await store.aput(
-        namespace,
-        "pending_messages",
-        {"messages": [{"content": {"text": "Explain this", "image_urls": [url]}}]},
-    )
+    await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
     with (
         patch("openswe.middleware.check_message_queue.get_config", return_value=config),
-        patch("openswe.middleware.check_message_queue.get_store", return_value=store),
         patch("openswe.middleware.check_message_queue.fetch_image_block", return_value=image),
     ):
         update = await check_message_queue_before_model.abefore_model(
@@ -885,4 +875,19 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model() ->
     )
     assert handler.call_args.args[0].model is not captured["model"]
     assert handler.call_args.args[0].messages == messages
-    assert await store.aget(namespace, "pending_messages") is None
+    assert await QueuedMessage.for_thread("thread-ctx") == []
+
+
+@pytest.mark.asyncio
+async def test_historical_personal_models_and_routing_do_not_override_workspace() -> None:
+    captured = await _capture_create_deep_agent_kwargs(
+        profile={
+            "default_model": "anthropic:claude-opus-5-5",
+            "reasoning_effort": "high",
+            "default_subagent_model": "anthropic:claude-opus-5-5",
+            "subagent_reasoning_effort": "high",
+            "model_routing_enabled": True,
+        }
+    )
+    assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
+    assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"

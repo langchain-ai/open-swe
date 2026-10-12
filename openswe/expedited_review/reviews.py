@@ -4,8 +4,8 @@ import logging
 
 import httpx2
 
-from openswe.dashboard.profiles import get_valid_access_token
-from openswe.github.http import GITHUB_API_BASE, github_client, github_request
+from openswe.github.http import GitHubClient, GitHubError, GitHubSignInRequired
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.slack.client import get_slack_permalink
 from openswe.slack.code_channels import is_code_channel_session
@@ -57,17 +57,15 @@ async def submit_approval(
     Records the review id and SHA on ``vote``; the caller persists them.
     """
     login = vote.github_login
-    user_token = await get_valid_access_token(login)
-    if not user_token:
-        return f"Open SWE has no GitHub token for @{login}. {github_token_hint()}"
     pr = approval.pull_request
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/reviews"
     payload = {"commit_id": head_sha, "event": "APPROVE", "body": await _review_body(approval)}
     try:
-        async with github_client(token=user_token) as client:
-            response = await github_request(client, "POST", url, json=payload)
-            response.raise_for_status()
-            data = response.json()
+        async with GitHubClient.as_user(login) as github:
+            data = (
+                await github.repo(pr.owner, pr.repo).pull_request(pr.number).create_review(payload)
+            )
+    except GitHubSignInRequired:
+        return f"Open SWE has no GitHub token for @{login}. {github_token_hint()}"
     except httpx2.HTTPStatusError as exc:
         return f"GitHub rejected @{login}'s review: {github_error(exc.response)}"
     except httpx2.HTTPError, ValueError:
@@ -81,7 +79,7 @@ async def submit_approval(
 
 
 async def dismiss_approval(
-    approval: HumanReviewRequest, vote: HumanReviewParticipant, token: str, reason: str
+    approval: HumanReviewRequest, vote: HumanReviewParticipant, pull: PullRequestClient, reason: str
 ) -> None:
     """Withdraw the GitHub review ``vote`` submitted; clears its id once GitHub confirms.
 
@@ -89,18 +87,20 @@ async def dismiss_approval(
     """
     if vote.github_review_id is None:
         return
-    pr = approval.pull_request
-    url = (
-        f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/reviews/"
-        f"{vote.github_review_id}/dismissals"
-    )
-    payload = {"message": f"Expedited review closed: {reason}", "event": "DISMISS"}
     try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "PUT", url, json=payload)
-            # A review GitHub no longer has cannot count toward a merge either.
-            if response.status_code != 404:
-                response.raise_for_status()
+        await pull.dismiss_review(vote.github_review_id, f"Expedited review closed: {reason}")
+    except GitHubError as refused:
+        # A review GitHub no longer has cannot count toward a merge either.
+        if refused.response.status_code != 404:
+            logger.warning(
+                "GitHub refused to dismiss an expedited review approval",
+                extra={
+                    "approval_id": str(approval.id),
+                    "github_review_id": vote.github_review_id,
+                    "github_message": refused.message,
+                },
+            )
+            return
     except httpx2.HTTPError:
         logger.warning(
             "Failed to dismiss an expedited review approval on GitHub",

@@ -1,6 +1,6 @@
 """One refresh at a time per stored OAuth credential, across every worker and replica.
 
-Providers that rotate refresh tokens (GitHub, Notion, LangSmith) treat a second use
+Providers that rotate refresh tokens (GitHub, LangSmith) treat a second use
 of a rotated token as theft and revoke the whole grant, so two processes refreshing
 the same credential at once can silently disconnect the person. Callers hold this
 guard around their read-refresh-write and must re-read the stored credential once

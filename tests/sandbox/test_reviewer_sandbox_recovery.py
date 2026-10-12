@@ -11,7 +11,7 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
-from openswe.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
+from openswe.reviewer import PrepareReviewerRunMiddleware, ensure_reviewer_sandbox_for_thread
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from openswe.sandboxes.providers.registry import SandboxGoneError
@@ -179,7 +179,7 @@ async def test_reviewer_opts_into_replacement() -> None:
         new_callable=AsyncMock,
         return_value=sandbox_backend,
     ) as ensure:
-        result, github_token = await _ensure_reviewer_sandbox_for_thread(
+        result, github_token = await ensure_reviewer_sandbox_for_thread(
             "thread-reviewer",
             RunConfig.parse({"repo": {"owner": "langchain-ai", "name": "open-swe"}}),
         )
@@ -201,7 +201,7 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
 
     with (
         patch(
-            "openswe.reviewer._ensure_reviewer_sandbox_for_thread",
+            "openswe.reviewer.ensure_reviewer_sandbox_for_thread",
             new_callable=AsyncMock,
             side_effect=SandboxUnreachableError("thread-reviewer", "sandbox-deleted", "not found"),
         ),

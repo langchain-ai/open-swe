@@ -6,7 +6,11 @@
  */
 type Topic = "workspaces" | "incident-settings"
 /** Topics whose records each have one of their own, `<topic>/<key>`. */
-type KeyedTopic = "review-styles" | "incidents"
+type KeyedTopic =
+  | "review-styles"
+  | "incidents"
+  | "pull-requests"
+  | "thread-queues"
 
 export type InvalidationTopic = string
 

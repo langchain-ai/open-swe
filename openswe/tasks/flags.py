@@ -3,14 +3,10 @@ from uuid import UUID
 
 from openswe.bridge.constants import SANDBOX_ID_PREFIX
 from openswe.tasks.schemas import ThreadMetadata
-from openswe.users import User
 
 
 async def task_coordination_enabled(login: str, *, owner_user_id: UUID | None = None) -> bool:
-    if owner_user_id is not None:
-        owner = await User.get(owner_user_id)
-        return owner is not None and owner.typed_preferences.experimental_task_coordination
-    return bool(login) and (await User.preferences_for_login(login)).experimental_task_coordination
+    return False
 
 
 def task_owner_login(metadata: Mapping[str, object]) -> str:

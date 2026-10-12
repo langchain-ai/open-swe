@@ -114,10 +114,19 @@ github_login: carol
     })
   })
 
-  it("ignores nested data fields", () => {
+  it.each([
+    [
+      "field lines",
+      "<issue>\nidentifier: ENG-1\ntitle: Fix &lt;it&gt;\n</issue>",
+    ],
+    [
+      "nested tags, as stored earlier",
+      "<issue>\n<identifier>ENG-1</identifier>\n<labels>\n<item>bug</item>\n</labels>\n</issue>",
+    ],
+  ])("ignores structured data written as %s", (_, data) => {
     expect(
       parseStructuredInput(
-        '<input-message sender="linear:dev@example.com" surface="linear" kind="human">\nFix it\n<issue>\n<identifier>ENG-1</identifier>\n<labels>\n<item>bug</item>\n</labels>\n</issue>\n</input-message>'
+        `<input-message sender="linear:dev@example.com" surface="linear" kind="human">\nFix it\n${data}\n</input-message>`
       )
     ).toEqual({
       type: "message",

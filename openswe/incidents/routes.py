@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal, Self
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import require_session
 from openswe.incidents.models import IncidentId
@@ -71,6 +72,7 @@ async def get_settings(
 
 
 @router.patch("/settings", status_code=202)
+@audit_endpoint
 async def update_settings(
     body: IncidentSettingsBody,
     session: Annotated[dict[str, Any], Depends(_administrator)],
@@ -116,6 +118,7 @@ async def get_incident(
 
 
 @router.post("/records/{incident_id}/commands", status_code=202)
+@audit_endpoint
 async def submit_command(
     incident_id: IncidentId,
     body: IncidentCommandBody,

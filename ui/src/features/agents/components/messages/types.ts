@@ -28,6 +28,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** Identity for remembering the scroll position across navigation. */
   scrollKey?: string
   showPlanArtifact?: boolean
+  /** Cost of each finished run, by invocation id, shown beside its turn's timestamp. */
+  runCosts?: Record<string, number>
   emptyState?: React.ReactNode
   footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean

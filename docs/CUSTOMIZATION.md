@@ -425,9 +425,9 @@ never visible to, reused by, or revealed to another user. The dashboard API is
 `/dashboard/api/my-mcps` and requires only a signed-in session.
 
 Personal connections load only inside a **private thread owned by the triggering
-user**, the same rule that applies to personal Notion connections. Collaborative
-(workspace or Slack channel) threads can be prompted by anyone, so they run without
-personal credentials; to use yours, continue the thread privately from the dashboard.
+user**. Collaborative (workspace or Slack channel) threads can be prompted by anyone, so
+they run without personal credentials; to use yours, continue the thread privately from
+the dashboard.
 Both scopes share the **MCPs** tool group. A personal connection with the same name as a
 workspace connection replaces it entirely for that user's runs, and a disabled personal
 connection hides the workspace one rather than falling back to it.

@@ -17,9 +17,7 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypedDict
 
-import httpx2
-
-from openswe.github.http import GITHUB_GRAPHQL, github_client, github_request
+from openswe.github.http import GitHubClient, or_none
 
 CheckState = Literal["failing", "passing", "pending", "unknown"]
 PrState = Literal["open", "draft", "merged", "closed"]
@@ -131,9 +129,9 @@ def _build_query(identities: Sequence[tuple[str, str, int]]) -> tuple[str, dict[
 
 
 async def get_pull_request_check_states(
-    records: Sequence[object], login: str, token: str
+    github: GitHubClient, records: Sequence[object], login: str
 ) -> dict[str, PullRequestState]:
-    """Return live state per requested pull request, keyed ``repo#number``."""
+    """Return live state per requested pull request, keyed ``repo#number``; cached per ``login``."""
     now = time.monotonic()
     _evict_expired(now)
 
@@ -155,18 +153,7 @@ async def get_pull_request_check_states(
         return results
 
     query, variables = _build_query(pending)
-    payload: Any = None
-    try:
-        async with github_client(token=token) as client:
-            response = await github_request(
-                client, "POST", GITHUB_GRAPHQL, json={"query": query, "variables": variables}
-            )
-            response.raise_for_status()
-            payload = response.json()
-    except httpx2.HTTPError, ValueError:
-        payload = None
-
-    data = payload.get("data") if isinstance(payload, Mapping) else None
+    data = await or_none(github.graphql(query, variables, partial=True))
     expires = time.monotonic() + _CACHE_TTL_SECONDS
     for index, (owner, repo, number) in enumerate(pending):
         full_name = f"{owner}/{repo}"

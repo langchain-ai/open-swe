@@ -21,7 +21,7 @@ import {
   type UsageLeaderboardPayload,
   type UsageLeaderboardRow,
 } from "@/lib/api"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { makeQueryClient } from "@/lib/query"
 
 import { UsageAnalytics, UsageDateRange } from "./usage"
@@ -116,7 +116,7 @@ it("labels the shared date range and changes it independently of usage scope", a
   const onPeriodChange = vi.fn()
   mountReport(onPeriodChange)
   const range = screen.getByRole("combobox", { name: "Date range" })
-  const outcomes = screen.getByText("PR outcomes", { selector: "h2" })
+  const outcomes = screen.getByText("PR Outcomes", { selector: "h2" })
   expect(
     range.compareDocumentPosition(outcomes) & Node.DOCUMENT_POSITION_FOLLOWING
   ).toBeTruthy()
@@ -392,8 +392,7 @@ it.each([
 
     const openCount = within(row).getByRole("button", { name: "3 (43%)" })
     if (interaction === "hover") {
-      fireEvent.mouseEnter(openCount)
-      fireEvent.mouseMove(openCount)
+      fireEvent.pointerMove(openCount, { pointerType: "mouse" })
     } else if (interaction === "focus") {
       act(() => openCount.focus())
     } else {
@@ -1201,11 +1200,15 @@ it("links the user name and avatar to their GitHub profile only when a login exi
   expect(linked.getAttribute("target")).toBe("_blank")
   expect(linked.getAttribute("rel")).toBe("noreferrer")
   expect(screen.queryByRole("link", { name: "Anonymous Reader" })).toBeNull()
-  const avatarLink = screen.getByText("CR").closest("a")
+  const avatarLink = linked
+    .closest("td")!
+    .querySelector('a[aria-hidden="true"]')
   expect(avatarLink?.getAttribute("href")).toBe("https://github.com/reader")
   expect(avatarLink?.getAttribute("target")).toBe("_blank")
   expect(avatarLink?.getAttribute("rel")).toBe("noreferrer")
-  expect(screen.getByText("AR").closest("a")).toBeNull()
+  expect(
+    screen.getByText("Anonymous Reader").closest("td")!.querySelector("a")
+  ).toBeNull()
   client.clear()
 })
 

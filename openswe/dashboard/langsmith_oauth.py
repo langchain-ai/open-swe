@@ -8,16 +8,16 @@ LangSmith's MCP resource, not its API), keeps each person's tokens encrypted in 
 """
 
 import logging
+import secrets
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlparse
 
 import httpx2
 
 from openswe.config import ENV
-from openswe.dashboard.notion_oauth import code_challenge_for_verifier, generate_code_verifier
+from openswe.dashboard.oauth import pkce_s256_challenge
 from openswe.dashboard.oauth_credentials import (
     OAuthProvider,
-    UnknownUser,
     delete_credential,
     load_credential,
     save_credential,
@@ -25,13 +25,14 @@ from openswe.dashboard.oauth_credentials import (
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import delete_value, get_value, now_iso, put_value
+from openswe.store import now_iso
+from openswe.users.records import UnknownUser, UserRecords
 
 logger = logging.getLogger(__name__)
 
 LANGSMITH_KEY: OAuthProvider = "langsmith"
 LANGSMITH_STATE_COOKIE_NAME = "osw_langsmith_oauth_state"
-LANGSMITH_OAUTH_FLOW_NAMESPACE = ["langsmith_oauth_flows"]
+LANGSMITH_OAUTH_FLOWS = UserRecords("langsmith_oauth_flow")
 _METADATA_PATH = "/.well-known/oauth-authorization-server"
 _HTTP_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 _EXPIRY_SKEW = timedelta(minutes=2)
@@ -142,10 +143,9 @@ async def start_langsmith_oauth(
     """Store a pending flow and return LangSmith's authorize URL."""
     endpoints = await _metadata()
     client_id = _client_id()
-    verifier = generate_code_verifier()
-    await put_value(
-        [*LANGSMITH_OAUTH_FLOW_NAMESPACE, login.strip().lower()],
-        nonce_hash,
+    verifier = secrets.token_urlsafe(32)
+    await LANGSMITH_OAUTH_FLOWS.put(
+        login,
         {
             "encrypted_code_verifier": encrypt_token(verifier),
             "client_id": client_id,
@@ -153,13 +153,14 @@ async def start_langsmith_oauth(
             "redirect_uri": redirect_uri,
             "created_at": now_iso(),
         },
+        nonce_hash,
     )
     params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "state": state,
-        "code_challenge": code_challenge_for_verifier(verifier),
+        "code_challenge": pkce_s256_challenge(verifier),
         "code_challenge_method": "S256",
         "scope": "openid email offline_access",
         "resource": langsmith_issuer(),
@@ -227,9 +228,7 @@ async def _save_tokens(
 
 
 async def complete_langsmith_oauth(login: str, nonce_hash: str, code: str) -> None:
-    namespace = [*LANGSMITH_OAUTH_FLOW_NAMESPACE, login.strip().lower()]
-    flow = await get_value(namespace, nonce_hash)
-    await delete_value(namespace, nonce_hash)
+    flow = await LANGSMITH_OAUTH_FLOWS.pop(login, nonce_hash)
     if not isinstance(flow, dict):
         raise LangSmithOAuthError(400, "oauth flow expired — please retry")
     verifier = decrypt_token(flow.get("encrypted_code_verifier", ""))

@@ -29,6 +29,7 @@ from openswe.github.comments import fence_github_comment_body
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.input_messages import Fields
 from openswe.prompts import prompt
 from openswe.webhooks.event_log import LoggedEvent, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
@@ -150,16 +151,10 @@ class EventSummary(BaseModel):
     @property
     def details(self) -> str:
         """Every field the sender controls, for fencing as one block."""
-        lines = [
-            f"{label}: {value}"
-            for label, value in (
-                ("On", self.target),
-                ("From", self.sender),
-                ("Status", self.status),
-                ("Link", self.link),
-            )
-            if value
-        ]
+        fields = Fields(
+            {"On": self.target, "From": self.sender, "Status": self.status, "Link": self.link}
+        ).text()
+        lines = [fields] if fields else []
         if self.body:
             lines.extend(("", self.body[:_MAX_BODY_CHARS]))
         return "\n".join(lines)
@@ -171,6 +166,8 @@ class EventSummary(BaseModel):
             return cls._github(event, _GitHubDelivery.model_validate(payload))
         if event.source == "slack":
             return cls._slack(event, _SlackDelivery.model_validate(payload))
+        if event.source == "deployment":
+            return cls._deployment(event, payload)
         return cls._linear(event, _LinearDelivery.model_validate(payload))
 
     @classmethod
@@ -231,6 +228,24 @@ class EventSummary(BaseModel):
             trusted=event.user_id is not None,
             from_open_swe=bool(own_user) and message.user_id == own_user,
             slack_channel_id=message.channel_id,
+        )
+
+    @classmethod
+    def _deployment(cls, event: LoggedEvent, payload: dict[str, JsonValue]) -> Self:
+        """A verified deploy. ``from_open_swe`` stays false so a subscription can wake."""
+        target = payload.get("target")
+        commits = payload.get("commits")
+        count = len(commits) if isinstance(commits, list) else 0
+        return cls(
+            source="deployment",
+            event_type=event.event_type,
+            target=target.strip() if isinstance(target, str) else "",
+            status="deployed",
+            body=(
+                "This deploy includes the merge commit the thread subscribed for "
+                f"({count} commits)."
+            ),
+            trusted=True,
         )
 
     @classmethod

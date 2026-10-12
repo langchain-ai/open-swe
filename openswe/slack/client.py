@@ -1201,11 +1201,17 @@ async def post_slack_thread_reply(
     thread_ts: str,
     text: str,
     *,
+    unfurl_links: bool = True,
+    unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     agent_thread_id: str | None = None,
 ) -> bool:
     """Post a reply in a Slack thread."""
-    kwargs: dict[str, Any] = {"blocks": blocks}
+    kwargs: dict[str, Any] = {
+        "blocks": blocks,
+        "unfurl_links": unfurl_links,
+        "unfurl_media": unfurl_media,
+    }
     if agent_thread_id is not None:
         kwargs["agent_thread_id"] = agent_thread_id
     try:

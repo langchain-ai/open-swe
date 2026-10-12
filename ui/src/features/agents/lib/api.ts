@@ -2,6 +2,7 @@ import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
   AgentPullRequestStatusResponse,
+  AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
   Message,
@@ -124,6 +125,7 @@ export interface ThreadsPageParams {
   bot?: string
   repo?: string
   ownerless?: boolean
+  owned?: boolean
   sortBy?: ThreadSortBy
 }
 
@@ -244,6 +246,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.repo) search.set("repo", params.repo)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
+  if (params.owned) search.set("owned", "true")
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -252,6 +255,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
 function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
+  owned?: boolean
 }): string {
   const search = new URLSearchParams()
   if (params.includeResolved != null)
@@ -259,6 +263,7 @@ function buildReposQuery(params: {
   if (params.includeAutomations != null) {
     search.set("include_automations", String(params.includeAutomations))
   }
+  if (params.owned) search.set("owned", "true")
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -277,37 +282,13 @@ export interface PullRequestSnapshot {
   state: PullRequestLiveState | null
 }
 
-export type ThreadFeedbackRating = "bad" | "good"
-
-export type ThreadFeedbackSubmission =
-  | { action?: "submit"; rating: ThreadFeedbackRating; comment?: string }
-  | { action: "comment"; comment: string }
-  | { action: "dismiss" }
-
-export interface ThreadFeedback {
-  status: "unavailable" | "ready" | "completed" | "dismissed"
-  rating: ThreadFeedbackRating | "other" | null
-  comment: string
-}
-
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
-  getThreadFeedback: (threadId: string) =>
-    agentsRequest<ThreadFeedback>(
-      `/threads/${encodeURIComponent(threadId)}/feedback`
-    ),
-  submitThreadFeedback: (threadId: string, body: ThreadFeedbackSubmission) =>
-    agentsRequest<ThreadFeedback>(
-      `/threads/${encodeURIComponent(threadId)}/feedback`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
-    ),
   listThreadRepos: (
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
+      owned?: boolean
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(
@@ -386,6 +367,10 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
+    ),
+  getThreadQueuedMessages: (threadId: string) =>
+    agentsRequest<Array<AgentQueuedMessage>>(
+      `/threads/${encodeURIComponent(threadId)}/queued-messages`
     ),
   getThreadPullRequestContext: (
     threadId: string,

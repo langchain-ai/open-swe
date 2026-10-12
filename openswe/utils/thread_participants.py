@@ -4,10 +4,8 @@ import asyncio
 from collections.abc import Collection, Mapping
 from typing import Any
 
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from openswe.dashboard.agent_overrides import resolve_github_login
 from openswe.github.comments import fetch_github_thread_participants
 from openswe.github.thread_token import resolve_thread_github_token
 from openswe.input_messages import PersonIdentity
@@ -285,18 +283,3 @@ async def resolve_thread_participant_logins(
     if not logins:
         raise ValueError("No mapped participants were found for the active thread")
     return logins, unresolved_count
-
-
-async def resolve_participant(on_behalf_of: str) -> str:
-    login = on_behalf_of.strip()
-    if not login:
-        raise ValueError("on_behalf_of is required: name the thread participant to act for.")
-    config = get_config()
-    caller = await resolve_github_login(as_json_object(config))
-    if not caller or login.lower() != caller.lower():
-        raise ValueError("on_behalf_of must match the user who triggered this run.")
-    participants, _ = await resolve_thread_participant_logins(config)
-    matches = {participant.lower(): participant for participant in participants}
-    if login.lower() not in matches:
-        raise ValueError(f"{login!r} is not a verified participant in this thread.")
-    return matches[login.lower()]
