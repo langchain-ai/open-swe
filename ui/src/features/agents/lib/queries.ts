@@ -604,14 +604,17 @@ export function useSeedAgentThreadDetails(
         queryClient.setQueryData<AgentThread>(
           agentThreadKeys.detail(thread.id),
           (detail) =>
-            detail && {
-              ...detail,
-              traceUrl: thread.traceUrl,
-              sandboxId: thread.sandboxId,
-              sourceUrl: thread.sourceUrl,
-              sourceAppUrl: thread.sourceAppUrl,
-              automationId: thread.automationId,
-            }
+            detail && thread.updatedAt > detail.updatedAt
+              ? {
+                  ...detail,
+                  updatedAt: thread.updatedAt,
+                  traceUrl: thread.traceUrl,
+                  sandboxId: thread.sandboxId,
+                  sourceUrl: thread.sourceUrl,
+                  sourceAppUrl: thread.sourceAppUrl,
+                  automationId: thread.automationId,
+                }
+              : detail
         )
         continue
       }
