@@ -29,7 +29,9 @@ from openswe.tools.record_author_feedback import record_author_feedback
 from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
     MAX_TITLE_CHARS,
+    FileHunks,
     FileRanges,
+    FileSplits,
     LineRef,
     claim,
 )
@@ -79,7 +81,9 @@ class _State:
         return {
             "success": True,
             **result,
-            "walkthrough": self.reader.status(self.ctx.unplanned).model_dump(),
+            "walkthrough": self.reader.status(
+                self.ctx.unplanned_lines, self.ctx.workspace.hunks
+            ).model_dump(),
         }
 
     def shown_this_turn(self) -> bool:
@@ -239,9 +243,9 @@ async def _plan(
 @_one_at_a_time
 async def walkthrough_plan_chunk(
     title: str,
-    show: list[FileRanges],
+    show: list[FileHunks],
     explanation: str,
-    other: list[FileRanges] | None = None,
+    other: list[FileHunks] | None = None,
     after: int | None = None,
 ) -> dict[str, Any]:
     """Implement the `walkthrough_plan_chunk` tool."""
@@ -253,8 +257,14 @@ async def walkthrough_plan_chunk(
 
 
 @_one_at_a_time
+async def walkthrough_split_hunks(files: list[FileSplits]) -> dict[str, Any]:
+    """Implement the `walkthrough_split_hunks` tool."""
+    return await _plan(lambda ctx: ctx.workspace.split(files))
+
+
+@_one_at_a_time
 async def walkthrough_move_to_other(
-    files: list[FileRanges], restore: bool = False
+    files: list[FileHunks], restore: bool = False
 ) -> dict[str, Any]:
     """Implement the `walkthrough_move_to_other` tool."""
     return await _plan(lambda ctx: ctx.workspace.move_to_other(files, restore=restore))
@@ -325,6 +335,7 @@ def walkthrough_tools(mode: GuideMode) -> list[Callable[..., Awaitable[Any]]]:
         walkthrough_show_other,
         walkthrough_skip_changes,
         walkthrough_plan_chunk,
+        walkthrough_split_hunks,
         walkthrough_move_to_other,
         walkthrough_describe_other,
         walkthrough_end,

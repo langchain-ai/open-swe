@@ -3,7 +3,7 @@
 Any agent with a checkout of the PR can plan: the review scout in the
 background, or a review guide that got ahead of it. Opening the workspace
 carries the stored plan to the checkout's head first, so planners only ever
-place lines that are new there. Only a checkout at the PR's current head may
+place hunks that are new there. Only a checkout at the PR's current head may
 carry it; one pinned before a push raises ``PlanMovedError``.
 """
 
@@ -22,13 +22,16 @@ from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
     MAX_OTHER_SUMMARY_CHARS,
     MAX_TITLE_CHARS,
-    FileRanges,
+    FileHunks,
+    FileSplits,
+    Hunks,
     LineRef,
     Plan,
     PlanChunk,
     PlanStatus,
     RangeError,
-    claim,
+    find_line,
+    line_name,
 )
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
@@ -109,6 +112,10 @@ class PlanWorkspace:
         return moved.plan
 
     @property
+    def hunks(self) -> Hunks:
+        return self.plan.hunks(self.changes)
+
+    @property
     def complete(self) -> bool:
         return not self.plan.unplanned(self.changes)
 
@@ -128,19 +135,20 @@ class PlanWorkspace:
         self,
         *,
         title: str,
-        show: list[FileRanges],
+        show: list[FileHunks],
         explanation: str,
-        other: list[FileRanges] | None = None,
+        other: list[FileHunks] | None = None,
         after: int | None = None,
     ) -> int:
-        """Place a chunk of unplanned lines; lines in ``other`` go to Other first. Its number."""
+        """Place a chunk of unplanned hunks; hunks in ``other`` go to Other first. Its number."""
         trimmed = " ".join(title.split())[:MAX_TITLE_CHARS]
         if not trimmed:
             raise RangeError("title must name the chunk")
         unplanned = self.plan.unplanned(self.changes)
-        to_other = claim(other, unplanned) if other else []
+        hunks = self.hunks
+        to_other = hunks.claim(other, unplanned) if other else []
         taken = set(to_other)
-        lines = claim(show, [line for line in unplanned if LineRef.of(line) not in taken])
+        lines = hunks.claim(show, [line for line in unplanned if LineRef.of(line) not in taken])
         chunk = PlanChunk(
             title=trimmed,
             explanation=explanation.strip()[:MAX_EXPLANATION_CHARS],
@@ -160,14 +168,14 @@ class PlanWorkspace:
         await self._edit(place)
         return number
 
-    async def move_to_other(self, files: list[FileRanges], *, restore: bool = False) -> None:
+    async def move_to_other(self, files: list[FileHunks], *, restore: bool = False) -> None:
         if restore:
             other = set(self.plan.other)
             pool = [line for c in self.changes for line in c.lines if LineRef.of(line) in other]
-            refs = claim(files, pool)
+            refs = self.hunks.claim(files, pool)
             await self._edit(lambda plan: plan.restore_other(refs))
             return
-        refs = claim(files, self.plan.unplanned(self.changes))
+        refs = self.hunks.claim(files, self.plan.unplanned(self.changes))
 
         def send(plan: Plan) -> None:
             planned = plan.planned()
@@ -176,6 +184,28 @@ class PlanWorkspace:
             plan.add_other(refs)
 
         await self._edit(send)
+
+    async def split(self, files: list[FileSplits]) -> None:
+        """Start a new hunk at each named unplanned line, splitting the hunk it sits in."""
+        unplanned = self.plan.unplanned(self.changes)
+        hunks = self.hunks
+        refs: list[LineRef] = []
+        for split in files:
+            for name in split.at:
+                line = find_line(split.path, name, unplanned)
+                if hunks.key(line) == (line.path, line_name(line)):
+                    raise RangeError(f"`{line.path}` {name} already starts a hunk")
+                refs.append(LineRef.of(line))
+        if not refs:
+            raise RangeError("no lines are named to split at")
+
+        def split_at(plan: Plan) -> None:
+            planned = plan.planned()
+            if any(ref in planned for ref in refs):
+                raise RangeError("another planner just placed some of these lines; check again")
+            plan.split(refs)
+
+        await self._edit(split_at)
 
     async def settle(self) -> int:
         """Send every line still unplanned to Other, completing the plan; how many there were."""

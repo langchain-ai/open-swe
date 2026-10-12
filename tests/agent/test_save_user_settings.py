@@ -83,16 +83,24 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     user_records.seed("profile", "bob", {"draft_prs": True})
     user_records.seed("dashboard_preferences", "Alice", prefs)
     user_records.seed("github_oauth_token", "Alice", {"encrypted_gh_token": "secret"})
-    result = await save_user_settings({"auto_fix_ci": False, "default_workspace": "  NEW  "})
+    result = await save_user_settings(
+        {"auto_fix_ci": False, "auto_human_review_enabled": False, "default_workspace": "  NEW  "}
+    )
     assert result == {
         "ok": True,
         "login": "Alice",
-        "updated": {"auto_fix_ci": False, "default_workspace": "new"},
+        "updated": {
+            "auto_fix_ci": False,
+            "auto_human_review_enabled": False,
+            "default_workspace": "new",
+        },
     }
     saved = user_records.get("profile", "Alice")
     assert {key: saved[key] for key in profile} == profile
     assert not legacy_model_settings.keys() & saved.keys()
     assert saved["auto_fix_ci"] is False
+    participant = (await read_user_settings())["participants"][0]
+    assert participant["profile"]["auto_human_review_enabled"] is False
     assert user_records.get("profile", "bob") == {"draft_prs": True}
     assert user_records.get("github_oauth_token", "Alice") == {"encrypted_gh_token": "secret"}
     saved_prefs = user_records.get("dashboard_preferences", "Alice")
@@ -282,6 +290,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "login": "Alice",
             "profile": {
                 **ordinary,
+                "auto_human_review_enabled": True,
                 "concierge_mode": False,
                 "preserve_sandbox_memory": True,
                 "pr_review_links": False,
