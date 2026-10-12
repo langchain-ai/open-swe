@@ -623,7 +623,12 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
 async def assign(
     request: HumanReviewRequest, github_login: str, reason: str, *, replace: bool = False
 ) -> RequestResult:
-    """Pick a reviewer; person-named replacements withdraw overlapping pending picks."""
+    """Pick ``github_login`` to review: show them on the card and DM them.
+
+    The first reviewer stands alone. More join only for code owner areas nobody on the request
+    owns, and unasked only once someone approved. ``replace`` is a person naming the reviewer:
+    Open SWE's pending picks for the same code are withdrawn first.
+    """
     approvers = await _github_approvers(request)
     coverage = await Coverage.load(request)
     if approvers and (coverage is None or not coverage.uncovered(approvers)):

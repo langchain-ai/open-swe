@@ -114,7 +114,11 @@ async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
 
 
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
-    """Write editable profile settings without touching the OAuth token record."""
+    """Write the user's editable settings.
+
+    Only touches the profile record — the OAuth token record is untouched, so a concurrent re-login can't be clobbered by this write
+    and vice versa.
+    """
     existing = normalize_profile_for_response(await get_profile(login) or {})
     value: dict[str, Any] = {
         **existing,
