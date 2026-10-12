@@ -33,10 +33,16 @@ from openswe.webhooks.event_log import RETAINED_DAYS, WebhookSource
 logger = logging.getLogger(__name__)
 
 type MultitaskStrategy = Literal["enqueue", "interrupt"]
+type EventSource = WebhookSource | Literal["thread"]
 
 _SYSTEM: SystemIdentity = {
     "id": "system:event-subscription",
     "display_name": "Event listener",
+    "platform": "open-swe",
+}
+_THREAD_REPLY_SYSTEM: SystemIdentity = {
+    "id": "system:thread-reply",
+    "display_name": "Open SWE thread reply",
     "platform": "open-swe",
 }
 _RETAINED = timedelta(days=RETAINED_DAYS)
@@ -61,7 +67,7 @@ class EventMatch(Base):
 
     thread_id: Mapped[str]
     subscription_id: Mapped[UUID]
-    source: Mapped[WebhookSource] = mapped_column(Text)
+    source: Mapped[EventSource] = mapped_column(Text)
     delivery_id: Mapped[str]
     content: Mapped[str]
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
@@ -122,15 +128,16 @@ class EventMatch(Base):
         messages: list[RunMessage] = []
         for match in matches:
             data: dict[str, str] = {"event_match": str(match.id)}
+            system = _THREAD_REPLY_SYSTEM if match.source == "thread" else _SYSTEM
             built = build_input_messages(
                 match.content,
                 {
-                    "sender_id": _SYSTEM["id"],
-                    "surface": match.source,
+                    "sender_id": system["id"],
+                    "surface": "automation" if match.source == "thread" else match.source,
                     "kind": "system",
                     "data": data,
                 },
-                systems=[_SYSTEM],
+                systems=[system],
                 injected_dynamic_context_hashes=introduced,
             )
             built[-1]["id"] = f"event-match:{match.id}"

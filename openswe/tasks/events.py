@@ -19,9 +19,10 @@ _TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 _MAX_RESULT_CHARS = 16_000
 
 
-async def worker_result(
+async def run_answer(
     thread_id: str, run_id: str, status: str, payload: Mapping[str, object]
 ) -> str:
+    """The final answer a run's invocation left, or why it has none."""
     parsed = RunPayload.parse(payload)
     if status != "success":
         return parsed.failure(status, _MAX_RESULT_CHARS)
@@ -41,7 +42,7 @@ async def worker_result(
         state = StateSnapshot.model_validate(history[0])
         if answer := state.values.answer(_MAX_RESULT_CHARS):
             return answer
-    return "The invocation completed without a final answer. Inspect the worker thread for details."
+    return "The invocation completed without a final answer. Inspect the thread for details."
 
 
 async def worker_finished(
@@ -62,7 +63,7 @@ async def worker_finished(
         )
         return True
     try:
-        result = await worker_result(thread_id, run_id, status, payload)
+        result = await run_answer(thread_id, run_id, status, payload)
     except Exception:
         # Losing the answer must not lose the hand-off: the coordinator still learns it finished.
         logger.exception(

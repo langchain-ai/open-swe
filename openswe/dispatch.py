@@ -450,15 +450,17 @@ async def dispatch_agent_run(
     multitask_strategy: str = "interrupt",
     source_context: SourceContext | None = None,
     use_mda: bool = False,
+    message_id: str | None = None,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
-    the graph (``"agent"`` or ``"reviewer"``).
+    the graph (``"agent"`` or ``"reviewer"``). ``message_id`` names the message
+    built from ``content``.
     """
     if input is not None and any(
-        value is not None for value in (content, context, channels, systems)
+        value is not None for value in (content, context, channels, systems, message_id)
     ):
         raise ValueError("prebuilt input cannot be combined with content or source identities")
     if input is None:
@@ -474,6 +476,8 @@ async def dispatch_agent_run(
             if context is not None
             else await _dispatch_input(content, source, configurable)
         )
+        if message_id:
+            input["messages"][-1]["id"] = message_id
     client = client or dispatch_client()
     if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:
         from openswe.thread_feedback import note_feedback_activity

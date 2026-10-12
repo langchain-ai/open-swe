@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.message_queue import QueuedMessage
+from openswe.threads.replies import ThreadReply
 
 threads_tool = importlib.import_module("openswe.tools.threads")
 
@@ -356,7 +357,12 @@ async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
 
     sent = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
-    assert sent == {"success": True, "mode": mode, "run_id": result["run_id"]}
+    assert sent == {
+        "success": True,
+        "mode": mode,
+        "run_id": result["run_id"],
+        "reply_expected": False,
+    }
 
 
 async def test_manage_thread_starts_idle_message_with_fixed_command(
@@ -376,18 +382,30 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
         AsyncMock(return_value={"id": "thread-1", "planMode": True}),
     )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    monkeypatch.setattr(
+        threads_tool, "get_config", lambda: {"configurable": {"thread_id": "requester-thread"}}
+    )
+    monkeypatch.setattr(threads_tool.postgres, "configured", lambda: True)
+    owed = ThreadReply(
+        requester_thread_id="requester-thread", target_thread_id="thread-1", message_id="m-1"
+    )
+    monkeypatch.setattr(ThreadReply, "request", AsyncMock(return_value=owed))
 
     result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
     assert result["success"] is True
     assert result["mode"] == "started"
     assert result["run_id"] == "run-1"
+    assert result["reply_expected"] is True
     awaited = proxy.await_args
     assert awaited is not None
     command = json.loads(awaited.args[2])
     assert isinstance(command["id"], int)
     assert command["method"] == "run.start"
     assert "plan_mode" not in command["params"]["config"]["configurable"]
+    message = command["params"]["input"]["messages"][-1]
+    assert message["id"] == "m-1"
+    assert message["content"] == "Continue\n\nreply_to_thread: requester-thread"
 
 
 async def test_manage_thread_rejects_plan_format_conversion(

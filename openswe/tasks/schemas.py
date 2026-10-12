@@ -125,7 +125,7 @@ class RunPayload(BaseModel):
             if isinstance(error, RunError)
             else error or ""
         )
-        return (detail.strip() or f"Worker invocation ended with status {status}.")[:limit]
+        return (detail.strip() or f"The invocation ended with status {status}.")[:limit]
 
 
 class Run(BaseModel):

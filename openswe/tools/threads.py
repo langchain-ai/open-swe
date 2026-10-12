@@ -18,6 +18,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
+from openswe.database import postgres
 from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
@@ -35,6 +36,7 @@ from openswe.threads.handlers import (
 from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
+from openswe.threads.replies import ThreadReply
 from openswe.threads.runs import start_dashboard_thread
 from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
@@ -856,6 +858,16 @@ def _message_args(
     return model_id, effort
 
 
+async def _reply_request(target_thread_id: str, fire_and_forget: bool) -> ThreadReply | None:
+    """Owe the calling thread a reply from the target, unless it asked for none."""
+    if fire_and_forget or not postgres.configured():
+        return None
+    requester = RunConfig.parse(_config().get("configurable")).thread_id
+    if not requester or requester == target_thread_id:
+        return None
+    return await ThreadReply.request(requester, target_thread_id)
+
+
 async def _send_message(
     thread_id: str,
     actor: _Actor,
@@ -863,17 +875,22 @@ async def _send_message(
     *,
     model_id: str | None,
     effort: str | None,
+    fire_and_forget: bool,
 ) -> dict[str, Any]:
     # The dashboard's own send: a busy thread gets the message steered into its
     # open turn or queued as a follow-up run, both shown on the transcript at once.
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
+    thread_reply = await _reply_request(thread_id, fire_and_forget)
+    human: dict[str, str] = {"type": "human", "content": message}
+    if thread_reply is not None:
+        human.update(id=thread_reply.message_id, content=thread_reply.addressed(message))
     command = {
         "id": 1,
         "method": "run.start",
         "params": {
-            "input": {"messages": [{"type": "human", "content": message}]},
+            "input": {"messages": [human]},
             "config": {"configurable": configurable},
         },
     }
@@ -891,7 +908,12 @@ async def _send_message(
         return _failure(reply.detail or "Could not start thread run", status_code=status_code)
     result = reply.result
     mode = "steered" if result.steered else "queued" if result.queued else "started"
-    return {"success": True, "mode": mode, "run_id": result.run_id}
+    return {
+        "success": True,
+        "mode": mode,
+        "run_id": result.run_id,
+        "reply_expected": thread_reply is not None,
+    }
 
 
 class _CommandResult(BaseModel):
@@ -972,6 +994,7 @@ async def manage_thread(
     fingerprint: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
+    fire_and_forget: bool = False,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `manage_thread` tool."""
@@ -992,6 +1015,8 @@ async def manage_thread(
         model_id=model_id,
         effort=effort,
     )
+    if fire_and_forget and action != "send_message":
+        unexpected.append("fire_and_forget")
     if unexpected:
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
     if action == "admin_cancel" and not actor.admin:
@@ -1017,6 +1042,7 @@ async def manage_thread(
                 message or "",
                 model_id=model_id,
                 effort=effort,
+                fire_and_forget=fire_and_forget,
             )
         if action == "cancel":
             thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
@@ -1104,6 +1130,7 @@ async def start_thread(
     instructions: str,
     repos: list[str] | None = None,
     visibility: Literal["workspace", "private"] = "workspace",
+    fire_and_forget: bool = False,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `start_thread` tool."""
@@ -1119,16 +1146,19 @@ async def start_thread(
     if len(instructions) > _MAX_MESSAGE_CHARS:
         return _failure(f"instructions must be at most {_MAX_MESSAGE_CHARS} characters")
     clean_repos = list(dict.fromkeys(repo.strip() for repo in repos or () if repo.strip()))
+    thread_id = str(uuid.uuid4())
+    task = prompt("runs/started-thread", instructions=instructions, other_repos=clean_repos[1:])
     try:
-        thread_id = await start_dashboard_thread(
+        reply = await _reply_request(thread_id, fire_and_forget)
+        await start_dashboard_thread(
             actor.login,
             actor.email,
             title=title[:_MAX_TITLE_CHARS],
-            prompt=prompt(
-                "runs/started-thread", instructions=instructions, other_repos=clean_repos[1:]
-            ),
+            prompt=reply.addressed(task) if reply else task,
             repos=clean_repos,
             visibility="private" if visibility == "private" else "public",
+            thread_id=thread_id,
+            message_id=reply.message_id if reply else None,
         )
     except HTTPException as exc:
         return _http_failure(exc)
@@ -1139,4 +1169,5 @@ async def start_thread(
         "success": True,
         "thread_id": thread_id,
         "dashboard_url": dashboard_thread_url(thread_id),
+        "reply_expected": reply is not None,
     }

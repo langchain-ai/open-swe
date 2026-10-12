@@ -447,11 +447,13 @@ async def start_dashboard_thread(
     login: str,
     email: str | None,
     *,
+    thread_id: str,
     title: str,
     prompt: str,
     repos: Sequence[str],
     visibility: Literal["public", "private"],
-) -> str:
+    message_id: str | None = None,
+) -> None:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
     repo_configs: list[dict[str, str]] = []
     for repo in repos:
@@ -463,7 +465,7 @@ async def start_dashboard_thread(
     await _ensure_dashboard_github_token(login)
     primary = repo_configs[0] if repo_configs else {}
     thread = await create_dashboard_thread_record(
-        str(uuid.uuid4()),
+        thread_id,
         login=login,
         email=email,
         repo_config=primary,
@@ -472,17 +474,15 @@ async def start_dashboard_thread(
         visibility=visibility,
         workspace=await _resolve_requested_workspace(None, primary, login=login),
     )
-    thread_id = str(thread["thread_id"])
-    client = langgraph_client()
     await dispatch_agent_run(
         thread_id,
         prompt,
         await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
         source=DASHBOARD_SOURCE,
         thread_title=None,
-        client=client,
+        client=langgraph_client(),
+        message_id=message_id,
     )
-    return thread_id
 
 
 async def start_sandbox_guest_run(

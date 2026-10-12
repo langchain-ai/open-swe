@@ -117,9 +117,9 @@ async def test_result_uses_completed_payload_and_invocation_not_newer_thread_sta
             "messages": [{"type": "ai", "content": [{"type": "text", "text": "Reset passes"}]}]
         },
     }
-    assert await events.worker_result(_WORKER, "old-run", "success", payload) == "Reset passes"
+    assert await events.run_answer(_WORKER, "old-run", "success", payload) == "Reset passes"
     assert (
-        await events.worker_result(_WORKER, "old-run", "success", {"metadata": payload["metadata"]})
+        await events.run_answer(_WORKER, "old-run", "success", {"metadata": payload["metadata"]})
         == "Login passes"
     )
     client.threads.get_state.assert_not_awaited()

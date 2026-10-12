@@ -6,5 +6,6 @@ For PR implementation or fixes, first follow the Task Execution existing-thread 
 - `instructions`: everything the new thread needs, self-contained; it cannot see this conversation.
 - `repos`: `owner/name` repositories the task touches. The first is the one its sandbox opens in; the others are listed for it to clone.
 - `visibility`: `workspace` (default) is visible to the workspace; `private` only to the person.
+- `fire_and_forget`: `true` when this conversation does not need the result. By default the new thread's final answer is delivered back here as a thread reply.
 
-Returns `thread_id` and `dashboard_url`. Share the link. Check progress later with `get_thread`, and send follow-ups with `manage_thread`.
+Returns `thread_id` and `dashboard_url`. Share the link. Send follow-ups with `manage_thread`.

@@ -36,6 +36,7 @@ from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.thread_feedback import schedule_answer_feedback
+from openswe.threads.replies import ThreadReply
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
@@ -527,6 +528,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
                 extra={"thread_id": thread_id, "run_id": run_id},
             )
             raise
+        await ThreadReply.answer(thread_id, run_id, status, payload)
     payload_metadata = payload.get("metadata")
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         await settle_review_style_run(payload_metadata)
