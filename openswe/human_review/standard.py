@@ -68,6 +68,7 @@ from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
 from openswe.utils.thread_ops import langgraph_client
@@ -714,6 +715,8 @@ async def assign(
         dm_text = (
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
+        if not replace and (base := dashboard_base_url()):
+            dm_text += f" <{base}/my-settings/agent|Turn off automatic review picks>."
         origin = added.dm_origin
         sent = await send_dm_with_location(
             user.slack_user_id,
