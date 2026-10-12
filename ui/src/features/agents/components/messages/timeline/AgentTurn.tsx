@@ -324,6 +324,11 @@ export function AgentTurn({
               : label
           }
           active={live}
+          since={
+            live
+              ? (replyTimestamp(segments[index - 1]) ?? turnStart)
+              : undefined
+          }
           expanded={expanded}
           onToggle={() => toggleFold(segment.key)}
         />
