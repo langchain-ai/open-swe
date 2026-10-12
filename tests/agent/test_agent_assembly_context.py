@@ -418,6 +418,11 @@ async def test_personal_settings_tool_not_exposed_to_unauthorized_runs(
     assert "save_user_settings" not in {_registered_tool_name(tool) for tool in tools}
 
 
+def _tool_names(tools: object) -> set[str]:
+    assert isinstance(tools, list)
+    return {_registered_tool_name(tool) for tool in tools}
+
+
 @pytest.mark.asyncio
 async def test_agent_includes_sql_only_on_private_admin_surfaces(
     monkeypatch: pytest.MonkeyPatch,
@@ -427,10 +432,9 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     from openswe.tools.manage_feature_flags import manage_feature_flags
 
     captured = await _capture_create_deep_agent_kwargs()
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
     config = _base_config()
@@ -438,15 +442,14 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     assert isinstance(configurable, dict)
     configurable["admin_thread"] = True
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql in tools
-    assert manage_feature_flags in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ in tools
+    assert manage_feature_flags.__name__ in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    assert read_only_sql in general_purpose["tools"]
-    assert manage_feature_flags in general_purpose["tools"]
+    assert read_only_sql.__name__ in _tool_names(general_purpose["tools"])
+    assert manage_feature_flags.__name__ in _tool_names(general_purpose["tools"])
 
     configurable["source"] = "slack"
     configurable["slack_thread"] = {
@@ -456,28 +459,25 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
         "channel_context": {"is_im": True},
     }
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql in tools
-    assert manage_feature_flags in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ in tools
+    assert manage_feature_flags.__name__ in tools
 
-    assert all(tool in tools for tool in ADMIN_TOOLS)
+    assert all(tool.__name__ in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "not-an-admin"
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
-    assert all(tool not in tools for tool in ADMIN_TOOLS)
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
+    assert all(tool.__name__ not in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "octocat"
     configurable["source"] = "schedule"
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
 
 
 SLACK_TOOL_NAMES = {

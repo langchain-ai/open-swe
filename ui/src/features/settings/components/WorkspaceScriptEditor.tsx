@@ -1,5 +1,4 @@
 import { useId, useState } from "react"
-import Editor from "@monaco-editor/react"
 import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import {
@@ -8,7 +7,7 @@ import {
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
 
-import { useResolvedTheme } from "@/lib/theme"
+import { TextEditor } from "@/components/TextEditor"
 
 function WorkspaceReposPopover({ repos }: { repos: string[] }) {
   const titleId = useId()
@@ -46,7 +45,6 @@ export function WorkspaceScriptEditor({
   onChange: (value: string) => void
   description?: string
 }) {
-  const theme = useResolvedTheme()
   const [open, setOpen] = useState(false)
   const lines = value ? value.trimEnd().split("\n").length : 0
 
@@ -79,22 +77,12 @@ export function WorkspaceScriptEditor({
             <WorkspaceReposPopover repos={repos} /> to preload; runs clone any
             other repository on demand.
           </p>
-          <div className="min-h-0 overflow-auto">
-            <Editor
-              height="min(60vh, 600px)"
+          <div className="h-[min(60vh,600px)]">
+            <TextEditor
               language="shell"
+              ariaLabel={label}
               value={value}
-              onChange={(next) => onChange((next ?? "").replace(/\r\n/g, "\n"))}
-              theme={theme === "dark" ? "vs-dark" : "light"}
-              options={{
-                ariaLabel: label,
-                automaticLayout: true,
-                minimap: { enabled: false },
-                fontSize: 13,
-                scrollBeyondLastLine: false,
-                padding: { top: 12, bottom: 12 },
-                tabSize: 2,
-              }}
+              onChange={onChange}
             />
           </div>
           <div className="flex justify-end border-t border-default p-space-3">
