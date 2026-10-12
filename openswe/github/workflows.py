@@ -78,6 +78,8 @@ class WorkflowPolicies:
         return policy
 
     async def remove(self, repository: str, workflow: str) -> None:
-        repository, key = workflow_identity(repository, workflow)
-        await self.require_repository(repository)
+        """Revoke a policy, even one whose repository has since been unbound."""
+        _, key = workflow_identity(repository, workflow)
+        if not await WORKSPACES.slug_exists(self.workspace):
+            raise ValueError("Workspace not found")
         await delete_value(self.namespace, key)

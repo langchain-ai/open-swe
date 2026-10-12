@@ -18,6 +18,7 @@ def requester(grant_tool_access: Callable[..., None]):
         ),
         patch("openswe.tools.github_workflows.require_repo_access_for_user", AsyncMock()),
         patch("openswe.github.workflows.WorkflowPolicies.require_repository", AsyncMock()),
+        patch("openswe.github.workflows.WORKSPACES.slug_exists", AsyncMock(return_value=True)),
     ):
         yield
 
