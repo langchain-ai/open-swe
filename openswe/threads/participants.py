@@ -5,11 +5,9 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel
 
-from openswe.slack.users import SlackUser
 from openswe.source_context import SourceContext
 from openswe.threads.access import _readable_thread_metadata
 from openswe.users import User
-from openswe.users.avatars import slack_profile
 from openswe.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
     PARTICIPANT_LOGINS_KEY,
@@ -25,15 +23,12 @@ class ThreadParticipant(BaseModel):
 
 
 async def _participant(user: User) -> ThreadParticipant:
-    profile = await slack_profile(user)
+    profile = await user.slack_profile()
     return ThreadParticipant(
         id=str(user.id),
-        displayName=(profile.display_name if profile else "")
-        or user.display_name
-        or user.github_login
-        or "Participant",
+        displayName=profile.display_name or user.display_name or user.github_login or "Participant",
         githubLogin=user.github_login or None,
-        avatarUrl=profile.avatar_url if profile else "",
+        avatarUrl=profile.avatar_url,
     )
 
 
@@ -67,14 +62,9 @@ async def participant_summaries(metadata: Mapping[str, object]) -> list[ThreadPa
         for user_id, user in zip(sorted(slack_ids), slack_users, strict=True)
         if user is None
     ]
-    profiles = await asyncio.gather(*(SlackUser.load(user_id) for user_id in unknown_slack_ids))
     participants.extend(
-        ThreadParticipant(
-            id=f"slack:{user_id}",
-            displayName=(profile.display_name if profile else "") or user_id,
-            avatarUrl=profile.avatar_url if profile else "",
-        )
-        for user_id, profile in zip(unknown_slack_ids, profiles, strict=True)
+        ThreadParticipant(id=f"slack:{user_id}", displayName=user_id)
+        for user_id in unknown_slack_ids
     )
     known_logins = {user.github_login.lower() for user in unique.values()}
     participants.extend(

@@ -11,7 +11,7 @@ reference ``users.id`` instead of a provider-specific handle.
 import logging
 from collections.abc import Collection, Iterable
 from datetime import datetime
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID, uuid7
 
 from sqlalchemy import (
@@ -36,6 +36,9 @@ from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.users.authorization import UnauthorizedUser, is_authorized_github_login
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
 from openswe.utils.json_types import JsonObject
+
+if TYPE_CHECKING:
+    from openswe.users.avatars import SlackProfile
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +88,14 @@ class User(Base):
     @property
     def slack_user_id(self) -> str:
         return self._identity_field("slack", "external_id")
+
+    async def slack_profile(self) -> SlackProfile:
+        from openswe.users.avatars import SlackProfile
+
+        return await SlackProfile(self).load()
+
+    async def resolved_avatar_url(self) -> str:
+        return (await self.slack_profile()).avatar_url
 
     @property
     def email(self) -> str:

@@ -7,10 +7,10 @@ from sqlalchemy import func, select, update
 
 from openswe.database import postgres
 from openswe.slack.client import get_slack_user_info
-from openswe.slack.users import SlackUser
 from openswe.threads.participants import participant_summaries
 from openswe.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
-from openswe.users.avatars import avatar_for_login
+from openswe.users.models import UserIdentity
+from openswe.users.records import UserRecord
 from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -68,12 +68,12 @@ async def test_user_search_filters_before_pagination_without_duplicate_identitie
 
 
 async def test_participants_deduplicate_linked_identities_and_keep_cached_slack_photo(
-    slack_api,
+    slack_api: SlackAPI,
 ) -> None:
     user = await User.sign_in(
         "github", "1001", login="OctoCat", avatar_url="https://github.com/octocat.png"
     )
-    await user.link("slack", "U0123", email="octocat@example.com")
+    user = await user.link("slack", "U0123", email="octocat@example.com")
     slack_api.respond(
         {
             "ok": True,
@@ -86,11 +86,22 @@ async def test_participants_deduplicate_linked_identities_and_keep_cached_slack_
             },
         }
     )
-    assert await avatar_for_login("octocat") == "https://slack.test/octocat.png"
+    assert await user.resolved_avatar_url() == "https://slack.test/octocat.png"
+    assert await user.resolved_avatar_url() == "https://slack.test/octocat.png"
+    assert len(slack_api.calls) == 1
     async with postgres.session() as session:
-        stored = await session.get(SlackUser, "U0123")
-        assert stored is not None and stored.fetched_at is not None
-        stored.fetched_at = stored.fetched_at.replace(year=2000)
+        stored = await session.get(UserRecord, (user.id, "slack_profile", ""))
+        assert stored is not None and stored.updated_at is not None
+        assert stored.value == {
+            "display_name": "Octo Cat",
+            "avatar_url": "https://slack.test/octocat.png",
+        }
+        stored.updated_at = stored.updated_at.replace(year=2000)
+        await session.execute(
+            update(UserIdentity)
+            .where(UserIdentity.external_id == "U0123")
+            .values(last_seen_at=stored.updated_at)
+        )
     slack_api.respond({"ok": False, "error": "missing_scope"})
     people = await participant_summaries(
         {
@@ -104,23 +115,24 @@ async def test_participants_deduplicate_linked_identities_and_keep_cached_slack_
     assert people[0].id == str(user.id)
     assert people[0].displayName == "Octo Cat"
     assert people[0].avatarUrl == "https://slack.test/octocat.png"
-    async with postgres.session() as session:
-        session.add(
-            SlackUser(
-                id="U_UNLINKED",
-                payload={
-                    "profile": {
-                        "display_name": "Unlinked participant",
-                        "image_72": "https://slack.test/unlinked.png",
-                    }
-                },
-            )
-        )
+    slack_api.respond(
+        {"ok": True, "user": {"profile": {"image_72": "https://slack.test/unlinked.png"}}}
+    )
     unlinked = await participant_summaries({"participant_slack_ids": ["U_UNLINKED"]})
     assert len(unlinked) == 1
     assert unlinked[0].id == "slack:U_UNLINKED"
-    assert unlinked[0].displayName == "Unlinked participant"
-    assert unlinked[0].avatarUrl == "https://slack.test/unlinked.png"
+    assert unlinked[0].displayName == "U_UNLINKED"
+    assert unlinked[0].avatarUrl == ""
+    assert await User.for_identity("slack", "U_UNLINKED") is None
+    assert all(params.get("user") != "U_UNLINKED" for _, params in slack_api.calls)
+    async with postgres.session() as session:
+        assert await session.scalar(select(func.count()).select_from(UserRecord)) == 1
+    await user.link("slack", "U0123")
+    changed = await User.for_login("github", "octocat")
+    assert changed is not None
+    slack_api.responses.clear()
+    slack_api.respond({"ok": False, "error": "missing_scope"})
+    assert await changed.resolved_avatar_url() == ""
 
 
 async def test_identity_lookup_uses_current_email_and_fails_closed(
@@ -128,8 +140,8 @@ async def test_identity_lookup_uses_current_email_and_fails_closed(
 ) -> None:
     from openswe.slack import client
 
-    async with postgres.session() as session:
-        session.add(SlackUser(id="U0123", payload={"profile": {"email": "old@example.com"}}))
+    user = await User.sign_in("github", "1001", login="OctoCat")
+    await user.link("slack", "U0123", email="old@example.com")
     slack_api.respond({"ok": True, "user": {"profile": {"email": "new@example.com"}}})
     assert await get_slack_user_info("U0123") == {"profile": {"email": "new@example.com"}}
     slack_api.respond({"ok": False, "error": "user_not_found"})

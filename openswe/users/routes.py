@@ -1,14 +1,15 @@
 """Dashboard routes for people: the admin listing of who Open SWE knows."""
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Query
 
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
-from openswe.users.avatars import avatar_for_login
 from openswe.users.models import User
 
 router = APIRouter(tags=["users"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/users/{login}/avatar")
@@ -16,7 +17,14 @@ async def user_avatar(
     login: str,
     _session: dict[str, str] = SESSION_DEP,
 ) -> dict[str, str]:
-    return {"avatar_url": await avatar_for_login(login)}
+    try:
+        user = await User.for_login("github", login)
+        return {"avatar_url": await user.resolved_avatar_url() if user else ""}
+    except Exception:
+        logger.warning(
+            "Could not resolve Slack avatar", extra={"github_login": login}, exc_info=True
+        )
+        return {"avatar_url": ""}
 
 
 @router.get("/admin/users")

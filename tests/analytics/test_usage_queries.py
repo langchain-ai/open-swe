@@ -9,8 +9,8 @@ from sqlalchemy import text
 from openswe.analytics import directory, queries
 from openswe.database import analytics as database
 from openswe.database import postgres
-from openswe.slack.users import SlackUser
 from openswe.users.models import User, UserIdentity
+from openswe.users.records import UserRecord
 from tests.analytics.conftest import initialize_database
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)
@@ -129,22 +129,20 @@ async def report(**kwargs):
 async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     alice = await person("alice", "alice@example.com", display_name="Alice Example")
     async with postgres.session() as session:
-        session.add(
-            User(
-                identities=[
-                    UserIdentity(provider="github", external_id="1001", login="alice"),
-                    UserIdentity(provider="slack", external_id="U_ALICE"),
-                ]
-            )
+        user = User(
+            identities=[
+                UserIdentity(provider="github", external_id="1001", login="alice"),
+                UserIdentity(provider="slack", external_id="U_ALICE"),
+            ]
         )
+        session.add(user)
+        await session.flush()
         session.add(
-            SlackUser(
-                id="U_ALICE",
-                payload={
-                    "profile": {
-                        "image_72": "https://slack.test/alice.png",
-                    }
-                },
+            UserRecord(
+                user_id=user.id,
+                kind="slack_profile",
+                key="",
+                value={"avatar_url": "https://slack.test/alice.png"},
             )
         )
     bob = await person("bob", "bob@example.com")
