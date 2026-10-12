@@ -12,7 +12,6 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
-import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
@@ -93,7 +92,7 @@ function ThreadRepoIndicator({
 }
 
 const TARGET_ICONS = {
-  Cloud: CloudIcon,
+  Cloud: null,
   "This Mac": LaptopRegularIcon,
   "Local CLI": TerminalIcon,
 }
@@ -347,14 +346,16 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-space-3">
-          <span
-            role="img"
-            aria-label={`Runs on ${target}`}
-            title={target}
-            className="text-icon-secondary"
-          >
-            <TargetIcon size={16} weight="regular" />
-          </span>
+          {TargetIcon && (
+            <span
+              role="img"
+              aria-label={`Runs on ${target}`}
+              title={target}
+              className="text-icon-secondary"
+            >
+              <TargetIcon size={16} weight="regular" />
+            </span>
+          )}
           {!localThread && visibilityMenu}
         </div>
       </div>
