@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from openswe.database.store_imports import StoreImport
 from openswe.users import User, import_store
 from openswe.users.import_store import USER_MAPPINGS_NAMESPACE, import_user_mappings
 from tests.conftest import FakeStore
@@ -40,7 +41,7 @@ async def test_creates_the_user_from_a_mapping_and_deletes_the_record(
         AsyncMock(return_value=import_store._GithubAccount(id=1001, login="OctoCat")),
     )
 
-    assert await import_user_mappings() == 1
+    assert await import_user_mappings() == StoreImport(moved=1)
 
     user = await User.for_identity("slack", "U1")
     assert user is not None
@@ -57,7 +58,7 @@ async def test_links_onto_an_existing_user_without_asking_github(
     lookup = AsyncMock()
     monkeypatch.setattr(import_store, "_github_account", lookup)
 
-    assert await import_user_mappings() == 1
+    assert await import_user_mappings() == StoreImport(moved=1)
 
     user = await User.for_identity("slack", "U2")
     assert user is not None and user.id == existing.id
@@ -76,7 +77,7 @@ async def test_records_that_cannot_be_completed_wait_for_the_next_startup(
 
     monkeypatch.setattr(import_store, "_github_account", account)
 
-    assert await import_user_mappings() == 0
+    assert await import_user_mappings() == StoreImport(waiting=2)
 
     assert set(fake_store.values(USER_MAPPINGS_NAMESPACE)) == {"ghost", "mallory"}
     assert await User.for_login("github", "mallory") is None
@@ -89,7 +90,7 @@ async def test_a_work_email_with_no_slack_id_lands_on_the_github_identity(
     fake_store.seed(USER_MAPPINGS_NAMESPACE, "grace", _mapping("grace", "grace@work.example"))
     monkeypatch.setattr(import_store, "_github_account", AsyncMock())
 
-    assert await import_user_mappings() == 1
+    assert await import_user_mappings() == StoreImport(moved=1)
 
     assert await User.email_for_login("grace") == "grace@work.example"
     assert fake_store.values(USER_MAPPINGS_NAMESPACE) == {}
@@ -103,11 +104,11 @@ async def test_a_work_email_that_cannot_be_stored_keeps_its_record(
     fake_store.seed(USER_MAPPINGS_NAMESPACE, "grace", _mapping("grace", "grace@work.example"))
     monkeypatch.setattr(import_store, "_github_account", AsyncMock())
 
-    assert await import_user_mappings() == 0
+    assert await import_user_mappings() == StoreImport(waiting=1)
 
     assert set(fake_store.values(USER_MAPPINGS_NAMESPACE)) == {"grace"}
     assert await User.email_for_login("grace") == "grace@personal.example"
 
 
 async def test_an_empty_namespace_is_a_noop(fake_store: FakeStore) -> None:
-    assert await import_user_mappings() == 0
+    assert await import_user_mappings() == StoreImport()

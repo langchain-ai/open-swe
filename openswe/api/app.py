@@ -73,21 +73,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await database.migrate()
     try:
         # People used to be Store records keyed by GitHub login; this moves them
-        # into the users table and is a no-op once it has.
-        imported_users = await import_user_mappings()
+        # into the users table.
+        await run_store_import("user_mappings", import_user_mappings)
     except Exception:  # noqa: BLE001
         # Startup continues: anyone still in the Store cannot vote or be
         # resolved from Slack until an import succeeds, and nothing else breaks.
         logger.exception("Importing user mappings from the LangGraph Store failed")
-    else:
-        logger.info(
-            "Imported user mappings from the LangGraph Store",
-            extra={"imported_users": imported_users},
-        )
     try:
         # Concierge mode used to be a Store profile flag; this moves it into
-        # users.preferences and is a no-op once it has.
-        await import_concierge_mode()
+        # users.preferences. It runs before user_records, which moves the
+        # profiles themselves.
+        await run_store_import("concierge_mode", import_concierge_mode)
     except Exception:  # noqa: BLE001
         # Startup continues: opted-in people get a thread per DM message until
         # an import succeeds.

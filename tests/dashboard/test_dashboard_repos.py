@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from openswe.github import dashboard_routes, repo_cache, repos
+from openswe.users import User
 from tests.support.github_sdk import mock_github_sdk
 
 
@@ -142,3 +143,18 @@ async def test_schedule_repo_cache_refresh_runs_once_per_login() -> None:
 
     assert calls == 1
     assert "octocat" not in repo_cache._refreshing
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_repo_cache_round_trips_per_person(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada,bob")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    await User.sign_in("github", "1", login="ada")
+    await User.sign_in("github", "2", login="bob")
+    payload = {"installations": [], "repositories": [{"full_name": "acme/api"}]}
+
+    await repo_cache.write_cached_repos("Ada", payload)
+
+    cached = await repo_cache.read_cached_repos("ada")
+    assert cached is not None and cached[0] == payload
+    assert await repo_cache.read_cached_repos("bob") is None
