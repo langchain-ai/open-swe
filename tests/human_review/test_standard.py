@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -23,6 +24,7 @@ from openswe.human_review.standard import (
 )
 from openswe.slack.blocks import block_payload
 from openswe.users import User, UserIdentity
+from tests.conftest import FakeUserRecords
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -150,6 +152,86 @@ async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
     ):
         assert (await _auto_assign(request, asked=True, trigger=None)).status == "claimed"
     wake.assert_not_awaited()
+
+
+@pytest.mark.parametrize("source", ["automatic", "named", "forged", "mcp", "unauthorized_mcp"])
+async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
+    source: str, user_records: FakeUserRecords, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.human_review import standard
+    from openswe.human_review.people import Participant
+    from openswe.human_review.picking import Coverage
+
+    tool = import_module("openswe.tools.request_human_review")
+    reviewer = User(identities=[UserIdentity(provider="github", external_id="2", login="grace")])
+    author = User(identities=[UserIdentity(provider="github", external_id="1", login="ada")])
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", thread_id="picker"
+    )
+    request.pull_request = pr
+    user_records.seed("profile", "grace", {"auto_human_review_enabled": False})
+    config: dict[str, object] = {
+        "thread_id": "picker",
+        "source": "slack",
+        "slack_thread": {
+            "channel_id": "C1",
+            "thread_ts": "1.0",
+            "triggering_event_ts": "2.0",
+            "triggering_user_id": "U_ADA",
+        },
+    }
+    if source in {"mcp", "unauthorized_mcp"}:
+        config.update(
+            source="mcp", thread_id=None, github_login="ada" if source == "mcp" else "grace"
+        )
+    monkeypatch.setattr(tool, "get_config", lambda: {"configurable": config})
+    monkeypatch.setattr(
+        tool,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(
+            return_value={
+                "user": "U_ADA",
+                "text": "assign @grace" if source == "named" else "who is reviewing?",
+            }
+        ),
+    )
+    monkeypatch.setattr(tool, "_repository_refusal", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        User,
+        "for_login",
+        AsyncMock(side_effect=lambda _, login: author if login == "ada" else reviewer),
+    )
+    monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=request))
+    monkeypatch.setattr(HumanReviewRequest, "get", AsyncMock(return_value=request))
+    monkeypatch.setattr(standard, "_github_approvers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(Coverage, "load", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        standard, "resolve_writer", AsyncMock(return_value=Participant(reviewer, "grace"))
+    )
+    monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
+    monkeypatch.setattr(standard, "_request_github_review", AsyncMock(return_value=True))
+    monkeypatch.setattr(standard, "_schedule", AsyncMock(return_value=True))
+    monkeypatch.setattr(standard, "_assignment_minutes", AsyncMock(return_value=120))
+    monkeypatch.setattr(standard, "_permalink", AsyncMock(return_value=""))
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    monkeypatch.setattr(HumanReviewRequest, "locked", locked)
+    result = await tool.assign_human_reviewer(
+        pr.url, "grace", "owner", named_by_person=source in {"named", "forged"}
+    )
+    assert result["success"] is (source in {"named", "mcp"})
+    if source in {"named", "mcp"}:
+        assert len(request.participants) == 1
+        assert request.participants[0].user_id == reviewer.id
+        assert request.participants[0].decision == "picked"
+    else:
+        assert not request.participants
+        if source == "automatic":
+            assert "opted out" in result["error"]
 
 
 @pytest.mark.parametrize("status", [200, 503])
@@ -490,3 +572,19 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [row.number for row in result.pull_requests] == [1]
+
+
+@pytest.mark.parametrize(("user", "blocked"), [(User(), False), (None, True)])
+async def test_review_blockers_refuse_authors_without_an_open_swe_account(
+    user: User | None, blocked: bool
+) -> None:
+    from openswe.expedited_review.readiness import Readiness
+    from openswe.human_review.standard import review_blockers
+
+    readiness = Readiness(snapshot=_snapshot(), blockers=[])
+    with (
+        patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+    ):
+        blockers = await review_blockers(MagicMock())
+    assert blockers == (["its author is not an Open SWE user"] if blocked else [])

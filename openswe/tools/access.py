@@ -12,7 +12,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal, ParamSpec, TypeVar, cast
 
-import langgraph_sdk
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.config import ENV
@@ -28,6 +27,7 @@ from openswe.utils.thread_participants import (
     PARTICIPANT_LOGINS_KEY,
     participant_logins,
 )
+from openswe.utils.thread_reads import read_thread
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ async def _metadata(thread_id: str | None) -> dict[str, object]:
     if not thread_id:
         return {}
     try:
-        return thread_metadata(await langgraph_sdk.get_client().threads.get(thread_id))
+        return thread_metadata(await read_thread(thread_id))
     except Exception:
         logger.warning("Could not read thread metadata for access", exc_info=True)
         return {}

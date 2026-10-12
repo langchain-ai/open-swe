@@ -11,8 +11,10 @@ from openswe.credential_scope import (
     pr_author_login,
     private_credential_login,
 )
+from openswe.slack import solo_threads
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
+from tests.slack.test_slack_solo_threads import _Harness, _Store
 
 slack_breakout_tool = importlib.import_module("openswe.slack.tools.start_new_thread")
 
@@ -107,6 +109,7 @@ class _FakeThreadsClient:
 class _FakeClient:
     def __init__(self, captured: dict[str, Any]) -> None:
         self.threads = _FakeThreadsClient(captured)
+        self.store = _Store()
 
 
 @pytest.fixture(autouse=True)
@@ -235,6 +238,11 @@ async def test_slack_breakout_thread_success(
         return thread_id
 
     fake_client = _FakeClient(captured)
+    routing = _Harness()
+    routing.history = [{"ts": new_ts, "user": "BOT", "bot_id": "B1", "text": "breakout"}]
+    fake_client.store = routing.store
+    monkeypatch.setattr(solo_threads.SlackClient, "bot", routing.bot)
+    monkeypatch.setattr(solo_threads, "slack_thread_mutation_lock", routing.mutation_lock)
     monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: fake_client)
@@ -265,6 +273,14 @@ async def test_slack_breakout_thread_success(
         channel_id=explicit,
     )
 
+    assert await solo_threads.allow_solo_thread_followup(
+        fake_client,
+        channel_id=target,
+        thread_ts=new_ts,
+        message_ts="1700000001.0",
+        user_id="U1",
+        explicit_mention=False,
+    )
     expected_thread_id = captured["thread_create"]["thread_id"]
     assert uuid.UUID(expected_thread_id).version == 4
     assert result == {

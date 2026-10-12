@@ -2,7 +2,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Self
 
-import langgraph_sdk
 from langchain.agents.middleware import AgentState
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -17,6 +16,7 @@ from openswe.tasks.flags import task_coordination_enabled, task_coordination_sup
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.schemas import Thread
 from openswe.tasks.store import TaskContext, TaskDelegation, TaskMembership
+from openswe.utils.thread_reads import read_thread
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
 
     @classmethod
     async def for_thread(cls, thread_id: str) -> Self | None:
-        thread = Thread.model_validate(await langgraph_sdk.get_client().threads.get(thread_id))
+        thread = Thread.model_validate(await read_thread(thread_id))
         metadata = thread.metadata
         owner_login = metadata.owner_login if metadata.owner_type == "user" else None
         enabled = task_coordination_supported(

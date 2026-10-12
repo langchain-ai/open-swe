@@ -196,6 +196,60 @@ describe("Messages", () => {
     ).toBeTruthy()
   })
 
+  it("folds each stretch of work between the Slack replies around it", () => {
+    render(
+      <Messages
+        isStreaming
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "tool-execution",
+                toolCallId: "ack",
+                title: "Slack thread reply",
+                toolKind: "slack",
+                status: "completed",
+                input: { message: "On it!" },
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "shell",
+                title: "ls",
+                toolKind: "execute",
+                status: "completed",
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "progress",
+                title: "Slack thread reply",
+                toolKind: "slack",
+                status: "completed",
+                input: { message: "Found the cause" },
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const inOrder = [
+      screen.getByText("On it!"),
+      screen.getByRole("button", { name: "Worked · 1 action" }),
+      screen.getByText("Found the cause"),
+      screen.getByRole("button", { name: "Thinking…" }),
+    ]
+    inOrder.slice(1).forEach((later, index) => {
+      expect(
+        inOrder[index]!.compareDocumentPosition(later) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
+  })
+
   it("renders unfinished grouped work after its fold row", () => {
     render(
       <Messages

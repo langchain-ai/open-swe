@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
@@ -9,6 +10,8 @@ from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_requests import PullRequest
 from openswe.human_review.picking import ReviewerInstructions, WorkHours
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.users import User, UserIdentity
+from tests.conftest import FakeUserRecords
 
 _CODEOWNERS = CodeOwners.parse(
     """
@@ -136,3 +139,43 @@ def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
     friday_evening = datetime(2026, 10, 2, 23, tzinfo=UTC)
     assert not hours.on_shift(friday_evening)
     assert hours.next_start(friday_evening) == datetime(2026, 10, 5, 13, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("codeowners", [CodeOwners.parse("* @ada @grace"), None])
+async def test_auto_picks_skip_opted_out_owners_and_recent_authors(
+    monkeypatch: pytest.MonkeyPatch,
+    user_records: FakeUserRecords,
+    caplog: pytest.LogCaptureFixture,
+    codeowners: CodeOwners | None,
+) -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review import picking
+
+    ada = User(identities=[UserIdentity(provider="github", external_id="1", login="ada")])
+    grace = User(identities=[UserIdentity(provider="github", external_id="2", login="grace")])
+    user_records.seed("profile", "ada", {"auto_human_review_enabled": False})
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    monkeypatch.setattr(
+        ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
+    )
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=codeowners))
+    monkeypatch.setattr(picking, "_touched", AsyncMock(return_value=Counter(ada=10, grace=1)))
+    monkeypatch.setattr(
+        User,
+        "for_login",
+        AsyncMock(side_effect=lambda _, login: {"ada": ada, "grace": grace}[login]),
+    )
+    monkeypatch.setattr(
+        HumanReviewRequest, "open_review_counts", AsyncMock(return_value={ada.id: 0, grace.id: 0})
+    )
+    pull = MagicMock()
+    pull.repo.can_write = AsyncMock(return_value=True)
+    with caplog.at_level("INFO", logger=picking.__name__):
+        choice = await picking._choose_reviewer(request, pull, None, {})
+    assert isinstance(choice, picking.Pick) and choice.login == "grace"
+    filtered = next(
+        record for record in caplog.records if record.message == "Filtered reviewer candidates"
+    )
+    assert filtered.skipped == {"ada": "opted_out"}

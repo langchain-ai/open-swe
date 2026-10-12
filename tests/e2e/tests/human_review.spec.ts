@@ -617,6 +617,40 @@ test.describe("Human review in Slack", () => {
     ).toHaveCount(0);
   });
 
+  test("unreviewable pull requests explain why a review can't be requested", async ({
+    page,
+    request,
+  }) => {
+    await setReviewChannel(request);
+    await loginAs(page, ALICE);
+    await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Conflicted change",
+      author: ALICE.login,
+      mergeable: false,
+      mergeable_state: "dirty",
+      check_runs: GREEN,
+    });
+    await page.goto("/agents/reviews");
+    const row = page
+      .getByRole("listitem")
+      .filter({ hasText: "Conflicted change" });
+    await expect(
+      row.getByRole("button", { name: "Request review in Slack" }),
+    ).toBeDisabled();
+    await row
+      .getByRole("button", { name: "Why a review can't be requested" })
+      .click();
+    await expect(
+      page.getByText(
+        "A review can't be requested yet: it has merge conflicts.",
+      ),
+    ).toBeVisible();
+    await page.screenshot({
+      path: "test-results/human-review-blocked-reason.png",
+    });
+  });
+
   test("requested from the dashboard; nobody signs up, so the agent picks a reviewer, DMs them without posting in the channel, and it merges on their approval", async ({
     page,
     request,

@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx2
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
+from openswe.dashboard.profiles import PROFILES
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github.codeowners import CodeOwners
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
@@ -442,6 +443,8 @@ async def _choose_reviewer(
             skipped[login] = "no_open_swe_account"
         elif _is_bot(login):
             skipped[login] = "bot"
+        elif not await PROFILES.allows_auto_human_review(user.github_login or login):
+            skipped[login] = "opted_out"
         elif request.is_author(user.id, login):
             skipped[login] = "author"
         elif user.id in taken:

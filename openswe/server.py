@@ -45,6 +45,7 @@ from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemSta
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -153,7 +154,7 @@ from openswe.model_request import (
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import construct_system_prompt
-from openswe.prompts import apply_tool_descriptions, prompt
+from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import RunConfig
@@ -303,6 +304,7 @@ from openswe.utils.model import (
 )
 from openswe.utils.startup_trace import aphase
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from openswe.utils.thread_reads import read_thread, shared_thread_reads
 from openswe.utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
@@ -372,6 +374,29 @@ def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
 SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_messages"})
 
 
+def _tool_description_values() -> dict[str, dict[str, object]]:
+    return {"expose_port": {"jwks_url": service_identity_jwks_url(), "port": "<port>"}}
+
+
+def warm_agent_build() -> None:
+    """Pay a worker's one-time graph-building costs at startup instead of on its first run.
+
+    That is every exported tool's schemas, plus whatever the first deep agent a
+    process builds caches for the rest (deepagents scans installed packages once).
+    """
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    import openswe.tools as tools
+
+    functions = [getattr(tools, name) for name in tools.__all__]
+    warm_tool_schemas(functions, _tool_description_values())
+    create_deep_agent(
+        model=FakeListChatModel(responses=[""]),
+        system_prompt="",
+        tools=apply_tool_descriptions(functions, _tool_description_values()),
+    )
+
+
 def _registered_tool_name(value: Any) -> str:
     name = getattr(value, "name", None) or getattr(value, "__name__", None)
     if not isinstance(name, str) or not name:
@@ -411,7 +436,7 @@ async def _resolve_repo_custom_instructions(
 async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIdentity]:
     """Git identities of everyone who has posted in this thread."""
     try:
-        thread = await client.threads.get(thread_id=thread_id)
+        thread = await read_thread(thread_id, client)
         logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
         return await resolve_participant_identities(logins)
     except Exception:
@@ -685,6 +710,7 @@ def _general_purpose_subagent(
                 _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
                 _SubagentToolGuard(),
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 TranscriptMiddleware(),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
@@ -729,7 +755,7 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     if not thread_id:
         return None
     try:
-        thread = await client.threads.get(thread_id=thread_id)
+        thread = await read_thread(thread_id, client)
     except Exception:
         logger.warning(
             "Could not read the thread's sandbox; treating it as hosted",
@@ -770,9 +796,7 @@ async def _mcp_code_mode(
 ) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
     if local_run or not (tools or additional_tools):
         return None, tools
-    import langgraph_sdk
-
-    thread = await langgraph_sdk.get_client().threads.get(thread_id)
+    thread = await read_thread(thread_id)
     launcher_login = thread_metadata(thread).get("owner_login")
     profile = await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
     if not profile or profile.get("experimental_mcp_ptc") is not True:
@@ -1424,6 +1448,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         return create_deep_agent(
             system_prompt="",
             tools=[],
+            middleware=[
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
+            ],
         ).with_config(bindable_config(config))
 
     from openswe.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
@@ -1856,15 +1883,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
-    static_tools = apply_tool_descriptions(
-        static_tools,
-        {
-            "expose_port": {
-                "jwks_url": service_identity_jwks_url(),
-                "port": "<port>",
-            }
-        },
-    )
+    static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
@@ -2071,7 +2090,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     tools=[
                         tool
                         for tool in static_tools
-                        if tool is not save_user_settings
+                        if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
                         and _registered_tool_name(tool) not in sandbox_only_tools
                     ],
                     workspace_skills=workspace_skills,
@@ -2096,6 +2115,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 list[AgentMiddleware[Any, Any, Any]],
                 [
                     FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
+                    AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                     ConversationOffloadingMiddleware(
                         main_model, agent_backend, manual=cfg.offload_conversation is True
                     ),
@@ -2228,7 +2248,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     thread_id = configurable.get("thread_id")
     if not isinstance(thread_id, str):
         return await _get_agent(config)
-    async with aphase(thread_id, "factory.total"):
+    async with aphase(thread_id, "factory.total"), shared_thread_reads():
         return await _get_agent(config)
 
 

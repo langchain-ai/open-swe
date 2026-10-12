@@ -27,6 +27,7 @@ from openswe.slack import client as slack_client
 from openswe.slack import dm, thread_owner
 from openswe.slack.channels import SlackChannel
 from openswe.users import User, UserIdentity
+from openswe.users.records import UserRecords
 from openswe.utils import thread_ops
 from openswe.webhooks import common
 from tests.support.scenarios.core import (
@@ -109,6 +110,8 @@ class Directory:
                 computing(lambda person: by_slack.get(str(person["id"]).removeprefix("slack:"))),  # type: ignore[index]
             ),
             (User, "concierge_mode_for_slack", returning(False)),
+            # Nobody has saved settings, so every per-person record reads as absent.
+            (UserRecords, "get", returning(None)),
         ]
 
 

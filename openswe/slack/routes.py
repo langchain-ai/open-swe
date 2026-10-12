@@ -63,10 +63,6 @@ from openswe.slack.responses import (
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from openswe.slack.solo_threads import allow_solo_thread_followup
 from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
-from openswe.slack.thread_feedback import (
-    handle_slack_feedback_interaction,
-    is_slack_feedback_payload,
-)
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -906,8 +902,6 @@ async def slack_interactivity(
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
-    if is_slack_feedback_payload(payload):
-        return await handle_slack_feedback_interaction(payload, background_tasks)
 
     if interaction is None:
         return ignored("Invalid Slack interaction")

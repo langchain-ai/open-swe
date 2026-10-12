@@ -22,9 +22,10 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.exc import IntegrityError
 
+from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
@@ -79,6 +80,7 @@ from openswe.slack.client import (
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
 from openswe.utils.thread_ops import langgraph_client
@@ -99,7 +101,7 @@ _DEADLINE_RETRY = timedelta(minutes=5)
 _ROUNDS_BEFORE_AUTHOR = 2
 # The why of an overdue notice still owed to the author, by the still-assigned reviewers' ids.
 _OVERDUE_NOTICE = "overdue_notice:"
-# The reason for a pick held until the reviewer's work day starts, by their user id.
+# A pick held until the reviewer's work day starts (a _HeldPick), by their user id.
 _PICK_START = "pick_start:"
 SNOOZE_DURATIONS = {
     "30 minutes": timedelta(minutes=30),
@@ -111,6 +113,13 @@ SNOOZE_DURATIONS = {
 }
 _AUTO_ASSIGN_ASKED = "auto_assign_asked"
 _MORE_REVIEWERS_ASKED = "more_reviewers_asked"
+
+
+class _HeldPick(BaseModel):
+    """A pick made outside the reviewer's work hours, told when their day starts."""
+
+    reason: str
+    named: bool = False
 
 
 class ReviewChannelUnknownError(Exception):
@@ -207,6 +216,17 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     if snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
         names = ", ".join(snapshot.failing_checks) or "a required check"
         blockers.append(f"required checks are failing: {names}")
+    return blockers
+
+
+async def review_blockers(pull: PullRequestClient) -> list[str] | None:
+    """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
+    readiness = await Readiness.assess(pull)
+    if readiness is None:
+        return None
+    blockers = request_blockers(readiness.snapshot)
+    if await User.for_login("github", readiness.snapshot.author) is None:
+        blockers.append("its author is not an Open SWE user")
     return blockers
 
 
@@ -387,10 +407,10 @@ async def _request_review(
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
 
-    readiness = await Readiness.assess(pull)
-    if readiness is None:
+    blockers = await review_blockers(pull)
+    if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
-    if blockers := request_blockers(readiness.snapshot):
+    if blockers:
         return _failure(
             f"{pr_ref.url} cannot be put up for review: "
             + "; ".join(blockers)
@@ -405,8 +425,6 @@ async def _request_review(
     if recorded is None:
         return _failure("Pull request is unavailable")
     pull_request, details = recorded
-    if await User.for_login("github", details.author) is None:
-        return _failure("Human review is only available for PRs authored by Open SWE users.")
     if origin.thread_id:
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
 
@@ -694,6 +712,10 @@ async def assign(
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
+    if not replace and not await PROFILES.allows_auto_human_review(
+        user.github_login or github_login
+    ):
+        return _failure(f"@{github_login} opted out of automatic review picks; pick someone else.")
     if (previous := request.participant(user.id)) is not None and previous.decision == "expired":
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
@@ -760,7 +782,8 @@ async def assign(
     if starts_at > now:
         async with HumanReviewRequest.locked(added.id) as (_, row):
             if row is not None:
-                row.run_config = {**row.run_config, f"{_PICK_START}{user.id}": reason.strip()}
+                held = _HeldPick(reason=reason.strip(), named=replace)
+                row.run_config = {**row.run_config, f"{_PICK_START}{user.id}": held.model_dump()}
         logger.info(
             "Holding a reviewer pick until their work day starts",
             extra={
@@ -771,7 +794,7 @@ async def assign(
         )
         await _schedule(added, f"{_PICK_START}{user.id}", starts_at - now)
     else:
-        await _notify_pick(added, user, reason)
+        await _notify_pick(added, user, reason, named=replace)
     return RequestResult(
         success=True,
         request_id=str(added.id),
@@ -781,8 +804,13 @@ async def assign(
     )
 
 
-async def _notify_pick(request: HumanReviewRequest, user: User, reason: str) -> None:
-    """Tell a pick on GitHub and in Slack; only ever during their work hours."""
+async def _notify_pick(
+    request: HumanReviewRequest, user: User, reason: str, *, named: bool
+) -> None:
+    """Tell a pick on GitHub and in Slack; only ever during their work hours.
+
+    ``named`` is a person naming them, which their automatic-pick opt-out does not cover.
+    """
     pr = request.pull_request
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
     await _request_github_review(request, user.login_for("github"))
@@ -792,25 +820,27 @@ async def _notify_pick(request: HumanReviewRequest, user: User, reason: str) -> 
     permalink = await _permalink(request)
     where = "review card" if request.has_card else "Slack post"
     card = f" (<{permalink}|{where}>)" if permalink else ""
-    await _send_pick_dm(
-        request,
-        user,
-        f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}",
-    )
+    text = f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
+    if not named and (base := dashboard_base_url()):
+        text += f" <{base}/my-settings/agent|Turn off automatic review picks>."
+    await _send_pick_dm(request, user, text)
 
 
 async def _start_held_pick(request: HumanReviewRequest, user_id: str) -> str:
     """Their work day started: tell a pick held overnight, unless it ended meanwhile."""
     key = f"{_PICK_START}{user_id}"
-    reason = request.run_config.get(key)
+    try:
+        held = _HeldPick.model_validate(request.run_config.get(key))
+    except ValidationError:
+        held = None
     try:
         participant = request.participant(UUID(user_id))
     except ValueError:
         participant = None
     await _forget(request, key)
-    if participant is None or participant.decision != "picked" or not isinstance(reason, str):
+    if participant is None or participant.decision != "picked" or held is None:
         return "no_longer_picked"
-    await _notify_pick(request, participant.user, reason)
+    await _notify_pick(request, participant.user, held.reason, named=held.named)
     return "notified"
 
 
@@ -1299,7 +1329,7 @@ async def _wake_picker(
         suggestions=suggestions,
     )
     return await ReviewCard(request).notify_agent(
-        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}"
+        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}", unlisted=True
     )
 
 
