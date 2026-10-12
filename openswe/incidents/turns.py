@@ -197,23 +197,21 @@ def _input(
 ) -> dict[str, Any]:
     channel = f"slack:{record.channel_id}"
     if request is None:
-        return {
-            "messages": [
-                system_introduction(_INCIDENTS_SYSTEM),
-                system_input(
-                    automatic_request,
-                    {
-                        "sender_id": _INCIDENTS_SYSTEM["id"],
-                        "channel_id": channel,
-                        "surface": "slack",
-                        "kind": "system",
-                    },
-                ),
-            ]
-        }
-    person: PersonIdentity = requester or {"id": "system:incidents-dashboard"}
-    return {
-        "messages": [
+        messages = [
+            system_introduction(_INCIDENTS_SYSTEM),
+            system_input(
+                automatic_request,
+                {
+                    "sender_id": _INCIDENTS_SYSTEM["id"],
+                    "channel_id": channel,
+                    "surface": "slack",
+                    "kind": "system",
+                },
+            ),
+        ]
+    else:
+        person: PersonIdentity = requester or {"id": "system:incidents-dashboard"}
+        messages = [
             human_input(
                 request,
                 {
@@ -224,7 +222,11 @@ def _input(
                 },
             ),
         ]
-    }
+    message = messages[-1]
+    message["content"] = (
+        f"{message['content']}\n\n<incident-request>{json.dumps(request)}</incident-request>"
+    )
+    return {"messages": messages}
 
 
 async def dispatch_turn(
