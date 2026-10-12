@@ -7,13 +7,8 @@ import { pageTitle } from "@/lib/pageTitle"
 export const Route = createFileRoute("/agents_/instructions")({
   head: () => ({ meta: [{ title: pageTitle("Repository instructions") }] }),
   component: () => (
-    <SettingsPage
-      title="Repository Instructions"
-      description="Per-repository instructions added to the agent's system prompt for runs in that repository."
-    >
-      <div className="rounded-lg border border-default bg-surface-level-1">
-        <AgentInstructionsPanel />
-      </div>
+    <SettingsPage fill>
+      <AgentInstructionsPanel />
     </SettingsPage>
   ),
 })
