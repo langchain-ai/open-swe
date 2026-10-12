@@ -773,12 +773,8 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
 
 async def _mcp_tools_for(
     credential_login: str | None, workspace: str, managed_gateway: str | None
-) -> list[Any]:
-    """Load the run's MCPs by tier: instance, then workspace, then the user's own.
-
-    A later tier's connection replaces a same-named one from the tier before. The
-    workspace's LangSmith Managed Tools gateway comes last, used as the private owner.
-    """
+) -> list[BaseTool]:
+    """Load MCP tiers in precedence order, with the private owner's managed gateway last."""
     sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
@@ -1733,7 +1729,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     stop_summary_mode = cfg.stop_summary is True
     cli_result_required = not stop_summary_mode and bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
-    mcp_tools: list[Any] = []
+    mcp_tools: list[BaseTool] = []
     workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
     managed_gateway = (
         (await cached_workspace_settings(workspace)).managed_tools_gateway_id
@@ -1743,6 +1739,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     if not stop_summary_mode and not local_run and credential_scope_known:
         async with aphase(thread_id, "factory.mcp_tools"):
             mcp_tools = await _mcp_tools_for(credential_login, workspace, managed_gateway)
+        if incident_session is not None:
+            # incident.io refuses publishing from this MCP client (surface_cannot_publish).
+            mcp_tools = [
+                tool
+                for tool in mcp_tools
+                if not tool.name.startswith("mcp_incident_status_page_update")
+            ]
 
     slack_tools = [
         manage_code_channel,
