@@ -166,6 +166,11 @@ def forget_work_dir(sandbox_backend: object) -> None:
     vars(sandbox_backend).pop(_WORK_DIR_CACHE_ATTR, None)
 
 
+def remember_work_dir(sandbox_backend: SandboxBackendProtocol, work_dir: str) -> None:
+    """Record a work dir already known to be writable, so no run probes it again."""
+    _cache_work_dir(sandbox_backend, work_dir)
+
+
 def _cache_work_dir(sandbox_backend: SandboxBackendProtocol, work_dir: str) -> None:
     try:
         setattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, work_dir)

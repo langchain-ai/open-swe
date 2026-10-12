@@ -21,7 +21,7 @@ from langsmith.sandbox import (
 from pydantic import BaseModel
 
 from openswe.config import ENV
-from openswe.sandboxes.paths import WORKSPACE_DIR
+from openswe.sandboxes.paths import WORKSPACE_DIR, remember_work_dir
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.startup_trace import asubphase
@@ -591,7 +591,11 @@ async def create_langsmith_sandbox(
     )
 
     if sandbox_id is None:
-        await backend.aexecute(f"mkdir -p {WORKSPACE_DIR}")
+        # Proving it writable here is the same check the work-dir probe makes, so
+        # the run that follows skips that probe's round trip.
+        created = await backend.aexecute(f"mkdir -p {WORKSPACE_DIR} && test -w {WORKSPACE_DIR}")
+        if created.exit_code == 0:
+            remember_work_dir(backend, WORKSPACE_DIR)
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
