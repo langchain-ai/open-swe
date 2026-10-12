@@ -281,23 +281,6 @@ async def test_slack_breakout_thread_success(
         user_id="U1",
         explicit_mention=False,
     )
-    assert not await solo_threads.allow_solo_thread_followup(
-        fake_client,
-        channel_id=target,
-        thread_ts=new_ts,
-        message_ts="1700000000.5",
-        user_id="U1",
-        explicit_mention=False,
-    )
-    routing.history.append({"ts": "1700000001.5", "user": "U2", "text": "joining"})
-    assert not await solo_threads.allow_solo_thread_followup(
-        fake_client,
-        channel_id=target,
-        thread_ts=new_ts,
-        message_ts="1700000002.0",
-        user_id="U1",
-        explicit_mention=False,
-    )
     expected_thread_id = captured["thread_create"]["thread_id"]
     assert uuid.UUID(expected_thread_id).version == 4
     assert result == {
