@@ -537,6 +537,7 @@ async def create_langsmith_sandbox(
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
     create_params: dict[str, Any] | None = None,
+    prepare_work_dir: bool = True,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -555,6 +556,7 @@ async def create_langsmith_sandbox(
         vcpus: Optional virtual CPU count override for a newly-created sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
         create_params: Optional additional fields merged into the sandbox create body.
+        prepare_work_dir: Whether a new sandbox creates ``/workspace`` before returning.
 
     Returns:
         SandboxBackendProtocol instance
@@ -590,7 +592,7 @@ async def create_langsmith_sandbox(
         create_params=create_params,
     )
 
-    if sandbox_id is None:
+    if sandbox_id is None and prepare_work_dir:
         await backend.aexecute(f"mkdir -p {WORKSPACE_DIR}")
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)

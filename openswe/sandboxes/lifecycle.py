@@ -6,6 +6,7 @@ recreate rebind. The registry itself lives in ``state``.
 
 import asyncio
 import logging
+import shlex
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from openswe.config import ENV
 from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from openswe.github.sandbox_access import SandboxGitHubAccess, workspace_token
 from openswe.sandboxes.handoff import complete_handoff
+from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from openswe.sandboxes.state import (
@@ -124,9 +126,20 @@ class SandboxCreateConfig:
             return await create_sandbox(
                 snapshot_id=self.snapshot_id,
                 create_params=self.create_params,
+                prepare_work_dir=False,
                 **self.resources,
             )
-        return await create_sandbox(snapshot_id=self.snapshot_id, **self.resources)
+        # The git identity write right after boot readies the work dir in its own round trip.
+        return await create_sandbox(
+            snapshot_id=self.snapshot_id, prepare_work_dir=False, **self.resources
+        )
+
+
+async def _proxy_token(
+    thread_id: str | None, workspace_slug: str | None, repositories: Sequence[str] | None
+) -> SandboxGitHubAccess:
+    async with aphase(thread_id, "sandbox.proxy_token"):
+        return await workspace_token(workspace_slug, repositories=repositories)
 
 
 async def _create_sandbox_with_proxy(
@@ -143,15 +156,25 @@ async def _create_sandbox_with_proxy(
         config = await SandboxCreateConfig.resolve(
             workspace_slug, source=source, owner_login=owner_login
         )
-    async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
-        sandbox_backend = await config.boot()
+    # The proxy token does not depend on the sandbox, so it is minted while the box boots.
+    token = (
+        asyncio.ensure_future(_proxy_token(thread_id, workspace_slug, github_proxy_repositories))
+        if ENV.SANDBOX_TYPE.get() == "langsmith"
+        else None
+    )
+    if token is not None:
+        token.add_done_callback(lambda minted: minted.cancelled() or minted.exception())
+    try:
+        async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
+            sandbox_backend = await config.boot()
+    except BaseException:
+        if token is not None:
+            token.cancel()
+        raise
 
     async with git_identity(thread_id, sandbox_backend):
-        if ENV.SANDBOX_TYPE.get() == "langsmith":
-            async with aphase(thread_id, "sandbox.proxy_token"):
-                access = await workspace_token(
-                    workspace_slug, repositories=github_proxy_repositories
-                )
+        if token is not None:
+            access = await token
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
                 await _configure_proxy(
@@ -276,11 +299,29 @@ async def _refresh_github_proxy_or_fail(
     return sandbox_backend
 
 
+_WORK_DIR_READY = "__open_swe_work_dir_ready__"
+
+
 async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await sandbox_backend.aexecute(
+    """Write the bot identity, and ready the provider's work dir in the same round trip.
+
+    Creating the work dir and proving it writable is the check the work-dir probe
+    makes, so every connection that runs this spares the run that probe.
+    """
+    identity = (
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
-        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
+        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
     )
+    work_dir = declared_work_dir(sandbox_backend)
+    if work_dir is None:
+        await sandbox_backend.aexecute(identity)
+        return
+    quoted = shlex.quote(work_dir)
+    result = await sandbox_backend.aexecute(
+        f"{{ mkdir -p {quoted} && test -w {quoted} && echo {_WORK_DIR_READY}; }}; {identity}"
+    )
+    if _WORK_DIR_READY in result.output:
+        remember_work_dir(sandbox_backend, work_dir)
 
 
 @asynccontextmanager
