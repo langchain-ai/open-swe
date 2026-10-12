@@ -22,6 +22,7 @@ Before making any change, first till the soil: refactor the surrounding code so 
 - Keep comments minimal and only explain non-obvious reasons.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions. Typed and slash commands are optional shortcuts, never the only way.
 - User-initiated UI mutations are optimistic: update immediately, roll back on failure, show an error toast. Skip this only when an immediate update would be unsafe or misleading. Slack Block Kit counts: update the clicked message before slow GitHub or Slack calls.
+- The LangGraph Store is banned for new data, with no exceptions. Every new record, setting, policy, or cache lives in a PostgreSQL table (with a migration and foreign keys to what owns it). Never add a Store namespace or a new `openswe.store`/`TypedStore` call site; existing Store data is legacy, to be migrated to PostgreSQL, never extended.
 - Create database migrations with `make migration m="Short description"`.
 - Structured logging: static message, values in `extra`. Avoid standard `LogRecord` field names in `extra`.
 - Prefer exposing UI write operations as authorized agent tools. Destructive or sensitive actions may stay human-only. Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
