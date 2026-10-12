@@ -1,9 +1,11 @@
+import {
+  ArrowUpIcon,
+  CaretDownIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
 import { memo, useEffect, useMemo } from "react"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
@@ -31,19 +33,28 @@ function QueuedMessages({
   if (queuedMessages.length === 0) return null
 
   return (
-    <div className="mb-3 space-y-2" data-testid="queued-messages">
+    <div className="mb-space-3 space-y-space-2" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
         const imageCount = message.images?.length ?? 0
-        const statusLabel =
-          index === 0
+        const statusLabel = message.waitsForAgent
+          ? "Held for the agent. It reads this before its next step, and it starts no run of its own."
+          : index === 0
             ? "Sends when the run ends. Send now, or Enter on an empty composer, steers the run with it instead."
             : "Waits for the message ahead of it."
+        const status = message.waitsForAgent
+          ? "Waiting for the agent"
+          : "Queued"
+        const actionable =
+          (onSteer || onRemove) &&
+          message.mine !== false &&
+          !message.waitsForAgent
         return (
           <div
             key={message.id}
             className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-surface-level-2 px-space-3 py-space-2 text-sm text-primary shadow-sm"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
+            data-waits-for-agent={message.waitsForAgent ? "true" : undefined}
           >
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
@@ -59,13 +70,14 @@ function QueuedMessages({
               <span
                 className="inline-flex h-6 items-center gap-space-1"
                 title={statusLabel}
-                aria-label={`Queued. ${statusLabel}`}
+                aria-label={`${status}. ${statusLabel}`}
               >
                 <ClockIcon size={14} weight="regular" aria-hidden />
-                Queued
+                {status}
                 <span className="ml-space-1 size-1.5 animate-status-pulse rounded-full bg-current" />
               </span>
-              {(onSteer || onRemove) && message.mine !== false && (
+              {message.sender && <span>from {message.sender}</span>}
+              {actionable && (
                 <div className="ml-auto flex items-center gap-0.5">
                   {onSteer && (
                     <IconButton
@@ -123,7 +135,7 @@ export const Messages = memo(function MessagesComponent({
   reconnectLabel = null,
   localRepo,
   contentWidthClass = "max-w-[42rem]",
-  contentPaddingClass = "px-6",
+  contentPaddingClass = "px-space-5",
   bottomInset = 0,
   loadEarlier = null,
   scrollButtonSlot = "internal",
@@ -201,7 +213,7 @@ export const Messages = memo(function MessagesComponent({
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-space-3 w-full rounded-sm py-1.5 text-center text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
+                className="mb-space-3 w-full rounded-sm py-space-1 text-center text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
@@ -284,7 +296,7 @@ export const Messages = memo(function MessagesComponent({
             color="secondary"
             variant="outlined"
             onClick={scrollToBottom}
-            className="absolute left-1/2 z-30 -translate-x-1/2 shadow-md"
+            className="absolute left-1/2 z-floating-bar -translate-x-1/2 shadow-md"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
           />
         )}

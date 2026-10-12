@@ -72,25 +72,25 @@ class SlackPullRequestLink(Base):
     first_seen_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
 
     @classmethod
-    async def record(cls, envelope: SlackEventEnvelope) -> None:
-        """Record links without changing Slack routing or requiring a managed PR."""
+    async def record(cls, envelope: SlackEventEnvelope) -> list[GitHubPrRef]:
+        """Record links without changing Slack routing; returns those new to their Slack thread."""
         event = envelope.event
         if not postgres.configured() or event is None:
-            return
+            return []
         refs = event_pull_requests(envelope)
         if not refs:
-            return
+            return []
         message = event.message if event.subtype == "message_changed" else event
         if message is None:
-            return
+            return []
         team_id = envelope.team_id or event.team
         channel_id = event.resolve_channel_id()
         thread_ts = message.thread_ts or message.ts
         if not (team_id and channel_id and thread_ts and message.ts):
-            return
+            return []
         try:
             async with postgres.session() as session:
-                await session.execute(
+                inserted = await session.scalars(
                     insert(cls)
                     .values(
                         [
@@ -105,7 +105,9 @@ class SlackPullRequestLink(Base):
                         ]
                     )
                     .on_conflict_do_nothing()
+                    .returning(cls.pr_url)
                 )
+                new_urls = set(inserted.all())
         except Exception:
             logger.warning(
                 "Recording Slack pull request links failed",
@@ -116,3 +118,5 @@ class SlackPullRequestLink(Base):
                 },
                 exc_info=True,
             )
+            return []
+        return [ref for ref in refs if ref.url in new_urls]

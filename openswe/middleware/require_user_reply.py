@@ -140,14 +140,31 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             isinstance(args, Mapping) and args.get("response_type") == "final"
         )
 
+    @staticmethod
+    def _requires_completion_reply(message: ToolMessage) -> bool:
+        try:
+            payload = json.loads(content_to_text(message.content))
+        except ValueError:
+            return False
+        return (
+            isinstance(payload, dict)
+            and payload.get("success") is True
+            and payload.get("completion_reply_required") is True
+        )
+
     def _satisfied(self, messages: Sequence[BaseMessage]) -> bool:
         tail = turn_tail(messages)
+        completion_reply_required = any(
+            isinstance(message, ToolMessage) and self._requires_completion_reply(message)
+            for message in tail
+        )
         call_ids = {
             call.get("id")
             for message in tail
             if isinstance(message, AIMessage)
             for call in message.tool_calls
             if self._discharges_turn(call)
+            and not (completion_reply_required and call.get("name") == self._no_reply_tool_name)
         }
         if not call_ids:
             return False

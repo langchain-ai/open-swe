@@ -1,18 +1,19 @@
+import { useState } from "react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/macaw-components/Popover"
+import { Text } from "@langchain/macaw-components/Text"
+import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
 import { pullRequestKey } from "../lib/status"
 import { PullRequestActionButton } from "./PullRequestActionButton"
-
-/** Why the server would refuse the request, as far as the list's status can tell. */
-function refusal(pr: OpenPullRequest): string | null {
-  if (pr.mergeable === false || pr.mergeState === "dirty")
-    return "Resolve the merge conflicts first"
-  if (pr.ci === "failing" && pr.mergeState !== "unstable")
-    return "Fix the failing required checks first"
-  return null
-}
 
 /** Posts a review card in the repository's Slack review channel. */
 export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
@@ -22,9 +23,15 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     enabled: pr.reviewDecision !== "approved",
     staleTime: 60_000,
   })
-  const blocked = refusal(pr)
+  const [channel, setChannel] = useState<string | null>(null)
+  const needsChannel = availability.isSuccess && !availability.data.available
+  const blockers = availability.data?.blockers ?? []
+  const reason = blockers.length
+    ? `A review can't be requested yet: ${blockers.join("; ")}.`
+    : null
   const requestReview = useMutation({
-    mutationFn: () => api.requestHumanReview(pr),
+    mutationFn: () =>
+      api.requestHumanReview(pr, needsChannel ? (channel ?? "") : ""),
     meta: {
       errorTitle: `Could not request a review of ${pullRequestKey(pr)}`,
     },
@@ -50,8 +57,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     },
     retry: false,
   })
-  if (pr.reviewDecision === "approved" || !availability.data?.available)
-    return null
+  if (pr.reviewDecision === "approved") return null
   const label =
     requestReview.isPending || requestReview.isSuccess
       ? "Review requested"
@@ -59,14 +65,49 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         ? "Retry review request"
         : "Request review in Slack"
   return (
-    <span title={blocked ?? undefined}>
+    <span
+      className="inline-flex items-center gap-space-2"
+      onClick={(event) => event.stopPropagation()}
+      title={reason ?? undefined}
+    >
+      {needsChannel && !reason && !requestReview.isSuccess && (
+        <SlackChannelCombobox
+          value={channel}
+          onValueChange={setChannel}
+          placeholder="Choose a review channel"
+          aria-label="Review channel"
+          eligible={(option) => option.is_member}
+          disabled={requestReview.isPending}
+        />
+      )}
       <PullRequestActionButton
         label={label}
         disabled={
-          blocked !== null || requestReview.isPending || requestReview.isSuccess
+          reason !== null ||
+          availability.isPending ||
+          (needsChannel && !channel) ||
+          requestReview.isPending ||
+          requestReview.isSuccess
         }
         onClick={() => requestReview.mutate()}
       />
+      {reason && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <IconButton
+              icon={InfoIcon}
+              label="Why a review can't be requested"
+              size="xs"
+              color="secondary"
+              variant="plain"
+              tooltipProps={{ title: reason }}
+            />
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)]">
+            <Text variant="xs">{reason}</Text>
+          </PopoverContent>
+        </Popover>
+      )}
     </span>
   )
 }

@@ -1,3 +1,4 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -9,7 +10,6 @@ import {
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 
@@ -92,7 +92,7 @@ function ScopeSwitcher(props: {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
-        className="flex h-6 min-w-0 shrink cursor-pointer items-center gap-space-1 rounded-md px-1.5 text-sm font-medium text-primary transition-colors hover:bg-surface-level-1-hover"
+        className="flex h-6 min-w-0 shrink cursor-pointer items-center gap-space-1 rounded-md px-space-1 text-sm font-medium text-primary transition-colors hover:bg-surface-level-1-hover"
         aria-label={`Diff scope: ${label}`}
       >
         <span className="min-w-0 truncate">{label}</span>
@@ -156,7 +156,7 @@ export function ChangesPanel({
           variant="plain"
           onClick={onRefresh}
           disabled={isFetching}
-          iconClassName={isFetching ? "animate-spin" : undefined}
+          loading={isFetching}
         />
         {extraActions}
         {pr && (
@@ -182,7 +182,7 @@ export function ChangesPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {truncated && (
-        <div className="shrink-0 border-b border-default bg-warning px-3 py-2 text-xs text-warning-secondary">
+        <div className="shrink-0 border-b border-default bg-warning px-space-3 py-space-2 text-xs text-warning-secondary">
           Only the first {files.length} changed file
           {files.length === 1 ? " is" : "s are"} shown.
         </div>
@@ -195,7 +195,7 @@ export function ChangesPanel({
         emptyLabel={emptyLabel}
         truncated={truncated}
         leading={
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-space-2">
             <ScopeSwitcher
               scope={scope}
               branchScopeAvailable={branchScopeAvailable}

@@ -42,7 +42,6 @@ export type AgentTriggerKind =
   | "schedule_test"
   | "wakeup"
   | "reviewer"
-  | "analyzer"
   | "ci_autofix"
   | "slack_bot"
 
@@ -331,6 +330,18 @@ export interface QueuedThreadMessage {
   pending?: boolean
   /** False when someone else sent it: only its sender may send it now or cancel it. */
   mine?: boolean
+  /** Held in the thread's queue for the agent's next model call, with no run of its own. */
+  waitsForAgent?: boolean
+  sender?: string | null
+}
+
+/** A message in the thread's queue, as `/threads/{id}/queued-messages` returns it. */
+export interface AgentQueuedMessage {
+  id: string
+  text: string
+  sender: string | null
+  platform: string | null
+  queued_at: string | null
 }
 
 export interface PendingThreadMessage extends Omit<

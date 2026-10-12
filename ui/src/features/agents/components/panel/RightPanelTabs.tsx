@@ -1,3 +1,9 @@
+import {
+  GlobeRegularIcon,
+  PlusIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ContextMenu,
@@ -17,11 +23,8 @@ import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
 import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
 import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
-import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
@@ -291,16 +294,18 @@ function RightPanelEmptyState(props: {
         .map((action) => action.shortcut)
         .join("")}
       className={cn(
-        "flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pt-6 outline-none",
+        "flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-space-5 pt-space-5 outline-none",
         // The panel topbar sits above this container; matching bottom padding
         // keeps the cards centered against the full panel, not the leftover.
         "pb-[calc(var(--workspace-topbar-height)+--spacing(6))]"
       )}
     >
       <div className="relative w-full max-w-lg">
-        <div className="absolute inset-x-0 bottom-full mb-5 text-center">
-          <h3 className="text-sm font-medium text-primary">Open a surface</h3>
-          <p className="mt-1 text-xs text-secondary">
+        <div className="absolute inset-x-0 bottom-full mb-space-4 text-center">
+          <Text as="h3" variant="h5" weight="medium" color="primary">
+            Open a surface
+          </Text>
+          <p className="mt-space-1 text-xs text-secondary">
             Choose what to show in the right panel.
           </p>
         </div>
@@ -326,11 +331,11 @@ function RightPanelEmptyState(props: {
                 )}
               >
                 <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
-                <span className="flex items-center gap-2 pe-8">
+                <span className="flex items-center gap-space-2 pe-space-6">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-xs leading-relaxed text-secondary">
+                <span className="mt-space-1 text-xs leading-relaxed text-secondary">
                   {action.description}
                 </span>
               </button>
@@ -343,11 +348,11 @@ function RightPanelEmptyState(props: {
                 )}
               >
                 <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
-                <span className="flex items-center gap-2 pe-8">
+                <span className="flex items-center gap-space-2 pe-space-6">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-xs leading-relaxed text-secondary">
+                <span className="mt-space-1 text-xs leading-relaxed text-secondary">
                   {action.disabledReason}
                 </span>
               </div>
@@ -382,7 +387,7 @@ export function surfaceTitle(
 }
 
 const SURFACE_ICONS = {
-  preview: GlobeIcon,
+  preview: GlobeRegularIcon,
   diff: GitDiffIcon,
   files: FilesIcon,
   file: FileIcon,
@@ -474,8 +479,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     >
       <div
         className={cn(
-          "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1 pl-2",
-          props.layoutControls ? "pr-3" : "pr-2"
+          "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-space-1 pl-space-2",
+          props.layoutControls ? "pr-space-3" : "pr-space-2"
         )}
         data-right-panel-tabbar
       >
@@ -486,7 +491,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           data-right-panel-tab-list
           role="tablist"
         >
-          <div className="flex h-full w-max min-w-full items-center gap-1">
+          <div className="flex h-full w-max min-w-full items-center gap-space-1">
             {props.surfaces.map((surface, index) => {
               const active = surface.id === props.activeSurfaceId
               const pending = props.pendingSurfaceIds.has(surface.id)
@@ -501,7 +506,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       onAuxClick={(event) => handleTabAuxClick(event, surface)}
                       onContextMenu={(event) => event.stopPropagation()}
                       className={cn(
-                        "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
+                        "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-space-2 pl-space-1 text-xs",
                         active
                           ? "bg-selected text-primary"
                           : "text-secondary hover:bg-surface-level-1-hover hover:text-primary"

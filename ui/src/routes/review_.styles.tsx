@@ -8,8 +8,8 @@ export const Route = createFileRoute("/review_/styles")({
   head: () => ({ meta: [{ title: pageTitle("Review styles") }] }),
   component: () => (
     <SettingsPage
-      title="Review styles"
-      description="Per-repository review style guides and approval policies. Run analysis to learn a style guide from past pull request feedback."
+      title="Review Styles"
+      description="Per-repository review style guides and approval policies."
     >
       <div className="rounded-lg border border-default bg-surface-level-1">
         <ReviewStylesPanel />

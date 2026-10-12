@@ -54,6 +54,8 @@ export const agentThreadKeys = {
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   pullRequestStatus: (threadId: string) =>
     ["agent-threads", threadId, "pull-request-status"] as const,
+  queuedMessages: (threadId: string) =>
+    ["agent-threads", threadId, "queued-messages"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -858,6 +860,15 @@ export function useAgentThreadPullRequestStatus(
     refetchInterval: 30_000,
     refetchOnWindowFocus: "always",
     retry: false,
+  })
+}
+
+export function useAgentThreadQueuedMessages(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.queuedMessages(threadId),
+    queryFn: () => agentsApi.getThreadQueuedMessages(threadId),
+    enabled: Boolean(threadId),
+    meta: { invalidatedBy: [invalidationTopic("thread-queues", threadId)] },
   })
 }
 

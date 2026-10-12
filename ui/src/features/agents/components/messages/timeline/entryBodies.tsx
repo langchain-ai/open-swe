@@ -19,7 +19,7 @@ export const ShellEntryBody = memo(function ShellEntryBody({
   const pendingOutput = Boolean(chunk.loadOutput) && loadedText == null
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-space-2">
       {command && (
         <pre className="cursor-text overflow-x-auto font-mono text-xxs leading-relaxed whitespace-pre text-primary select-text">
           <span className="text-tertiary">$ </span>

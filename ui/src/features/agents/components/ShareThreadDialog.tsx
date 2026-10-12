@@ -1,3 +1,4 @@
+import { WarningRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import {
@@ -5,7 +6,6 @@ import {
   DialogContent,
   DialogDescription,
 } from "@langchain/macaw-components/Dialog"
-import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
 import { useState } from "react"
 
 export function ShareThreadDialog({
@@ -33,7 +33,7 @@ export function ShareThreadDialog({
     >
       <DialogContent
         title="Expose this entire thread to the workspace?"
-        titleIcon={WarningIcon}
+        titleIcon={WarningRegularIcon}
         titleIconIntent="error"
         showClose={false}
         className="w-[min(32rem,calc(100vw-2rem))] border border-error"

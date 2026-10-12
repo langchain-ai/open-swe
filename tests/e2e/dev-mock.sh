@@ -4,7 +4,8 @@
 # hot-reload, and Vite proxies the API + Yjs collaboration WebSocket + mock
 # Slack/GitHub + sign-in to the harness ($API). Same-origin is what lets the
 # session cookie ride the plan-review WebSocket (cross-origin WS drops it).
-# The LLM is real; only the Slack/GitHub SaaS boundaries are faked.
+# The LLM is real when an OpenAI key is available, otherwise the scripted fake;
+# only the Slack/GitHub SaaS boundaries are always faked.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
@@ -13,6 +14,12 @@ API_PORT="${E2E_PORT:-2024}"
 UI_PORT="${UI_PORT:-3000}"
 API="http://127.0.0.1:${API_PORT}"
 UI="http://127.0.0.1:${UI_PORT}"
+
+# An Open SWE sandbox points OPENAI_BASE_URL at Open SWE's own Responses API,
+# behind a placeholder key. Each call there starts a production thread, so drop both.
+case "${OPENAI_BASE_URL:-}" in
+  */sandbox-openai/*) unset OPENAI_BASE_URL OPENAI_API_KEY ;;
+esac
 
 # Use a real OpenAI key. The agent talks to OpenAI directly, so a LangSmith
 # gateway key (lsv2_*) stray in the shell won't authenticate — prefer .env's
@@ -28,8 +35,11 @@ case "${OPENAI_API_KEY:-}" in
     ;;
 esac
 case "${OPENAI_API_KEY:-}" in
-  sk-*) : ;;
-  *) echo "WARNING: OPENAI_API_KEY is not an OpenAI key (sk-…); model calls will 401." >&2 ;;
+  sk-*) REAL_LLM=1 ;;
+  *)
+    echo "No OpenAI key (sk-…) found; using the scripted fake model." >&2
+    REAL_LLM=""
+    ;;
 esac
 
 # Single origin = the Vite HMR server ($UI). Agent links, the sign-in redirect,
@@ -47,11 +57,11 @@ echo "│  Continue with GitHub → pick Alice or Bob (mock sign-in)            
 echo "└──────────────────────────────────────────────────────────────────────┘"
 echo "  Mock Slack:  ${UI}/mock/slack          (send as Alice or Bob)"
 echo "  Everything is on ${UI} (Vite HMR; API + WS proxied to the harness)."
-echo "  LLM is real; Slack/GitHub are mocked. Open two browser profiles to be"
+echo "  Slack/GitHub are mocked. Open two browser profiles to be"
 echo "  two users (Alice owns the plan; Bob can comment + request changes)."
 echo
 
-E2E_REAL_LLM=1 uv run langgraph dev --config tests/e2e/langgraph.e2e.json \
+E2E_REAL_LLM="${REAL_LLM}" uv run langgraph dev --config tests/e2e/langgraph.e2e.json \
   --port "${API_PORT}" --no-browser --allow-blocking --no-reload &
 HARNESS=$!
 trap 'kill "${HARNESS}" 2>/dev/null || true' EXIT INT TERM

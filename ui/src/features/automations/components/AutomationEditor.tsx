@@ -1,3 +1,5 @@
+import { CheckIcon, PlusIcon } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -8,12 +10,10 @@ import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { Switch } from "@langchain/macaw-components/Switch"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 
@@ -314,8 +314,8 @@ export function AutomationEditor({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <header className="flex items-center justify-between gap-3 px-6 py-4 max-md:pt-14">
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-tertiary">
+      <header className="flex items-center justify-between gap-space-3 px-space-5 py-space-4 max-md:pt-space-8">
+        <div className="flex min-w-0 items-center gap-space-2 text-xs text-tertiary">
           <Link
             to="/agents/automations"
             className="shrink-0 transition-colors hover:text-primary"
@@ -328,7 +328,7 @@ export function AutomationEditor({
           </span>
         </div>
         {canManage && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-space-2">
             {mode === "edit" && (
               <IconButton
                 icon={TrashIcon}
@@ -355,7 +355,7 @@ export function AutomationEditor({
         )}
       </header>
 
-      <div className="mx-auto w-full max-w-3xl px-6 pt-2 pb-16">
+      <div className="mx-auto w-full max-w-3xl px-space-5 pt-space-2 pb-space-9">
         {!canManage && (
           <Banner intent="neutral" className="mb-space-4">
             This workspace automation is read-only. Ask a workspace admin to
@@ -371,7 +371,7 @@ export function AutomationEditor({
           className="w-full bg-transparent text-base font-medium text-primary outline-none placeholder:text-placeholder"
         />
 
-        <div className="mt-3 flex items-center gap-3 text-xs">
+        <div className="mt-space-3 flex items-center gap-space-3 text-xs">
           <Switch
             checked={enabled}
             onChange={setEnabled}
@@ -392,20 +392,20 @@ export function AutomationEditor({
           />
         </div>
         {savedWorkspaceMissing && (
-          <p role="alert" className="mt-2 text-xs text-error-secondary">
+          <p role="alert" className="mt-space-2 text-xs text-error-secondary">
             Workspace {schedule?.workspace} no longer exists, so runs are
             refused. Pick another workspace and save.
           </p>
         )}
 
         <SectionLabel>Triggers</SectionLabel>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-space-2">
           {drafts.map((draft) => {
             const problem = draftProblem(draft)
             const hint = (fallback: string) => (
               <p
                 className={cn(
-                  "mt-2 text-xs",
+                  "mt-space-2 text-xs",
                   problem ? "text-error-secondary" : "text-tertiary"
                 )}
               >
@@ -455,7 +455,7 @@ export function AutomationEditor({
                     </p>
                   )}
                   {problem && (
-                    <p className="mt-1 text-xs text-error-secondary">
+                    <p className="mt-space-1 text-xs text-error-secondary">
                       {problem}
                     </p>
                   )}
@@ -518,7 +518,7 @@ export function AutomationEditor({
                     onToggle={(event) => toggleEvent(draft.key, event)}
                     disabled={!canManage}
                   />
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-secondary">
+                  <div className="mt-space-2 flex flex-wrap items-center gap-space-2 text-xs text-secondary">
                     <span>From</span>
                     <GroupedTabs
                       size="xs"
@@ -528,7 +528,7 @@ export function AutomationEditor({
                       disabled={!canManage}
                     />
                   </div>
-                  <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_9rem]">
+                  <div className="mt-space-2 grid gap-space-2 sm:grid-cols-[1fr_9rem]">
                     <FilterInput
                       label="Text matches"
                       value={draft.match}
@@ -572,7 +572,7 @@ export function AutomationEditor({
                   onToggle={(event) => toggleEvent(draft.key, event)}
                   disabled={!canManage}
                 />
-                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_9rem]">
+                <div className="mt-space-2 grid gap-space-2 sm:grid-cols-[1fr_1fr_9rem]">
                   <FilterInput
                     label="Labels"
                     value={draft.labels}
@@ -614,7 +614,7 @@ export function AutomationEditor({
               onLinear={() =>
                 setDrafts((current) => [...current, linearDraft()])
               }
-              className="flex items-center gap-1.5 self-start rounded-lg border border-dashed border-default px-3 py-2 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
+              className="flex items-center gap-space-2 self-start rounded-lg border border-dashed border-default px-space-3 py-space-2 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
             >
               <PlusIcon size={14} weight="regular" />
               Add trigger
@@ -626,7 +626,7 @@ export function AutomationEditor({
         </div>
 
         <SectionLabel>Agent Instructions</SectionLabel>
-        <div className="rounded-xl border border-default bg-surface-level-1 p-3">
+        <div className="rounded-xl border border-default bg-surface-level-1 p-space-3">
           <SlackChannelTextarea
             bare
             value={prompt}
@@ -634,9 +634,9 @@ export function AutomationEditor({
             disabled={!canManage}
             placeholder="What should Open SWE do each time this runs?"
             rows={5}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed text-primary outline-none placeholder:text-tertiary"
+            className="w-full resize-none bg-transparent text-sm leading-relaxed text-primary outline-none placeholder:text-placeholder"
           />
-          <div className="mt-2 flex items-center">
+          <div className="mt-space-2 flex items-center">
             <ModelPicker
               models={models}
               selection={activeSelection}
@@ -656,7 +656,7 @@ export function AutomationEditor({
               />
               <p
                 id="automation-admin-thread-description"
-                className="mt-0.5 pl-6 text-xs text-tertiary"
+                className="mt-0.5 pl-space-5 text-xs text-tertiary"
               >
                 Allow this automation to use workspace admin capabilities.
               </p>
@@ -676,7 +676,7 @@ export function AutomationEditor({
 }
 
 const CARD_ACTION =
-  "rounded-sm p-1 text-tertiary hover:bg-surface-level-1-hover hover:text-primary"
+  "rounded-sm p-space-1 text-tertiary hover:bg-surface-level-1-hover hover:text-primary"
 
 function EventChips<E extends string>({
   items,
@@ -690,7 +690,7 @@ function EventChips<E extends string>({
   disabled: boolean
 }) {
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
+    <div className="mt-space-2 flex flex-wrap gap-space-2">
       {items.map((item) => {
         const on = selected.includes(item.value)
         return (
@@ -701,7 +701,7 @@ function EventChips<E extends string>({
             onClick={() => onToggle(item.value)}
             disabled={disabled}
             className={cn(
-              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:pointer-events-none",
+              "inline-flex items-center gap-space-1 rounded-full border px-space-2 py-space-1 text-xs transition-colors disabled:pointer-events-none",
               on
                 ? "border-brand bg-brand-subtle text-primary"
                 : "border-default text-secondary hover:bg-surface-level-1-hover hover:text-primary"
@@ -762,7 +762,7 @@ function TriggerCard({
   canManage: boolean
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-default bg-surface-level-1 px-3 py-2.5">
+    <div className="flex items-start gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-3 py-space-2">
       <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-level-2 text-secondary">
         <Icon size={16} weight="regular" />
       </div>
@@ -785,6 +785,14 @@ function TriggerCard({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mt-8 mb-2 text-xs font-medium text-secondary">{children}</h2>
+    <Text
+      as="h2"
+      variant="sm"
+      weight="medium"
+      color="secondary"
+      className="mt-space-6 mb-space-2"
+    >
+      {children}
+    </Text>
   )
 }

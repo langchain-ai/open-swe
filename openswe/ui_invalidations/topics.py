@@ -100,6 +100,9 @@ class Topic(BaseTopic):
     """Keyed: one pull request's live state and review page, from its GitHub
     reviews, checks and comments to the reviewer's findings and the walkthrough."""
 
+    THREAD_QUEUES: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
+
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
 
@@ -171,8 +174,34 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     }
 
 
+async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
+    # Thread summaries reach the Store, which imports this module.
+    from openswe.threads.summary import thread_is_readable
+    from openswe.utils.json_types import thread_metadata
+    from openswe.utils.thread_ops import langgraph_client
+
+    client = langgraph_client()
+    ordered = sorted(thread_ids)
+    threads = await asyncio.gather(
+        *(client.threads.get(thread_id) for thread_id in ordered), return_exceptions=True
+    )
+    readable: set[str] = set()
+    for thread_id, thread in zip(ordered, threads, strict=True):
+        if isinstance(thread, BaseException):
+            logger.warning(
+                "Could not read thread for queue invalidations",
+                exc_info=thread,
+                extra={"agent_thread_id": thread_id},
+            )
+            continue
+        if thread_is_readable(thread_metadata(thread), session.get("sub"), session.get("email")):
+            readable.add(thread_id)
+    return readable
+
+
 Topic.WORKSPACES = Topic("workspaces")
 Topic.REVIEW_STYLES = KeyedTopic("review-styles")
 Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
+Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)

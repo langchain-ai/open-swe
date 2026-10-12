@@ -1,7 +1,8 @@
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useRef, useState } from "react"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 
 import { cn, formatElapsed } from "@/lib/utils"
+import { ElapsedSeconds } from "./ElapsedSeconds"
 
 function reasoningLabel(elapsedMs: number | null): string {
   if (elapsedMs === null) return "Thought"
@@ -45,7 +46,7 @@ export function ReasoningBlock({
   const expanded = isLive || userExpanded
 
   return (
-    <div className="my-1">
+    <div className="my-space-1">
       <button
         type="button"
         onClick={() => {
@@ -56,7 +57,10 @@ export function ReasoningBlock({
         disabled={isLive}
       >
         {isLive ? (
-          <span className="shimmer-text">Thinking...</span>
+          <>
+            <span className="shimmer-text">Thinking...</span>
+            <ElapsedSeconds />
+          </>
         ) : (
           <>
             <CaretRightIcon
@@ -75,7 +79,7 @@ export function ReasoningBlock({
         )}
       </button>
       {expanded && trimmed && (
-        <div className="ms-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary">
+        <div className="ms-space-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary">
           {trimmed}
         </div>
       )}

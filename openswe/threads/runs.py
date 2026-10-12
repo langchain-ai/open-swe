@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
-from openswe.dashboard.agent_overrides import normalize_profile_overrides
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -141,14 +140,6 @@ class DashboardImageBody(BaseModel):
     file_name: str | None = Field(default=None, alias="fileName")
 
 
-class ThreadMessageBody(BaseModel):
-    content: str = Field(default="", max_length=20_000)
-    images: list[DashboardImageBody] = Field(default_factory=list)
-    model_id: str | None = None
-    effort: str | None = None
-    client_message_id: uuid.UUID | None = None
-
-
 class ThreadRenameBody(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -168,9 +159,6 @@ async def _resolve_agent_model_choice(
     settings = await get_workspace_settings(workspace)
     resolved_model, resolved_effort = settings.default_model("agent")
     if model_id not in DEPRECATED_MODEL_IDS:
-        profile_model, profile_effort = normalize_profile_overrides(profile)
-        if profile_model and profile_effort:
-            resolved_model, resolved_effort = profile_model, profile_effort
         chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
         if chosen_model and chosen_effort:
             resolved_model, resolved_effort = chosen_model, chosen_effort
@@ -289,8 +277,8 @@ async def create_dashboard_thread_record(
     )
     _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
-    metadata_model = chosen_model or profile.get("default_model") or "Default"
-    metadata_effort = chosen_effort or profile.get("reasoning_effort")
+    metadata_model = chosen_model or "Default"
+    metadata_effort = chosen_effort
     if images and not model_supports_images(str(metadata_model)):
         metadata_model = resolved_model
         metadata_effort = resolved_effort
@@ -341,7 +329,7 @@ async def create_dashboard_thread_record(
         client,
         thread_id,
         title=initial_title,
-        metadata={**metadata, "feedback_initiator_login": login},
+        metadata=metadata,
         if_exists="raise",
     )
     thread = await client.threads.get(thread_id)
@@ -417,6 +405,38 @@ async def _build_dashboard_configurable(
             if value is not None:
                 configurable[key] = value
     return configurable
+
+
+class SessionCreateBody(BaseModel):
+    prompt: str = Field(min_length=1)
+    repo: str | None = Field(default=None, pattern=r"^[^/\s]+/[^/\s]+$")
+    workspace: str | None = None
+    visibility: Literal["public", "private"] | None = None
+    start: bool = True
+
+
+async def create_dashboard_session(
+    body: SessionCreateBody, login: str, *, email: str | None = None
+) -> str:
+    """Create a fresh owned thread using the person's dashboard defaults."""
+    profile = await get_profile(login) or {}
+    repo = body.repo if body.repo is not None else profile.get("default_repo")
+    repo_config = _parse_repo(repo) or {}
+    if repo:
+        if not repo_config:
+            raise HTTPException(422, "repo must be owner/name")
+        await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
+    await _ensure_dashboard_github_token(login)
+    thread = await create_dashboard_thread_record(
+        str(uuid.uuid4()),
+        login=login,
+        email=email,
+        repo_config=repo_config,
+        prompt=body.prompt,
+        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
+        workspace=await _resolve_requested_workspace(body.workspace, repo_config, login=login),
+    )
+    return str(thread["thread_id"])
 
 
 async def start_dashboard_thread(
@@ -971,7 +991,6 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
-    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(client, thread_id):
@@ -1232,7 +1251,6 @@ async def steer_running_thread(
         thread_id=thread_id,
         metadata={
             "updated_at_ms": now_ms,
-            "feedback_last_activity_at_ms": now_ms,
             **await participant_metadata(metadata, login=login, email=email),
         },
     )

@@ -27,19 +27,10 @@ const saveProfileMutationKey = (login: string | undefined) => [
 interface ProfilePatch {
   login: string | undefined
   patch: Partial<ProfileUpdate>
-  fallbackModel: string
-  fallbackEffort: string
 }
 
 function applyProfileWrite(profile: Profile, write: ProfilePatch): Profile {
-  const { model_routing_enabled, ...rest } = write.patch
-  return {
-    ...profile,
-    ...rest,
-    ...(model_routing_enabled !== undefined && {
-      model_routing_enabled: model_routing_enabled ?? undefined,
-    }),
-  }
+  return { ...profile, ...write.patch }
 }
 
 /** The profile, with saves still in flight already applied. */
@@ -143,9 +134,7 @@ export function usePatchProfile() {
       api.saveProfile(
         buildProfileUpdate(
           qc.getQueryData<Profile>(profileQueryKey(write.login)),
-          write.patch,
-          write.fallbackModel,
-          write.fallbackEffort
+          write.patch
         )
       ),
     onMutate: async (write) => {
@@ -166,11 +155,7 @@ export function usePatchProfile() {
     },
   })
   return {
-    patch: (
-      patch: Partial<ProfileUpdate>,
-      fallbackModel: string,
-      fallbackEffort: string
-    ) => mutation.mutate({ login, patch, fallbackModel, fallbackEffort }),
+    patch: (patch: Partial<ProfileUpdate>) => mutation.mutate({ login, patch }),
     isPending: mutation.isPending,
   }
 }
@@ -182,23 +167,13 @@ export function usePatchProfile() {
  */
 export function buildProfileUpdate(
   current: Profile | undefined,
-  patch: Partial<ProfileUpdate>,
-  fallbackModel: string,
-  fallbackEffort: string
+  patch: Partial<ProfileUpdate>
 ): ProfileUpdate {
   return {
-    default_model: current?.default_model ?? fallbackModel,
-    reasoning_effort: current?.reasoning_effort ?? fallbackEffort,
-    default_subagent_model: current?.default_subagent_model ?? null,
-    subagent_reasoning_effort:
-      current?.default_subagent_model == null
-        ? null
-        : (current.subagent_reasoning_effort ?? fallbackEffort),
     default_repo: current?.default_repo ?? null,
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
-    model_routing_enabled: current?.model_routing_enabled ?? null,
     recent_thread_context_enabled:
       current?.recent_thread_context_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,

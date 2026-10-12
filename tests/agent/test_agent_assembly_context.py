@@ -329,7 +329,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 @pytest.mark.asyncio
 async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     config = _base_config()
-    config["configurable"]["thread_id"] = "thread-1"
+    config["configurable"].update(thread_id="thread-1", source="dashboard", model_selection="auto")
     profile = {
         "default_model": "anthropic:claude-opus-5-5",
         "reasoning_effort": "high",
@@ -418,6 +418,11 @@ async def test_personal_settings_tool_not_exposed_to_unauthorized_runs(
     assert "save_user_settings" not in {_registered_tool_name(tool) for tool in tools}
 
 
+def _tool_names(tools: object) -> set[str]:
+    assert isinstance(tools, list)
+    return {_registered_tool_name(tool) for tool in tools}
+
+
 @pytest.mark.asyncio
 async def test_agent_includes_sql_only_on_private_admin_surfaces(
     monkeypatch: pytest.MonkeyPatch,
@@ -427,10 +432,9 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     from openswe.tools.manage_feature_flags import manage_feature_flags
 
     captured = await _capture_create_deep_agent_kwargs()
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
     config = _base_config()
@@ -438,15 +442,14 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     assert isinstance(configurable, dict)
     configurable["admin_thread"] = True
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql in tools
-    assert manage_feature_flags in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ in tools
+    assert manage_feature_flags.__name__ in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    assert read_only_sql in general_purpose["tools"]
-    assert manage_feature_flags in general_purpose["tools"]
+    assert read_only_sql.__name__ in _tool_names(general_purpose["tools"])
+    assert manage_feature_flags.__name__ in _tool_names(general_purpose["tools"])
 
     configurable["source"] = "slack"
     configurable["slack_thread"] = {
@@ -456,28 +459,25 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
         "channel_context": {"is_im": True},
     }
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql in tools
-    assert manage_feature_flags in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ in tools
+    assert manage_feature_flags.__name__ in tools
 
-    assert all(tool in tools for tool in ADMIN_TOOLS)
+    assert all(tool.__name__ in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "not-an-admin"
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
-    assert all(tool not in tools for tool in ADMIN_TOOLS)
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
+    assert all(tool.__name__ not in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "octocat"
     configurable["source"] = "schedule"
     captured = await _capture_create_deep_agent_kwargs(config)
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    assert read_only_sql not in tools
-    assert manage_feature_flags not in tools
+    tools = _tool_names(captured["tools"])
+    assert read_only_sql.__name__ not in tools
+    assert manage_feature_flags.__name__ not in tools
 
 
 SLACK_TOOL_NAMES = {
@@ -779,7 +779,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     assert snapshot["model_handoff_complete"] is True
     assert snapshot["model_id"] == expected_model
     assert snapshot["effort"] == expected_effort
-    assert snapshot["subagent_model_id"] == (expected_model if profile else "openai:gpt-6.1-sol")
+    assert snapshot["subagent_model_id"] == "openai:gpt-6.1-sol"
     assert snapshot["subagent_effort"] == "low"
 
     followup = _base_config()
@@ -876,3 +876,18 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     assert handler.call_args.args[0].model is not captured["model"]
     assert handler.call_args.args[0].messages == messages
     assert await QueuedMessage.for_thread("thread-ctx") == []
+
+
+@pytest.mark.asyncio
+async def test_historical_personal_models_and_routing_do_not_override_workspace() -> None:
+    captured = await _capture_create_deep_agent_kwargs(
+        profile={
+            "default_model": "anthropic:claude-opus-5-5",
+            "reasoning_effort": "high",
+            "default_subagent_model": "anthropic:claude-opus-5-5",
+            "subagent_reasoning_effort": "high",
+            "model_routing_enabled": True,
+        }
+    )
+    assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
+    assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"

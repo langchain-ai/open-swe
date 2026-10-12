@@ -150,6 +150,20 @@ test("groups file reads and edits with expandable original calls", async ({
 test("restores sidebar navigation, pins, view controls, and search", async ({
   page,
 }) => {
+  const previous = await startSlackThread(
+    page,
+    "Add a greet() helper and open a PR",
+  );
+  await waitForThreadIdle(page, previous);
+  await page.goto(`/assistant/${previous}`);
+  expect(
+    (
+      await page.request.post(`/dashboard/api/threads/${previous}/pin`, {
+        headers: { origin: new URL(page.url()).origin },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  expect((await page.request.post("/control/reset")).ok()).toBeTruthy();
   const id = await startSlackThread(page, "Add a greet() helper and open a PR");
   await waitForThreadIdle(page, id);
   await page.goto(`/assistant/${id}`);
@@ -159,7 +173,9 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
       sidebar.locator(`nav a[href^="/agents/${path}"]`),
     ).toBeVisible();
   }
-  await expect(sidebar.getByRole("link", { name: "New Thread" })).toBeVisible();
+  await expect(
+    sidebar.getByRole("link", { name: "New", exact: true }),
+  ).toBeVisible();
   await sidebar.getByRole("button", { name: "Repositories options" }).click();
   await expect(
     page.getByRole("menuitemcheckbox", { name: "Show archived" }),

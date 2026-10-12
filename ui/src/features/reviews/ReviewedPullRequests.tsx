@@ -16,7 +16,7 @@ import { ReviewCounts } from "./components/ReviewCounts"
 function statusBadge(review: ReviewSummary) {
   if (review.status === "running") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-secondary">
+      <span className="inline-flex items-center gap-space-2 text-xs text-secondary">
         <span className="size-1.5 animate-pulse rounded-full bg-warning-strong" />
         Reviewing
       </span>
@@ -55,7 +55,7 @@ export function ReviewedPullRequests({
   const items = reviews.data?.reviews ?? []
   return (
     <>
-      <div className="mt-4 flex justify-end">
+      <div className="mt-space-4 flex justify-end">
         <Button
           size="xs"
           color="secondary"
@@ -68,28 +68,28 @@ export function ReviewedPullRequests({
       </div>
       <div
         aria-busy={reviews.isFetching}
-        className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-default bg-surface-level-1"
+        className="mt-space-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-default bg-surface-level-1"
       >
         {reviews.isFetching && reviews.data && (
           <p
             role="status"
-            className="border-b border-default px-4 py-3 text-xs text-secondary"
+            className="border-b border-default px-space-4 py-space-3 text-xs text-secondary"
           >
             Loading page {page + 1}…
           </p>
         )}
         {reviews.isLoading && (
-          <div className="p-4">
+          <div className="p-space-4">
             <Skeleton className="h-24 w-full" />
           </div>
         )}
         {reviews.error && (
-          <p className="px-4 py-3 text-xs text-error-secondary">
+          <p className="px-space-4 py-space-3 text-xs text-error-secondary">
             {reviews.error.message}
           </p>
         )}
         {reviews.data && items.length === 0 && (
-          <p className="px-4 py-3 text-xs text-secondary">
+          <p className="px-space-4 py-space-3 text-xs text-secondary">
             No reviews yet. Enable repositories under Open SWE Review settings
             and open a PR.
           </p>
@@ -103,9 +103,9 @@ export function ReviewedPullRequests({
           {items.map((review) => (
             <div
               key={review.thread_id}
-              className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-surface-level-2-hover"
+              className="flex items-center justify-between gap-space-4 px-space-4 py-space-3 transition-colors hover:bg-surface-level-2-hover"
             >
-              <div className="flex min-w-0 items-center gap-3">
+              <div className="flex min-w-0 items-center gap-space-3">
                 <GitPullRequestIcon
                   weight="regular"
                   className="size-4 shrink-0 text-icon-secondary"
@@ -122,12 +122,12 @@ export function ReviewedPullRequests({
                   <div className="mt-0.5 text-xs text-secondary">
                     {review.owner}/{review.repo}#{review.number}
                     {review.author && (
-                      <span className="ml-2">by {review.author}</span>
+                      <span className="ml-space-2">by {review.author}</span>
                     )}
                   </div>
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-3 text-xs">
+              <div className="flex shrink-0 items-center gap-space-3 text-xs">
                 {statusBadge(review)}
                 <ReviewCounts counts={review.counts} />
               </div>
@@ -135,9 +135,9 @@ export function ReviewedPullRequests({
           ))}
         </div>
         {(page > 0 || reviews.data?.has_more) && (
-          <div className="flex items-center justify-between gap-4 border-t border-default px-4 py-2 text-xs">
+          <div className="flex items-center justify-between gap-space-4 border-t border-default px-space-4 py-space-2 text-xs">
             <span className="text-secondary">Page {page + 1}</span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-space-2">
               <Button
                 size="xs"
                 color="secondary"

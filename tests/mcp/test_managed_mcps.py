@@ -99,7 +99,7 @@ async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
         assert record.url.endswith(f"/v1/managed-tools/gateways/{GATEWAY_ID}/mcp")
         assert record.connection_headers()["Authorization"] == "Bearer alice-langsmith-token"
         return [
-            Tool(name=name, inputSchema={"type": "object"})
+            Tool(name=name, input_schema={"type": "object"})
             for name in ("notion_notion-search", "linear_list_issues")
         ]
 
@@ -125,7 +125,7 @@ async def test_langsmith_outage_drops_only_the_gateway(monkeypatch):
     monkeypatch.setattr(managed, "langsmith_access_token", unavailable)
 
     async def discover(record, namespace):
-        return [Tool(name="search", inputSchema={"type": "object"})]
+        return [Tool(name="search", input_schema={"type": "object"})]
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
     workspace_record = MCPConnection(

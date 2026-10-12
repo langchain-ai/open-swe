@@ -58,10 +58,7 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
         "participants": [
             {
                 "login": "octocat",
-                "profile": {
-                    "default_model": "openai:gpt-6.1-sol",
-                    "reasoning_effort": "high",
-                },
+                "profile": {},
                 "instructions": "Be concise.",
             }
         ],

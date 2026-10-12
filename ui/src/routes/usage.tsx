@@ -1,3 +1,9 @@
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
+import { Card } from "@langchain/macaw-components/Card"
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { Fragment, useState } from "react"
@@ -11,8 +17,6 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { ClockCountdownIcon } from "@phosphor-icons/react/dist/ssr/ClockCountdown"
 import { SortAscendingIcon } from "@phosphor-icons/react/dist/ssr/SortAscending"
@@ -47,7 +51,7 @@ import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 const HELP_TRIGGER_CLASS =
-  "cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
+  "cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
 
 export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -262,7 +266,7 @@ function UsageAnalyticsPeriod({
       <PRMergeRateSection report={report} />
 
       <SettingsSection
-        title="Agent leaderboard"
+        title="Agent Leaderboard"
         description="Ranked by merged PRs, then agent lines of code and PRs opened."
         action={
           <div className="flex items-center gap-space-2">
@@ -306,7 +310,7 @@ function UsageAnalyticsPeriod({
         }
       >
         {leaderboard.isLoading ? (
-          <div className="space-y-2 p-4">
+          <div className="space-y-space-2 p-space-4">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
@@ -334,7 +338,7 @@ function UsageAnalyticsPeriod({
             />
           </div>
         ) : !leaderboard.data?.total_members ? (
-          <div className="p-6 text-center text-xs text-secondary">
+          <div className="p-space-5 text-center text-xs text-secondary">
             No Open SWE Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -383,24 +387,24 @@ function UsageAnalyticsPeriod({
       </SettingsSection>
 
       <SettingsSection
-        title="Reviewer stats"
+        title="Reviewer Stats"
         description="Issues surfaced by Open SWE Review and how often users addressed them."
       >
         {leaderboard.isLoading ? (
-          <div className="grid gap-3 p-4 sm:grid-cols-2">
+          <div className="grid gap-space-3 p-space-4 sm:grid-cols-2">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-24 w-full" />
           </div>
         ) : leaderboard.isError ? (
-          <p className="p-4 text-xs text-error-secondary">
+          <p className="p-space-4 text-xs text-error-secondary">
             Reviewer stats are unavailable. Retry usage analytics above.
           </p>
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
         ) : (
-          <div className="p-6 text-center text-xs text-secondary">
+          <div className="p-space-5 text-center text-xs text-secondary">
             No reviewer stats have been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -476,8 +480,8 @@ function AnalyticsCoverage({
 
   return (
     <div role="status" aria-label="Analytics coverage">
-      <details className="group rounded-xl border border-default bg-surface-level-1 text-xs">
-        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)] [&::-webkit-details-marker]:hidden">
+      <details className="group rounded-lg border border-muted bg-surface-level-2 text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-space-3 rounded-lg px-space-4 py-space-3 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none [&::-webkit-details-marker]:hidden">
           <StatusIcon
             aria-hidden="true"
             size={16}
@@ -519,7 +523,7 @@ function AnalyticsCoverage({
             />
           </span>
         </summary>
-        <div className="space-y-1 border-t border-default px-4 py-3 text-secondary">
+        <div className="space-y-space-1 border-t border-default px-space-4 py-space-3 text-secondary">
           <p>
             Period: {PERIOD_LABELS[period]} · PR report as of{" "}
             {reportServerAsOf ? (
@@ -632,12 +636,12 @@ function PRMergeRateSection({
 
   return (
     <SettingsSection
-      title="PR outcomes"
+      title="PR Outcomes"
       description="Outcomes for PRs opened during the selected period."
     >
       {report.isPending ? (
         <div
-          className="space-y-2 p-4"
+          className="space-y-space-2 p-space-4"
           role="status"
           aria-label="Loading PR outcomes"
         >
@@ -672,20 +676,23 @@ function PRMergeRateSection({
           maturityDays={data.maturity_days}
         />
       ) : (
-        <p className="p-6 text-center text-xs text-secondary" role="status">
+        <p
+          className="p-space-5 text-center text-xs text-secondary"
+          role="status"
+        >
           {emptyMessage}
         </p>
       )}
       {data?.unavailable_thread_ids.length ? (
-        <details className="border-t border-default px-4 py-3 text-xs text-secondary">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[color:var(--border-focus)]">
+        <details className="border-t border-default px-space-4 py-space-3 text-xs text-secondary">
+          <summary className="cursor-pointer rounded-sm focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none">
             Unavailable model attribution ({data.unavailable_thread_ids.length})
           </summary>
-          <p className="mt-3">
+          <p className="mt-space-3">
             These PRs are excluded from model outcomes. Copy a thread ID to
             triage its opening-run attribution.
           </p>
-          <ul className="mt-2 space-y-1">
+          <ul className="mt-space-2 space-y-space-1">
             {data.unavailable_thread_ids.map((threadId) => (
               <li key={threadId} className="flex items-center gap-space-2">
                 <code className="select-all">{threadId}</code>
@@ -703,11 +710,11 @@ function PRMergeRateSection({
         </details>
       ) : null}
       {data ? (
-        <details className="border-t border-default px-4 py-3 text-xs text-secondary">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[color:var(--border-focus)]">
+        <details className="border-t border-default px-space-4 py-space-3 text-xs text-secondary">
+          <summary className="cursor-pointer rounded-sm focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none">
             How these numbers work
           </summary>
-          <div className="mt-3 space-y-3">
+          <div className="mt-space-3 space-y-space-3">
             <p>
               <strong>Open</strong> includes PRs that haven’t been merged or
               closed. Each count’s tooltip shows the age breakdown: open for
@@ -743,7 +750,7 @@ function PRMergeRateSection({
               selected period. PRs without a valid opening-run start time are
               excluded, and it shows — when a group has none.
             </p>
-            <ul className="list-disc space-y-1 pl-4">
+            <ul className="list-disc space-y-space-1 pl-space-4">
               <li>
                 Merge rate = merged ÷ (merged + closed without merge + open at
                 least {data.maturity_days} days).
@@ -974,12 +981,12 @@ function PROutcomeCells({
   const rate = group.mature_cohort_merge_share
   return (
     <>
-      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+      <td className="px-space-2 py-space-3 text-right whitespace-nowrap tabular-nums">
         {group.cohort_size} <span className="text-secondary">(100%)</span>
       </td>
       {(["merged", "closed_without_merge", "open"] as const).map((outcome) => (
         <Fragment key={outcome}>
-          <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+          <td className="px-space-2 py-space-3 text-right whitespace-nowrap tabular-nums">
             <OutcomeCell
               group={group}
               outcome={outcome}
@@ -987,7 +994,7 @@ function PROutcomeCells({
             />
           </td>
           {outcome === "merged" && (
-            <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+            <td className="px-space-2 py-space-3 text-right whitespace-nowrap tabular-nums">
               <span className="font-semibold">
                 {rate == null ? "—" : formatPercent(rate)}
               </span>
@@ -1017,7 +1024,7 @@ function PROutcomeCells({
         return (
           <td
             key={metric}
-            className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
+            className="px-space-2 py-space-3 text-right whitespace-nowrap tabular-nums"
           >
             <Tooltip
               title={
@@ -1045,10 +1052,10 @@ function PROutcomeCells({
           </td>
         )
       })}
-      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+      <td className="px-space-2 py-space-3 text-right whitespace-nowrap tabular-nums">
         <AvgTimeToPR cohort={group} />
       </td>
-      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+      <td className="px-space-2 py-space-3 text-right whitespace-nowrap tabular-nums">
         <AvgTimeToMerge cohort={group} />
       </td>
     </>
@@ -1094,7 +1101,7 @@ function PRMergeRateTable({
     <div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1100px] text-xs">
-          <caption className="px-4 py-3 text-left text-secondary">
+          <caption className="px-space-4 py-space-3 text-left text-secondary">
             Outcome shares use PRs opened in each row as their base. Expand a
             model to see its reasoning efforts.
           </caption>
@@ -1119,14 +1126,14 @@ function PRMergeRateTable({
                   }}
                   className={
                     column.key === "model"
-                      ? "sticky left-0 z-10 bg-surface-level-1 pl-4 text-left"
+                      ? "sticky left-0 z-table-sticky-cell bg-surface-level-2 pl-space-4 text-left"
                       : "text-right"
                   }
                 />
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-subtle [&>tr]:bg-surface-level-1">
+          <tbody className="divide-y divide-subtle [&>tr]:bg-surface-level-2">
             {rows.map((cohort) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
               const modelLabel =
@@ -1138,15 +1145,15 @@ function PRMergeRateTable({
                   <tr>
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 bg-inherit px-4 py-3 text-left font-normal"
+                      className="sticky left-0 z-table-sticky-cell bg-inherit px-space-4 py-space-3 text-left font-normal"
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-space-2">
                         {hasMultipleEfforts ? (
                           <IconButton
                             size="xxs"
                             color="secondary"
                             variant="plain"
-                            className="-ml-1 shrink-0"
+                            className="-ml-space-1 shrink-0"
                             icon={isExpanded ? CaretDownIcon : CaretRightIcon}
                             label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
                             aria-expanded={isExpanded}
@@ -1162,7 +1169,7 @@ function PRMergeRateTable({
                         ) : (
                           <span
                             aria-hidden="true"
-                            className="-ml-1 size-5.5 shrink-0"
+                            className="-ml-space-1 size-5.5 shrink-0"
                           />
                         )}
                         <div>
@@ -1186,7 +1193,7 @@ function PRMergeRateTable({
                       <tr key={`${key}-${effort.effort ?? "unknown"}`}>
                         <th
                           scope="row"
-                          className="sticky left-0 z-10 bg-inherit py-3 pr-2 pl-11 text-left font-medium"
+                          className="sticky left-0 z-table-sticky-cell bg-inherit py-space-3 pr-space-2 pl-space-7 text-left font-medium"
                         >
                           {formatEffort(effort.effort)}
                         </th>
@@ -1295,7 +1302,7 @@ function SortableHeader<Key extends string>({
       type="button"
       onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
       className={cn(
-        "flex w-full items-center gap-space-1 rounded-sm px-space-2 py-space-3 hover:bg-surface-level-2-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]",
+        "flex w-full items-center gap-space-1 rounded-sm px-space-2 py-space-3 hover:bg-surface-level-2-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
         column.align === "right" ? "justify-end" : "justify-start",
         isActive && "text-primary",
         column.tooltip &&
@@ -1380,7 +1387,7 @@ function UsageTable({
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={onSort}
-                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-surface-level-1" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "w-14 pr-0 pl-space-4" : index === columns.length - 1 ? "pr-space-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-table-sticky-cell bg-surface-level-2" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
@@ -1391,16 +1398,18 @@ function UsageTable({
             {rows.map((row) => (
               <tr
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
-                className="bg-surface-level-1"
+                className="bg-surface-level-2"
               >
-                <td className="px-4 py-3 text-secondary">{row.rank}</td>
-                <td className="sticky left-0 z-10 bg-inherit px-2 py-3">
+                <td className="px-space-4 py-space-3 text-secondary">
+                  {row.rank}
+                </td>
+                <td className="sticky left-0 z-table-sticky-cell bg-inherit px-space-2 py-space-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}
                   />
                 </td>
-                <td className="max-w-48 px-2 py-3 text-secondary">
+                <td className="max-w-48 px-space-2 py-space-3 text-secondary">
                   <div className="truncate">
                     {safeModelLabel(row.favorite_model) || "Unavailable"}
                   </div>
@@ -1410,45 +1419,45 @@ function UsageTable({
                       : (row.favorite_model_effort ?? "Unknown")}
                   </div>
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   {formatNumber(
                     scope === "threads" ? (row.threads ?? 0) : row.invocations
                   )}
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   {row.threads
                     ? (row.invocations / row.threads).toFixed(1)
                     : "—"}
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   {formatNumber(row.total_tokens)}
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   <UsageCost row={row} />
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   {formatDuration(
                     scope === "threads"
                       ? (row.avg_thread_seconds ?? 0)
                       : row.avg_invocation_seconds
                   )}
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   {formatNumber(row.prs_opened)}
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   {formatNumber(row.merged_prs)}
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   {(row.merged_prs_per_thread ?? 0).toFixed(2)}
                 </td>
                 <td
-                  className="px-2 py-3 text-right tabular-nums"
+                  className="px-space-2 py-space-3 text-right tabular-nums"
                   title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
                 >
                   {formatNumber(row.agent_loc)}
                 </td>
-                <td className="px-2 py-3 text-right tabular-nums">
+                <td className="px-space-2 py-space-3 text-right tabular-nums">
                   {formatNumber(row.prs_reviewed ?? 0)}
                 </td>
               </tr>
@@ -1476,22 +1485,22 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
       helper: `${formatNumber(stats.prs_with_findings)} with findings`,
     },
     {
-      label: "Issues surfaced",
+      label: "Issues Surfaced",
       value: stats.surfaced_findings,
       helper: `${formatNumber(stats.findings_recorded)} recorded`,
     },
     {
-      label: "Addressed & resolved",
+      label: "Addressed & Resolved",
       value: stats.addressed_findings,
       helper: `${formatPercent(stats.resolution_rate)} of surfaced`,
     },
     {
-      label: "Resolved after update",
+      label: "Resolved After Update",
       value: stats.resolved_after_update,
       helper: "Resolved on a later PR head",
     },
     {
-      label: "Awaiting follow-up",
+      label: "Awaiting Follow-Up",
       value: stats.unresolved_surfaced_findings,
       helper: "Surfaced but not resolved/dismissed",
     },
@@ -1503,24 +1512,23 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
   ]
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="space-y-space-4 p-space-4">
+      <div className="grid gap-space-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (
-          <div
-            key={card.label}
-            className="rounded-md border border-default p-3"
-          >
+          <Card key={card.label} className="bg-surface-level-3 p-space-3">
             <div className="text-xs text-secondary">{card.label}</div>
-            <div className="mt-1 text-lg font-medium tabular-nums">
+            <div className="mt-space-1 text-lg font-medium tabular-nums">
               {formatNumber(card.value)}
             </div>
-            <div className="mt-1 text-xs text-secondary">{card.helper}</div>
-          </div>
+            <div className="mt-space-1 text-xs text-secondary">
+              {card.helper}
+            </div>
+          </Card>
         ))}
       </div>
-      <div className="grid gap-4 border-t border-default pt-4 sm:grid-cols-2">
-        <CounterList title="Top categories" rows={stats.top_categories} />
-        <CounterList title="Severity mix" rows={severityRows(stats)} />
+      <div className="grid gap-space-4 border-t border-default pt-space-4 sm:grid-cols-2">
+        <CounterList title="Top Categories" rows={stats.top_categories} />
+        <CounterList title="Severity Mix" rows={severityRows(stats)} />
       </div>
     </div>
   )
@@ -1546,13 +1554,15 @@ function CounterList({
 }) {
   return (
     <div>
-      <h3 className="text-xs font-medium text-secondary">{title}</h3>
+      <Text as="h3" variant="sm" weight="medium" color="secondary">
+        {title}
+      </Text>
       {rows.length ? (
-        <ul className="mt-2 space-y-2 text-xs">
+        <ul className="mt-space-2 space-y-space-2 text-xs">
           {rows.map((row) => (
             <li
               key={row.name}
-              className="flex items-center justify-between gap-3"
+              className="flex items-center justify-between gap-space-3"
             >
               <span className="truncate text-primary">{row.name}</span>
               <span className="text-secondary tabular-nums">
@@ -1562,7 +1572,9 @@ function CounterList({
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-xs text-secondary">No data yet.</p>
+        <Text as="p" variant="sm" color="secondary" className="mt-space-2">
+          No data yet
+        </Text>
       )}
     </div>
   )
@@ -1582,7 +1594,7 @@ function UserCell({
       href={profileUrl}
       target="_blank"
       rel="noreferrer"
-      className="truncate font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
+      className="truncate font-medium text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
     >
       {row.user.name}
     </a>
@@ -1598,7 +1610,7 @@ function UserCell({
     />
   )
   return (
-    <div className="flex min-w-0 items-center gap-2.5">
+    <div className="flex min-w-0 items-center gap-space-3">
       {profileUrl ? (
         <a
           href={profileUrl}
@@ -1613,7 +1625,7 @@ function UserCell({
         avatar
       )}
       <div className="flex min-w-0 flex-col">
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-space-2">
           {name}
           {isCurrentUser ? (
             <Badge color="secondary" size="xxs" aria-label="You">

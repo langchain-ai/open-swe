@@ -456,3 +456,23 @@ def test_web_auth_callback_rejects_missing_state_cookie(monkeypatch) -> None:
 
     assert callback_response.status_code == 400
     assert "oauth state mismatch" in callback_response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"code": "github-code", "state": "mcp-transaction"},
+        {"error": "access_denied", "state": "mcp-transaction"},
+    ],
+)
+def test_auth_callback_hands_mcp_sign_ins_to_the_mcp_server(query: dict[str, str]) -> None:
+    app = FastAPI()
+    app.include_router(routes.router)
+
+    with TestClient(app) as client:
+        response = client.get("/dashboard/api/auth/callback", params=query, follow_redirects=False)
+
+    assert response.status_code == 302
+    location = urlparse(response.headers["location"])
+    assert location.path == "/dashboard/api/auth/mcp/callback"
+    assert parse_qs(location.query) == {key: [value] for key, value in query.items()}

@@ -258,6 +258,7 @@ DELEGATE_MARKER = "E2E_DELEGATE"
 SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
 SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
+SLACK_REPLY_SEGMENTS_MARKER = "E2E_SLACK_REPLY_SEGMENTS"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -283,6 +284,9 @@ class ScriptContext:
     first_text: str
     last_text: str
     human_count: int
+    # The whole latest turn: a wake-up's event can be followed by notes queued
+    # for the thread meanwhile, so it is not always the last message.
+    pending_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -363,6 +367,19 @@ def _envelope_follows(messages: list[BaseMessage], index: int) -> bool:
             continue
         return text.startswith("<input-message ")
     return False
+
+
+def _latest_turn_text(messages: list[BaseMessage]) -> str:
+    """The human messages that arrived together before the model's latest replies."""
+    last_human = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1)
+    replied = max(
+        (i for i, m in enumerate(messages[:last_human]) if isinstance(m, AIMessage)), default=-1
+    )
+    return "\n".join(
+        _text(m.content)
+        for m in messages[replied + 1 : last_human + 1]
+        if isinstance(m, HumanMessage)
+    )
 
 
 def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
@@ -1074,6 +1091,39 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Finished the long task."),
     ),
+    "slack_reply_segments": (
+        _tool_step(
+            "Acknowledging the Slack request before starting work.",
+            "slack_reply",
+            {"message": "On it!", "response_type": "progress"},
+            "call-segments-ack",
+        ),
+        _tool_step(
+            "Exploring before reporting progress.",
+            "execute",
+            {"command": "sleep 1"},
+            "call-segments-explore",
+        ),
+        _tool_step(
+            "Reporting progress mid-run.",
+            "slack_reply",
+            {"message": "Found the cause.", "response_type": "progress"},
+            "call-segments-progress",
+        ),
+        _tool_step(
+            "Running a long fix while the progress reply is on screen.",
+            "execute",
+            {"command": "sleep 10"},
+            "call-segments-fix",
+        ),
+        _tool_step(
+            "Reporting the outcome.",
+            "slack_reply",
+            {"message": "Fixed it."},
+            "call-segments-done",
+        ),
+        StepSpec(content="Finished the fix."),
+    ),
     "slack_reply_grouped_order": (
         _tool_step(
             "Acknowledging the Slack request before delegating work.",
@@ -1420,6 +1470,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: SLACK_REPLY_GROUPED_ORDER_MARKER in ctx.first_text,
     ),
     ScriptRule(
+        "slack_reply_segments",
+        lambda ctx: SLACK_REPLY_SEGMENTS_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
         "slack_reply_order",
         lambda ctx: SLACK_REPLY_ORDER_MARKER in ctx.first_text,
     ),
@@ -1459,7 +1513,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
     ScriptRule(
         "human_review_assign",
-        lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.last_text,
+        lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.pending_text,
     ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
@@ -1535,6 +1589,7 @@ class FakeScriptedChatModel(BaseChatModel):
             first_text=_text(humans[0].content) if humans else "",
             last_text=_text(humans[-1].content) if humans else "",
             human_count=len(humans),
+            pending_text=_latest_turn_text(messages),
         )
         script = _script_for(context)
 

@@ -74,7 +74,7 @@ query PullRequestAllReviewThreads($owner: String!, $repo: String!, $number: Int!
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          path line startLine diffSide startDiffSide
+          id isResolved isOutdated path line startLine diffSide startDiffSide
           comments(first: 100) {
             nodes { id fullDatabaseId body pullRequestReview { fullDatabaseId } }
           }
@@ -88,6 +88,12 @@ _ADD_REVIEW_THREAD_MUTATION = """
 mutation($input: AddPullRequestReviewThreadInput!) {
   addPullRequestReviewThread(input: $input) { thread { id } }
 }
+"""
+_RESOLVE_THREAD_MUTATION = """
+mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }
+"""
+_UNRESOLVE_THREAD_MUTATION = """
+mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }
 """
 _UPDATE_REVIEW_COMMENT_MUTATION = """
 mutation($input: UpdatePullRequestReviewCommentInput!) {
@@ -483,6 +489,15 @@ class PullRequestClient:
             f"pulls/{self.number}/comments", params=params, max_pages=max_pages
         )
 
+    async def reply_to_review_comment(self, comment_id: int, body: str) -> object:
+        """Reply in the inline thread that ``comment_id`` opened."""
+        return await self.repo.post(
+            f"pulls/{self.number}/comments/{comment_id}/replies", {"body": body}
+        )
+
+    async def commits(self) -> list[dict[str, Any]]:
+        return await self.repo.pages(f"pulls/{self.number}/commits")
+
     async def add_review_comment(self, comment: Mapping[str, object]) -> object:
         """Post one inline comment now, outside any review."""
         return await self.repo.post(f"pulls/{self.number}/comments", comment)
@@ -522,6 +537,12 @@ class PullRequestClient:
     async def add_review_thread(self, thread: Mapping[str, object]) -> None:
         """Add an inline comment to a pending review; ``thread`` is GraphQL's thread input."""
         await self.repo.github.graphql(_ADD_REVIEW_THREAD_MUTATION, {"input": dict(thread)})
+
+    async def set_thread_resolved(self, thread_node_id: str, resolved: bool) -> None:
+        await self.repo.github.graphql(
+            _RESOLVE_THREAD_MUTATION if resolved else _UNRESOLVE_THREAD_MUTATION,
+            {"id": thread_node_id},
+        )
 
     async def edit_pending_comment(self, comment_node_id: str, body: str) -> None:
         """Edit a comment in a pending review, which REST cannot reach yet."""

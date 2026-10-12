@@ -39,9 +39,10 @@ export function loadReviewFileContents(
       file.headSha
     )
     .then((contents) => {
+      // An added file has no old side and a deleted one no new side; anything else missing is a failure.
       if (
-        contents.originalContent === null ||
-        contents.modifiedContent === null
+        (contents.originalContent === null && file.status !== "added") ||
+        (contents.modifiedContent === null && file.status !== "removed")
       )
         throw new Error("File contents are unavailable for this revision")
       return contents

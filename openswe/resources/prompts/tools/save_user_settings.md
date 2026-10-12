@@ -1,14 +1,12 @@
 Update the authenticated requester's ordinary personal settings in a private dashboard thread or linked Slack DM.
 
-Pass only the fields the user asked to change in `settings`; omitted fields stay unchanged. No login, email, thread ID, or on-behalf-of identity is accepted. Use `read_user_settings` to inspect existing values before changing model/effort pairs. Model choices and reasoning-effort combinations use the same validation and stale-model normalization as the dashboard.
+Pass only the fields the user asked to change in `settings`; omitted fields stay unchanged. No login, email, thread ID, or on-behalf-of identity is accepted. Model selection uses workspace defaults and per-thread overrides, not personal settings.
 
 Supported profile fields:
-- `default_model`, `reasoning_effort`: the main-agent model and effort.
-- `default_subagent_model`, `subagent_reasoning_effort`: subagent overrides; set both to null to inherit the main model.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `auto_fix_ci`, `recent_thread_context_enabled`: boolean preferences.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record. Browser-local Feature Flags tab visibility cannot be changed here.
-- `model_routing_enabled`, `review_draft_prs`: boolean overrides; null inherits the shared default.
+- `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
 Supported dashboard preferences:
