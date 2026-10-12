@@ -316,6 +316,37 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
 
 
+@pytest.mark.parametrize("relayed", [False, True])
+async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
+    monkeypatch: pytest.MonkeyPatch, relayed: bool
+) -> None:
+    async def canonical(person: dict[str, str]) -> dict[str, str]:
+        return person
+
+    monkeypatch.setattr(User, "canonical_person", canonical)
+    metadata = {"source": "slack", "source_context": {"slack_thread": {"thread_ts": "1.2"}}}
+    created: dict[str, object] = {"metadata": dict(metadata)}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    params: dict[str, object] = {
+        "input": {"messages": [{"type": "human", "content": "Pushed the fix"}]}
+    }
+    if relayed:
+        params[thread_runs.RELAYED_FROM_KEY] = "coordinator-tid"
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "existing-tid", "octocat", {"method": "run.start", "params": params}, metadata=metadata
+    )
+
+    texts = "".join(str(message["content"]) for message in enriched["params"]["input"]["messages"])
+    assert ("system:dashboard-handoff" in texts) is not relayed
+    assert ('surface="web"' in texts) is not relayed
+    assert thread_runs.RELAYED_FROM_KEY not in enriched["params"]
+    source = "slack" if relayed else "dashboard"
+    assert enriched["params"]["config"]["configurable"]["source"] == source
+    assert cast(dict[str, object], created["metadata"])["source"] == source
+
+
 @pytest.mark.parametrize("selection_changed", [False, True])
 async def test_enrich_run_start_command_preserves_explicit_auto_intent(
     monkeypatch: pytest.MonkeyPatch, selection_changed: bool
