@@ -72,6 +72,7 @@ class ProfileUpdate(BaseModel):
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     preserve_sandbox_memory: bool | None = None
+    auto_review_picks: bool | None = None
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
     prefer_tools_in_sandbox: bool | None = None
@@ -385,6 +386,7 @@ async def put_my_profile(
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
             preserve_sandbox_memory=update.preserve_sandbox_memory,
+            auto_review_picks=update.auto_review_picks,
             pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
             prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
@@ -397,7 +399,8 @@ async def put_my_profile(
         ),
     )
     if preferences is None and (
-        update.concierge_mode
+        update.auto_review_picks is not None
+        or update.concierge_mode
         or update.preserve_sandbox_memory
         or update.pr_review_links
         or update.pr_failure_reactions
