@@ -1184,7 +1184,6 @@ export interface ReviewDetail extends Omit<
 > {
   thread_id: string | null
   status: ReviewSummary["status"] | "none"
-  source_thread_id?: string | null
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>

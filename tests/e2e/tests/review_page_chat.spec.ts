@@ -201,21 +201,10 @@ test.describe("review page", () => {
     });
     expect(seeded.ok(), await seeded.text()).toBeTruthy();
 
-    await page.route(`**${reviewApi(pr)}`, async (route) => {
-      const response = await route.fetch();
-      const detail = await response.json();
-      await route.fulfill({
-        response,
-        json: { ...detail, source_thread_id: "original-coding-thread" },
-      });
-    });
     await openReview(page, pr);
     const guidance = page.getByRole("region", {
       name: "Requested behavior",
     });
-    await expect(
-      guidance.getByRole("link", { name: "Original conversation" }),
-    ).toHaveAttribute("href", "/agents/original-coding-thread");
     await expect(guidance).toContainText(
       "Asked to keep the constants in flat modules",
     );

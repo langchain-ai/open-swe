@@ -28,7 +28,6 @@ from openswe.github.pull_request_diff import (
     fetch_file_versions,
 )
 from openswe.github.pull_request_status import PullRequestClient
-from openswe.github.pull_requests import PullRequest
 from openswe.github.webhook import trigger_pr_review_from_ref
 from openswe.review.assessment_feedback import ASSESSMENTS
 from openswe.review.findings import (
@@ -706,11 +705,8 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         await ASSESSMENTS.get(str(assessment_id)) if isinstance(assessment_id, int) else None
     )
 
-    pull_request = await PullRequest.get(owner, repo, pr_number)
-
     return {
         **summary,
-        "source_thread_id": pull_request.agent_thread_id if pull_request else None,
         "pr": details,
         "checks": checks,
         "findings": findings,

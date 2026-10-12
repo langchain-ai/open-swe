@@ -1,6 +1,5 @@
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
@@ -64,21 +63,10 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
           aria-label="Requested behavior"
           className="rounded-xl border border-dashed border-default px-space-4 py-space-3"
         >
-          <div className="mb-space-1 flex flex-wrap items-center justify-between gap-space-2 text-xs">
-            <p className="flex items-center gap-space-2 font-medium text-secondary">
-              <AgentMark />
-              Requested behavior
-            </p>
-            {detail.source_thread_id && (
-              <Link
-                to="/agents/$threadId"
-                params={{ threadId: detail.source_thread_id }}
-                className="text-secondary underline-offset-2 hover:text-primary hover:underline"
-              >
-                Original conversation
-              </Link>
-            )}
-          </div>
+          <p className="mb-space-1 flex items-center gap-space-2 text-xs font-medium text-secondary">
+            <AgentMark />
+            Requested behavior
+          </p>
           <HumanInputText summary={detail.walkthrough.human_input} />
         </section>
       )}
