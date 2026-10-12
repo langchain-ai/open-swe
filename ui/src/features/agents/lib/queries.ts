@@ -601,21 +601,19 @@ export function useSeedAgentThreadDetails(
   useEffect(() => {
     for (const thread of threads.flatMap(threadFamily)) {
       if (thread.id === activeThreadId) {
-        queryClient.setQueryData<AgentThread>(
-          agentThreadKeys.detail(thread.id),
-          (detail) =>
-            detail && thread.updatedAt > detail.updatedAt
-              ? {
-                  ...detail,
-                  updatedAt: thread.updatedAt,
-                  traceUrl: thread.traceUrl,
-                  sandboxId: thread.sandboxId,
-                  sourceUrl: thread.sourceUrl,
-                  sourceAppUrl: thread.sourceAppUrl,
-                  automationId: thread.automationId,
-                }
-              : detail
-        )
+        const key = agentThreadKeys.detail(thread.id)
+        const detail = queryClient.getQueryData<AgentThread>(key)
+        if (detail && thread.updatedAt > detail.updatedAt) {
+          queryClient.setQueryData<AgentThread>(key, {
+            ...detail,
+            updatedAt: thread.updatedAt,
+            traceUrl: thread.traceUrl,
+            sandboxId: thread.sandboxId,
+            sourceUrl: thread.sourceUrl,
+            sourceAppUrl: thread.sourceAppUrl,
+            automationId: thread.automationId,
+          })
+        }
         continue
       }
       // Seed as already-stale: the detail GET is what marks a thread viewed

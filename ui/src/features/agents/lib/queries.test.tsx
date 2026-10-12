@@ -602,8 +602,15 @@ describe("active thread menu metadata", () => {
     const refreshed = client.getQueryData<AgentThread>(
       agentThreadKeys.detail(detail.id)
     )
+    const refreshedAt = client.getQueryState(
+      agentThreadKeys.detail(detail.id)
+    )?.dataUpdatedAt
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1000)
     for (const updatedAt of [detail.updatedAt, summary.updatedAt]) {
       rerender({ threads: [{ ...summary, updatedAt, sandboxId: null }] })
+      expect(
+        client.getQueryState(agentThreadKeys.detail(detail.id))?.dataUpdatedAt
+      ).toBe(refreshedAt)
       expect(client.getQueryData(agentThreadKeys.detail(detail.id))).toEqual(
         refreshed
       )
