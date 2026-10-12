@@ -7,7 +7,16 @@ signed up to review it on GitHub and where each of them stands.
 import json
 
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
-from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
+from openswe.slack.blocks import (
+    Block,
+    ButtonElement,
+    actions,
+    button,
+    context,
+    escape,
+    plain_text,
+    section,
+)
 from openswe.users import User
 
 BUTTON_TYPE = "human_review"
@@ -149,15 +158,15 @@ def open_card(
     ``author`` and ``requester`` are Slack mentions; ``review_states`` maps each
     GitHub login to its latest review state.
     """
-    blocks: list[Block] = [section(f"{_heading(request, review_states)}\n*{escape(title)}*")]
+    blocks: list[Block] = [section(_heading(request, review_states))]
     if request.tldr:
-        blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
+        blocks.append({"type": "section", "text": plain_text(request.tldr, emoji=False)})
     blocks.append(context(_stats(request, author, requester)))
     blocks.extend(_reviewers(request, review_states))
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))
     blocks.append(actions(*_buttons(request)))
-    return f"Review requested for {_label(request)}: {title}", blocks
+    return f"Review requested for {_label(request)}: {request.tldr}", blocks
 
 
 def closed_card(

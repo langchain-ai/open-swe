@@ -624,3 +624,63 @@ async def test_review_blockers_refuse_authors_without_an_open_swe_account(
     ):
         blockers = await review_blockers(MagicMock())
     assert blockers == (["its author is not an Open SWE user"] if blocked else [])
+
+
+async def test_matching_human_description_cannot_be_replaced_by_agent_summary() -> None:
+    from openswe.human_review.standard import Origin, RequestResult, _request_review, _resummarize
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    requester = User()
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        tldr="Please review permissions.",
+        requested_by_user_id=requester.id,
+    )
+    request.pull_request = pr
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=request)),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch(
+            "openswe.human_review.standard._existing",
+            AsyncMock(return_value=RequestResult(success=True)),
+        ),
+    ):
+        await _resummarize(request, request.tldr, human=True)
+        assert request.run_config["human_description"] is True
+        await _request_review(
+            MagicMock(),
+            MagicMock(),
+            Origin(requester=requester),
+            channel="",
+            inline_summary="AI replacement",
+        )
+    assert request.tldr == "Please review permissions."
+
+
+def test_broadcast_preserves_description_without_reciting_title() -> None:
+    from openswe.human_review.card import open_card
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada", title="Unhelpful PR title")
+    description = "Fix <permissions> & *literal text*.\n\nPlease check access controls."
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", tldr=description
+    )
+    request.pull_request = pr
+    text, blocks = open_card(
+        request, title=pr.title, author="@ada", requester="@ada", review_states={}
+    )
+    assert pr.title not in text
+    assert description in text
+    assert blocks[1] == {
+        "type": "section",
+        "text": {"type": "plain_text", "text": description, "emoji": False},
+    }
