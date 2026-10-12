@@ -1,4 +1,6 @@
-import { CheckCircleIcon, CircleIcon, XCircleIcon } from "@phosphor-icons/react"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { CircleIcon } from "@phosphor-icons/react/dist/ssr/Circle"
+import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 
 import { cn } from "@/lib/utils"
 
