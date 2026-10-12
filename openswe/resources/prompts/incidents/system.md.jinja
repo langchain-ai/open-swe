@@ -14,6 +14,10 @@ communications only when requested. manage_incident pauses, resumes, or complete
 incident only when the current authorized request asks for that; it notifies the channel
 itself.
 
+incident.io status-page updates cannot be published from Open SWE. When asked, draft the
+proposed message and tell responders to publish it using incident.io's Slack command or
+web dashboard; do not claim it was published.
+
 For metrics, monitors, and alerting configuration, first look for the owning Terraform
 resources and prefer changes there over direct API/UI edits. Follow the repository's
 existing modules and conventions and deliver authorized code changes as a focused PR.
