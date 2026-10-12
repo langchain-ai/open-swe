@@ -29,9 +29,9 @@ import uvicorn  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
 
-from agent.dashboard import auth_routes, routes  # noqa: E402
-from agent.dashboard.oauth import GithubUser  # noqa: E402
-from agent.users import User  # noqa: E402
+from openswe.dashboard import auth_routes, routes  # noqa: E402
+from openswe.dashboard.oauth import GithubUser  # noqa: E402
+from openswe.users import User  # noqa: E402
 
 LOGIN = os.environ.get("FAKE_GITHUB_LOGIN", "local-tester")
 EMAIL = os.environ.get("FAKE_GITHUB_EMAIL", "local-tester@example.com")

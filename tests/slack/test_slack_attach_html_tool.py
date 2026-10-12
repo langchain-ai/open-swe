@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from deepagents.backends.protocol import FileDownloadResponse
 
-attach_tool = importlib.import_module("agent.slack.tools.attach_html")
+attach_tool = importlib.import_module("openswe.slack.tools.attach_html")
 
 
 def _config() -> dict:

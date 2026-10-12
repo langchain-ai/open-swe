@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from agent.github.repositories import Repository
+from openswe.github.repositories import Repository
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 

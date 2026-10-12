@@ -103,29 +103,17 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     const rowA = page.locator(`a[href$="/agents/${threadA}"]`).first();
     await expect(rowA).toBeVisible();
 
-    await rowA.evaluate((element) => {
-      const touch = new Touch({
-        identifier: 0,
-        target: element,
-        clientX: 20,
-        clientY: 20,
-        radiusX: 1,
-        radiusY: 1,
-        rotationAngle: 0,
-        force: 1,
-      });
-      element.dispatchEvent(
-        new TouchEvent("touchstart", {
-          bubbles: true,
-          cancelable: true,
-          touches: [touch],
-          targetTouches: [touch],
-          changedTouches: [touch],
-        }),
-      );
-    });
+    // A touch press held past the long-press delay opens the row's context
+    // menu; iPadOS reports it as a touch-type pointer event.
+    const touchPointer = {
+      pointerType: "touch",
+      isPrimary: true,
+      clientX: 20,
+      clientY: 20,
+    };
+    await rowA.dispatchEvent("pointerdown", touchPointer);
     await expect(copyItem(page)).toBeVisible();
-    await rowA.dispatchEvent("touchend", { changedTouches: [] });
+    await rowA.dispatchEvent("pointerup", touchPointer);
     await rowA.dispatchEvent("click");
 
     await expect(copyItem(page)).toBeEnabled();

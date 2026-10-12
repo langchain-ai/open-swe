@@ -1,6 +1,5 @@
-"""The graph factory tool loaders must overlap, not run back-to-back."""
+"""Integration tools the graph factory loads into a run."""
 
-import asyncio
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,12 +10,10 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.middleware.dynamic_tools import DynamicToolMiddleware
-from agent.sandboxes.state import SANDBOX_BACKENDS
-from agent.server import get_agent
-
-_START_TIMEOUT_SECONDS = 2.0
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+from openswe.sandboxes.state import SANDBOX_BACKENDS
+from openswe.server import get_agent
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-5.6-sol",
@@ -35,7 +32,7 @@ def _config() -> RunnableConfig:
     return {
         "configurable": {
             "__is_for_execution__": True,
-            "thread_id": "thread-parallel-tools",
+            "thread_id": "thread-factory-tools",
             "github_login": "octocat",
         },
         "metadata": {},
@@ -61,7 +58,6 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
             )
         ),
     )
-    barrier = asyncio.Barrier(2)
 
     async def delete_incident() -> str:
         return "deleted"
@@ -72,48 +68,38 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         description="Delete an incident",
     )
 
-    def rendezvous(result: Any) -> Any:
-        # Serial loaders never all reach the barrier, so a regression times out
-        # here instead of quietly costing a few seconds per run.
-        async def loader(*_args: Any) -> Any:
-            await asyncio.wait_for(barrier.wait(), timeout=_START_TIMEOUT_SECONDS)
-            return result
-
-        return loader
-
-    thread_id = "thread-parallel-tools"
+    thread_id = "thread-factory-tools"
     SANDBOX_BACKENDS.pop(thread_id, None)
     with (
         patch(
-            "agent.server.resolve_github_token",
+            "openswe.server.resolve_github_token",
             new_callable=AsyncMock,
             return_value=("ghp", None),
         ),
-        patch("agent.server.resolve_triggering_user_identity", return_value=None),
+        patch("openswe.server.resolve_triggering_user_identity", return_value=None),
         patch(
-            "agent.server.ensure_sandbox_for_thread",
+            "openswe.server.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.resolve_sandbox_work_dir",
+            "openswe.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_workspace_settings",
+            "openswe.server.cached_workspace_settings",
             new_callable=AsyncMock,
             return_value=WorkspaceSettings(_MODEL_DEFAULTS),
         ),
-        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
-        patch("agent.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", return_value=MagicMock()),
-        patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
-        patch("agent.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
-        patch("agent.server._mcp_tools_for", side_effect=rendezvous([mcp_tool])),
-        patch("agent.server._notion_tools_for", side_effect=rendezvous([])),
+        patch("openswe.server.load_profile", new_callable=AsyncMock, return_value=None),
+        patch("openswe.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
+        patch("openswe.server.fallback_model_id_for", return_value=None),
+        patch("openswe.server.make_model", return_value=MagicMock()),
+        patch("openswe.server.construct_system_prompt", return_value="prompt"),
+        patch("openswe.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
+        patch("openswe.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
+        patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[mcp_tool]),
     ):
         config = _config()
         config["configurable"]["github_login"] = github_login
@@ -165,20 +151,70 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
 
 
 @pytest.mark.asyncio
-async def test_notion_connection_changes_are_visible_without_waiting_for_cache(
+async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent import server
+    from langchain_quickjs.middleware import filter_tools_for_ptc
 
-    status = AsyncMock(return_value={"notion": {"connected": False}})
-    load = AsyncMock(return_value=["first-tool"])
-    monkeypatch.setattr(server, "get_notion_status", status)
-    monkeypatch.setattr(server, "load_notion_tools", load)
-    assert await server._notion_tools_for("alice") == []
-    status.return_value = {"notion": {"connected": True, "updated_at": "first"}}
-    assert await server._notion_tools_for("alice") == ["first-tool"]
-    load.return_value = ["reconnected-tool"]
-    status.return_value = {"notion": {"connected": True, "updated_at": "second"}}
-    assert await server._notion_tools_for("alice") == ["reconnected-tool"]
-    status.return_value = {"notion": {"connected": False}}
-    assert await server._notion_tools_for("alice") == []
+    from openswe import server
+
+    async def invoke() -> str:
+        return "ok"
+
+    tools = [
+        StructuredTool.from_function(coroutine=invoke, name=name, description="Integration")
+        for name in ("mcp_valid_tool", "mcp_github-2_tool", "mcp_sentry_get-Issue", "mcp_tail-")
+    ]
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(
+                get=AsyncMock(return_value={"metadata": {"owner_login": "alice"}})
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        server, "_cached_profile", AsyncMock(return_value={"experimental_mcp_ptc": True})
+    )
+    code_mode, ordinary = await server._mcp_code_mode(
+        "thread",
+        tools,
+        local_run=False,
+        additional_tools=[
+            "http_request",
+            "read_file",
+            "write_file",
+            "task",
+            "background_execute",
+            "slack_reply",
+            "slack_no_reply_needed",
+            "cli_result",
+        ],
+    )
+    assert code_mode is not None
+    http_tool = StructuredTool.from_function(
+        coroutine=invoke, name="http_request", description="HTTP"
+    )
+    file_tool = StructuredTool.from_function(coroutine=invoke, name="read_file", description="Read")
+    write_tool = StructuredTool.from_function(
+        coroutine=invoke, name="write_file", description="Write"
+    )
+    guarded_tools = [
+        StructuredTool.from_function(coroutine=invoke, name=name, description="Guarded")
+        for name in ("background_execute", "slack_reply", "slack_no_reply_needed", "cli_result")
+    ]
+    exposed = filter_tools_for_ptc(
+        [http_tool, file_tool, write_tool, *guarded_tools], code_mode._ptc, self_tool_name="eval"
+    )
+    assert exposed == [tools[0], http_tool, file_tool, write_tool]
+    assert list(ordinary) == tools[1:]
+    dynamic = server._integration_middleware(ordinary, set())
+    full = server._integration_middleware(tools, set())
+    assert dynamic is not None and full is not None
+    assert {tool.name for tool in await dynamic.catalog_tools()} == {
+        tool.name for tool in tools[1:]
+    }
+    catalog = await full.catalog_tools()
+    assert {tool.name for tool in catalog} == {tool.name for tool in tools}
+    assert await catalog[0].ainvoke({}) == "ok"

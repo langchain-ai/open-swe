@@ -11,9 +11,9 @@ from datetime import date
 import pytest
 from sqlalchemy import text
 
-from agent.bridge.protocol import JsonObject
-from agent.bridge.store import Bridge, BridgeInUseError, BridgeStore
-from agent.database import postgres
+from openswe.bridge.protocol import JsonObject
+from openswe.bridge.store import Bridge, BridgeInUseError, BridgeStore
+from openswe.database import postgres
 
 OWNER = "test-user"
 OTHER = "someone-else"

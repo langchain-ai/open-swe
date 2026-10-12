@@ -1,6 +1,6 @@
 import pytest
 
-from agent.dashboard.admin import is_admin
+from openswe.dashboard.admin import is_admin
 
 
 def test_is_admin_accepts_email_or_github_login(monkeypatch: pytest.MonkeyPatch) -> None:

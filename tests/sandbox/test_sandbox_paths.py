@@ -3,7 +3,7 @@ from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-from agent.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
+from openswe.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
 
 
 class _FakeProvider:

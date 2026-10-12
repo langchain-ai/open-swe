@@ -2,7 +2,7 @@ import base64
 
 from langchain_core.messages import ToolMessage
 
-from agent.middleware.validate_image_reads import validate_read_file_message
+from openswe.middleware.validate_image_reads import validate_read_file_message
 
 PNG_HEAD = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 

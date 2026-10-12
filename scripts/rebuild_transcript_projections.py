@@ -15,8 +15,8 @@ import argparse
 import asyncio
 import logging
 
-from agent.database import postgres
-from agent.transcript.rebuild import rebuild_thread_projections
+from openswe.database import postgres
+from openswe.transcript.rebuild import rebuild_thread_projections
 
 logger = logging.getLogger(__name__)
 

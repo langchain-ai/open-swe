@@ -6,15 +6,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.credential_scope import (
+from openswe.credential_scope import (
     PrAuthorNotAParticipant,
     pr_author_login,
     private_credential_login,
 )
-from agent.slack.channels import SlackChannel
-from agent.slack.http import SlackRequestError
+from openswe.slack.channels import SlackChannel
+from openswe.slack.http import SlackRequestError
 
-slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
+slack_breakout_tool = importlib.import_module("openswe.slack.tools.start_new_thread")
 
 
 def _channel(*, private: bool) -> SlackChannel | None:
@@ -39,7 +39,7 @@ async def test_slack_breakout_thread_refuses_private_channel(
     monkeypatch: pytest.MonkeyPatch,
     private_source: bool,
 ) -> None:
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(
         SlackChannel,
         "load",
@@ -116,7 +116,7 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_web_breakout_does_not_post_or_bind_slack(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     dispatch = AsyncMock(return_value=True)
     post = AsyncMock()
     bind = AsyncMock()
@@ -235,7 +235,7 @@ async def test_slack_breakout_thread_success(
         return thread_id
 
     fake_client = _FakeClient(captured)
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: fake_client)
     monkeypatch.setattr(
@@ -391,7 +391,7 @@ async def test_breakout_preserves_requester_and_credential_scope(
     )
     post = AsyncMock(return_value="1700000000.111111")
     dispatch = AsyncMock(return_value={"run_id": "run-123"})
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config)
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
     monkeypatch.setattr(slack_breakout_tool, "post_slack_thread_reply_with_ts", post)
@@ -417,7 +417,7 @@ async def test_breakout_preserves_requester_and_credential_scope(
     assert child_metadata["source_context"]["breakout_from"]["message_ts"] == "1700000000.999999"
     get_thread.return_value = {"metadata": child_metadata}
     monkeypatch.setattr("langgraph_sdk.get_client", lambda: client)
-    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": child_config})
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: {"configurable": child_config})
     user_owned = owner_type == "user" or bool(actor and not background)
     assert child_metadata["owner_type"] == ("user" if user_owned else "system")
     assert await pr_author_login() == (actor if user_owned else None)
@@ -437,7 +437,7 @@ async def test_breakout_rejects_unreadable_parent_scope(monkeypatch: pytest.Monk
     get_thread = AsyncMock(side_effect=RuntimeError("store unavailable"))
     client = SimpleNamespace(threads=SimpleNamespace(get=get_thread))
     post = AsyncMock()
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
 
@@ -465,7 +465,7 @@ async def test_slack_breakout_thread_returns_detail_failure_without_dispatch(
         captured["dispatched"] = True
         return {"run_id": "run-123"}
 
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
     )

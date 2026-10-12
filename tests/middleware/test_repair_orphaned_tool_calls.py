@@ -5,7 +5,7 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from agent.middleware.repair_orphaned_tool_calls import (
+from openswe.middleware.repair_orphaned_tool_calls import (
     RepairOrphanedToolCallsMiddleware,
 )
 

@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.utils import url_safety
+from openswe.utils import url_safety
 
 
 @pytest.mark.asyncio

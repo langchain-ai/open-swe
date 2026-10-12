@@ -8,7 +8,7 @@ import {
   type BridgeSession,
 } from "./api"
 import { LocalExecutor, type DispatchOutcome } from "./executor"
-import { errorMessage } from "./json"
+import { errorMessage, type JsonObject } from "./json"
 
 const POLL_WAIT_SECONDS = 25
 const POLL_LIMIT = 8
@@ -52,7 +52,13 @@ export interface BridgeOptions {
   log: (message: string) => void
   /** The environment the agent's commands start from, before secrets are stripped. */
   env?: Record<string, string | undefined>
+  /** Methods the host app serves itself, ahead of the local executor's. */
+  handlers?: Record<string, BridgeHandler>
 }
+
+export type BridgeHandler = (
+  params: Record<string, unknown>
+) => Promise<JsonObject>
 
 function resolveRoot(root: string | (() => string)): string {
   return typeof root === "string" ? root : root()
@@ -257,7 +263,10 @@ export class Bridge {
     this.held.add(request.requestId)
     let reply: DispatchOutcome
     try {
-      reply = await this.executor.dispatch(request.method, request.params)
+      const handler = this.options.handlers?.[request.method]
+      reply = handler
+        ? { result: await handler(request.params) }
+        : await this.executor.dispatch(request.method, request.params)
     } catch (cause) {
       reply = { error: errorMessage(cause) }
     }

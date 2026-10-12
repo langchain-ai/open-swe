@@ -6,8 +6,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import ingestion, summaries
-from agent.analytics.events import (
+from openswe.analytics import ingestion, summaries
+from openswe.analytics.events import (
     EventName,
     FindingStatePayload,
     FindingSurfacedPayload,
@@ -16,7 +16,7 @@ from agent.analytics.events import (
     RunCostRecordedPayload,
     RunStartedPayload,
 )
-from agent.database import postgres
+from openswe.database import postgres
 from tests.analytics.helpers import DAY, event
 
 

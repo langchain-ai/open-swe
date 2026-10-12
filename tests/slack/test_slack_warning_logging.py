@@ -2,8 +2,8 @@ import logging
 
 import pytest
 
-from agent.slack import client as slack_utils
-from agent.utils.user_messages import warning
+from openswe.slack import client as slack_utils
+from openswe.utils.user_messages import warning
 
 
 @pytest.mark.asyncio

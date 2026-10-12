@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import langgraph_sdk
 import pytest
 
-from agent.github import token as auth
+from openswe.github import token as auth
 
 
 def _slack_config(github_login: str | None = "mason-gh") -> dict:
@@ -26,8 +26,8 @@ def _stub_dashboard_store(
     expires_at: str | None = "2099-01-01T00:00:00Z",
     cached: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    from agent.dashboard import profiles
-    from agent.github.thread_token import cache_github_token_for_thread
+    from openswe.dashboard import profiles
+    from openswe.github.thread_token import cache_github_token_for_thread
 
     if cached[0]:
         cache_github_token_for_thread("t1", cached[0], cached[1], principal="login:mason-gh")

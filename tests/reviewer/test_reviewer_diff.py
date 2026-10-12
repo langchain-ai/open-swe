@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent.review.diff import (
+from openswe.review.diff import (
     compute_diff_line_set,
     extract_diff_hunk,
     is_range_in_diff,
@@ -68,7 +68,7 @@ async def test_compute_diff_in_sandbox_uses_three_dot_for_merge_base() -> None:
     """First-review path passes merge_base=True so we use base...head, not base..head."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from agent.review.diff import compute_diff_in_sandbox
+    from openswe.review.diff import compute_diff_in_sandbox
 
     backend = MagicMock()
     backend.aexecute = AsyncMock(return_value="")

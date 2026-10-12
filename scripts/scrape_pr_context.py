@@ -10,7 +10,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent.github.pull_request_context import (  # noqa: E402
+from openswe.github.pull_request_context import (  # noqa: E402
     CHECKS_QUERY,
     REVIEWS_QUERY,
     actionable_check,

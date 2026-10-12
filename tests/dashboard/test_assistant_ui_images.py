@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from agent.threads.runs import _dashboard_images_from_content, _validate_command_images
+from openswe.threads.runs import _dashboard_images_from_content, _validate_command_images
 
 
 @pytest.mark.parametrize(

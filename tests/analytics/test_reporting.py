@@ -6,10 +6,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import outbox, queries
-from agent.analytics.events import EventName, PROpenedPayload, make_event
-from agent.database import analytics as database
-from agent.database import postgres
+from openswe.analytics import outbox, queries
+from openswe.analytics.events import EventName, PROpenedPayload, make_event
+from openswe.database import analytics as database
+from openswe.database import postgres
 from tests.analytics.conftest import initialize_database
 
 
@@ -92,7 +92,7 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
 
 
 async def test_merge_rates_keep_models_without_directory_entries_separate(reporting_db):
-    from agent.analytics import ingestion
+    from openswe.analytics import ingestion
 
     workspace = database.workspace_id()
     for model_id in (uuid4(), uuid4()):
@@ -119,8 +119,8 @@ async def test_merge_rates_keep_models_without_directory_entries_separate(report
 
 
 async def test_merge_rates_group_efforts_under_model_privacy_cohorts(reporting_db):
-    from agent.analytics import ingestion
-    from agent.analytics.events import RunStartedPayload
+    from openswe.analytics import ingestion
+    from openswe.analytics.events import RunStartedPayload
 
     workspace = database.workspace_id()
     model_id = uuid4()
@@ -170,8 +170,8 @@ async def test_merge_rates_group_efforts_under_model_privacy_cohorts(reporting_d
 
 
 async def _ingest_model_effort_prs(efforts: list[str]) -> None:
-    from agent.analytics import ingestion
-    from agent.analytics.events import RunStartedPayload
+    from openswe.analytics import ingestion
+    from openswe.analytics.events import RunStartedPayload
 
     workspace = database.workspace_id()
     model_id = uuid4()
@@ -283,8 +283,8 @@ async def test_merge_rates_keep_efforts_when_all_groups_meet_threshold(reporting
 
 
 async def test_avg_time_to_pr_measures_opening_run_start_to_pr_creation(reporting_db):
-    from agent.analytics import ingestion
-    from agent.analytics.events import RunStartedPayload
+    from openswe.analytics import ingestion
+    from openswe.analytics.events import RunStartedPayload
 
     workspace = database.workspace_id()
     model_id = uuid4()
@@ -383,7 +383,7 @@ async def test_avg_time_to_pr_measures_opening_run_start_to_pr_creation(reportin
 
 
 async def test_avg_time_to_pr_is_null_without_valid_timing(reporting_db):
-    from agent.analytics import ingestion
+    from openswe.analytics import ingestion
 
     workspace = database.workspace_id()
     model_id = uuid4()
@@ -411,8 +411,8 @@ async def test_avg_time_to_pr_is_null_without_valid_timing(reporting_db):
 
 
 async def test_merge_rates_separate_decisions_maturity_and_waiting(reporting_db, monkeypatch):
-    from agent.analytics import ingestion
-    from agent.analytics.events import PRStatePayload
+    from openswe.analytics import ingestion
+    from openswe.analytics.events import PRStatePayload
 
     as_of = datetime(2026, 9, 11, tzinfo=UTC)
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent.config import ENV
+from openswe.config import ENV
 
 
 def test_current_name_wins_over_alias(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.api import tracing
+from openswe.api import tracing
 
 
 @pytest.fixture

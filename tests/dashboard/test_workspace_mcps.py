@@ -6,10 +6,10 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from agent.dashboard import deps, oauth, routes
-from agent.encryption import decrypt_token
-from agent.mcp import MCPConnectionUpdate
-from agent.mcp import workspace as mcps
+from openswe.dashboard import deps, oauth, routes
+from openswe.encryption import decrypt_token
+from openswe.mcp import MCPConnectionUpdate
+from openswe.mcp import workspace as mcps
 
 
 @pytest.fixture(autouse=True)

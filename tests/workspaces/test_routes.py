@@ -6,10 +6,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.dashboard import deps, oauth, routes
-from agent.slack.channels import SlackChannel
-from agent.workspaces import routes as workspace_routes
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.dashboard import deps, oauth, routes
+from openswe.slack.channels import SlackChannel
+from openswe.workspaces import routes as workspace_routes
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 

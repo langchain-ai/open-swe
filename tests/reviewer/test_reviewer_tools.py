@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.tools.add_finding import add_finding
-from agent.tools.resolve_finding_thread import resolve_finding_thread
-from agent.tools.update_finding import update_finding
+from openswe.tools.add_finding import add_finding
+from openswe.tools.resolve_finding_thread import resolve_finding_thread
+from openswe.tools.update_finding import update_finding
 
 
 @pytest.fixture(autouse=True)
@@ -25,8 +25,8 @@ def _stub_resolve_review_head_sha() -> Iterator[None]:
         return head if isinstance(head, str) else ""
 
     with (
-        patch("agent.tools.add_finding.resolve_review_head_sha", AsyncMock(side_effect=_head)),
-        patch("agent.tools.update_finding.resolve_review_head_sha", AsyncMock(side_effect=_head)),
+        patch("openswe.tools.add_finding.resolve_review_head_sha", AsyncMock(side_effect=_head)),
+        patch("openswe.tools.update_finding.resolve_review_head_sha", AsyncMock(side_effect=_head)),
     ):
         yield
 
@@ -68,9 +68,9 @@ async def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
         "metadata": {},
     }
     with (
-        patch("agent.run_config.get_config", return_value=config),
-        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
-        patch("agent.tools.add_finding.append_finding", new_callable=AsyncMock),
+        patch("openswe.run_config.get_config", return_value=config),
+        patch("openswe.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("openswe.tools.add_finding.append_finding", new_callable=AsyncMock),
     ):
         result = await add_finding(
             severity="high",
@@ -97,13 +97,13 @@ async def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
         return {"finding": finding, "created": True}
 
     with (
-        patch("agent.run_config.get_config", return_value=_config()),
-        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("openswe.run_config.get_config", return_value=_config()),
+        patch("openswe.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch(
-            "agent.tools.add_finding.resolve_review_head_sha",
+            "openswe.tools.add_finding.resolve_review_head_sha",
             AsyncMock(return_value="freshhead"),
         ),
-        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+        patch("openswe.tools.add_finding.append_finding", side_effect=fake_append),
     ):
         result = await add_finding(
             severity="medium",
@@ -134,17 +134,19 @@ async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
 
     with (
         patch(
-            "agent.run_config.get_config",
+            "openswe.run_config.get_config",
             return_value=_config(repo={"owner": "o", "name": "r"}, pr_number=7),
         ),
         patch(
-            "agent.tools.resolve_finding_thread.resolve_thread_github_token", return_value="token"
+            "openswe.tools.resolve_finding_thread.resolve_thread_github_token", return_value="token"
         ),
-        patch("agent.tools.resolve_finding_thread.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.resolve_finding_thread.get_finding", AsyncMock(return_value=finding)),
-        patch("agent.tools.resolve_finding_thread.resolve_review_thread", resolve),
-        patch("agent.tools.resolve_finding_thread.reply_to_review_comment", reply),
-        patch("agent.tools.resolve_finding_thread.update_finding_fields", update),
+        patch(
+            "openswe.tools.resolve_finding_thread.get_thread_id_from_runtime", return_value="tid"
+        ),
+        patch("openswe.tools.resolve_finding_thread.get_finding", AsyncMock(return_value=finding)),
+        patch("openswe.tools.resolve_finding_thread.resolve_review_thread", resolve),
+        patch("openswe.tools.resolve_finding_thread.reply_to_review_comment", reply),
+        patch("openswe.tools.resolve_finding_thread.update_finding_fields", update),
     ):
         result = await resolve_finding_thread(
             "f1", status="resolved", note="Fixed in the latest commit"
@@ -170,7 +172,7 @@ async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
 
 
 async def test_update_finding_requires_note_for_resolution() -> None:
-    with patch("agent.run_config.get_config", return_value=_config()):
+    with patch("openswe.run_config.get_config", return_value=_config()):
         result = await update_finding(finding_id="f_x", status="resolved")
     assert result["success"] is False
     assert "requires a note" in result["error"]
@@ -186,13 +188,13 @@ async def test_update_finding_rejects_long_suggestion_without_clobbering() -> No
 
     long_suggestion = "\n".join(f"line_{i}" for i in range(6))
     with (
-        patch("agent.run_config.get_config", return_value=_config()),
-        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("openswe.run_config.get_config", return_value=_config()),
+        patch("openswe.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch(
-            "agent.tools.update_finding.list_findings",
+            "openswe.tools.update_finding.list_findings",
             AsyncMock(return_value=[_existing_finding()]),
         ),
-        patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
+        patch("openswe.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
         result = await update_finding(
             finding_id="f_a",
@@ -209,19 +211,19 @@ async def test_update_finding_rejects_long_suggestion_without_clobbering() -> No
 async def test_update_finding_leaves_open_when_github_resolution_fails() -> None:
     cfg = _config(repo={"owner": "o", "name": "r"}, pr_number=7)
     with (
-        patch("agent.run_config.get_config", return_value=cfg),
-        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("openswe.run_config.get_config", return_value=cfg),
+        patch("openswe.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch(
-            "agent.tools.update_finding.list_findings",
+            "openswe.tools.update_finding.list_findings",
             AsyncMock(return_value=[_existing_finding(github_review_thread_ids=["THREAD_1"])]),
         ),
-        patch("agent.run_config.get_config", return_value=cfg),
+        patch("openswe.run_config.get_config", return_value=cfg),
         patch(
-            "agent.tools.resolve_finding_thread.resolve_thread_github_token", return_value="token"
+            "openswe.tools.resolve_finding_thread.resolve_thread_github_token", return_value="token"
         ),
-        patch("agent.tools.update_finding.update_finding_fields", AsyncMock()) as update,
+        patch("openswe.tools.update_finding.update_finding_fields", AsyncMock()) as update,
         patch(
-            "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
+            "openswe.tools.resolve_finding_thread._resolve_finding_thread_async",
             new_callable=AsyncMock,
             return_value={
                 "success": False,
@@ -251,15 +253,15 @@ async def test_update_finding_resolves_hidden_finding_locally() -> None:
 
     cfg = _config(repo={"owner": "o", "name": "r"}, pr_number=7)
     with (
-        patch("agent.run_config.get_config", return_value=cfg),
-        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("openswe.run_config.get_config", return_value=cfg),
+        patch("openswe.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch(
-            "agent.tools.update_finding.list_findings",
+            "openswe.tools.update_finding.list_findings",
             AsyncMock(return_value=[_existing_finding()]),
         ),
-        patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
+        patch("openswe.tools.update_finding.update_finding_fields", side_effect=fake_update),
         patch(
-            "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
+            "openswe.tools.resolve_finding_thread._resolve_finding_thread_async",
             new_callable=AsyncMock,
         ) as resolve_async,
     ):
@@ -279,15 +281,15 @@ async def test_update_finding_resolves_hidden_finding_locally() -> None:
 async def test_add_finding_returns_structured_error_when_thread_missing() -> None:
     """A missing reviewer thread must come back as a do-not-retry tool result,
     not a raised exception the agent retries against 10-30 times."""
-    from agent.review.findings import ReviewerThreadMissingError
+    from openswe.review.findings import ReviewerThreadMissingError
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
         raise ReviewerThreadMissingError(thread_id, RuntimeError("thread X not found"))
 
     with (
-        patch("agent.run_config.get_config", return_value=_config()),
-        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
-        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+        patch("openswe.run_config.get_config", return_value=_config()),
+        patch("openswe.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("openswe.tools.add_finding.append_finding", side_effect=fake_append),
     ):
         result = await add_finding(
             severity="medium",

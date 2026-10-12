@@ -1,8 +1,8 @@
+import { Switch } from "@langchain/macaw-components/Switch"
+
 import { SettingsRow } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
 import {
   useExperimentalAssistantUi,
-  useOptions,
   usePatchProfile,
   useProfile,
 } from "@/lib/profile"
@@ -14,12 +14,10 @@ import {
 
 export function AssistantUiPreference() {
   const profile = useProfile()
-  const options = useOptions()
   const save = usePatchProfile()
   const enabled = useExperimentalAssistantUi()
   const preferStream = useStreamPreference()
-  const defaults = options.data
-  const disabled = !profile.isSuccess || !defaults
+  const disabled = !profile.isSuccess
 
   return (
     <>
@@ -30,8 +28,9 @@ export function AssistantUiPreference() {
         control={
           <Switch
             id="sdk-use-stream"
+            aria-label="SDK useStream (experimental)"
             checked={preferStream}
-            onCheckedChange={setUseStreamPreference}
+            onChange={setUseStreamPreference}
           />
         }
       />
@@ -42,21 +41,20 @@ export function AssistantUiPreference() {
         control={
           <Switch
             id="experimental-assistant-ui"
+            aria-label="Assistant UI (experimental)"
             checked={enabled}
             disabled={disabled}
-            onCheckedChange={(value) => {
-              if (!defaults) return
-              save.patch(
-                { experimental_assistant_ui: value },
-                defaults.default_agent_model,
-                defaults.default_agent_reasoning_effort
-              )
+            onChange={(value) => {
+              save.patch({ experimental_assistant_ui: value })
             }}
           />
         }
       />
-      {(profile.error || options.error) && (
-        <p role="alert" className="px-4 py-2 text-xs text-destructive">
+      {profile.error && (
+        <p
+          role="alert"
+          className="px-space-4 py-space-2 text-xs text-error-secondary"
+        >
           Could not load the conversation preference. Please try again.
         </p>
       )}

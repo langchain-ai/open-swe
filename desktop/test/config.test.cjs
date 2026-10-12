@@ -171,8 +171,8 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
     "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
   );
   assert.equal(
-    connectExchangeUrl("https://backend.example", "notion"),
-    "https://backend.example/dashboard/api/notion/desktop/exchange",
+    connectExchangeUrl("https://backend.example", "langsmith"),
+    "https://backend.example/dashboard/api/langsmith/desktop/exchange",
   );
 });
 

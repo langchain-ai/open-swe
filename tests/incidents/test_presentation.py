@@ -1,7 +1,7 @@
 import pytest
 
-from agent.incidents.models import Evidence, IncidentReport
-from agent.incidents.presentation import report_message
+from openswe.incidents.models import Evidence, IncidentReport
+from openswe.incidents.presentation import report_message
 
 
 def test_investigation_bounds_untrusted_sections_without_mentions_or_unsafe_links():

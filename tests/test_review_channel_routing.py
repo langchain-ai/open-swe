@@ -1,6 +1,6 @@
 from pytest import MonkeyPatch
 
-from agent.github.repo_files import RepoSettings
+from openswe.github.repo_files import RepoSettings
 
 
 def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
@@ -20,7 +20,7 @@ def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
         choices.extend(channels)
         return channels[-1]
 
-    monkeypatch.setattr("agent.github.repo_files.random.choice", choose)
+    monkeypatch.setattr("openswe.github.repo_files.random.choice", choose)
     assert settings.channel_for_files(["ui/a", "agent/b", "README.md"]) == "#backend"
     assert set(choices) == {"#frontend", "#backend"}
     choices.clear()

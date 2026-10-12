@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.github import notifications, webhook
-from agent.github.pull_requests import PullRequest
-from agent.slack import thinking
-from agent.slack.http import SlackRequestError
-from agent.users import User
-from agent.webhooks import common
+from openswe.github import notifications, webhook
+from openswe.github.pull_requests import PullRequest
+from openswe.slack import thinking
+from openswe.slack.http import SlackRequestError
+from openswe.users import User
+from openswe.webhooks import common
 
 
 @pytest.fixture

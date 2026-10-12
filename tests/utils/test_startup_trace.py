@@ -8,9 +8,9 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from typing_extensions import TypedDict
 
-from agent.middleware.prepare_run import BasePrepareRunMiddleware
-from agent.utils import startup_trace
-from agent.utils.startup_trace import aphase, flush_phases
+from openswe.middleware.prepare_run import BasePrepareRunMiddleware
+from openswe.utils import startup_trace
+from openswe.utils.startup_trace import aphase, flush_phases
 
 
 class _FakeClient:

@@ -1,6 +1,6 @@
 import pytest
 
-from agent.github.token_scope import (
+from openswe.github.token_scope import (
     GITHUB_TOKEN_REPOSITORIES_KEY,
     event_token_repositories,
     token_repositories_from_metadata,

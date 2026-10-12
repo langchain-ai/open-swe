@@ -2,7 +2,7 @@ from xml.etree import ElementTree
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.input_messages import (
+from openswe.input_messages import (
     human_input,
     person_introduction,
     visible_dynamic_context_hashes,

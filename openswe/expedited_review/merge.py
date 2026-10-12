@@ -1,0 +1,173 @@
+"""Merge a pull request on its expedited approvals.
+
+The agent calls this once it believes the pull request is ready. Votes count
+for the current head while the diff the card drew is unchanged, or when the
+agent judges a change needs no re-review; GitHub's answer to the merge is final
+and there is no admin bypass.
+"""
+
+import logging
+
+import httpx2
+
+from openswe.expedited_review.eligibility import (
+    ChangedFile,
+    Ineligible,
+    assess_eligibility,
+    fingerprint_matches,
+)
+from openswe.expedited_review.readiness import Readiness
+from openswe.expedited_review.reviews import submit_approval
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
+from openswe.github.pull_request_status import PullRequestClient
+from openswe.human_review.lifecycle import ReviewCard
+from openswe.human_review.merging import MergeResult, merge_pull_request
+from openswe.human_review.requests import HumanReviewRequest
+
+logger = logging.getLogger(__name__)
+
+_NO_APPROVALS = MergeResult(
+    "needs_approvals",
+    "Nobody has approved the Slack card yet. You will be woken when someone does.",
+)
+
+
+async def _keep_approval(
+    approval: HumanReviewRequest, pull: PullRequestClient, fingerprint: str, reason: str
+) -> HumanReviewRequest | None:
+    """Carry the votes over to the current diff once the PR says why no re-review was needed."""
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
+        if row is None or row.state != "open":
+            return None
+        try:
+            await pull.comment(
+                "The diff changed after the expedited approval; the approval was kept because: "
+                f"{reason.strip()}"
+            )
+        except httpx2.HTTPError:
+            logger.warning(
+                "Could not post why the expedited approval was kept",
+                extra={"approval_id": str(approval.id)},
+                exc_info=True,
+            )
+            return None
+        row.diff_fingerprint = fingerprint
+    logger.info(
+        "Kept expedited approval across a diff change",
+        extra={"approval_id": str(approval.id)},
+    )
+    return await HumanReviewRequest.get(approval.id)
+
+
+async def merge_approved(
+    approval: HumanReviewRequest, keep_approval_reason: str = ""
+) -> MergeResult:
+    pr = approval.pull_request
+    try:
+        async with GitHubClient.as_app(pr.owner, pr.repo) as github:
+            return await _merge_approved(
+                approval,
+                github.repo(pr.owner, pr.repo).pull_request(pr.number),
+                keep_approval_reason,
+            )
+    except GitHubAppUnavailable:
+        return MergeResult("error", "Open SWE cannot reach this repository's GitHub App.")
+
+
+async def _merge_approved(
+    approval: HumanReviewRequest, pull: PullRequestClient, keep_approval_reason: str
+) -> MergeResult:
+    pr = approval.pull_request
+    readiness = await Readiness.assess(pull)
+    if readiness is None:
+        return MergeResult("error", "GitHub was unavailable while checking the pull request.")
+    snapshot = readiness.snapshot
+    if snapshot.merged:
+        await ReviewCard(approval).mark_merged()
+        return MergeResult("merged", f"{pr.url} is already merged.")
+    if snapshot.state != "open":
+        await ReviewCard(approval).retire("cancelled", "the pull request was closed")
+        return MergeResult("closed", "The pull request is closed; the expedited review ended.")
+
+    files = await ChangedFile.of_pull(pull)
+    if files is None:
+        return MergeResult("error", "Could not read the pull request's changed files.")
+    if not fingerprint_matches(files, approval.diff_fingerprint):
+        verdict = assess_eligibility(files, approval.excluded_hunks)
+        if isinstance(verdict, Ineligible):
+            await ReviewCard(approval).retire(
+                "superseded",
+                "A later commit grew the diff past expedited review; votes were discarded.",
+            )
+            return MergeResult(
+                "invalidated",
+                f"The diff is no longer eligible for expedited review ({verdict.reason}), so "
+                "the approval was discarded. Ask for a normal GitHub review.",
+            )
+        if not keep_approval_reason.strip():
+            return MergeResult(
+                "diff_changed",
+                "A commit since the card was posted changed the non-test diff, either what the "
+                "approver saw or what you excluded under APPROVALS.md. Nothing was discarded. "
+                "A changed excluded hunk is drawn on the card again. If the change does not "
+                "need the approver to look again, call `merge_expedited_pr` again with "
+                "`keep_approval_reason`; "
+                "otherwise call `expedite_pr_approval` for a fresh card.",
+            )
+        kept = await _keep_approval(approval, pull, verdict.fingerprint, keep_approval_reason)
+        if kept is None:
+            return MergeResult(
+                "error",
+                "Could not record why the approval was kept, so nothing was merged. Try again.",
+            )
+        approval = kept
+
+    if approval.awaiting_ready:
+        return MergeResult(
+            "needs_approvals",
+            "The author has not marked the draft ready on the Slack card yet. You will be "
+            "woken once someone approves it.",
+        )
+    if not approval.approvals:
+        return _NO_APPROVALS
+    if readiness.blockers:
+        return MergeResult("not_ready", "Not ready to merge: " + "; ".join(readiness.blockers))
+
+    # Held through the merge so a Dismiss or second merge call waits for it.
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
+        if row is None or row.state != "open":
+            return MergeResult(
+                "closed", "The expedited review closed before the merge; nothing was merged."
+            )
+        if not row.approvals:
+            return _NO_APPROVALS
+        if await or_none(pull.head_sha()) != snapshot.head_sha:
+            return MergeResult(
+                "not_ready",
+                "The pull request's head changed while it was being checked. Call "
+                "`merge_expedited_pr` again.",
+            )
+        threads = await pull.unresolved_threads()
+        if threads is None:
+            return MergeResult("error", "GitHub was unavailable while checking review threads.")
+        if threads:
+            return MergeResult(
+                "not_ready", f"Not ready to merge: {len(threads)} unresolved review threads"
+            )
+        for vote in row.approvals:
+            # An approval on an older head still counts unless GitHub dismissed it as stale;
+            # one on this head was submitted by a click after the snapshot was read.
+            if vote.github_review_id is not None and (
+                vote.github_review_id in snapshot.approved_review_ids
+                or vote.github_review_sha == snapshot.head_sha
+            ):
+                continue
+            failed = await submit_approval(row, vote, snapshot.head_sha)
+            if failed is not None:
+                return MergeResult("error", failed)
+        result = await merge_pull_request(
+            row, snapshot.head_sha, snapshot.allowed_merge_methods, pull
+        )
+    if result.status == "merged":
+        await ReviewCard(approval).mark_merged()
+    return result

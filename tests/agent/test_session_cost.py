@@ -7,8 +7,8 @@ import httpx
 import pytest
 from langsmith.utils import LangSmithError
 
-from agent import session_cost
-from agent.utils import langsmith as ls_utils
+from openswe import session_cost
+from openswe.utils import langsmith as ls_utils
 
 
 class _LangSmithThreads:

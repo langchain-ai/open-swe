@@ -70,7 +70,7 @@ It binds `127.0.0.1:5433`, so `POSTGRES_URI=postgresql://postgres:postgres@127.0
 
 Code paths that want an App installation token rather than the caller's — a published
 review and its diff, inline review comments, the reviewer trigger — fall back to the
-`gh` CLI's token under `langgraph dev` (`agent/github/app.py::_local_dev_token`). So
+`gh` CLI's token under `langgraph dev` (`openswe/github/app.py::_local_dev_token`). So
 they work locally, and `503 GitHub App token unavailable` means `gh` is logged out,
 not that the feature needs an App.
 

@@ -4,7 +4,7 @@ from typing import TypedDict
 
 import pytest
 
-from agent.webhooks import common as webhook_common
+from openswe.webhooks import common as webhook_common
 
 
 class _Reply(TypedDict):

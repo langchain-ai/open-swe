@@ -13,8 +13,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import StateSnapshot
 
-from agent.input_messages import message_sender_id
-from agent.middleware.require_user_reply import (
+from openswe.input_messages import message_sender_id
+from openswe.middleware.require_user_reply import (
     REPLY_GUARD,
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
@@ -74,12 +74,11 @@ class TestRequireUserReplyMiddleware:
         _assert_nudged(result, 1)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("tool_name", ["slack_reply", "request_service_connection"])
-    async def test_lets_the_turn_end_once_the_reply_tool_ran(self, tool_name: str) -> None:
+    async def test_lets_the_turn_end_once_the_reply_tool_ran(self) -> None:
         result = await _middleware().aafter_model(
             _state(
                 HumanMessage(content="what is up"),
-                _call(tool_name, "call-1", response_type="final"),
+                _call(TOOL, "call-1", response_type="final"),
                 _result("call-1"),
                 AIMessage(content="done"),
             ),
@@ -118,12 +117,48 @@ class TestRequireUserReplyMiddleware:
         assert result == {"reply_nudges": 0}
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("tool_name", ["slack_reply", "request_service_connection"])
-    async def test_a_reply_slack_rejected_does_not_count(self, tool_name: str) -> None:
+    @pytest.mark.parametrize("final_reply", [False, True])
+    async def test_private_card_requires_a_completion_reply(self, final_reply: bool) -> None:
+        messages: list[BaseMessage] = [
+            HumanMessage(content="fix this"),
+            _call("expedite_pr_approval", "card"),
+            ToolMessage(
+                content='{"success": true, "completion_reply_required": true}',
+                tool_call_id="card",
+            ),
+            _call(NO_REPLY_TOOL, "silence"),
+            _result("silence"),
+        ]
+        if final_reply:
+            messages.extend([_reply("final"), _result("final")])
+        messages.append(AIMessage(content=""))
+        result = await _middleware().aafter_model(_state(*messages), _runtime())
+        if final_reply:
+            assert result == {"reply_nudges": 0}
+        else:
+            _assert_nudged(result, 1)
+
+    @pytest.mark.asyncio
+    async def test_a_tool_that_posts_to_the_person_also_ends_the_turn(self) -> None:
+        state = _state(
+            HumanMessage(content="looks good"),
+            _call("show_chunk", "call-1", title="Next"),
+            _result("call-1"),
+            AIMessage(content=""),
+        )
+
+        assert await _middleware(replies=frozenset({"show_chunk"})).aafter_model(
+            state, _runtime()
+        ) == {"reply_nudges": 0}
+        _assert_nudged(await _middleware().aafter_model(state, _runtime()), 1)
+
+    @pytest.mark.asyncio
+    async def test_a_reply_slack_rejected_does_not_count(self) -> None:
+
         result = await _middleware().aafter_model(
             _state(
                 HumanMessage(content="what is up"),
-                _call(tool_name, "call-1", response_type="final"),
+                _call(TOOL, "call-1", response_type="final"),
                 _result("call-1", success=False),
                 AIMessage(content="I could not post that"),
             ),
@@ -162,7 +197,7 @@ class TestRequireUserReplyMiddleware:
     async def test_posts_the_final_message_once_the_budget_is_spent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import agent.slack.tools.reply as reply_tool
+        import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
         monkeypatch.setattr(reply_tool, "slack_reply", posted)
@@ -181,7 +216,7 @@ class TestRequireUserReplyMiddleware:
     async def test_blank_replies_to_the_nudges_still_post_the_earlier_answer(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import agent.slack.tools.reply as reply_tool
+        import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
         monkeypatch.setattr(reply_tool, "slack_reply", posted)
@@ -201,7 +236,7 @@ class TestRequireUserReplyMiddleware:
     async def test_a_spent_budget_with_nothing_to_say_posts_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import agent.slack.tools.reply as reply_tool
+        import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
         monkeypatch.setattr(reply_tool, "slack_reply", posted)
@@ -225,7 +260,7 @@ class TestRequireUserReplyMiddleware:
     async def test_retries_preserve_prefix_and_checkpoint_nudges(
         self, monkeypatch: pytest.MonkeyPatch, system: SystemMessage | None
     ) -> None:
-        import agent.slack.tools.reply as reply_tool
+        import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
         monkeypatch.setattr(reply_tool, "slack_reply", posted)

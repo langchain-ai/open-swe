@@ -3,9 +3,7 @@ import { PullRequestLinks } from "../PullRequestLinks"
 import {
   canAttemptMerge,
   canUpdateBranch,
-  hasFailingChecks,
-  hasUnresolvedConversations,
-  isConflicted,
+  pullRequestFixes,
 } from "../lib/status"
 import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
@@ -44,34 +42,21 @@ export function PullRequestActions({
     onSettled(next)
     return () => onSettled(undefined)
   }
+  const fixes = pullRequestFixes(pr)
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <div className="flex flex-wrap items-center gap-x-space-4 gap-y-space-2">
       {outcome && (
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-secondary">
           {outcomeLabels[outcome]} · leaves the list on the next refresh
         </span>
       )}
       {/* Hidden rather than unmounted, so a rolled-back outcome keeps each control's state. */}
       <div
         hidden={Boolean(outcome)}
-        className="flex flex-wrap items-center gap-x-2 gap-y-2"
+        className="flex flex-wrap items-center gap-x-space-2 gap-y-space-2"
       >
-        {isConflicted(pr) && (
-          <PullRequestThreadAction
-            pr={pr}
-            login={login}
-            action="fix-conflicts"
-          />
-        )}
-        {hasFailingChecks(pr) && (
-          <PullRequestThreadAction pr={pr} login={login} action="fix-checks" />
-        )}
-        {hasUnresolvedConversations(pr) && (
-          <PullRequestThreadAction
-            pr={pr}
-            login={login}
-            action="address-comments"
-          />
+        {fixes.length > 0 && (
+          <PullRequestThreadAction pr={pr} login={login} actions={fixes} />
         )}
         {pr.draft === true && (
           <MarkPullRequestReady pr={pr} onReady={onReady} />
@@ -88,7 +73,7 @@ export function PullRequestActions({
           />
         )}
         {pr.missingChecks.length > 0 && (
-          <span className="text-xs text-amber-700 dark:text-amber-400">
+          <span className="text-xs text-warning-secondary">
             Merge blocked: {pr.missingChecks.join(", ")} never reported
           </span>
         )}

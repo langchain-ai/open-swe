@@ -6,13 +6,13 @@ from uuid import UUID
 
 from sqlalchemy import func, select, update
 
-from agent.database import postgres
-from agent.github.app import (
+from openswe.database import postgres
+from openswe.github.app import (
     get_github_app_installation_id_for_repo,
     get_github_app_installation_token,
 )
-from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.github.pull_requests import PullRequest, PullRequestEvent
+from openswe.github.http import GITHUB_API_BASE, github_client, github_request
+from openswe.github.pull_requests import PullRequest, PullRequestEvent
 
 logger = logging.getLogger(__name__)
 

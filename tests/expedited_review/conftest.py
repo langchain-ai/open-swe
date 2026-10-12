@@ -2,9 +2,9 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
-from agent.github.pull_requests import PullRequest
-from agent.human_review.requests import HumanReviewRequest
-from agent.users import User
+from openswe.github.pull_requests import PullRequest
+from openswe.human_review.requests import HumanReviewRequest
+from openswe.users import User
 
 PEOPLE = {"U_ADA": ("ada", "1"), "U_GRACE": ("grace", "2"), "U_LINUS": ("linus", "3")}
 

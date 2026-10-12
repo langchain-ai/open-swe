@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 
 import langgraph_sdk
 
-from agent.dashboard import profiles
-from agent.run_config import RunConfig
-from agent.threads import plan_api, workflow_approval_api
+from openswe.dashboard import profiles
+from openswe.run_config import RunConfig
+from openswe.threads import plan_api, workflow_approval_api
 
 
 async def test_approval_run_uses_authenticated_actor(monkeypatch, fake_store):
@@ -36,13 +36,13 @@ async def test_approval_run_uses_authenticated_actor(monkeypatch, fake_store):
 
     assert dispatch.await_args is not None
     config = {"configurable": dispatch.await_args.args[2]}
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config)
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(
         profiles,
         "get_valid_access_token",
         AsyncMock(side_effect={"alice": "alice-token", "Bob": "bob-token"}.get),
     )
-    opr = importlib.import_module("agent.tools.open_pull_request")
+    opr = importlib.import_module("openswe.tools.open_pull_request")
     assert await opr._resolve_pr_author_token() == ("bob-token", "user")
     cfg = RunConfig.from_runtime()
     assert cfg.user_email == "bob@example.com"

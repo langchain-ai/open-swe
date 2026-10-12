@@ -1,0 +1,154 @@
+"""Tool for managing durable `/baby-sit` PR watches."""
+
+from collections.abc import Mapping
+from typing import Any, Literal
+
+from langgraph.config import get_config
+
+from openswe.baby_sit import record_retry, start_watch, stop_watch, watch_key
+from openswe.github.app import get_github_app_installation_id_for_repo
+from openswe.github.http import GitHubClient, or_none
+from openswe.github.token import resolve_github_token
+from openswe.run_config import RunConfig
+from openswe.slack.client import parse_github_pr_url
+from openswe.source_context import SourceContext
+
+
+def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
+    config = get_config()
+    return RunConfig.from_config(config), config if isinstance(config, Mapping) else {}
+
+
+def dispatch_run_config(
+    cfg: RunConfig, thread_id: str, source_installation_id: int | None
+) -> dict[str, Any]:
+    """The configurable a durable watch stores to wake this thread later."""
+    allowed = (
+        "source",
+        "slack_thread",
+        "linear_issue",
+        "github_issue",
+        "pr_number",
+        "github_login",
+        "user_email",
+        "workspace",
+        # `environment` is the pre-workspaces spelling; a watch started before
+        # the rename still carries it, and both keys mean the same workspace.
+        "environment",
+        "agent_model_id",
+        "agent_effort",
+    )
+    dumped = cfg.dump()
+    result = {key: dumped[key] for key in allowed if dumped.get(key) is not None}
+    if cfg.github_issue and isinstance(dumped.get("repo"), Mapping):
+        result["source_repo"] = dumped["repo"]
+        if source_installation_id is not None:
+            result["source_installation_id"] = source_installation_id
+    result["thread_id"] = thread_id
+    return result
+
+
+def _source_context(cfg: RunConfig) -> SourceContext:
+    dumped = cfg.dump()
+    return SourceContext.parse(
+        {
+            key: dumped[key]
+            for key in ("slack_thread", "linear_issue", "github_issue")
+            if isinstance(dumped.get(key), Mapping)
+        }
+    )
+
+
+async def manage_baby_sit(
+    pr_url: str,
+    action: Literal["start", "stop", "record_retry"] = "start",
+    head_sha: str = "",
+    check_name: str = "",
+    evidence: str = "",
+    details_url: str = "",
+) -> dict[str, Any]:
+    """Implement the `manage_baby_sit` tool."""
+    pr_ref = parse_github_pr_url(pr_url)
+    if pr_ref is None:
+        return {"success": False, "error": "pr_url must be a canonical GitHub pull request URL"}
+
+    cfg, config = _configurable()
+    thread_id = cfg.thread_id
+    if not thread_id:
+        return {"success": False, "error": "No executable agent thread is available"}
+    key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if action == "stop":
+        from openswe.baby_sit import WATCHES
+
+        watch = await WATCHES.get(key)
+        if watch and watch.thread_id != thread_id:
+            return {"success": False, "error": "This watch belongs to another agent thread"}
+        stopped = await stop_watch(key)
+        return {"success": True, "stopped": stopped, "watch_key": key}
+
+    if action == "record_retry":
+        if not head_sha.strip() or not check_name.strip() or not evidence.strip():
+            return {
+                "success": False,
+                "error": "head_sha, check_name, and evidence are required when recording a flaky rerun",
+            }
+        return await record_retry(
+            key,
+            thread_id=thread_id,
+            head_sha=head_sha.strip(),
+            check_name=check_name,
+            evidence=evidence,
+            details_url=details_url,
+        )
+
+    try:
+        token, _ = await resolve_github_token(config, thread_id)
+    except Exception as exc:
+        return {"success": False, "error": f"GitHub authentication failed: {exc}"}
+    async with GitHubClient.connect(token=token) as github:
+        pr = await or_none(
+            github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number).pull()
+        )
+    if not pr:
+        return {"success": False, "error": "Pull request is unavailable"}
+    if pr.get("state") != "open":
+        return {"success": False, "error": "Pull request is not open"}
+    head = pr.get("head") if isinstance(pr.get("head"), Mapping) else {}
+    pr_head_sha = head.get("sha") if isinstance(head, Mapping) else None
+    pr_head_ref = head.get("ref") if isinstance(head, Mapping) else None
+    if not isinstance(pr_head_sha, str) or not pr_head_sha:
+        return {"success": False, "error": "Pull request head SHA is unavailable"}
+    if not isinstance(pr_head_ref, str) or not pr_head_ref:
+        return {"success": False, "error": "Pull request head branch is unavailable"}
+
+    installation_id = await get_github_app_installation_id_for_repo(pr_ref.owner, pr_ref.repo)
+    if installation_id is None:
+        return {
+            "success": False,
+            "error": "GitHub App installation is unavailable for this repository",
+        }
+    source_installation_id = installation_id
+    if cfg.github_issue and cfg.repo:
+        source_installation_id = await get_github_app_installation_id_for_repo(
+            cfg.repo.owner, cfg.repo.name
+        )
+    try:
+        watch = await start_watch(
+            pr_ref=pr_ref,
+            head_sha=pr_head_sha,
+            head_ref=pr_head_ref,
+            installation_id=installation_id,
+            thread_id=thread_id,
+            run_config=dispatch_run_config(cfg, thread_id, source_installation_id),
+            source_context=_source_context(cfg),
+        )
+    except Exception as exc:
+        return {"success": False, "error": f"Could not start baby-sit watch: {exc}"}
+    return {
+        "success": True,
+        "watch_key": watch.key,
+        "pr_url": watch.pr_url,
+        "head_sha": watch.head_sha,
+        "poll_schedule": "every 10 minutes",
+        "webhook_first": True,
+    }

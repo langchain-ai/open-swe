@@ -3,11 +3,11 @@ from typing import Any
 
 import pytest
 
-import agent.utils.authorship as authorship
-from agent.github import app as github_app
-from agent.users import User
-from agent.utils import ttl_cache
-from agent.utils.authorship import (
+import openswe.utils.authorship as authorship
+from openswe.github import app as github_app
+from openswe.users import User
+from openswe.utils import ttl_cache
+from openswe.utils.authorship import (
     resolve_participant_identities,
     resolve_public_github_profile,
     resolve_triggering_user_identity,
@@ -21,19 +21,19 @@ async def test_participant_context_includes_slack_identity(
 ) -> None:
     from unittest.mock import AsyncMock
 
-    from agent.input_messages import person_introduction
-    from agent.server import _thread_participant
-    from agent.users.models import UserIdentity
+    from openswe.input_messages import person_introduction
+    from openswe.server import _thread_participant
+    from openswe.users.models import UserIdentity
 
     user = User(
         display_name="Mason",
         identities=[UserIdentity(provider="slack", external_id="U_LINKED")],
     )
-    monkeypatch.setattr("agent.server._user_for_login", AsyncMock(return_value=user))
-    monkeypatch.setattr("agent.server.load_profile", AsyncMock(return_value={}))
-    monkeypatch.setattr("agent.server.participant_is_admin", AsyncMock(return_value=False))
+    monkeypatch.setattr("openswe.server._user_for_login", AsyncMock(return_value=user))
+    monkeypatch.setattr("openswe.server.load_profile", AsyncMock(return_value={}))
+    monkeypatch.setattr("openswe.server.participant_is_admin", AsyncMock(return_value=False))
     monkeypatch.setattr(
-        "agent.server._resolve_user_custom_instructions", AsyncMock(return_value="")
+        "openswe.server._resolve_user_custom_instructions", AsyncMock(return_value="")
     )
     participant = await _thread_participant(
         authorship.CollaboratorIdentity(

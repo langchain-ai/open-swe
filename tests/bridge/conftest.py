@@ -1,6 +1,6 @@
 import pytest
 
-from agent.bridge import store
+from openswe.bridge import store
 
 
 @pytest.fixture(autouse=True)

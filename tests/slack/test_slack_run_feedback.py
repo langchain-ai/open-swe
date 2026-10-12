@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack import run_feedback
-from agent.slack.payloads import SlackChannelContext, SlackInteraction
-from agent.utils.json_types import JsonObject
+from openswe.slack import run_feedback
+from openswe.slack.payloads import SlackChannelContext, SlackInteraction
+from openswe.utils.json_types import JsonObject
 
 
 def interaction(rating: Literal["up", "down"] = "up") -> SlackInteraction:

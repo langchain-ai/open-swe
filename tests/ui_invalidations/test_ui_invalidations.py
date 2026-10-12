@@ -1,15 +1,17 @@
 import asyncio
 import json
 from contextlib import aclosing
+from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import text
 
-from agent.database import postgres
-from agent.database.notifications import LISTENER
-from agent.ui_invalidations import Topic, outbox
-from agent.ui_invalidations.hub import HUB
-from agent.ui_invalidations.routes import _stream
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
+from openswe.database import postgres
+from openswe.database.notifications import LISTENER
+from openswe.ui_invalidations import Topic, outbox
+from openswe.ui_invalidations.hub import HUB
+from openswe.ui_invalidations.routes import _stream
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 
 def _parse(frame: str) -> tuple[str, dict[str, object]]:
@@ -47,6 +49,23 @@ async def test_a_reconnecting_reader_is_told_only_what_committed_within_its_wind
             text("UPDATE ui_invalidation SET created_at = created_at - interval '2 days'")
         )
     assert await outbox.prune() == 1
+
+
+async def test_only_readers_of_a_private_thread_hear_its_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private = {"source": "dashboard", "visibility": "private", "owner_login": "alice"}
+    threads = {"t-private": private, "t-shared": {"source": "dashboard"}}
+
+    async def get(thread_id: str) -> dict[str, object]:
+        return {"thread_id": thread_id, "metadata": threads[thread_id]}
+
+    client = SimpleNamespace(threads=SimpleNamespace(get=get))
+    monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: client)
+    topics = [Topic.THREAD_QUEUES.keyed(thread_id) for thread_id in threads]
+
+    assert await Topic.audible({"sub": "alice"}, topics) == set(topics)
+    assert await Topic.audible({"sub": "bob"}, topics) == {"thread-queues/t-shared"}
 
 
 async def test_a_workspace_write_reaches_an_open_stream(registry_db: None) -> None:

@@ -2,7 +2,7 @@ from typing import cast
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.threads.creation import TITLE_LOCKED_KEY, ensure_titled_thread
+from openswe.threads.creation import TITLE_LOCKED_KEY, ensure_titled_thread
 
 
 class _Threads:

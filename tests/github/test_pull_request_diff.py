@@ -14,7 +14,7 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github.pull_request_diff import build_pr_diff_files, fetch_file_versions
+from openswe.github.pull_request_diff import build_pr_diff_files, fetch_file_versions
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 

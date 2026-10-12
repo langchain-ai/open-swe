@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import oauth, profiles, routes
+from openswe.dashboard import oauth, profiles, routes
 
 
 @pytest.fixture

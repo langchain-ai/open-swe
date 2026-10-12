@@ -2,8 +2,8 @@
 
 import pytest
 
-from agent.users import User, UserPreferences, UserPreferencesPatch
-from agent.users.import_concierge_mode import PROFILES_NAMESPACE, import_concierge_mode
+from openswe.users import User, UserPreferences, UserPreferencesPatch
+from openswe.users.import_concierge_mode import PROFILES_NAMESPACE, import_concierge_mode
 from tests.conftest import FakeStore
 
 pytestmark = pytest.mark.usefixtures("registry_db")

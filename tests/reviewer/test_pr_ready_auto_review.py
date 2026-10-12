@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
-from agent.github import webhook as github_webhooks
-from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from openswe.github import webhook as github_webhooks
+from openswe.webhooks import common as webhook_common
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
 
 
@@ -228,21 +228,21 @@ async def test_converted_to_draft_disables_watch_when_drafts_off(
 
     with (
         patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
+            "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
         patch(
-            "agent.webhooks.common.get_profile",
+            "openswe.webhooks.common.get_profile",
             new_callable=AsyncMock,
             return_value={"login": "alice", "review_draft_prs": False},
         ),
         patch(
-            "agent.webhooks.common.get_workspace_settings",
+            "openswe.webhooks.common.get_workspace_settings",
             new_callable=AsyncMock,
             return_value={"review_draft_prs": False},
         ),
-        patch("agent.webhooks.common.set_reviewer_thread_metadata", side_effect=fake_set),
+        patch("openswe.webhooks.common.set_reviewer_thread_metadata", side_effect=fake_set),
     ):
         await github_webhooks.process_github_pr_close(_converted_to_draft_payload())
     assert captured and captured[0][1]["watch"] is False

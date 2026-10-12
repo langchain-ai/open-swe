@@ -1,5 +1,5 @@
-from agent.mcp.models import MCPConnectionUpdate
-from agent.mcp.workspace import (
+from openswe.mcp.models import MCPConnectionUpdate
+from openswe.mcp.workspace import (
     WORKSPACE_MCPS_NAMESPACE,
     list_workspace_mcps,
     save_workspace_mcp,

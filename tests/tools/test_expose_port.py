@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-service_tool = importlib.import_module("agent.tools.expose_port")
+service_tool = importlib.import_module("openswe.tools.expose_port")
 
 
 class _Backend:
@@ -12,7 +12,7 @@ class _Backend:
 
 def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, list[tuple[str, int]]]:
     monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
+        "openswe.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
     backend = _Backend()
     calls: list[tuple[str, int]] = []

@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, call
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import oauth
-from agent.users import authorization
+from openswe.dashboard import oauth
+from openswe.users import authorization
 
 
 @pytest.mark.parametrize("value", [None, "  ,  "])
@@ -29,7 +29,7 @@ def test_startup_rejects_missing_allowlists(monkeypatch, caplog, value: str | No
 
 @pytest.mark.asyncio
 async def test_app_lifespan_exits_when_allowlists_are_missing(monkeypatch) -> None:
-    from agent.api.app import app, lifespan
+    from openswe.api.app import app, lifespan
 
     monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
     monkeypatch.delenv("ALLOWED_GITHUB_USERS", raising=False)

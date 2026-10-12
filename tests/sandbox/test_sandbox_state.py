@@ -10,7 +10,7 @@ from deepagents.backends.protocol import (
 )
 from langchain_core.runnables.config import var_child_runnable_config
 
-from agent.sandboxes.state import (
+from openswe.sandboxes.state import (
     SANDBOX_BACKENDS,
     SandboxBackendProxy,
     get_or_create_sandbox_backend_proxy,
@@ -47,10 +47,10 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         return _FakeSandboxBackend()
 
     monkeypatch.setattr(
-        "agent.sandboxes.state.get_sandbox_id_from_metadata",
+        "openswe.sandboxes.state.get_sandbox_id_from_metadata",
         get_sandbox_id_from_metadata,
     )
-    monkeypatch.setattr("agent.sandboxes.connect.connect_sandbox", connect_sandbox)
+    monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect_sandbox)
 
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
     assert SANDBOX_BACKENDS[thread_id] is proxy
@@ -80,7 +80,7 @@ async def test_sandbox_metadata_ignores_run_config_from_before_rebind(
     class _Client:
         threads = _Threads()
 
-    monkeypatch.setattr("agent.sandboxes.state.get_client", lambda: _Client())
+    monkeypatch.setattr("openswe.sandboxes.state.get_client", lambda: _Client())
     token = var_child_runnable_config.set({"metadata": {"sandbox_id": "sandbox-old"}})
     try:
         assert await get_sandbox_id_from_metadata("thread-1") == "sandbox-new"

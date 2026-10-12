@@ -2,8 +2,8 @@ from typing import Any
 
 import pytest
 
-from agent.slack import feedback as slack_feedback
-from agent.slack.feedback import (
+from openswe.slack import feedback as slack_feedback
+from openswe.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )

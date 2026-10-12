@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import {
-  SAME_ORIGIN_HEADERS,
   SAME_USER,
   dismissOnboardingIfShown,
   loginAs,
@@ -68,10 +67,6 @@ const toolResults = new Map(
   ),
 );
 
-function jsonlUpload(header: Record<string, string>, body: string): Buffer {
-  return Buffer.from(`${JSON.stringify(header)}\n${body}`);
-}
-
 function normalized(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -88,15 +83,13 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
   let threadId: string | undefined;
   try {
     await loginAs(page, SAME_USER);
-    const unpushed = await page.request.post("/dashboard/api/threads/uploads", {
-      headers: {
-        ...SAME_ORIGIN_HEADERS,
-        "content-type": "application/x-ndjson",
+    const unpushed = await api.post("/control/session-upload", {
+      data: {
+        login: SAME_USER.login,
+        type: "claude",
+        repo: "fakeorg/demo",
+        branch: "never-pushed",
       },
-      data: jsonlUpload(
-        { type: "claude", repo: "fakeorg/demo", branch: "never-pushed" },
-        transcript,
-      ),
     });
     expect(unpushed.status()).toBe(422);
     expect(await unpushed.text()).toContain("push it first");
@@ -112,25 +105,41 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     expect(seeded.ok(), await seeded.text()).toBeTruthy();
     const { number } = (await seeded.json()) as { number: number };
 
-    const upload = await page.request.post("/dashboard/api/threads/uploads", {
-      headers: {
-        ...SAME_ORIGIN_HEADERS,
-        "content-type": "application/x-ndjson",
-        "content-encoding": "gzip",
+    const reserved = await api.post("/control/session-upload", {
+      data: {
+        login: SAME_USER.login,
+        email: SAME_USER.email,
+        type: "claude",
+        pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
+        visibility: "private",
       },
-      data: gzipSync(
-        jsonlUpload(
-          {
-            type: "claude",
-            pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
-            visibility: "private",
-          },
-          transcript,
-        ),
-      ),
     });
+    expect(reserved.ok(), await reserved.text()).toBeTruthy();
+    const {
+      upload_url: uploadUrl,
+      upload_token: token,
+      thread_id: reservedId,
+    } = (await reserved.json()) as {
+      upload_url: string;
+      upload_token: string;
+      thread_id: string;
+    };
+    threadId = reservedId;
+
+    // What the agent curls: the transcript alone, authorized by the token, no Origin.
+    const uploadTranscript = () =>
+      api.post(new URL(uploadUrl).pathname, {
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/x-ndjson",
+          "content-encoding": "gzip",
+        },
+        data: gzipSync(Buffer.from(transcript)),
+      });
+    const upload = await uploadTranscript();
     expect(upload.ok(), await upload.text()).toBeTruthy();
-    threadId = (await upload.json()).id as string;
+    expect((await upload.json()).id).toBe(threadId);
+    expect((await uploadTranscript()).status()).toBe(204);
 
     const summary = await (
       await page.request.get(`/dashboard/api/threads/${threadId}`)

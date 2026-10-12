@@ -354,7 +354,7 @@ export function PlanArtifactFrame({
       sandbox={ARTIFACT_SANDBOX}
       allow={ARTIFACT_ALLOW}
       onLoad={connect}
-      className={cn("bg-background", className)}
+      className={cn("bg-surface-level-1", className)}
     />
   )
 }

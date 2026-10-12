@@ -3,8 +3,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.github import pull_request_context
-from agent.threads import handlers
+from openswe.dashboard import profiles
+from openswe.github import pull_request_context
+from openswe.threads import handlers
 from tests.conftest import patch_thread_module
 
 _BROKEN_PR = {
@@ -102,7 +103,7 @@ async def test_thread_context_requires_tracked_pull_before_token_lookup(
 
     token = AsyncMock(return_value="oauth-token")
     patch_thread_module(monkeypatch, "_readable_thread_metadata", readable)
-    patch_thread_module(monkeypatch, "_github_token_for_login", token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", token)
 
     with pytest.raises(HTTPException) as exc_info:
         await handlers.get_dashboard_thread_pull_request_context(

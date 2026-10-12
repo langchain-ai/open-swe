@@ -5,15 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.sandboxes.lifecycle import SandboxRecreationStopError, recreate_sandbox_for_thread
-from agent.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
+from openswe.sandboxes.lifecycle import SandboxRecreationStopError, recreate_sandbox_for_thread
+from openswe.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
 
 
 @pytest.fixture(autouse=True)
 def sandbox_client() -> Iterator[AsyncMock]:
     client = AsyncMock()
     with (
-        patch("agent.sandboxes.providers.langsmith.get_async_sandbox_client") as factory,
+        patch("openswe.sandboxes.providers.langsmith.get_async_sandbox_client") as factory,
         patch.dict(os.environ, {"SANDBOX_TYPE": "langsmith"}),
     ):
         factory.return_value.__aenter__ = AsyncMock(return_value=client)
@@ -29,7 +29,7 @@ async def test_worker_cannot_recreate_shared_sandbox(sandbox_client: AsyncMock) 
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={
                 "sandbox_id": "sandbox-shared",
@@ -38,9 +38,11 @@ async def test_worker_cannot_recreate_shared_sandbox(sandbox_client: AsyncMock) 
             },
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
         ) as create,
-        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock) as update,
+        patch(
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+        ) as update,
     ):
         with pytest.raises(PermissionError, match="coordinator must recover"):
             await recreate_sandbox_for_thread("worker")
@@ -75,22 +77,22 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists(
         assert proxy.current is old_sandbox
 
     with (
-        patch("agent.sandboxes.lifecycle.asyncio.timeout", side_effect=lambda _: timeout(0.01)),
+        patch("openswe.sandboxes.lifecycle.asyncio.timeout", side_effect=lambda _: timeout(0.01)),
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-old", "owner_login": "octocat"},
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=new_sandbox,
         ) as create,
         patch(
-            "agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
         ) as configure,
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update",
+            "openswe.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,
             side_effect=persist_metadata,
         ) as update,
@@ -134,17 +136,17 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-old"},
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=MagicMock(id="sandbox-new"),
         ) as create,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
     ):
         result = await recreate_sandbox_for_thread(
             thread_id, workspace_slug="langchainplus", source="base"
@@ -164,10 +166,10 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
 @pytest.mark.asyncio
 async def test_base_source_skips_workspace_lookup_entirely() -> None:
     """An absent slug still resolves the `default` workspace, so base must not rely on it."""
-    from agent.sandboxes.lifecycle import SandboxCreateConfig
+    from openswe.sandboxes.lifecycle import SandboxCreateConfig
 
     with patch(
-        "agent.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock
+        "openswe.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock
     ) as load_workspace:
         config = await SandboxCreateConfig.resolve("langchainplus", source="base")
 
@@ -180,11 +182,11 @@ async def test_base_source_skips_workspace_lookup_entirely() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("preserve", [True, False])
 async def test_owner_preference_decides_memory_preservation(preserve: bool) -> None:
-    from agent.sandboxes.lifecycle import SandboxCreateConfig
-    from agent.users import UserPreferences
+    from openswe.sandboxes.lifecycle import SandboxCreateConfig
+    from openswe.users import UserPreferences
 
     with patch(
-        "agent.sandboxes.lifecycle.User.preferences_for_login",
+        "openswe.sandboxes.lifecycle.User.preferences_for_login",
         new_callable=AsyncMock,
         return_value=UserPreferences(preserve_sandbox_memory=preserve),
     ) as preferences_for_login:
@@ -204,18 +206,18 @@ async def test_recreate_sandbox_keeps_old_binding_when_metadata_update_fails() -
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-old"},
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=new_sandbox,
         ),
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update",
+            "openswe.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,
             side_effect=RuntimeError("metadata unavailable"),
         ),
@@ -237,19 +239,21 @@ async def test_recreate_sandbox_rejects_non_distinct_provider_result() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-same"},
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=MagicMock(id="sandbox-same"),
         ),
         patch(
-            "agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
         ) as configure,
-        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock) as update,
+        patch(
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+        ) as update,
     ):
         with pytest.raises(RuntimeError, match="distinct sandbox"):
             await recreate_sandbox_for_thread(thread_id)

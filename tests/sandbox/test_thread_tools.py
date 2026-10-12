@@ -18,11 +18,11 @@ from langchain_core.tools import StructuredTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware
-from agent.middleware.trace import OpenSWEMiddleware
-from agent.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
-from agent.sandboxes.tool_data import ToolContext
-from agent.sandboxes.tool_runtime import ToolSurface
+from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+from openswe.middleware.trace import OpenSWEMiddleware
+from openswe.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
+from openswe.sandboxes.tool_data import ToolContext
+from openswe.sandboxes.tool_runtime import ToolSurface
 from tests.conftest import FakeStore
 
 TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
@@ -35,9 +35,9 @@ def capability_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_task_event_preserves_latest_human_actor(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.input_messages import build_input_messages
-    from agent.tasks.messages import TaskMessage
-    from agent.tools import threads
+    from openswe.input_messages import build_input_messages
+    from openswe.tasks.messages import TaskMessage
+    from openswe.tools import threads
 
     monkeypatch.setattr(
         threads,
@@ -151,8 +151,11 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     fake_store: FakeStore,
     enabled: bool,
 ) -> None:
-    from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
-    from agent.sandboxes.providers import langsmith
+    from openswe.dashboard.workspace_settings import (
+        WorkspaceSettingsUpdate,
+        upsert_instance_settings,
+    )
+    from openswe.sandboxes.providers import langsmith
 
     await upsert_instance_settings(WorkspaceSettingsUpdate(sandbox_openai_enabled=enabled))
 
@@ -199,7 +202,7 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
 async def test_restores_idle_context_ignoring_legacy_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent import server
+    from openswe import server
 
     monkeypatch.setattr(
         tool_runtime,
@@ -403,7 +406,7 @@ async def test_chunked_request_limit_precedes_json_parsing(monkeypatch: pytest.M
 def test_agent_factory_is_accepted_by_langgraph() -> None:
     from langgraph_api._factory_utils import FACTORY_KWARGS, classify_factory
 
-    from agent.server import traced_agent
+    from openswe.server import traced_agent
 
     graph_id = "sandbox-tools-factory-test"
     try:

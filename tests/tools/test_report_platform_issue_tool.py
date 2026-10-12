@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from agent.tools import report_platform_issue
+from openswe.tools import report_platform_issue
 
 
 class _Unserializable:
@@ -22,7 +22,7 @@ def export(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         return True
 
     monkeypatch.setattr(
-        importlib.import_module("agent.tools.report_platform_issue"),
+        importlib.import_module("openswe.tools.report_platform_issue"),
         "create_langsmith_thread_feedback",
         create_langsmith_thread_feedback,
     )
@@ -49,7 +49,7 @@ async def test_report_platform_issue_logs_report_and_thread_details(
             assert thread_id == "thread-1"
             return thread
 
-    module = importlib.import_module("agent.tools.report_platform_issue")
+    module = importlib.import_module("openswe.tools.report_platform_issue")
     monkeypatch.setattr(
         module,
         "get_config",
@@ -65,7 +65,7 @@ async def test_report_platform_issue_logs_report_and_thread_details(
     )
     monkeypatch.setattr(module, "langgraph_client", lambda: SimpleNamespace(threads=Threads()))
 
-    with caplog.at_level(logging.WARNING, logger="agent.tools.report_platform_issue"):
+    with caplog.at_level(logging.WARNING, logger="openswe.tools.report_platform_issue"):
         result = await report_platform_issue(
             problem_description="The sandbox command timed out",
             keywords=["sandbox", "timeout"],
@@ -114,14 +114,14 @@ async def test_report_platform_issue_survives_undiagnosable_run(
     caplog: pytest.LogCaptureFixture,
     export: list[dict[str, Any]],
 ) -> None:
-    module = importlib.import_module("agent.tools.report_platform_issue")
+    module = importlib.import_module("openswe.tools.report_platform_issue")
 
     def no_runtime() -> dict[str, Any]:
         raise RuntimeError("called outside of a runnable context")
 
     monkeypatch.setattr(module, "get_config", no_runtime)
 
-    with caplog.at_level(logging.WARNING, logger="agent.tools.report_platform_issue"):
+    with caplog.at_level(logging.WARNING, logger="openswe.tools.report_platform_issue"):
         result = await report_platform_issue(problem_description="broken", keywords=["sandbox"])
 
     assert uuid.UUID(result["report_id"]).version == 7
@@ -134,7 +134,7 @@ async def test_report_platform_issue_survives_undiagnosable_run(
 
 @pytest.mark.asyncio
 async def test_report_platform_issue_requires_description(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING, logger="agent.tools.report_platform_issue"):
+    with caplog.at_level(logging.WARNING, logger="openswe.tools.report_platform_issue"):
         with pytest.raises(ValueError, match="Describe the platform issue"):
             await report_platform_issue(problem_description="   ", keywords=["sandbox"])
     assert caplog.records == []

@@ -73,6 +73,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:delete-legacy-local-thread", threadId),
   prepareLocalThread: (input) =>
     ipcRenderer.invoke("desktop:prepare-local-thread", { ...input }),
+  takeOverThread: (input) =>
+    ipcRenderer.invoke("desktop:take-over-thread", { ...input }),
   ensureLocalBridge: (threadId) =>
     ipcRenderer.invoke("desktop:ensure-local-bridge", threadId),
   getLocalThread: (threadId) =>
@@ -93,6 +95,12 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:read-workspace-path", { ...input }),
   listWorkspaceFiles: (localSessionId) =>
     ipcRenderer.invoke("desktop:list-workspace-files", localSessionId),
+  onLocalThreadsChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("desktop:local-threads-changed", listener);
+    return () =>
+      ipcRenderer.removeListener("desktop:local-threads-changed", listener);
+  },
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects);
     ipcRenderer.on("desktop:projects-changed", listener);

@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
-from agent.incidents import channels, service, turns
-from agent.incidents.models import Incident, IncidentPolicy
-from agent.slack.channels import SlackChannel
+from openswe.incidents import channels, service, turns
+from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",

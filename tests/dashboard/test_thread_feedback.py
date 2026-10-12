@@ -6,10 +6,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent import thread_feedback
-from agent.dashboard.oauth import require_session
-from agent.threads import feedback
-from agent.threads.routes import router as threads_router
+from openswe import thread_feedback
+from openswe.dashboard.oauth import require_session
+from openswe.threads import feedback
+from openswe.threads.routes import router as threads_router
 
 
 @pytest.fixture

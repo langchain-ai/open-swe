@@ -14,10 +14,10 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langchain_core.outputs import ChatGenerationChunk
 from langgraph.prebuilt.tool_node import ToolCallRequest
 
-from agent.input_messages import build_input_messages
-from agent.middleware import transcript as mw
-from agent.transcript.engine import Command, append
-from agent.transcript.events import (
+from openswe.input_messages import build_input_messages
+from openswe.middleware import transcript as mw
+from openswe.transcript.engine import Command, append
+from openswe.transcript.events import (
     MessageSender,
     MessageUsage,
     ThreadCreated,
@@ -25,8 +25,8 @@ from agent.transcript.events import (
     TurnFailed,
     TurnRequested,
 )
-from agent.transcript.rebuild import rebuild_thread_projections
-from agent.transcript.snapshot import load_events, load_snapshot
+from openswe.transcript.rebuild import rebuild_thread_projections
+from openswe.transcript.snapshot import load_events, load_snapshot
 
 THREAD_ID = "thread-under-test"
 RUN_ID = "run-under-test"
@@ -72,7 +72,11 @@ def _install(
     async def _has_transcript(thread_id: str) -> bool:
         return transcribed
 
+    async def _reusable_turn_id(ids: mw.RunIds) -> UUID | None:
+        return ids.turn_id
+
     monkeypatch.setattr(mw, "_has_transcript", _has_transcript)
+    monkeypatch.setattr(mw, "_reusable_turn_id", _reusable_turn_id)
     configurable: dict[str, Any] = {"thread_id": THREAD_ID, "run_id": RUN_ID}
     if turn_id is not None:
         configurable["transcript_turn_id"] = str(turn_id)
@@ -303,6 +307,51 @@ async def test_event_inputs_survive_initial_delivery_injection_and_replay(
     assert reloaded is not None and reloaded.messages == snapshot.messages
     assert reloaded.turns == retried.turns
     assert reloaded.thread.status == "idle"
+
+
+async def test_a_run_inheriting_a_closed_turn_id_opens_and_closes_its_own_turn(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    thread_id, closed_turn = str(uuid7()), uuid7()
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id="created",
+                event=ThreadCreated(title="Task", source="dashboard", owner_login="owner"),
+                actor_kind="system",
+            ),
+            Command(
+                command_id="requested",
+                event=TurnRequested(
+                    turn_id=closed_turn,
+                    message_id="request",
+                    text="go",
+                    sender=MessageSender(login="owner", kind="dashboard"),
+                ),
+                actor_kind="user",
+            ),
+            Command(
+                command_id=f"turn:{closed_turn}:completed",
+                event=TurnCompleted(turn_id=closed_turn),
+                actor_kind="agent",
+            ),
+        ],
+    )
+    configurable = {
+        "thread_id": thread_id,
+        "run_id": "wakeup",
+        "transcript_turn_id": str(closed_turn),
+    }
+    monkeypatch.setattr(mw, "get_config", lambda: {"configurable": configurable})
+    middleware = mw.TranscriptMiddleware()
+    state: dict[str, Any] = {"messages": [HumanMessage(content="wake up", id="wakeup")]}
+
+    await middleware.abefore_agent(state, None)
+    await middleware.aafter_agent(state, None)
+
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None and snapshot.thread.status == "idle"
 
 
 async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(

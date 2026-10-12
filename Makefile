@@ -52,10 +52,10 @@ build-dashboard:
 	pnpm --filter open-swe-dashboard run build
 
 run:
-	uv run uvicorn agent.webapp:app --reload --port 8000
+	uv run uvicorn openswe.webapp:app --reload --port 8000
 
 swagger:
-	uv run python -c 'import json; from pathlib import Path; from agent.webapp import app; Path("swagger.json").write_text(json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n", encoding="utf-8")'
+	uv run python -c 'import json; from pathlib import Path; from openswe.webapp import app; Path("swagger.json").write_text(json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n", encoding="utf-8")'
 
 desktop:
 	pnpm run dev:desktop
@@ -79,12 +79,6 @@ cli:
 	pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe
 	pnpm --filter open-swe-cli run build
 	@echo "Built $(CURDIR)/cli/dist/oswe"
-
-CLI_SOURCES := $(wildcard cli/src/*.ts) desktop/src/shared-config.ts cli/package.json pnpm-lock.yaml
-
-# `make cli`, but only when a source is newer than the binary.
-cli/dist/oswe: $(CLI_SOURCES)
-	@$(MAKE) --no-print-directory cli
 
 ######################
 # TESTING
@@ -125,7 +119,7 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	uv run ty check agent tests
+	uv run ty check openswe tests
 
 ######################
 # HELP
@@ -148,7 +142,7 @@ help:
 	@echo 'cli                          - build the oswe CLI binary into cli/dist/oswe'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
-	@echo 'typecheck                    - run ty on agent/ and tests/'
+	@echo 'typecheck                    - run ty on openswe/ and tests/'
 	@echo 'test                         - run unit tests'
 	@echo 'integration_tests            - run integration tests'
 	@echo '----'

@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.review.diff import MaterializedReviewDiff
-from agent.tools.fetch_review_diff import fetch_review_diff
+from openswe.review.diff import MaterializedReviewDiff
+from openswe.tools.fetch_review_diff import fetch_review_diff
 
 
 @pytest.mark.asyncio
@@ -27,15 +27,17 @@ async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
     }
 
     with (
-        patch("agent.run_config.get_config", return_value=config),
-        patch("agent.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()),
+        patch("openswe.run_config.get_config", return_value=config),
         patch(
-            "agent.tools.fetch_review_diff.resolve_sandbox_work_dir",
+            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()
+        ),
+        patch(
+            "openswe.tools.fetch_review_diff.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.tools.fetch_review_diff.materialize_review_diff",
+            "openswe.tools.fetch_review_diff.materialize_review_diff",
             new_callable=AsyncMock,
             return_value=materialized,
         ) as mock_materialize,
@@ -81,15 +83,17 @@ async def test_fetch_review_diff_uses_incremental_range_for_re_review() -> None:
     )
 
     with (
-        patch("agent.run_config.get_config", return_value=config),
-        patch("agent.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()),
+        patch("openswe.run_config.get_config", return_value=config),
         patch(
-            "agent.tools.fetch_review_diff.resolve_sandbox_work_dir",
+            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()
+        ),
+        patch(
+            "openswe.tools.fetch_review_diff.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.tools.fetch_review_diff.materialize_review_diff",
+            "openswe.tools.fetch_review_diff.materialize_review_diff",
             new_callable=AsyncMock,
             return_value=materialized,
         ) as mock_materialize,

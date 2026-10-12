@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { DownloadIcon } from "lucide-react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import { agentsApi } from "@/features/agents/lib/api"
@@ -20,7 +21,7 @@ import {
 } from "@/features/agents/lib/rightPanelStore"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
-  useLocalThread,
+  useMacCheckout,
   useLocalThreadDiff,
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
@@ -49,7 +50,7 @@ export function AgentGitPanel({
   )
   // A "This Mac" thread's checkout is right here, so its terminals, files and
   // diff come from this machine; anywhere else, from the sandbox endpoints.
-  const localThread = useLocalThread(thread.id)
+  const localThread = useMacCheckout(thread)
   const cwd = localThread ? (localThread.worktreePath ?? localThread.cwd) : ""
   const terminalTarget = useMemo<TerminalTarget>(
     () =>
@@ -216,16 +217,19 @@ export function AgentGitPanel({
           onScopeChange={(next) => selectScope(threadRef, next)}
           extraActions={
             canDownloadRecovery ? (
-              <button
-                type="button"
-                aria-label="Download recovery patch"
-                title={recoveryError ?? "Download recovery patch"}
+              <IconButton
+                icon={DownloadSimpleIcon}
+                label="Download recovery patch"
+                tooltipProps={
+                  recoveryError ? { title: recoveryError } : undefined
+                }
+                size="sm"
+                color="secondary"
+                variant="plain"
+                loading={recoveringPatch}
                 disabled={recoveringPatch}
                 onClick={() => void downloadRecoveryPatch()}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-              >
-                <DownloadIcon className="size-3.5" />
-              </button>
+              />
             ) : undefined
           }
         />

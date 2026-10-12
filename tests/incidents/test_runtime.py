@@ -9,11 +9,11 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest
 from langchain_core.messages import HumanMessage
 
-from agent.incidents import documents, runtime, service
-from agent.incidents.models import Incident, IncidentPolicy
-from agent.incidents.report import CONTEXT_MARKER
-from agent.slack.channels import SlackChannel
-from agent.slack.http import SlackRequestError
+from openswe.incidents import documents, runtime, service
+from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.incidents.report import CONTEXT_MARKER
+from openswe.slack.channels import SlackChannel
+from openswe.slack.http import SlackRequestError
 
 CHANNEL = {
     "id": "C1",

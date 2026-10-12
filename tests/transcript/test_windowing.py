@@ -10,9 +10,9 @@ from uuid import uuid7
 import pytest
 from fastapi import HTTPException
 
-from agent.transcript.cursor import TurnPageCursor, decode_turn_cursor, encode_turn_cursor
-from agent.transcript.engine import Command, append
-from agent.transcript.events import (
+from openswe.transcript.cursor import TurnPageCursor, decode_turn_cursor, encode_turn_cursor
+from openswe.transcript.engine import Command, append
+from openswe.transcript.events import (
     CheckpointFile,
     MessageCompleted,
     MessageSender,
@@ -22,8 +22,8 @@ from agent.transcript.events import (
     TurnCheckpointCompleted,
     TurnRequested,
 )
-from agent.transcript.routes import api_get_thread_transcript_turns
-from agent.transcript.snapshot import load_snapshot, load_turn_page
+from openswe.transcript.routes import api_get_thread_transcript_turns
+from openswe.transcript.snapshot import load_snapshot, load_turn_page
 
 OWNER = "test-user"
 SESSION = {"sub": OWNER, "email": f"{OWNER}@example.com"}

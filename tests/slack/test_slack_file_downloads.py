@@ -6,9 +6,9 @@ from urllib.parse import urlparse
 import httpx2
 import pytest
 
-from agent.slack import client as slack_client
-from agent.slack import webhook as slack_webhook
-from agent.utils import url_safety
+from openswe.slack import client as slack_client
+from openswe.slack import webhook as slack_webhook
+from openswe.utils import url_safety
 
 
 class DownloadStream(httpx2.AsyncByteStream):
@@ -155,7 +155,7 @@ async def test_download_slack_files_uploads_before_downloading_next_file(
     backend = MagicMock()
     backend.aupload_files = upload
     monkeypatch.setattr(
-        "agent.sandboxes.lifecycle.ensure_sandbox_for_thread", AsyncMock(return_value=backend)
+        "openswe.sandboxes.lifecycle.ensure_sandbox_for_thread", AsyncMock(return_value=backend)
     )
     monkeypatch.setattr(slack_client, "download_slack_file", download)
 
@@ -176,7 +176,7 @@ async def test_download_slack_files_uploads_before_downloading_next_file(
 
 @pytest.mark.asyncio
 async def test_download_slack_file_requires_a_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.slack import client as slack_client
+    from openswe.slack import client as slack_client
 
     monkeypatch.setattr(slack_client, "SLACK_BOT_TOKEN", "")
 

@@ -10,10 +10,10 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from agent.incidents import channels
-from agent.slack import routes
-from agent.slack.payloads import SlackChannelContext
-from agent.webhooks import common
+from openswe.incidents import channels
+from openswe.slack import routes
+from openswe.slack.payloads import SlackChannelContext
+from openswe.webhooks import common
 
 _SIGNING_SECRET = "incidents-test-signing-secret"
 
@@ -197,7 +197,7 @@ def test_signed_wrong_installation_cannot_enroll(client, fake_store, monkeypatch
 
 
 def test_disabled_registered_channel_still_cannot_launch_coding(client, fake_store, monkeypatch):
-    from agent.incidents import service
+    from openswe.incidents import service
 
     fake_store.seed(
         ("incidents", "policies"),

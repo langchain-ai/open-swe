@@ -4,7 +4,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from agent.middleware.sanitize_openai_responses import _sanitize_messages
+from openswe.middleware.sanitize_openai_responses import _sanitize_messages
 
 
 def test_stateless_responses_replay_preserves_tool_history_without_mutation() -> None:
