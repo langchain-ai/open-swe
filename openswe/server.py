@@ -135,7 +135,7 @@ from openswe.middleware import (
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
-from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
+from openswe.middleware.model_selection import ModelSelectionState, RoutingMode, SelectedRoute
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware
 from openswe.middleware.require_user_reply import (
@@ -1072,6 +1072,50 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     error=None if prepared else "Model selection preparation failed",
                 )
 
+    async def _turn_route(
+        self, state: PrepareRunState, cfg: RunConfig, requested_model: str | None
+    ) -> SelectedRoute | None:
+        if self._model_selection is None:
+            return None
+        if requested_model:
+            return "default"
+        routing_state = cast(ModelSelectionState, state).copy()
+        if (
+            cfg.source == "dashboard"
+            and cfg.model_selection == "auto"
+            and cfg.model_selection_changed
+        ):
+            routing_state.pop("model_route", None)
+            routing_state.pop("requested_model", None)
+        return await self._model_selection.select_route(routing_state)
+
+    async def _sender_messages(
+        self,
+        state: PrepareRunState,
+        cfg: RunConfig,
+        triggering_user_identity: CollaboratorIdentity | None,
+    ) -> list[Any]:
+        bot_id = (
+            cfg.slack_thread.triggering_bot_id
+            if self._source == "slack" and cfg.slack_thread
+            else ""
+        )
+        subject_id = self._sender_subject_id(
+            state, f"system:slack-bot-{bot_id}" if bot_id else None
+        )
+        if subject_id is None:
+            return []
+        participants = await _thread_participants(
+            self._thread_id,
+            self._config or {},
+            triggering_user_identity,
+            sender_person_id=subject_id,
+            sender_display_name=(cfg.slack_thread.triggering_user_name if cfg.slack_thread else ""),
+            sender_timezone=(cfg.slack_thread.triggering_user_timezone if cfg.slack_thread else ""),
+            sender_slack_user_id=(cfg.slack_thread.triggering_user_id if cfg.slack_thread else ""),
+        )
+        return self._participants_messages(state, participants)
+
     async def _prepare_with_decision(
         self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
     ) -> dict[str, object]:  # noqa: ARG002
@@ -1287,55 +1331,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 if recent_context_audience is not None
                 else None
             )
-            attribution_model_id = self._model_id
-            attribution_effort = self._effort
-            attribution_route = None
-            if self._model_selection is not None:
-                routing_state = cast(ModelSelectionState, state).copy()
-                if (
-                    cfg.source == "dashboard"
-                    and cfg.model_selection == "auto"
-                    and cfg.model_selection_changed
-                ):
-                    routing_state.pop("model_route", None)
-                    routing_state.pop("requested_model", None)
-                attribution_route = (
-                    "default"
-                    if requested_model
-                    else await self._model_selection.select_route(routing_state)
-                )
-                if attribution_route != "default":
-                    attribution_model_id, attribution_effort = self._routing_defaults[
-                        attribution_route
-                    ]
+            attribution_route, sender_messages = await asyncio.gather(
+                self._turn_route(state, cfg, requested_model),
+                self._sender_messages(state, cfg, triggering_user_identity),
+            )
+            attribution_model_id, attribution_effort = (
+                self._routing_defaults[attribution_route]
+                if attribution_route not in (None, "default")
+                else (self._model_id, self._effort)
+            )
             configurable["resolved_agent_model_id"] = attribution_model_id
             configurable["resolved_agent_effort"] = attribution_effort
-            bot_id = (
-                cfg.slack_thread.triggering_bot_id
-                if self._source == "slack" and cfg.slack_thread
-                else ""
-            )
-            subject_id = self._sender_subject_id(
-                state, f"system:slack-bot-{bot_id}" if bot_id else None
-            )
-            sender_messages: list[Any] = []
-            if subject_id is not None:
-                participants = await _thread_participants(
-                    self._thread_id,
-                    self._config or {},
-                    triggering_user_identity,
-                    sender_person_id=subject_id,
-                    sender_display_name=(
-                        cfg.slack_thread.triggering_user_name if cfg.slack_thread else ""
-                    ),
-                    sender_timezone=(
-                        cfg.slack_thread.triggering_user_timezone if cfg.slack_thread else ""
-                    ),
-                    sender_slack_user_id=(
-                        cfg.slack_thread.triggering_user_id if cfg.slack_thread else ""
-                    ),
-                )
-                sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
