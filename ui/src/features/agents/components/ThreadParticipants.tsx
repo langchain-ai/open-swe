@@ -33,9 +33,9 @@ export function ThreadParticipants({ threadId }: { threadId: string }) {
         onPointerEnter={() => setOpen(true)}
         aria-label={`View ${people.length} thread participant${people.length === 1 ? "" : "s"}`}
         data-no-drag=""
-        className="focus-visible:outline-brand rounded-full p-1 hover:bg-surface-level-2 focus-visible:outline-2"
+        className="focus-visible:outline-brand rounded-full p-space-1 hover:bg-surface-level-2 focus-visible:outline-2"
       >
-        <span className="flex -space-x-1">
+        <span className="flex -space-x-space-1">
           {people.slice(0, 3).map((person) => (
             <ParticipantAvatar key={person.id} person={person} />
           ))}
@@ -48,7 +48,7 @@ export function ThreadParticipants({ threadId }: { threadId: string }) {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64">
         <h3 className="font-medium">Participants · {people.length}</h3>
-        <ul className="mt-3 max-h-64 space-y-3 overflow-y-auto">
+        <ul className="mt-space-3 max-h-64 space-y-space-3 overflow-y-auto">
           {people.map((person) => (
             <li key={person.id} className="flex items-center gap-2.5">
               <ParticipantAvatar person={person} />
