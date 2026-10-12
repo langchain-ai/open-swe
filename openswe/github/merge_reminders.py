@@ -7,8 +7,13 @@ from html import escape
 from langgraph_sdk import get_client
 
 from openswe.dashboard.profiles import get_valid_access_token
-from openswe.expedited_review.readiness import assess_readiness
-from openswe.github.pull_request_status import OpenPullRequest, list_open_pull_requests
+from openswe.expedited_review.readiness import Readiness
+from openswe.github.http import GitHubClient
+from openswe.github.pull_request_status import (
+    OpenPullRequest,
+    PullRequestClient,
+    list_open_pull_requests,
+)
 from openswe.slack.dm import send_dm
 from openswe.store import get_value, put_value
 from openswe.users import User
@@ -61,34 +66,35 @@ async def run_reminders(login: str) -> dict[str, int]:
     today = datetime.now(UTC).date().isoformat()
     sent = 0
     page: int | None = 1
-    while page is not None:
-        results = await list_open_pull_requests(login, token, page=page)
-        if results.incomplete:
-            logger.warning("Incomplete PR search for merge reminders", extra={"login": login})
-            break
-        for pr in results.pull_requests:
-            key = f"{pr.repo}#{pr.number}"
-            if not qualifies(pr) or await get_value(namespace, key) == {"date": today}:
-                continue
-            owner, repo = pr.repo.split("/", 1)
-            readiness = await assess_readiness(
-                owner=owner, repo=repo, pr_number=pr.number, token=token
-            )
-            if readiness is None or readiness.snapshot.head_sha != pr.head_sha:
-                continue
-            if any("unresolved review" not in blocker for blocker in readiness.blockers):
-                continue
-            url = f"https://github.com/{pr.repo}/pull/{pr.number}"
-            suffix = (
-                f" — {pr.unresolved_threads} unresolved review thread(s) to address."
-                if pr.unresolved_threads
-                else " — ready to merge."
-            )
-            if await send_dm(
-                user.slack_user_id,
-                f"Approved: <{url}|{escape(pr.title, quote=False)}> ({pr.repo}){suffix}",
-            ):
-                await put_value(namespace, key, {"date": today})
-                sent += 1
-        page = results.next_page
+    async with GitHubClient.connect(token=token) as github:
+        while page is not None:
+            results = await list_open_pull_requests(github, login, page=page)
+            if results.incomplete:
+                logger.warning("Incomplete PR search for merge reminders", extra={"login": login})
+                break
+            for pr in results.pull_requests:
+                key = f"{pr.repo}#{pr.number}"
+                if not qualifies(pr) or await get_value(namespace, key) == {"date": today}:
+                    continue
+                owner, repo = pr.repo.split("/", 1)
+                readiness = await Readiness.assess(
+                    PullRequestClient(github.repo(owner, repo), pr.number)
+                )
+                if readiness is None or readiness.snapshot.head_sha != pr.head_sha:
+                    continue
+                if any("unresolved review" not in blocker for blocker in readiness.blockers):
+                    continue
+                url = f"https://github.com/{pr.repo}/pull/{pr.number}"
+                suffix = (
+                    f" — {pr.unresolved_threads} unresolved review thread(s) to address."
+                    if pr.unresolved_threads
+                    else " — ready to merge."
+                )
+                if await send_dm(
+                    user.slack_user_id,
+                    f"Approved: <{url}|{escape(pr.title, quote=False)}> ({pr.repo}){suffix}",
+                ):
+                    await put_value(namespace, key, {"date": today})
+                    sent += 1
+            page = results.next_page
     return {"sent": sent}
