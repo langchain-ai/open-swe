@@ -84,6 +84,28 @@ class WorkspaceRepositoryRow(Base):
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
+class WorkspaceWorkflowPolicyRow(Base):
+    """A workflow Open SWE may dispatch in a bound repository.
+
+    Keyed on the binding, so unbinding the repository or deleting its workspace
+    revokes every policy with it.
+    """
+
+    __tablename__ = "workspace_workflow_policy"
+
+    repository_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspace_repository.repository_id", ondelete="CASCADE"), primary_key=True
+    )
+    workflow: Mapped[str] = mapped_column(primary_key=True)
+    ref: Mapped[str]
+    fixed_inputs: Mapped[dict[str, str]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb"), default_factory=dict
+    )
+    allow_bot_inputs: Mapped[bool] = mapped_column(server_default="false", default=False)
+    admin_only: Mapped[bool] = mapped_column(server_default="false", default=False)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+
 class WorkspaceSlackChannelRow(Base):
     __tablename__ = "workspace_slack_channel"
 

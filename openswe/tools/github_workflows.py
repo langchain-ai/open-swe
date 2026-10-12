@@ -5,7 +5,7 @@ from typing import Literal
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient
-from openswe.github.workflows import WorkflowPolicies, WorkflowRule, workflow_identity
+from openswe.github.workflows import WorkflowPolicies, WorkflowRule, workflow_target
 from openswe.tools.access import Policy, access, ack, resolve_access
 from openswe.tools.admin_gate import configurable
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
@@ -27,7 +27,7 @@ async def manage_workflow_allowlist(
     admin_only: bool = False,
 ) -> dict[str, object]:
     """Configure one workflow's fixed ref and permitted inputs as an admin."""
-    repository, _ = workflow_identity(repository, workflow)
+    repository = workflow_target(repository, workflow)
     login = configurable().github_login
     if not login:
         raise ValueError("An authenticated requester is required")
@@ -67,7 +67,7 @@ async def trigger_github_workflow(
     inputs: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Dispatch an allowlisted workflow at its admin-fixed ref."""
-    repository, _ = workflow_identity(repository, workflow)
+    repository = workflow_target(repository, workflow)
     login = configurable().github_login
     if not login:
         raise ValueError("An authenticated requester is required")
