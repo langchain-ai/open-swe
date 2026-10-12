@@ -472,7 +472,7 @@ test.describe("Human review in Slack", () => {
     expect((await pull(request, seeded.number)).merged).toBe(true);
     expect((await latestRequest(request)).state).toBe("merged");
     expect(cardText(await reviewCard(request, posted))).toContain(
-      "Review request: merged",
+      ":merged:",
     );
     await shootCard(page, "merged");
   });
