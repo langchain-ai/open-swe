@@ -1174,7 +1174,7 @@ async def _wake_picker(
             return False
         return True
     return await ReviewCard(request).notify_agent(
-        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}"
+        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}", unlisted=True
     )
 
 
