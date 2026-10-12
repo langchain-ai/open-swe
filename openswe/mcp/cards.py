@@ -1,18 +1,20 @@
 """Connect cards for a workspace's managed tools, and the follow-up run once they work.
 
-The agent offers a card in a private thread when the owner has not connected every
-service in the workspace's LMT gateway. Each button opens Open SWE, which mints LMT's
-single-use consent link only for the card's owner, waits for that consent to finish,
-and queues one follow-up run once the whole gateway is usable. Waiting happens in
+The agent offers a card in a private thread for the services the owner asked to use
+and has not connected in the workspace's LMT gateway (every unconnected service, when
+the gateway offers no tools until all are connected). Each button opens Open SWE, which
+mints LMT's single-use consent link only for the card's owner, waits for that consent to
+finish, and queues one follow-up run once the card's services work. Waiting happens in
 the dashboard process that minted the link; if it restarts, the person says "continue".
 """
 
 import asyncio
 import logging
+from collections.abc import Coroutine
 from datetime import timedelta
 from urllib.parse import quote, urlencode
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.event_claims import claim, release
@@ -25,6 +27,7 @@ from openswe.mcp.managed import (
     consent_outcome,
     gateway_id,
     gateway_status,
+    refresh_tools,
 )
 from openswe.prompts import prompt
 from openswe.source_context import SourceContext
@@ -49,6 +52,41 @@ _CONTEXT: InputMessageContext = {
 _waiters: set[asyncio.Task[None]] = set()
 
 
+def _wait_in_background(waiting: Coroutine[object, object, None]) -> None:
+    task = asyncio.create_task(waiting)
+    _waiters.add(task)
+    task.add_done_callback(_waiters.discard)
+
+
+async def _consented(login: str, gateway: str, auth_id: str) -> bool:
+    """Wait out one consent link; once used, re-list the gateway so new tools load."""
+    outcome = await consent_outcome(login, auth_id)
+    if outcome != "completed":
+        logger.info("Managed tools consent not completed", extra={"outcome": outcome})
+        return False
+    await refresh_tools(login, gateway)
+    return True
+
+
+async def _refresh_after(login: str, gateway: str, auth_id: str) -> None:
+    try:
+        await _consented(login, gateway, auth_id)
+    except TimeoutError:
+        logger.info("Stopped waiting for managed tools consent", extra={"gateway": gateway})
+    except Exception:
+        logger.warning(
+            "Managed tools refresh after consent failed", extra={"gateway": gateway}, exc_info=True
+        )
+
+
+async def connect_service(login: str, gateway: str, slug: str) -> ConsentLink | None:
+    """A consent link for one service outside any thread; its tools load once it is used."""
+    link = await connect_link(login, gateway, slug)
+    if link is not None and link.auth_id:
+        _wait_in_background(_refresh_after(login, gateway, link.auth_id))
+    return link
+
+
 class ConnectCard(BaseModel):
     """A card the agent offered one person in a thread, for one gateway."""
 
@@ -56,6 +94,8 @@ class ConnectCard(BaseModel):
     card_id: str
     login: str
     gateway: str
+    services: list[str] = Field(default_factory=list)
+    """Slugs of the services the card offers; empty offers every unconnected one."""
 
     @classmethod
     async def load(cls, thread_id: str, card_id: str) -> ConnectCard | None:
@@ -81,23 +121,17 @@ class ConnectCard(BaseModel):
         """Mint a consent link for ``slug`` and resume the thread once it is used."""
         link = await connect_link(self.login, self.gateway, slug)
         if link is not None and link.auth_id:
-            task = asyncio.create_task(self._resume_after(link.auth_id))
-            _waiters.add(task)
-            task.add_done_callback(_waiters.discard)
+            _wait_in_background(self._resume_after(link.auth_id))
         return link
 
     async def _resume_after(self, auth_id: str) -> None:
         extra = {"agent_thread_id": self.thread_id, "card": self.card_id}
         try:
-            outcome = await consent_outcome(self.login, auth_id)
-            if outcome != "completed":
-                logger.info(
-                    "Managed tools consent not completed", extra={**extra, "outcome": outcome}
-                )
+            if not await _consented(self.login, self.gateway, auth_id):
                 return
-            # Another service may still be missing; its own consent resumes the thread.
+            # Another of the card's services may still be missing; its consent resumes.
             status = await gateway_status(self.login, self.gateway, [])
-            if not status.ready:
+            if status.missing_for(self.services):
                 return
             key = f"{self.thread_id}:{self.card_id}"
             if not await claim(_RESUME_SCOPE, key, ttl=timedelta(days=7)):
