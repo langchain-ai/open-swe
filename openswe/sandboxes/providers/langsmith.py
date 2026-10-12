@@ -17,6 +17,7 @@ from langsmith.sandbox import (
     ResourceNotFoundError,
     SandboxConnectionError,
     SandboxServerReloadError,
+    _ws_execute,  # noqa: PLC2701
 )
 from pydantic import BaseModel
 
@@ -27,6 +28,14 @@ from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.startup_trace import asubphase
 
 logger = logging.getLogger(__name__)
+
+# After a command's "exit" frame the SDK closes the WebSocket and waits up to this
+# long for the server's TCP FIN, which trails the close frame by about a second
+# through the proxy chain, so every command paid the full 100 ms default. The result
+# is already in hand by then. The SDK exposes the wait only as an env var it reads
+# at import, which another module may already have triggered, so the module global
+# (read per call) is set instead.
+_ws_execute.WS_CLOSE_TIMEOUT = 0.001
 
 try:
     from langsmith.sandbox import SandboxNotReadyError
