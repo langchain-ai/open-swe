@@ -17,6 +17,7 @@ import {
   usePinAgentThread,
   useRenameAgentThread,
   useResolveAgentThread,
+  useSeedAgentThreadDetails,
   useSidebarActiveThread,
   useSidebarPinnedThreads,
   useSidebarRepoThreads,
@@ -571,6 +572,38 @@ function wrapperFor(client: QueryClient) {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
 }
+
+describe("active thread menu metadata", () => {
+  it("refreshes menu actions from the sidebar without replacing live detail", () => {
+    const client = testClient()
+    const detail = optimisticThread("thread-1", { prompt: "Pending prompt" })
+    client.setQueryData(agentThreadKeys.detail(detail.id), detail)
+    const summary: AgentThread = {
+      ...detail,
+      traceUrl: "https://smith.langchain.com/trace/thread-1",
+      sandboxId: "sandbox-1",
+      messages: [],
+      pendingMessages: [],
+    }
+    const { rerender } = renderHook(
+      ({ threads }) => useSeedAgentThreadDetails(threads, detail.id),
+      { initialProps: { threads: [summary] }, wrapper: wrapperFor(client) }
+    )
+    expect(client.getQueryData(agentThreadKeys.detail(detail.id))).toEqual({
+      ...detail,
+      traceUrl: summary.traceUrl,
+      sandboxId: summary.sandboxId,
+      sourceUrl: summary.sourceUrl,
+      sourceAppUrl: summary.sourceAppUrl,
+      automationId: summary.automationId,
+    })
+    rerender({ threads: [{ ...summary, sandboxId: null }] })
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(detail.id))
+        ?.sandboxId
+    ).toBeNull()
+  })
+})
 
 describe("optimistic thread mutations", () => {
   const thread = {

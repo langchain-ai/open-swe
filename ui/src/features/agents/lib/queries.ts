@@ -591,8 +591,7 @@ export function useDeleteAgentSkill(organization = false) {
 // Sidebar lists and detail reads return the same per-thread summary, so warming
 // the detail cache from the already-fetched sidebar avoids a fan-out of one
 // request per thread. Navigation stays instant; the real (mark-viewed) fetch
-// fires only when a thread is actually opened. The active thread is skipped so
-// its live detail query stays the source of truth.
+// fires only when a thread is actually opened.
 export function useSeedAgentThreadDetails(
   threads: Array<AgentThread>,
   activeThreadId?: string
@@ -601,7 +600,21 @@ export function useSeedAgentThreadDetails(
 
   useEffect(() => {
     for (const thread of threads.flatMap(threadFamily)) {
-      if (thread.id === activeThreadId) continue
+      if (thread.id === activeThreadId) {
+        queryClient.setQueryData<AgentThread>(
+          agentThreadKeys.detail(thread.id),
+          (detail) =>
+            detail && {
+              ...detail,
+              traceUrl: thread.traceUrl,
+              sandboxId: thread.sandboxId,
+              sourceUrl: thread.sourceUrl,
+              sourceAppUrl: thread.sourceAppUrl,
+              automationId: thread.automationId,
+            }
+        )
+        continue
+      }
       // Seed as already-stale: the detail GET is what marks a thread viewed
       // server-side, so opening a seeded entry must still refetch despite the
       // detail query's `staleTime` (which exists for the optimistic seed).
