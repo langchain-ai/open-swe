@@ -2748,6 +2748,14 @@
         "title": "MCPOAuthUpdate",
         "type": "object"
       },
+      "MCPScope": {
+        "enum": [
+          "instance",
+          "workspace",
+          "user"
+        ],
+        "type": "string"
+      },
       "MCPToolDescription": {
         "properties": {
           "description": {
@@ -2764,6 +2772,33 @@
           "name"
         ],
         "title": "MCPToolDescription",
+        "type": "object"
+      },
+      "MCPToolProvenance": {
+        "additionalProperties": false,
+        "description": "Credential-free provenance from the caller's authorized connection sources.",
+        "properties": {
+          "connection_name": {
+            "title": "Connection Name",
+            "type": "string"
+          },
+          "overridden_scopes": {
+            "items": {
+              "$ref": "#/components/schemas/MCPScope"
+            },
+            "title": "Overridden Scopes",
+            "type": "array"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/MCPScope"
+          }
+        },
+        "required": [
+          "connection_name",
+          "scope",
+          "overridden_scopes"
+        ],
+        "title": "MCPToolProvenance",
         "type": "object"
       },
       "ManagedConnectResponse": {
@@ -6978,6 +7013,16 @@
           "description": {
             "title": "Description",
             "type": "string"
+          },
+          "mcp_provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPToolProvenance"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "title": "Name",
