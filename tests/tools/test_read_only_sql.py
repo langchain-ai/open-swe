@@ -69,7 +69,7 @@ async def test_read_only_sql_allows_admin_slack_dm(monkeypatch: pytest.MonkeyPat
     async def connection():
         yield conn
 
-    monkeypatch.setattr(sql_tool.postgres, "read_only_transaction", connection)
+    monkeypatch.setattr(sql_tool.postgres, "untrusted_read_only_transaction", connection)
     with patch(
         "openswe.run_config.get_config",
         return_value=_config(
@@ -119,7 +119,7 @@ async def test_read_only_sql_returns_json_safe_limited_rows(
     async def connection():
         yield conn
 
-    monkeypatch.setattr(sql_tool.postgres, "read_only_transaction", connection)
+    monkeypatch.setattr(sql_tool.postgres, "untrusted_read_only_transaction", connection)
     with patch(
         "openswe.run_config.get_config",
         return_value=_config(admin_thread=True, source="dashboard", github_login="admin"),
@@ -148,7 +148,7 @@ async def test_read_only_sql_hides_database_errors(monkeypatch: pytest.MonkeyPat
         raise RuntimeError("secret database detail")
         yield
 
-    monkeypatch.setattr(sql_tool.postgres, "read_only_transaction", connection)
+    monkeypatch.setattr(sql_tool.postgres, "untrusted_read_only_transaction", connection)
     with patch(
         "openswe.run_config.get_config",
         return_value=_config(admin_thread=True, source="dashboard", github_login="admin"),
