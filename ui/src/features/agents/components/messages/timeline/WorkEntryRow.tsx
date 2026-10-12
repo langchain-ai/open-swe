@@ -20,6 +20,7 @@ import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { KeyboardEvent, ReactNode } from "react"
 
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
+import { ElapsedSeconds } from "@/features/agents/components/messages/ElapsedSeconds"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
 
@@ -257,10 +258,14 @@ export function WorkEntryRow({
 
           <div className="flex shrink-0 items-center gap-space-1 text-secondary">
             {trailing}
-            {hoverTimestamp && (
-              <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-hover/entry:opacity-100">
-                {hoverTimestamp}
-              </time>
+            {entry.status === "in_progress" ? (
+              <ElapsedSeconds since={timestamp} />
+            ) : (
+              hoverTimestamp && (
+                <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-hover/entry:opacity-100">
+                  {hoverTimestamp}
+                </time>
+              )
             )}
             <span
               className="flex size-4 shrink-0 items-center justify-center"

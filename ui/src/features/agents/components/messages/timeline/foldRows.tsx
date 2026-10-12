@@ -13,11 +13,14 @@ import { ElapsedSeconds } from "@/features/agents/components/messages/ElapsedSec
 export function TurnFoldRow({
   label,
   active,
+  since,
   expanded,
   onToggle,
 }: {
   label: string
   active: boolean
+  /** When the live segment started, so its counter survives remounts. */
+  since?: string
   expanded: boolean
   onToggle: () => void
 }) {
@@ -38,7 +41,7 @@ export function TurnFoldRow({
       >
         {active && <LoadingIndicator className="mr-space-1 size-3" />}
         <span className={active ? "shimmer-text" : undefined}>{label}</span>
-        {active && <ElapsedSeconds />}
+        {active && <ElapsedSeconds since={since} />}
         <Caret size={12} weight="bold" aria-hidden />
       </button>
     </div>
