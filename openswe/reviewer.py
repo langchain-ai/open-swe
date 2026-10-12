@@ -825,10 +825,10 @@ async def prepare_reviewer_run(
         return content
 
     async def _fetch_approval_policy() -> str | None:
-        # Read at the base commit so a pull request cannot rewrite the policy it is judged by.
+        # Read from the default branch so a pull request cannot rewrite the policy it is judged by.
         if reviewer_eval:
             return None
-        return await approval_policy_for_review(repo_owner, repo_name, base_sha, token=github_token)
+        return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
 
     diff_context_task = asyncio.create_task(_fetch_diff_context())
     pr_overview_task = asyncio.create_task(_fetch_pr_overview())
