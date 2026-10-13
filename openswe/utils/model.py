@@ -106,7 +106,8 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
     provider defaults below (see :mod:`openswe.utils.gateway`).
     """
-    model_kwargs: dict[str, object] = dict(kwargs)
+    model_kwargs: dict[str, object] = dict(model_request_defaults(model_id))
+    model_kwargs.update(kwargs)
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
     if model_id.startswith(_TIMEOUT_PROVIDER_PREFIXES):
         model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
@@ -181,9 +182,14 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     return None
 
 
-def is_gemini_3_family(model_id: str) -> bool:
-    model_name = model_id.split(":", 1)[-1]
-    return model_name.startswith("gemini-3")
+def model_request_defaults(model_id: str) -> ModelKwargs:
+    if model_id == "google_genai:gemini-4-argon":
+        return {"timeout": 900.0, "temperature": None}
+    return {}
+
+
+def supports_google_thinking_level(model_id: str) -> bool:
+    return model_id.startswith("google_genai:gemini-3") or model_id == "google_genai:gemini-4-argon"
 
 
 def openai_reasoning_for(
@@ -273,7 +279,8 @@ def provider_model_kwargs(
     openai_reasoning_default: OpenAIReasoning | None = None,
 ) -> ModelKwargs:
     """Build provider-specific kwargs for ``make_model`` from a model id and effort."""
-    kwargs: ModelKwargs = {"max_tokens": max_tokens}
+    kwargs = model_request_defaults(model_id)
+    kwargs["max_tokens"] = max_tokens
     if model_id.startswith("openai:"):
         reasoning = openai_reasoning_for(profile_effort)
         if reasoning is not None:
@@ -287,7 +294,7 @@ def provider_model_kwargs(
         effort = anthropic_effort_for(profile_effort)
         if effort is not None:
             kwargs["effort"] = effort
-    elif model_id.startswith("google_genai:") and is_gemini_3_family(model_id):
+    elif supports_google_thinking_level(model_id):
         thinking_level = google_thinking_level_for(profile_effort)
         if thinking_level is not None:
             kwargs["thinking_level"] = thinking_level
