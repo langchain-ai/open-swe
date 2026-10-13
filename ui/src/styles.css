@@ -18,6 +18,14 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Tailwind v4 preflight resets buttons to the default cursor; Macaw sets none. */
+@layer base {
+    button:not(:disabled),
+    [role="button"]:not(:disabled) {
+        cursor: pointer;
+    }
+}
+
 body:has(.version-mismatch-banner) {
     .h-svh { height: calc(100svh - 2.5rem); }
     .min-h-svh { min-height: calc(100svh - 2.5rem); }
