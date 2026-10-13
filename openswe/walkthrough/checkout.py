@@ -13,6 +13,7 @@ from typing import Self
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
+from openswe.sandboxes.repo_prep import BLOBLESS_CLONE_ARGS
 from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import LineRef
 from openswe.walkthrough.render import render_chunk
@@ -76,7 +77,7 @@ class PinnedCheckout:
         )
         await self._run(
             f"[ -d {shlex.quote(name)}/.git ] || gh repo clone {shlex.quote(full_name)} "
-            f"{shlex.quote(name)} -- --quiet\n"
+            f"{shlex.quote(name)} -- --quiet {BLOBLESS_CLONE_ARGS}\n"
             f"cd {shlex.quote(name)}\n"
             f"for ref in {base} {head} {pull_ref}; do\n"
             '  git fetch --quiet origin "$ref" 2>/dev/null || true\n'
