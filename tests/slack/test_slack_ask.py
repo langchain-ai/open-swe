@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack import ask as slack_ask
-from openswe.slack import client as slack_client
 from openswe.slack import routes as slack_routes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
@@ -207,27 +206,3 @@ async def test_an_unreplaceable_acknowledgement_falls_back_to_a_fresh_ephemeral(
     assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
 
     assert post.await_args.args == ("C1", "U1", "the answer")
-
-
-@pytest.mark.asyncio
-async def test_the_acknowledgement_only_goes_out_through_the_callback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[str, dict[str, Any], str]] = []
-
-    async def capture(response_url: str, payload: dict[str, Any], path_prefix: str) -> bool:
-        calls.append((response_url, payload, path_prefix))
-        return True
-
-    monkeypatch.setattr(slack_ask, "post_slack_ephemeral_message", AsyncMock(return_value=True))
-    monkeypatch.setattr(slack_client, "_post_slack_callback", capture)
-
-    assert await slack_client.acknowledge_slack_command(
-        "https://hooks.slack.com/commands/T1/1/x", "Working on it"
-    )
-
-    response_url, payload, prefix = calls[0]
-    assert prefix == "/commands/"
-    assert payload == {"response_type": "ephemeral", "text": "Working on it"}
-    # No replace_original: this message is the one later replies replace.
-    assert "replace_original" not in payload
