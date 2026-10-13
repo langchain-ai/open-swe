@@ -92,6 +92,34 @@ async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> N
     access.assert_awaited_once_with("octocat", "acme/oss")
 
 
+@pytest.mark.parametrize("explicit_repo", [None, "acme/explicit"])
+async def test_create_session_uses_selected_workspace_personal_default(
+    monkeypatch, registry_db, explicit_repo: str | None
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(
+        monkeypatch,
+        profile={
+            "default_repo": "acme/oss",
+            "workspace_default_repos": {"selected": "acme/scoped"},
+        },
+    )
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    monkeypatch.setattr(thread_runs, "require_repo_access_for_user", AsyncMock())
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss", "acme/scoped"]), "octocat"
+    )
+    await WORKSPACES.create(WorkspaceCreate(name="Selected"), "octocat")
+    await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="Fix login", repo=explicit_repo, workspace="selected"),
+        "octocat",
+    )
+    metadata = created["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["repo_name"] == ("explicit" if explicit_repo else "scoped")
+    assert metadata["workspace"] == "selected"
+
+
 def _image() -> thread_runs.DashboardImageBody:
     return thread_runs.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),

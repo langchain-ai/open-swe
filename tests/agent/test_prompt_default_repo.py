@@ -5,6 +5,7 @@ import pytest
 from openswe import server
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.run_config import RunConfig
+from tests.conftest import FakeUserRecords
 
 
 @pytest.mark.parametrize(
@@ -26,6 +27,21 @@ def test_resolve_prompt_default_repo_never_loads_team_default(
     monkeypatch.setattr(server, "get_workspace_settings", fake_get_workspace_settings)
 
     assert asyncio.run(server._resolve_prompt_default_repo(config)) == expected
+
+
+@pytest.mark.parametrize("workspace", ["oss", "other"])
+async def test_prompt_default_uses_personal_workspace_then_global(
+    user_records: FakeUserRecords, workspace: str
+) -> None:
+    user_records.seed(
+        "profile",
+        "alice",
+        {"default_repo": "user/global", "workspace_default_repos": {"oss": "user/scoped"}},
+    )
+    repo = await server._resolve_prompt_default_repo(
+        RunConfig(workspace=workspace, github_login="alice")
+    )
+    assert repo == {"owner": "user", "name": "scoped" if workspace == "oss" else "global"}
 
 
 def test_resolve_prompt_default_repo_falls_back_to_team_default(

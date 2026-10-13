@@ -189,9 +189,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # A follow-up stays in its thread's workspace; a new issue lands in the
     # repository's preferred one. Either way its default model and Fable flag
     # are the ones the vision fallback checks.
-    workspace = await common.get_thread_workspace(
-        thread_id
-    ) or await common.workspace_for_repo_config(repo_config)
+    workspace = (
+        await common.get_thread_workspace(thread_id)
+        or issue_data.get("default_repo_workspace")
+        or await common.workspace_for_repo_config(repo_config)
+    )
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:

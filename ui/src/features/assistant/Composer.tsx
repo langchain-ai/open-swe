@@ -1,5 +1,7 @@
 import { ArrowUpIcon, PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { useCallback, useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { api } from "@/lib/api"
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -13,6 +15,10 @@ import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
+import {
+  pickComposerRepo,
+  pickComposerWorkspace,
+} from "@/features/agents/lib/composerWorkspace"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useThreadMetadata } from "./AssistantProvider"
 
@@ -65,15 +71,62 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
   const { models, defaultSelection } = useModelOptions()
   const profile = useProfile()
   const repos = useRepos()
+  const preferences = useQuery({
+    queryKey: ["myPreferences"],
+    queryFn: api.getMyPreferences,
+    enabled: !thread,
+  })
   const workspaceQuery = useWorkspaceOptions(!thread)
   const workspaces = workspaceQuery.data?.workspaces ?? []
+  const workspace = pickComposerWorkspace({
+    override:
+      typeof config?.environment === "string" ? config.environment : null,
+    repoWorkspace: null,
+    userDefault: preferences.data?.default_workspace,
+    instanceDefault: workspaceQuery.data?.default_slug ?? null,
+    workspaces,
+  })
+  const repository = pickComposerRepo({
+    override:
+      config?.repo_explicitly_none === true
+        ? null
+        : config?.repo_from_default !== true && typeof config?.repo === "string"
+          ? config.repo
+          : initialRepo,
+    userDefault: profile.data?.default_repo ?? null,
+    userWorkspaceDefault: workspace
+      ? profile.data?.workspace_default_repos?.[workspace]
+      : undefined,
+    workspaceDefault:
+      workspaces.find((item) => item.slug === workspace)?.default_repo ?? null,
+    offered: repos.data?.repositories ?? [],
+  })
   const update = (values: Record<string, unknown>) =>
     aui.composer().setRunConfig({ custom: { ...config, ...values } })
 
   useEffect(() => {
-    if (config || !profile.data || disabled) return
+    if (
+      !profile.data ||
+      disabled ||
+      (!thread && (!preferences.data || !workspaceQuery.data || !repos.data))
+    )
+      return
+    if (config) {
+      if (
+        !thread &&
+        config.repo_from_default === true &&
+        (config.repo !== repository || (!config.environment && workspace))
+      )
+        aui.composer().setRunConfig({
+          custom: { ...config, repo: repository, environment: workspace },
+        })
+      return
+    }
     aui.composer().setRunConfig({
       custom: {
+        ...(!thread ? { environment: workspace } : {}),
+        repo: repository,
+        repo_from_default: initialRepo === undefined,
         ...modelConfigurable(
           thread?.modelSelection === "auto"
             ? null
@@ -83,8 +136,8 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
         ),
         ...(initialRepo === null
           ? { repo_explicitly_none: true }
-          : (initialRepo ?? profile.data.default_repo)
-            ? { repo: initialRepo ?? profile.data.default_repo }
+          : initialRepo
+            ? { repo: initialRepo }
             : {}),
       },
     })
@@ -95,7 +148,12 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
     disabled,
     initialRepo,
     profile.data,
+    repository,
     thread,
+    workspace,
+    preferences.data,
+    workspaceQuery.data,
+    repos.data,
   ])
 
   const selection =
@@ -158,9 +216,13 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                 aria-label="Repository"
                 hideSearch={false}
                 searchPlaceholder="Search repositories…"
-                value={typeof config?.repo === "string" ? config.repo : ""}
+                value={repository ?? ""}
                 onChange={(repo) =>
-                  update({ repo: repo || null, repo_explicitly_none: !repo })
+                  update({
+                    repo: repo || null,
+                    repo_explicitly_none: !repo,
+                    repo_from_default: false,
+                  })
                 }
                 options={[
                   { value: "", label: "No repository" },
@@ -176,13 +238,13 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                   value={
                     typeof config?.environment === "string"
                       ? config.environment
-                      : (workspaceQuery.data?.default_slug ?? "")
+                      : (workspace ?? "")
                   }
                   onChange={(environment) => {
                     if (environment) update({ environment })
                   }}
-                  options={workspaces.map((workspace) => ({
-                    value: workspace.slug,
+                  options={workspaces.map((item) => ({
+                    value: item.slug,
                   }))}
                   triggerClassName="max-w-32"
                 />

@@ -6,9 +6,11 @@ import time
 from fastapi import APIRouter
 
 from openswe.linear import webhook as service
+from openswe.thread_ids import linear_issue_thread_id
 from openswe.users import User
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.workspaces.routing import resolve_workspace
 
 router = APIRouter()
 
@@ -144,9 +146,17 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     else:
         comment_user_email = (data.get("user") or payload.get("actor") or {}).get("email")
         try:
+            login = await User.login_for_email(comment_user_email)
+            workspace = await common.get_thread_workspace(linear_issue_thread_id(issue_id))
+            if workspace is None:
+                workspace = (await resolve_workspace(login=login)).slug
             profile_repo = await common.get_profile_default_repo(
-                await User.login_for_email(comment_user_email)
+                login, workspace, fallback_global=False
             )
+            if profile_repo:
+                issue["default_repo_workspace"] = workspace
+            else:
+                profile_repo = await common.get_profile_default_repo(login)
         except Exception:  # noqa: BLE001
             common.logger.exception("Failed to apply dashboard default_repo for Linear user")
             profile_repo = None

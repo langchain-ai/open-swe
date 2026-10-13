@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
+from openswe.dashboard.agent_overrides import profile_default_repo
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -422,7 +423,14 @@ async def create_dashboard_session(
 ) -> str:
     """Create a fresh owned thread using the person's dashboard defaults."""
     profile = await get_profile(login) or {}
-    repo = body.repo if body.repo is not None else profile.get("default_repo")
+    repo = body.repo if body.repo is not None else profile_default_repo(profile)
+    workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
+    if body.repo is None:
+        preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
+        defaults = profile.get("workspace_default_repos")
+        if isinstance(defaults, dict) and defaults.get(preferred_workspace):
+            workspace = preferred_workspace
+        repo = profile_default_repo(profile, workspace)
     repo_config = _parse_repo(repo) or {}
     if repo:
         if not repo_config:
@@ -436,7 +444,7 @@ async def create_dashboard_session(
         repo_config=repo_config,
         prompt=body.prompt,
         visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
-        workspace=await _resolve_requested_workspace(body.workspace, repo_config, login=login),
+        workspace=workspace,
     )
     return str(thread["thread_id"])
 
@@ -913,6 +921,18 @@ async def _enrich_run_start_command(
         # the stamped metadata below).
         visibility = await _requested_visibility(client_configurable, login=login)
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
+        workspace = await _resolve_requested_workspace(
+            client_configurable.get("workspace") or client_configurable.get("environment"),
+            repo_config,
+            login=login,
+        )
+        if not repo_config and client_configurable.get("repo_explicitly_none") is not True:
+            profile = await get_profile(login) or {}
+            repo_config = _parse_repo(profile_default_repo(profile, workspace)) or {}
+            if repo_config:
+                await require_repo_access_for_user(
+                    login, f"{repo_config['owner']}/{repo_config['name']}"
+                )
         thread = await create_dashboard_thread_record(
             thread_id,
             login=login,
@@ -925,11 +945,7 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             model_selection=model_selection or "auto",
-            workspace=await _resolve_requested_workspace(
-                client_configurable.get("workspace") or client_configurable.get("environment"),
-                repo_config,
-                login=login,
-            ),
+            workspace=workspace,
         )
         metadata = thread_metadata(thread)
         if sandbox_bridge is not None:
