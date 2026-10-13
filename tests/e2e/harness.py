@@ -118,10 +118,11 @@ async def control_reset() -> JSONResponse:
     from sqlalchemy import delete
 
     from openswe.database import postgres
-    from openswe.threads.pins import ThreadPin
+    from openswe.threads.pins import THREAD_PINS
+    from openswe.users.records import UserRecord
 
     async with postgres.session() as session:
-        await session.execute(delete(ThreadPin))
+        await session.execute(delete(UserRecord).where(UserRecord.kind == THREAD_PINS.kind))
     for owner, repo in ((OWNER, REPO), (SECOND_OWNER, SECOND_REPO)):
         await cache_set(f"__lg_swr__:repo-settings:{owner}/{repo}".lower(), None)
     return JSONResponse({"ok": True})

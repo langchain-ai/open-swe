@@ -1,8 +1,9 @@
 """Dashboard content moved out of the LangGraph Store.
 
-Published plans with their review comments, pinned threads, and thread
-feedback prompts. A plan's ``value`` keeps the Store record's shape;
-``dismissed`` hides its inline preview until the next revision is published.
+Published plans with their review comments, and thread feedback. A plan's
+``value`` keeps the Store record's shape; ``dismissed`` hides its inline
+preview until the next revision is published. Pinned threads are
+``user_record`` rows of kind ``thread_pin``.
 """
 
 from alembic import op
@@ -32,14 +33,6 @@ def upgrade() -> None:
             anchor jsonb,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             PRIMARY KEY (thread_id, id)
-        )
-    """)
-    op.execute("""
-        CREATE TABLE thread_pin (
-            user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-            thread_id text NOT NULL,
-            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            PRIMARY KEY (user_id, thread_id)
         )
     """)
     op.execute("""
