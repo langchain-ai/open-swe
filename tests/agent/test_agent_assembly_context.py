@@ -655,6 +655,35 @@ def pinned_settings() -> dict[str, object]:
     }
 
 
+async def test_explicit_breakout_model_survives_startup_and_followup() -> None:
+    from openswe.server import PrepareAgentRunMiddleware
+
+    config = _base_config()
+    config["configurable"].update(
+        source="slack",
+        slack_breakout=True,
+        model_selection="explicit",
+        agent_model_id="anthropic:claude-opus-5-5",
+        agent_effort="max",
+    )
+    with patch("openswe.server.store_thread_settings", new_callable=AsyncMock) as store:
+        initial = await _capture_create_deep_agent_kwargs(config)
+    snapshot = cast(dict[str, object], store.call_args.args[2])
+    assert snapshot["model_handoff_complete"] is True
+    assert snapshot["model_routing_enabled"] is False
+    followup = await _capture_create_deep_agent_kwargs(_base_config(), thread_settings=snapshot)
+    for agent in (initial, followup):
+        calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+        assert calls[0][0] == "anthropic:claude-opus-5-5"
+        assert calls[0][1]["effort"] == "max"
+        prepare = next(
+            item
+            for item in cast(list[object], agent["middleware"])
+            if isinstance(item, PrepareAgentRunMiddleware)
+        )
+        assert prepare._requested_models is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["dashboard", "slack"])
 async def test_requested_model_survives_auto_followups_but_explicit_selection_wins(

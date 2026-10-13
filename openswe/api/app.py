@@ -31,6 +31,7 @@ from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
 from openswe.utils.event_loop import pin_single_event_loop
+from openswe.utils.http_pool import close_pool as close_http_pool
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await transcript_listener.stop()
         await LISTENER.stop()
         await stop_worker()
+        await close_http_pool()
         await database.close()
 
 

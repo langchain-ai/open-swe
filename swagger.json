@@ -1967,6 +1967,10 @@
       },
       "HumanReviewAvailability": {
         "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
           "available": {
             "title": "Available",
             "type": "boolean"
@@ -1978,10 +1982,16 @@
             },
             "title": "Blockers",
             "type": "array"
+          },
+          "permalink": {
+            "default": "",
+            "title": "Permalink",
+            "type": "string"
           }
         },
         "required": [
-          "available"
+          "available",
+          "active"
         ],
         "title": "HumanReviewAvailability",
         "type": "object"

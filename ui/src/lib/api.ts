@@ -1868,7 +1868,12 @@ export const api = {
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
   humanReviewAvailability: (pr: OpenPullRequest) =>
-    request<{ available: boolean; blockers: string[] }>(
+    request<{
+      available: boolean
+      active: boolean
+      permalink: string
+      blockers: string[]
+    }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
   requestHumanReview: (pr: OpenPullRequest, channel = "") =>
