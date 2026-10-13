@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 _NAMESPACE = "slack_solo_threads"
 _MAX_HISTORY_PAGES = 5
+# A mention's tracking runs after its webhook answers; a follow-up in the same
+# thread waits for it so it is judged against what the mention recorded.
+_mention_tracking: dict[tuple[str, str], asyncio.Task[bool]] = {}
 
 
 async def _thread_is_solo(channel_id: str, thread_ts: str, user_id: str) -> bool | None:
@@ -63,6 +66,8 @@ async def allow_solo_thread_followup(
     try:
         timestamp = float(message_ts)
         if not explicit_mention:
+            if (pending := _mention_tracking.get((channel_id, thread_ts))) is not None:
+                await asyncio.shield(pending)
             existing = await client.store.get_item(namespace, thread_ts)
             if not existing:
                 return False
@@ -108,3 +113,31 @@ async def allow_solo_thread_followup(
             exc_info=True,
         )
         return False
+
+
+def track_explicit_mention(
+    client: LangGraphClient, *, channel_id: str, thread_ts: str, message_ts: str, user_id: str
+) -> None:
+    """Record an @mention's sender for solo routing without holding up the reply.
+
+    The mention is answered either way; the record only decides whether later
+    untagged messages in the thread count as addressed to Open SWE.
+    """
+    task = asyncio.create_task(
+        allow_solo_thread_followup(
+            client,
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            message_ts=message_ts,
+            user_id=user_id,
+            explicit_mention=True,
+        )
+    )
+    key = (channel_id, thread_ts)
+    _mention_tracking[key] = task
+
+    def forget(done: asyncio.Task[bool]) -> None:
+        if _mention_tracking.get(key) is done:
+            del _mention_tracking[key]
+
+    task.add_done_callback(forget)
