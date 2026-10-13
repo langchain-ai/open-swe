@@ -101,9 +101,9 @@ async def stream_thread_events(
     headers = langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
     try:
-        async with httpx2.AsyncClient(
-            transport=pooled_transport(), timeout=_PROXY_STREAM_TIMEOUT
-        ) as client:
+        # Its own client, not the shared pool: the stream stays open for as long as
+        # a tab watches the thread, and open tabs must not starve other requests.
+        async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream("POST", url, content=body, headers=headers) as response:
                 if response.status_code >= 400:
                     error_body = await response.aread()
