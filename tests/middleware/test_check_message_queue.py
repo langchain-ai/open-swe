@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from openswe.attachments import envelope_attachments
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.check_message_queue import (
     LinearNotifyState,
@@ -73,3 +74,24 @@ async def test_check_message_queue_keeps_slack_for_a_message_relayed_by_another_
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
+
+
+@pytest.mark.asyncio
+async def test_check_message_queue_names_a_steered_follow_ups_attachments(
+    registry_db: None,
+) -> None:
+    fields = {"path": "/tmp/open-swe/attachments/a/report.html", "mime_type": "text/html"}
+    await QueuedMessage.put(
+        "thread-1",
+        {
+            "text": "see the report",
+            "attachments": [fields],
+            "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777004",
+            "sender": {"id": "github:octocat", "platform": "github", "github_login": "octocat"},
+        },
+    )
+
+    result = await _run({"messages": []})
+
+    assert result is not None
+    assert envelope_attachments(result["messages"][-1]["content"]) == [fields]

@@ -45,14 +45,21 @@ class LinearNotifyState(ReplySurfaceState):
 
 def _build_blocks_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
     text = payload.get("text", "")
-    # ``images`` is what follow-ups queued before attachments were generalized carry.
-    attachments = payload.get("attachments") or payload.get("images") or []
+    images = payload.get("images", []) or []
     blocks: list[dict[str, Any]] = []
     if text:
         blocks.append({"type": "text", "text": text})
-    if isinstance(attachments, list):
-        blocks.extend(block for block in attachments if isinstance(block, dict))
+    if isinstance(images, list):
+        blocks.extend(image for image in images if isinstance(image, dict))
     return blocks
+
+
+def _payload_attachments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """The fields of each file a dashboard send placed in the sandbox."""
+    attachments = payload.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    return [fields for fields in attachments if isinstance(fields, dict)]
 
 
 def _is_dashboard_queued_message(content: object) -> bool:
@@ -208,7 +215,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                     structured = build_input_messages(
                         blocks,
                         dashboard_input_context(
-                            person["id"], relayed_from if isinstance(relayed_from, str) else None
+                            person["id"],
+                            relayed_from if isinstance(relayed_from, str) else None,
+                            _payload_attachments(content),
                         ),
                         injected_dynamic_context_hashes=injected,
                     )

@@ -14,7 +14,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from openswe.attachments import MAX_ATTACHMENT_BYTES, SandboxAttachment, UnsupportedAttachment
+from openswe.attachments import MAX_ATTACHMENT_BYTES, StagedAttachment, UnsupportedAttachment
 from openswe.transcript.events import MessageAttachment
 from openswe.transcript.snapshot import reading
 
@@ -36,7 +36,7 @@ class PendingAttachment:
 
 
 def capture(
-    message_id: str, attachments: Sequence[SandboxAttachment]
+    message_id: str, attachments: Sequence[StagedAttachment]
 ) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
     """The metadata an event carries for ``attachments``, and the bytes to store beside it."""
     metadata: list[MessageAttachment] = []
@@ -58,7 +58,7 @@ def capture(
                 mime_type=placed.attachment.mime_type,
                 file_name=placed.attachment.file_name,
                 attachment_id=attachment_id,
-                path=placed.sandbox_path,
+                path=placed.path,
             )
         )
     return metadata, tuple(pending)

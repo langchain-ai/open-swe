@@ -560,6 +560,8 @@ describe("message attachments", () => {
                   attachment_id: "66666666-7777-8888-9999-000000000000",
                   path: "/tmp/open-swe/attachments/human-1/report.html",
                 }),
+                // A Slack file: in the sandbox, with no bytes on the transcript.
+                attachment({ path: "/tmp/open-swe/attachments/b/shot.png" }),
               ],
             }),
           ],
@@ -594,6 +596,12 @@ describe("message attachments", () => {
         mimeType: "text/html",
         fileName: "report.html",
         path: "/tmp/open-swe/attachments/human-1/report.html",
+      },
+      {
+        kind: "file",
+        mimeType: "image/png",
+        fileName: "shot.png",
+        path: "/tmp/open-swe/attachments/b/shot.png",
       },
     ])
   })

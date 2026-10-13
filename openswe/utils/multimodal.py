@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import httpx2
 
-from openswe.attachments import Attachment, UnsupportedAttachment
+from openswe.attachments import Attachment
 from openswe.config import ENV
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -59,11 +59,8 @@ def _auth_headers_for_url(original_url: str, current_url: str) -> dict[str, str]
     return None
 
 
-async def fetch_attachment_block(
-    url: str,
-    client: httpx2.AsyncClient,
-) -> dict[str, object] | None:
-    """Download a linked file as an attachment content block, or a note saying why not."""
+async def fetch_attachment(url: str, client: httpx2.AsyncClient) -> Attachment | None:
+    """Download a linked file as an attachment; ``None`` when it cannot be attached."""
     try:
         response = await request_with_safe_redirects(
             client,
@@ -72,23 +69,15 @@ async def fetch_attachment_block(
             headers_for_url=_auth_headers_for_url,
         )
         response.raise_for_status()
-        file_name = posixpath.basename(urlparse(url).path) or None
-        try:
-            attachment = Attachment.of(
-                response.content,
-                mime_type=response.headers.get("Content-Type"),
-                file_name=file_name,
-            )
-        except UnsupportedAttachment as exc:
-            logger.warning("Skipping a linked attachment", extra={"attachment_url": url})
-            return {"type": "text", "text": f"A linked file was not attached: {exc}."}
-        logger.info(
-            "Fetched a linked attachment",
-            extra={"attachment_url": url, "attachment_bytes": len(attachment.data)},
+        return Attachment.of(
+            response.content,
+            mime_type=response.headers.get("Content-Type"),
+            file_name=posixpath.basename(urlparse(url).path) or None,
         )
-        return attachment.to_block()
     except Exception:
-        logger.exception("Failed to fetch a linked attachment", extra={"attachment_url": url})
+        logger.warning(
+            "Could not attach a linked file", exc_info=True, extra={"attachment_url": url}
+        )
         return None
 
 

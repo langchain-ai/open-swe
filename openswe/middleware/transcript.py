@@ -38,7 +38,7 @@ from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 from sqlalchemy import text as sql
 
-from openswe.attachments import message_attachments
+from openswe.attachments import envelope_attachments
 from openswe.database import postgres
 from openswe.input_messages import (
     delivered_event_match_ids,
@@ -46,8 +46,6 @@ from openswe.input_messages import (
     message_sender_id,
 )
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.transcript import attachments as attachment_store
-from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
     TOOL_OUTPUT_PREVIEW_CHARS,
@@ -341,11 +339,19 @@ def _usage(message: AIMessage) -> MessageUsage | None:
     )
 
 
-def _human_attachments(
-    message: HumanMessage, message_id: str
-) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
-    """Files on a human message, as event metadata plus the bytes to store."""
-    return attachment_store.capture(message_id, message_attachments(message, message_id=message_id))
+def _human_attachments(message: HumanMessage) -> list[MessageAttachment]:
+    """The files a human message's envelope names in the sandbox.
+
+    Their bytes are not on the message; a dashboard send records them itself.
+    """
+    return [
+        MessageAttachment(
+            mime_type=fields.get("mime_type") or "application/octet-stream",
+            file_name=fields.get("name"),
+            path=fields["path"],
+        )
+        for fields in envelope_attachments(message.content)
+    ]
 
 
 def _tool_output(content: object) -> tuple[str, bool]:
@@ -787,7 +793,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 continue
             state.seen_human_ids.add(message_id)
             text = _transcribed_human_text(message)
-            attachments, pending = _human_attachments(message, message_id)
+            attachments = _human_attachments(message)
             if not text and not attachments:
                 continue
             state.enqueue(
@@ -807,7 +813,6 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                     actor_kind="user",
                     run_id=state.run_id,
                     turn_id=state.turn_id,
-                    attachments=pending,
                 )
             )
 
@@ -1086,9 +1091,9 @@ def _turn_requested(
     state: RunState, human: HumanMessage, ids: RunIds, metadata: Mapping[str, object]
 ) -> Command:
     message_id = human.id if isinstance(human.id, str) and human.id else str(uuid.uuid7())
-    # ``_start_run`` marks this message as seen, so its images can never be
+    # ``_start_run`` marks this message as seen, so its attachments can never be
     # recovered by ``_record_injected_humans``; they travel with the request.
-    attachments, pending = _human_attachments(human, message_id)
+    attachments = _human_attachments(human)
     return Command(
         command_id=f"turn:{state.turn_id}:requested",
         event=TurnRequested(
@@ -1105,7 +1110,6 @@ def _turn_requested(
         actor_kind="user",
         run_id=state.run_id,
         turn_id=state.turn_id,
-        attachments=pending,
     )
 
 

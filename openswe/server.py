@@ -143,7 +143,6 @@ from openswe.middleware.require_user_reply import (
     WEB_REPLY_SURFACE,
     ReplySurface,
 )
-from openswe.middleware.sandbox_attachments import SandboxAttachmentsMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import warn_stale_workspace
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
@@ -2143,7 +2142,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         else []
                     ),
                     TranscriptMiddleware(),
-                    SandboxAttachmentsMiddleware(agent_backend),
                     *([client_tools] if client_tools else []),
                     *(
                         [IncidentMiddleware(incident_session)]

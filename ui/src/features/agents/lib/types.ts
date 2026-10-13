@@ -202,11 +202,14 @@ export interface FileChunk {
   fileName?: string
 }
 
-/** A non-image file the transcript references; see `RemoteImageChunk`. */
+/**
+ * A file the transcript references; see `RemoteImageChunk`. Without a `url` its
+ * bytes were never captured, and only its sandbox `path` is known.
+ */
 export interface RemoteFileChunk {
   kind: "file"
-  url: string
-  credentials: "session" | "none"
+  url?: string
+  credentials?: "session" | "none"
   mimeType?: string
   fileName?: string
   /** Where the agent can read the file in its sandbox. */

@@ -874,8 +874,8 @@ function toolChunk(
 /**
  * The attachments a message carries, as chunks a renderer can show: an
  * attachment is fetched from our own API with the session, a bare `url` is a
- * remote reference the browser loads itself, and one with neither has no bytes
- * to show.
+ * remote reference the browser loads itself, and one with neither shows only
+ * its sandbox path, or nothing when it has none.
  */
 function attachmentChunks(
   threadId: string,
@@ -891,17 +891,16 @@ function attachmentChunks(
       : attachment.url
         ? { url: attachment.url, credentials: "none" as const }
         : null
-    if (!source) continue
+    if (!source && !attachment.path) continue
     const fields = {
-      ...source,
       ...(attachment.mime_type ? { mimeType: attachment.mime_type } : {}),
       ...(attachment.file_name ? { fileName: attachment.file_name } : {}),
       ...(attachment.path ? { path: attachment.path } : {}),
     }
     chunks.push(
-      attachment.mime_type.startsWith("image/")
-        ? { kind: "image", ...fields }
-        : { kind: "file", ...fields }
+      source && attachment.mime_type.startsWith("image/")
+        ? { kind: "image", ...source, ...fields }
+        : { kind: "file", ...source, ...fields }
     )
   }
   return chunks

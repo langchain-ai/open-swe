@@ -32,6 +32,7 @@ export function MessageFile({
       saveBlob(new Blob([bytes], { type: chunk.mimeType }), label)
       return
     }
+    if (!chunk.url) return
     if (chunk.credentials === "none") {
       window.open(chunk.url, "_blank", "noopener,noreferrer")
       return
@@ -43,14 +44,16 @@ export function MessageFile({
     }
   }, [chunk, label])
 
+  const downloadable = "base64" in chunk || Boolean(chunk.url)
   return (
     <button
       type="button"
+      disabled={!downloadable}
       onClick={() => void download()}
       title={path ? `${label} · ${path}` : label}
       data-testid="message-file"
       className={cn(
-        "flex max-w-full min-w-0 items-center gap-space-2 rounded-lg border border-default bg-surface-level-1 px-space-2 py-space-1 text-left transition-colors duration-normal hover:bg-surface-level-3 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+        "flex max-w-full min-w-0 items-center gap-space-2 rounded-lg border border-default bg-surface-level-1 px-space-2 py-space-1 text-left transition-colors duration-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none enabled:hover:bg-surface-level-3",
         className
       )}
     >

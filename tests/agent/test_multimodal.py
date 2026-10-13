@@ -8,7 +8,7 @@ import openswe.attachments as attachments
 import openswe.utils.url_safety as url_safety
 from openswe.utils.multimodal import (
     extract_image_urls,
-    fetch_attachment_block,
+    fetch_attachment,
 )
 
 
@@ -30,8 +30,8 @@ def test_extract_image_urls_ignores_non_images() -> None:
     assert extract_image_urls(text) == []
 
 
-def _png_block(file_name: str) -> dict[str, object]:
-    return {"type": "image", "base64": "cG5n", "mime_type": "image/png", "file_name": file_name}
+def _png(file_name: str) -> attachments.Attachment:
+    return attachments.Attachment(mime_type="image/png", file_name=file_name, data=b"png")
 
 
 def _addr_info(ip: str, port: int | None = None) -> tuple:
@@ -91,7 +91,7 @@ def _patch_image_dns(monkeypatch: Any) -> None:
     monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
 
 
-async def test_fetch_attachment_block_blocks_redirect_to_internal_url(monkeypatch: Any) -> None:
+async def test_fetch_attachment_blocks_redirect_to_internal_url(monkeypatch: Any) -> None:
     _patch_image_dns(monkeypatch)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
@@ -103,7 +103,7 @@ async def test_fetch_attachment_block_blocks_redirect_to_internal_url(monkeypatc
 
     client = FakeImageClient(responder)
 
-    result = await fetch_attachment_block(
+    result = await fetch_attachment(
         "https://example.com/start.png", cast(httpx2.AsyncClient, client)
     )
 
@@ -113,7 +113,7 @@ async def test_fetch_attachment_block_blocks_redirect_to_internal_url(monkeypatc
     assert client.calls[0]["headers"]["Host"] == "example.com"
 
 
-async def test_fetch_attachment_block_tries_each_validated_address(monkeypatch: Any) -> None:
+async def test_fetch_attachment_tries_each_validated_address(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         url_safety.socket,
         "getaddrinfo",
@@ -135,18 +135,18 @@ async def test_fetch_attachment_block_tries_each_validated_address(monkeypatch: 
 
     client = FakeImageClient(responder)
 
-    result = await fetch_attachment_block(
+    result = await fetch_attachment(
         "https://example.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
-    assert result == _png_block("image.png")
+    assert result == _png("image.png")
     assert [urlparse(call["url"]).hostname for call in client.calls] == [
         "93.184.216.34",
         "93.184.216.35",
     ]
 
 
-async def test_fetch_attachment_block_accepts_file_at_size_limit(monkeypatch: Any) -> None:
+async def test_fetch_attachment_accepts_file_at_size_limit(monkeypatch: Any) -> None:
     _patch_image_dns(monkeypatch)
     monkeypatch.setattr(attachments, "MAX_ATTACHMENT_BYTES", 3)
 
@@ -158,14 +158,14 @@ async def test_fetch_attachment_block_accepts_file_at_size_limit(monkeypatch: An
             content=b"png",
         )
 
-    result = await fetch_attachment_block(
+    result = await fetch_attachment(
         "https://example.com/image.png", cast(httpx2.AsyncClient, FakeImageClient(responder))
     )
 
-    assert result == _png_block("image.png")
+    assert result == _png("image.png")
 
 
-async def test_fetch_attachment_block_notes_file_above_size_limit(monkeypatch: Any) -> None:
+async def test_fetch_attachment_skips_file_above_size_limit(monkeypatch: Any) -> None:
     _patch_image_dns(monkeypatch)
     monkeypatch.setattr(attachments, "MAX_ATTACHMENT_BYTES", 3)
 
@@ -177,16 +177,14 @@ async def test_fetch_attachment_block_notes_file_above_size_limit(monkeypatch: A
             content=b"large",
         )
 
-    result = await fetch_attachment_block(
+    result = await fetch_attachment(
         "https://example.com/image.png", cast(httpx2.AsyncClient, FakeImageClient(responder))
     )
 
-    assert result is not None
-    assert result["type"] == "text"
-    assert str(result["text"]).startswith("A linked file was not attached")
+    assert result is None
 
 
-async def test_fetch_attachment_block_does_not_forward_slack_auth_to_redirect_host(
+async def test_fetch_attachment_does_not_forward_slack_auth_to_redirect_host(
     monkeypatch: Any,
 ) -> None:
     _patch_image_dns(monkeypatch)
@@ -209,18 +207,18 @@ async def test_fetch_attachment_block_does_not_forward_slack_auth_to_redirect_ho
 
     client = FakeImageClient(responder)
 
-    result = await fetch_attachment_block(
+    result = await fetch_attachment(
         "https://files.slack.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
-    assert result == _png_block("image.png")
+    assert result == _png("image.png")
     assert len(client.calls) == 2
     assert client.calls[0]["headers"]["Authorization"] == "Bearer test-slack-token"
     assert "Authorization" not in client.calls[1]["headers"]
     assert client.calls[1]["headers"]["Host"] == "cdn.example.com"
 
 
-async def test_fetch_attachment_block_does_not_add_slack_auth_after_untrusted_redirect(
+async def test_fetch_attachment_does_not_add_slack_auth_after_untrusted_redirect(
     monkeypatch: Any,
 ) -> None:
     _patch_image_dns(monkeypatch)
@@ -242,16 +240,16 @@ async def test_fetch_attachment_block_does_not_add_slack_auth_after_untrusted_re
 
     client = FakeImageClient(responder)
 
-    result = await fetch_attachment_block(
+    result = await fetch_attachment(
         "https://example.com/start.png", cast(httpx2.AsyncClient, client)
     )
 
-    assert result == _png_block("start.png")
+    assert result == _png("start.png")
     assert len(client.calls) == 2
     assert all("Authorization" not in call["headers"] for call in client.calls)
 
 
-async def test_fetch_attachment_block_keeps_auth_within_slack_host_family(monkeypatch: Any) -> None:
+async def test_fetch_attachment_keeps_auth_within_slack_host_family(monkeypatch: Any) -> None:
     _patch_image_dns(monkeypatch)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
 
@@ -271,11 +269,11 @@ async def test_fetch_attachment_block_keeps_auth_within_slack_host_family(monkey
 
     client = FakeImageClient(responder)
 
-    result = await fetch_attachment_block(
+    result = await fetch_attachment(
         "https://files.slack.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
-    assert result == _png_block("image.png")
+    assert result == _png("image.png")
     assert len(client.calls) == 2
     assert all(
         call["headers"]["Authorization"] == "Bearer test-slack-token" for call in client.calls

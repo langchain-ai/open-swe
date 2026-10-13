@@ -7,6 +7,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 import asyncio
 import posixpath
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -15,7 +16,14 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
-from openswe.attachments import MAX_ATTACHMENTS_PER_MESSAGE, Attachment, UnsupportedAttachment
+from openswe.attachments import (
+    MAX_ATTACHMENTS_PER_MESSAGE,
+    Attachment,
+    StagedAttachment,
+    UnsupportedAttachment,
+    envelope_data,
+)
+from openswe.attachments import stage as stage_attachments
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
@@ -238,23 +246,21 @@ def _slack_file_entries(messages: list[dict[str, Any]]) -> list[SlackFileEntry]:
     return entries
 
 
-async def _attachment_blocks(
+async def _slack_attachments(
     entries: list[SlackFileEntry], linked_image_urls: list[str]
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Content blocks for the files on the request and the images it links to.
+) -> tuple[list[Attachment], list[str]]:
+    """The files on the request and the images it links to, downloaded.
 
-    A file that cannot be attached comes back as a note instead, so the agent
+    A file that cannot be downloaded comes back as a note instead, so the agent
     knows it was there.
     """
-    blocks: list[dict[str, Any]] = []
+    attachments: list[Attachment] = []
     notes: list[str] = []
     for entry in entries[:MAX_ATTACHMENTS_PER_MESSAGE]:
         label = entry.name or posixpath.basename(urlparse(entry.url).path) or "a file"
         try:
             data = await slack_utils.download_slack_file(entry.url)
-            blocks.append(
-                Attachment.of(data, mime_type=entry.mime_type, file_name=entry.name).to_block()
-            )
+            attachments.append(Attachment.of(data, mime_type=entry.mime_type, file_name=entry.name))
         except slack_utils.SlackFileDownloadError as error:
             common.logger.info("Slack file download skipped", extra={"slack_error": error.code})
             notes.append(f"(Slack file {label} was not attached: {error.code}.)")
@@ -265,14 +271,9 @@ async def _attachment_blocks(
     if linked_image_urls[:remaining]:
         async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
             for url in linked_image_urls[:remaining]:
-                block = await common.fetch_attachment_block(url, http_client)
-                if block is None:
-                    continue
-                if block.get("type") == "text":
-                    notes.append(f"({block['text']})")
-                else:
-                    blocks.append(cast(dict[str, Any], block))
-    return blocks, notes
+                if attachment := await common.fetch_attachment(url, http_client):
+                    attachments.append(attachment)
+    return attachments, notes
 
 
 async def _slack_accounts_by_user_id(
@@ -391,6 +392,7 @@ def _slack_context_input(
     trigger_user_id: str = "",
     request_text: str,
     request_blocks: list[dict[str, Any]],
+    attachments: Sequence[StagedAttachment] = (),
     prior_message_text: str = "",
     is_breakout: bool = False,
     turn_context: str = "",
@@ -551,6 +553,7 @@ def _slack_context_input(
                 "data": {
                     "timestamp": event_ts,
                     "explicit_bot_mention": str(explicit_mention).lower(),
+                    **envelope_data([attachment.fields() for attachment in attachments]),
                 },
             },
         )
@@ -1243,13 +1246,6 @@ async def _process_slack_mention_impl(
     # A person writing in a closed guide wants it back.
     if guide is not None and guide.closed:
         await guide.set_closed(False)
-    attachments, attachment_notes = await _attachment_blocks(
-        _slack_file_entries(source_messages), linked_image_urls
-    )
-    if attachment_notes:
-        clean_text = "\n".join([clean_text, *attachment_notes])
-        content_blocks[0] = {**content_blocks[0], "text": clean_text}
-    content_blocks.extend(attachments)
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
     # queue while the thread is idle; an edit made after the agent finished waits
@@ -1259,6 +1255,21 @@ async def _process_slack_mention_impl(
     ):
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
         return False
+
+    attachments, attachment_notes = await _slack_attachments(
+        _slack_file_entries(source_messages), linked_image_urls
+    )
+    # A sandbox is only bound once the thread's ownership is recorded.
+    staged_attachments = (
+        await stage_attachments(thread_id, attachments, workspace_slug=thread_workspace)
+        if persisted
+        else []
+    )
+    if attachments and not persisted:
+        attachment_notes.append("(The attached files could not be placed in the sandbox.)")
+    if attachment_notes:
+        clean_text = "\n".join([clean_text, *attachment_notes])
+        content_blocks[0] = {**content_blocks[0], "text": clean_text}
 
     # Anything said in a DM is said to Open SWE, and the person expects the next
     # thing they type to redirect the work in front of them rather than queue
@@ -1292,6 +1303,7 @@ async def _process_slack_mention_impl(
         trigger_user_id=user_id,
         request_text=clean_text,
         request_blocks=content_blocks,
+        attachments=staged_attachments,
         prior_message_text=request.prior_message_text,
         is_breakout=bool(request.context_thread_ts),
         turn_context=turn_context,

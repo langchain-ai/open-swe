@@ -215,6 +215,7 @@ export async function materializeImages(
   const settled = await Promise.all(
     images.map(async (image): Promise<AttachmentChunk | null> => {
       if ("base64" in image) return image
+      if (!image.url) return null
       try {
         const response = await fetch(image.url, {
           credentials: image.credentials === "session" ? "include" : "omit",

@@ -1,10 +1,9 @@
 """Files a person attaches to a message.
 
-An attachment travels as a base64 ``image`` or ``file`` content block on the
-human message, so the transcript can store its bytes. The model never receives
-those bytes: before each model call the file is written into the sandbox and
-the block is replaced by a reference to its path, which the agent opens with
-``read_file`` when it wants to.
+A file is written into the thread's sandbox when its message arrives, and the
+message names it there: each file is an ``attachment_N`` element of the message's
+envelope giving its sandbox ``path``. The model opens it with ``read_file`` when it
+wants to; it never receives the bytes.
 """
 
 import base64
@@ -13,19 +12,18 @@ import logging
 import mimetypes
 import posixpath
 import re
-from collections.abc import Mapping
+import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from html import escape
 
-from langchain_core.messages import BaseMessage
-
-from openswe.prompts import prompt
+from openswe.input_messages import FieldValue, input_message_elements
 
 logger = logging.getLogger(__name__)
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 MAX_ATTACHMENTS_PER_MESSAGE = 10
 SANDBOX_ATTACHMENTS_DIR = "/tmp/open-swe/attachments"
+ATTACHMENT_ELEMENT_PREFIX = "attachment_"
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 
 
@@ -60,7 +58,7 @@ class Attachment:
 
     @classmethod
     def from_block(cls, block: object) -> Attachment | None:
-        """The attachment a base64 ``image``/``file`` block (or image data URL) carries."""
+        """The file a base64 ``image``/``file`` content block (or image data URL) carries."""
         if not isinstance(block, Mapping):
             return None
         kind = block.get("type")
@@ -86,68 +84,80 @@ class Attachment:
             file_name=file_name if isinstance(file_name, str) else None,
         )
 
-    def to_block(self) -> dict[str, object]:
-        return {
-            "type": "image" if self.mime_type.startswith("image/") else "file",
-            "base64": base64.b64encode(self.data).decode("ascii"),
-            "mime_type": self.mime_type,
-            **({"file_name": self.file_name} if self.file_name else {}),
-        }
-
 
 @dataclass(frozen=True, kw_only=True)
-class SandboxAttachment:
-    """An attachment as it sits on a message: its place there and its sandbox path."""
+class StagedAttachment:
+    """An attachment written into the sandbox, or the reason it could not be."""
 
     attachment: Attachment
-    position: int
-    sandbox_path: str
+    path: str
+    error: str | None = None
 
-    def reference(self, *, error: str | None = None) -> dict[str, str]:
-        """The text block the model sees in place of the file's bytes."""
+    def fields(self) -> dict[str, FieldValue | None]:
         return {
-            "type": "text",
-            "text": prompt(
-                "runs/message-attachment",
-                path=escape(self.sandbox_path),
-                mime_type=escape(self.attachment.mime_type),
-                file_name=escape(self.attachment.file_name or ""),
-                error=escape(error or ""),
-            ),
+            "path": self.path,
+            "mime_type": self.attachment.mime_type,
+            "name": self.attachment.file_name,
+            "error": self.error,
         }
 
 
-def message_attachments(
-    message: BaseMessage, *, message_id: str | None = None
-) -> list[SandboxAttachment]:
-    """Every attachment on ``message``, keyed by content-block index, with its sandbox path."""
-    message_id = message.id or message_id
-    if not isinstance(message.content, list) or not message_id:
+def envelope_data(
+    attachments: Sequence[Mapping[str, FieldValue | None]],
+) -> dict[str, Mapping[str, FieldValue | None]]:
+    """The ``attachment_N`` elements an input message's envelope carries, from each one's fields."""
+    return {
+        f"{ATTACHMENT_ELEMENT_PREFIX}{index}": fields
+        for index, fields in enumerate(attachments, start=1)
+    }
+
+
+def envelope_attachments(content: object) -> list[dict[str, str]]:
+    """The ``path``/``mime_type``/``name`` fields of each attachment a message's envelope names."""
+    return [
+        fields
+        for fields in input_message_elements(content, ATTACHMENT_ELEMENT_PREFIX)
+        if fields.get("path")
+    ]
+
+
+async def stage(
+    thread_id: str, attachments: Sequence[Attachment], *, workspace_slug: str | None
+) -> list[StagedAttachment]:
+    """Write ``attachments`` into the thread's sandbox, in order, under a fresh directory."""
+    if not attachments:
         return []
-    directory = posixpath.join(SANDBOX_ATTACHMENTS_DIR, _safe_name(message_id) or "message")
+    directory = posixpath.join(SANDBOX_ATTACHMENTS_DIR, str(uuid.uuid7()))
     used: set[str] = set()
-    found: list[SandboxAttachment] = []
-    for position, block in enumerate(message.content):
-        try:
-            attachment = Attachment.from_block(block)
-        except UnsupportedAttachment:
-            logger.warning(
-                "Skipping an unreadable message attachment",
-                exc_info=True,
-                extra={"attachment_message_id": message.id},
-            )
-            continue
-        if attachment is None:
-            continue
-        name = _unique(_file_name(attachment, len(found)), used)
-        found.append(
-            SandboxAttachment(
-                attachment=attachment,
-                position=position,
-                sandbox_path=posixpath.join(directory, name),
-            )
+    paths = [
+        posixpath.join(directory, _unique(_file_name(attachment, index), used))
+        for index, attachment in enumerate(attachments)
+    ]
+    try:
+        from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
+
+        backend = await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace_slug)
+        responses = await backend.aupload_files(
+            [(path, attachment.data) for path, attachment in zip(paths, attachments, strict=True)]
         )
-    return found
+        errors = [str(response.error) if response.error else None for response in responses]
+    except Exception:
+        logger.warning(
+            "Could not write attachments into the sandbox",
+            exc_info=True,
+            extra={"attachment_thread_id": thread_id},
+        )
+        errors = ["the sandbox was unavailable"] * len(attachments)
+    for path, error in zip(paths, errors, strict=True):
+        if error:
+            logger.warning(
+                "Could not write an attachment into the sandbox",
+                extra={"attachment_path": path, "attachment_error": error},
+            )
+    return [
+        StagedAttachment(attachment=attachment, path=path, error=error)
+        for attachment, path, error in zip(attachments, paths, errors, strict=True)
+    ]
 
 
 def _decode(encoded: str) -> bytes:
@@ -157,13 +167,11 @@ def _decode(encoded: str) -> bytes:
         raise UnsupportedAttachment("invalid attachment data") from exc
 
 
-def _safe_name(name: str) -> str:
-    return _UNSAFE_NAME.sub("_", name).strip("._")[:120]
-
-
 def _file_name(attachment: Attachment, index: int) -> str:
-    if attachment.file_name and (name := _safe_name(posixpath.basename(attachment.file_name))):
-        return name
+    if attachment.file_name:
+        name = _UNSAFE_NAME.sub("_", posixpath.basename(attachment.file_name)).strip("._")[:120]
+        if name:
+            return name
     extension = mimetypes.guess_extension(attachment.mime_type) or ""
     return f"attachment-{index + 1}{extension}"
 

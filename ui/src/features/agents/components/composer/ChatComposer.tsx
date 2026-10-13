@@ -136,6 +136,8 @@ export interface ChatComposerProps {
   followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
+  /** Accept only previewable images: a legacy local session hands attachments to its model. */
+  imagesOnly?: boolean
   droppedFiles?: { key: number; files: Array<File> } | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
@@ -286,6 +288,7 @@ export const ChatComposer = memo(function ChatComposer({
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
+  imagesOnly = false,
   models = [],
   selection = null,
   onSelectionChange,
@@ -593,26 +596,32 @@ export const ChatComposer = memo(function ChatComposer({
     ]
   )
 
-  const addFiles = useCallback(async (files: FileList | Array<File>) => {
-    const all = Array.from(files)
-    const accepted = all.filter((file) => file.size <= MAX_ATTACHMENT_BYTES)
-    const read = await Promise.all(accepted.map(fileToAttachmentChunk))
-    const valid = read.filter(
-      (attachment): attachment is AttachmentChunk => attachment !== null
-    )
-    let dropped = all.length - valid.length
-    setPendingImages((prev) => {
-      const next = [...prev, ...valid]
-      dropped += Math.max(0, next.length - MAX_ATTACHMENT_COUNT)
-      return next.slice(0, MAX_ATTACHMENT_COUNT)
-    })
-    if (dropped > 0)
-      setComposerError(
-        `Attach up to ${MAX_ATTACHMENT_COUNT} files of at most ${
-          MAX_ATTACHMENT_BYTES / (1024 * 1024)
-        }MB each.`
+  const addFiles = useCallback(
+    async (files: FileList | Array<File>) => {
+      const all = Array.from(files)
+      const accepted = all.filter(
+        (file) =>
+          file.size <= MAX_ATTACHMENT_BYTES &&
+          (!imagesOnly || PREVIEWABLE_IMAGE_TYPES.has(file.type))
       )
-  }, [])
+      const read = await Promise.all(accepted.map(fileToAttachmentChunk))
+      const valid = read
+        .filter(
+          (attachment): attachment is AttachmentChunk => attachment !== null
+        )
+        .slice(0, Math.max(0, MAX_ATTACHMENT_COUNT - pendingImages.length))
+      if (valid.length > 0) setPendingImages((prev) => [...prev, ...valid])
+      if (valid.length < all.length)
+        setComposerError(
+          imagesOnly
+            ? `Attach up to ${MAX_ATTACHMENT_COUNT} PNG, JPEG, GIF or WebP images.`
+            : `Attach up to ${MAX_ATTACHMENT_COUNT} files of at most ${
+                MAX_ATTACHMENT_BYTES / (1024 * 1024)
+              }MB each.`
+        )
+    },
+    [imagesOnly, pendingImages.length]
+  )
 
   useEffect(() => {
     if (droppedFiles)
@@ -826,6 +835,9 @@ export const ChatComposer = memo(function ChatComposer({
         )}
 
         <input
+          accept={
+            imagesOnly ? [...PREVIEWABLE_IMAGE_TYPES].join(",") : undefined
+          }
           className="hidden"
           multiple
           onChange={handleFileChange}
@@ -936,7 +948,7 @@ export const ChatComposer = memo(function ChatComposer({
                   className="size-3.5 shrink-0 text-icon-secondary"
                   weight="regular"
                 />
-                Attach files
+                {imagesOnly ? "Attach images" : "Attach files"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

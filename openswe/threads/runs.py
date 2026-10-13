@@ -7,15 +7,15 @@ from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 from fastapi import HTTPException
-from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from openswe.attachments import (
     MAX_ATTACHMENTS_PER_MESSAGE,
     Attachment,
+    StagedAttachment,
     UnsupportedAttachment,
-    message_attachments,
 )
+from openswe.attachments import stage as stage_attachments
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
@@ -75,10 +75,8 @@ from openswe.threads.summary import (
     thread_source,
 )
 from openswe.transcript import attachments as attachment_store
-from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
-    MessageAttachment,
     MessageCompleted,
     MessageSender,
     ThreadCreated,
@@ -511,18 +509,18 @@ def _command_prompt_text(content: Any) -> str:
 
 
 def _command_attachments(content: Any) -> tuple[Any, list[Attachment]]:
-    """``content`` with each attached file re-encoded from its verified bytes, and those files.
+    """``content`` without its attached files, and those files' verified bytes.
 
     Anything that is neither text nor a base64 file is refused, so nothing
-    unchecked reaches the model or the transcript.
+    unchecked reaches the sandbox or the transcript.
     """
     if not isinstance(content, list):
         return content, []
-    normalized: list[Any] = []
+    text: list[Any] = []
     attachments: list[Attachment] = []
     for block in content:
         if not isinstance(block, dict) or block.get("type") == "text":
-            normalized.append(block)
+            text.append(block)
             continue
         try:
             attachment = Attachment.from_block(block)
@@ -531,18 +529,18 @@ def _command_attachments(content: Any) -> tuple[Any, list[Attachment]]:
         if attachment is None:
             raise HTTPException(422, "attachments must be embedded as base64")
         attachments.append(attachment)
-        normalized.append(attachment.to_block())
     if len(attachments) > MAX_ATTACHMENTS_PER_MESSAGE:
         raise HTTPException(422, f"at most {MAX_ATTACHMENTS_PER_MESSAGE} files can be attached")
-    return normalized, attachments
+    return text, attachments
 
 
-def _transcript_attachments(
-    message: Mapping[str, Any], message_id: str
-) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
-    """The attachment metadata and bytes for the run message the graph will carry."""
-    human = HumanMessage(content=message.get("content") or "", id=message_id)
-    return attachment_store.capture(message_id, message_attachments(human))
+async def _stage_command_attachments(
+    thread_id: str, attachments: list[Attachment], metadata: Mapping[str, Any]
+) -> list[StagedAttachment]:
+    workspace = metadata.get("workspace") or metadata.get("environment")
+    return await stage_attachments(
+        thread_id, attachments, workspace_slug=workspace if isinstance(workspace, str) else None
+    )
 
 
 async def _resolve_sandbox_bridge(requested: object, *, owner_id: str) -> Bridge | None:
@@ -644,6 +642,7 @@ async def _attributed_run_messages(
     *,
     metadata: Mapping[str, Any],
     content: Any,
+    attachments: Sequence[StagedAttachment] = (),
     creating: bool,
     email: str | None,
     client: Any,
@@ -709,7 +708,9 @@ async def _attributed_run_messages(
         )
     structured = build_input_messages(
         content,
-        dashboard_input_context(sender_id, relayed_from),
+        dashboard_input_context(
+            sender_id, relayed_from, [attachment.fields() for attachment in attachments]
+        ),
         systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
@@ -831,11 +832,13 @@ async def _enrich_run_start_command(
             (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
         )
 
+    staged = await _stage_command_attachments(thread_id, command_attachments, metadata)
     structured, injected, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
         metadata=metadata,
         content=content,
+        attachments=staged,
         creating=creating,
         email=email,
         client=client,
@@ -908,7 +911,7 @@ async def _enrich_run_start_command(
             # deduplicates it — and the run then has to join the turn that was
             # recorded the first time rather than one nothing was written under.
             command_id = f"message:{message_id}:requested"
-            attachments, pending = _transcript_attachments(structured[-1], message_id)
+            attachments, pending = attachment_store.capture(message_id, staged)
             appended = await append(
                 thread_id,
                 [
@@ -1048,11 +1051,13 @@ async def steer_running_thread(
     live_run_id = turn.run_id if turn is not None else None
     if live_run_id is None and isinstance(latest_run_id, str) and latest_run_id:
         live_run_id = latest_run_id
+    staged = await _stage_command_attachments(thread_id, command_attachments, metadata)
     structured, _, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
         metadata=metadata,
         content=content,
+        attachments=staged,
         creating=False,
         email=email,
         client=client,
@@ -1068,7 +1073,7 @@ async def steer_running_thread(
 
     if turn is not None:
         turn_id = turn.turn_id
-        attachments, pending = _transcript_attachments(structured[-1], message_id)
+        attachments, pending = attachment_store.capture(message_id, staged)
         await append(
             thread_id,
             [
@@ -1092,7 +1097,7 @@ async def steer_running_thread(
 
     payload: dict[str, Any] = {
         "text": _command_prompt_text(content),
-        "attachments": [attachment.to_block() for attachment in command_attachments],
+        "attachments": [attachment.fields() for attachment in staged],
         "sender": {
             "id": f"github:{login}",
             "platform": "github",

@@ -1,11 +1,12 @@
 import asyncio
-import base64
 from typing import Any, cast
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
+from deepagents.backends.protocol import FileUploadResponse
 
+from openswe.attachments import envelope_attachments
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
@@ -432,9 +433,9 @@ async def slack_file_mention(monkeypatch, fake_store, registry_db):
             self.workspace_slug = workspace_slug
             self.files: dict[str, bytes] = {}
 
-        async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[dict]:
+        async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
             self.files.update(files)
-            return [{"error": None} for _ in files]
+            return [FileUploadResponse(path=path) for path, _ in files]
 
     provisioned: list[Sandbox] = []
 
@@ -488,19 +489,21 @@ async def slack_file_mention(monkeypatch, fake_store, registry_db):
     return request, client.threads, provisioned, captured
 
 
-async def test_slack_files_ride_on_the_request_as_attachments(slack_file_mention):
-    request, _, provisioned, captured = slack_file_mention
+async def test_slack_files_are_placed_in_the_sandbox_and_named_on_the_request(
+    slack_file_mention,
+):
+    request, threads, provisioned, captured = slack_file_mention
 
     await slack_webhooks._process_slack_mention_impl(request, None)
 
-    assert provisioned == []
+    assert threads.metadata["sandbox_id"] == "sandbox-for-slack-files"
+    ((path, data),) = provisioned[0].files.items()
+    assert path.startswith("/tmp/open-swe/attachments/") and path.endswith("/bundle.zip")
+    assert data == b"zip"
     trigger = captured["run_create"]["kwargs"]["input"]["messages"][-1]
-    assert {
-        "type": "file",
-        "base64": base64.b64encode(b"zip").decode("ascii"),
-        "mime_type": "application/zip",
-        "file_name": "bundle.zip",
-    } in trigger["content"]
+    assert envelope_attachments(trigger["content"]) == [
+        {"path": path, "mime_type": "application/zip", "name": "bundle.zip"}
+    ]
 
 
 async def test_slack_files_are_not_downloaded_without_an_account(monkeypatch, slack_file_mention):

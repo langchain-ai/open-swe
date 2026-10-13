@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+from openswe.attachments import Attachment, StagedAttachment, envelope_attachments
 from openswe.linear import webhook as linear_webhook
 
 
@@ -93,10 +94,13 @@ def _run_process(
         ),
         patch.object(
             linear_webhook.common,
-            "fetch_attachment_block",
+            "fetch_attachment",
             new_callable=AsyncMock,
-            side_effect=lambda url, _client: {"type": "image_url", "image_url": {"url": url}},
+            side_effect=lambda url, _client: Attachment.of(
+                b"png", mime_type="image/png", file_name=url.rsplit("/", 1)[-1]
+            ),
         ),
+        patch.object(linear_webhook, "stage_attachments", side_effect=_stage),
     ):
         asyncio.run(linear_webhook.process_linear_issue(issue_data, repo_config))
 
@@ -128,6 +132,15 @@ def test_linear_new_thread_lands_in_the_repositorys_preferred_workspace(fake_sto
     assert configurable["workspace"] == "oss"
 
 
+async def _stage(
+    thread_id: str, attachments: list[Attachment], *, workspace_slug: str | None
+) -> list[StagedAttachment]:
+    return [
+        StagedAttachment(attachment=attachment, path=f"/sandbox/{attachment.file_name}")
+        for attachment in attachments
+    ]
+
+
 def test_linear_comment_images_stay_with_their_comments(fake_store: Any) -> None:
     issue = _full_issue()
     issue["comments"]["nodes"] = [
@@ -151,8 +164,13 @@ def test_linear_comment_images_stay_with_their_comments(fake_store: Any) -> None
     )
 
     assert isinstance(content, dict)
-    human_messages = [
-        message for message in content["messages"] if isinstance(message["content"], list)
+    comments = [
+        message["content"]
+        for message in content["messages"]
+        if 'comment_id="comment-' in str(message["content"])
+        or "comment_id: comment-" in str(message["content"])
     ]
-    assert human_messages[0]["content"][1]["image_url"]["url"].endswith("one.png")
-    assert human_messages[1]["content"][1]["image_url"]["url"].endswith("two.png")
+    assert [envelope_attachments(comment) for comment in comments] == [
+        [{"path": "/sandbox/one.png", "mime_type": "image/png", "name": "one.png"}],
+        [{"path": "/sandbox/two.png", "mime_type": "image/png", "name": "two.png"}],
+    ]
