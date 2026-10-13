@@ -59,16 +59,16 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
     <div className="flex w-full max-w-[920px] flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
       <StandingPanel pr={pr} />
       {detail.walkthrough?.human_input && (
-        <section
-          aria-label="Human input"
-          className="rounded-xl border border-dashed border-default px-space-4 py-space-3"
-        >
-          <p className="mb-space-1 flex items-center gap-space-2 text-xs font-medium text-secondary">
+        <details className="group rounded-xl border border-dashed border-default px-space-4 py-space-3">
+          <summary className="flex cursor-pointer list-none items-center gap-space-2 rounded-sm text-xs font-medium text-secondary hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
             <AgentMark />
             What people asked for
-          </p>
-          <HumanInputText summary={detail.walkthrough.human_input} />
-        </section>
+            <CaretDownIcon className="ml-auto size-3 group-open:rotate-180" />
+          </summary>
+          <div className="pt-space-2">
+            <HumanInputText summary={detail.walkthrough.human_input} />
+          </div>
+        </details>
       )}
       <Description
         pr={pr}

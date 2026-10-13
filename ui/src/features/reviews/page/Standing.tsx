@@ -727,29 +727,35 @@ function OpenSweRow({
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
         action={
-          <>
-            {detail.thread_id && (
-              <Link
-                to="/agents/$threadId"
-                params={{ threadId: detail.thread_id }}
-                className={cn("text-xs", subtleLink)}
-              >
-                {running ? "Watch it work" : "See how it reviewed"}
-              </Link>
-            )}
-            {prOpen && (
-              <Button
-                size="sm"
-                color="secondary"
-                variant="plain"
-                leftDecorator={ArrowClockwiseIcon}
-                disabled={running}
-                onClick={() => reReview.mutate()}
-              >
-                {detail.status === "none" ? "Review" : "Re-review"}
-              </Button>
-            )}
-          </>
+          <details className="group/actions">
+            <summary className="flex cursor-pointer list-none items-center gap-space-1 rounded-sm text-xs text-secondary hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
+              Review actions
+              <CaretRightIcon className="size-3 group-open/actions:rotate-90" />
+            </summary>
+            <div className="flex flex-wrap items-center gap-space-3 pt-space-2">
+              {detail.thread_id && (
+                <Link
+                  to="/agents/$threadId"
+                  params={{ threadId: detail.thread_id }}
+                  className={cn("text-xs", subtleLink)}
+                >
+                  {running ? "Watch it work" : "See how it reviewed"}
+                </Link>
+              )}
+              {prOpen && (
+                <Button
+                  size="sm"
+                  color="secondary"
+                  variant="plain"
+                  leftDecorator={ArrowClockwiseIcon}
+                  disabled={running}
+                  onClick={() => reReview.mutate()}
+                >
+                  {detail.status === "none" ? "Review" : "Re-review"}
+                </Button>
+              )}
+            </div>
+          </details>
         }
       >
         {summary}
