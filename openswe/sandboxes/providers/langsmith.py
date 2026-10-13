@@ -13,6 +13,8 @@ from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import (
     DeleteResult,
     ExecuteResponse,
+    FileInfo,
+    LsResult,
     ReadResult,
     SandboxBackendProtocol,
     WriteResult,
@@ -60,6 +62,8 @@ SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
 _KILL_TIMEOUT_SECONDS = 5.0
+# The most entries the sandbox file API returns for one listing.
+_LS_MAX_ENTRIES = 1000
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -699,6 +703,25 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         client's pooled HTTP connection, so this is a single request.
         """
         return await asyncio.to_thread(self.read, file_path, offset, limit)
+
+    async def als(self, path: str) -> LsResult:
+        """List through the sandbox file API, keeping the listing command for its edge cases.
+
+        The file API caps a listing and answers a file path with no entries, so a
+        capped, empty or failed listing is redone by the base class's command.
+        """
+        try:
+            listing = await self._aget_sandbox().ls(path, limit=_LS_MAX_ENTRIES)
+        except ResourceNotFoundError:
+            return LsResult(error=f"Path '{path}': path_not_found")
+        except SandboxClientError:
+            logger.debug(
+                "Sandbox file API listing failed; using the listing command", exc_info=True
+            )
+            return await super().als(path)
+        if listing.truncated or not listing.matches:
+            return await super().als(path)
+        return LsResult(entries=[FileInfo(path=m.path, is_dir=m.is_dir) for m in listing.matches])
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         """Upload through the sandbox file API, which creates missing parent directories.
