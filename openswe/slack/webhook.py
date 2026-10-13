@@ -53,6 +53,7 @@ from openswe.slack.thinking import (
 )
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User, persist_display_name
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import as_json_object
 from openswe.utils.langsmith import create_langsmith_feedback, get_langsmith_trace_url
 from openswe.utils.thread_ops import (
@@ -643,16 +644,23 @@ async def process_slack_mention(
         and not request.concierge_mode
         and not request.message_update
     )
-    if show_status:
-        await restore_slack_thinking_status(request.channel_id, status_ts)
+    # Showing the status shouldn't hold up the run, but it has to land before the
+    # run's own status updates or a clear, or it would overwrite them.
+    status_shown = (
+        asyncio.ensure_future(restore_slack_thinking_status(request.channel_id, status_ts))
+        if show_status
+        else None
+    )
     try:
         status_handed_off = await _process_slack_mention_impl(
-            request, repo, inherited_workspace=inherited_workspace
+            request, repo, inherited_workspace=inherited_workspace, status_shown=status_shown
         )
-        if show_status and not status_handed_off:
+        if status_shown is not None and not status_handed_off:
+            await asyncio.wait({status_shown})
             await _clear_early_status_if_idle(request, status_ts)
     except Exception as exc:  # noqa: BLE001
-        if show_status:
+        if status_shown is not None:
+            await asyncio.wait({status_shown})
             await _clear_early_status_if_idle(request, status_ts)
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
@@ -798,10 +806,14 @@ async def process_slack_web_mention(
     repo: common.SlackRepoResolution | None,
     *,
     inherited_workspace: str | None = None,
+    model_choice: tuple[str, str | None] | None = None,
 ) -> bool:
     """Dispatch a web-only request seeded from Slack without Slack delivery."""
     return await _process_slack_mention_impl(
-        request.model_copy(update={"web_only": True}), repo, inherited_workspace=inherited_workspace
+        request.model_copy(update={"web_only": True}),
+        repo,
+        inherited_workspace=inherited_workspace,
+        model_choice=model_choice,
     )
 
 
@@ -810,6 +822,8 @@ async def _process_slack_mention_impl(
     repo_resolution: common.SlackRepoResolution | None,
     *,
     inherited_workspace: str | None = None,
+    model_choice: tuple[str, str | None] | None = None,
+    status_shown: asyncio.Future[bool] | None = None,
 ) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
@@ -1054,7 +1068,7 @@ async def _process_slack_mention_impl(
 
     # A DM always answers on the person's own default model: a per-thread model
     # choice is never routed into it.
-    thread_model_choice = None if concierge_mode else thread_record.model_choice
+    thread_model_choice = None if concierge_mode else model_choice or thread_record.model_choice
 
     # Routing comes before the run's repository: a repository nobody named
     # must not outrank the channel's binding, and once a workspace has won, a
@@ -1115,7 +1129,9 @@ async def _process_slack_mention_impl(
             resolved_model_id = fallback_model_id
             image_model_override = (fallback_model_id, fallback_effort)
         common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with httpx2.AsyncClient(
+            transport=pooled_transport(), timeout=common.DEFAULT_HTTP_TIMEOUT
+        ) as http_client:
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, http_client)
                 if image_block:
@@ -1415,6 +1431,8 @@ async def _process_slack_mention_impl(
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    if status_shown is not None:
+        await asyncio.wait({status_shown})
     try:
         run = await _dispatch_or_queue_slack_run(
             langgraph_client,

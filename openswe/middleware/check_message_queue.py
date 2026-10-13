@@ -37,6 +37,7 @@ from openswe.utils.dashboard_handoff import (
     dashboard_input_context,
 )
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,9 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:

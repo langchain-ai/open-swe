@@ -16,6 +16,7 @@ from openswe.utils import ttl_cache
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +197,7 @@ async def _identity_from_github_token(github_token: str | None) -> CollaboratorI
 
 async def _fetch_identity_from_github_token(github_token: str) -> CollaboratorIdentity | None:
     try:
-        async with httpx2.AsyncClient(timeout=5.0) as client:
+        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=5.0) as client:
             response = await client.get(
                 "https://api.github.com/user",
                 headers={
@@ -264,7 +265,9 @@ async def _fetch_public_github_profile(login: str) -> GitHubPublicProfile | None
     if not token:
         return None
     try:
-        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(
+            transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+        ) as client:
             response = await client.get(
                 f"https://api.github.com/users/{login}",
                 headers={

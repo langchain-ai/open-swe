@@ -23,7 +23,7 @@ from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import Origin, RequestResult, request_review, review_blockers
-from openswe.slack.client import GitHubPrRef
+from openswe.slack.client import GitHubPrRef, get_slack_permalink
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -144,6 +144,8 @@ def _pr_ref(owner: str, repo: str, number: int) -> GitHubPrRef:
 
 class HumanReviewAvailability(BaseModel):
     available: bool
+    active: bool
+    permalink: str = ""
     blockers: list[str] = []
 
 
@@ -162,7 +164,16 @@ async def api_human_review_availability(
         channel = await settings.channel_for_pr(pull)
         active = await HumanReviewRequest.active_for(owner, repo, number)
         blockers = None if active is not None else await review_blockers(pull)
-    return HumanReviewAvailability(available=bool(channel), blockers=blockers or [])
+    return HumanReviewAvailability(
+        available=bool(channel),
+        active=active is not None,
+        permalink=(
+            await get_slack_permalink(active.slack_channel_id, active.slack_message_ts) or ""
+            if active is not None
+            else ""
+        ),
+        blockers=blockers or [],
+    )
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review")

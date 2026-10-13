@@ -43,6 +43,17 @@ const title = "Show the thread title"
 afterEach(cleanup)
 
 describe("AgentThreadHeader", () => {
+  it.each(["Cloud", "This Mac", "Local CLI"] as const)(
+    "only shows the run target indicator for local targets: %s",
+    (target) => {
+      render(<AgentThreadHeader target={target} panelCollapsed={false} />)
+      const indicator = screen.queryByRole("img", {
+        name: `Runs on ${target}`,
+      })
+      expect(Boolean(indicator)).toBe(target !== "Cloud")
+    }
+  )
+
   it("saves a trimmed title once on Enter then blur", async () => {
     const onRename = vi.fn().mockResolvedValue(undefined)
     render(

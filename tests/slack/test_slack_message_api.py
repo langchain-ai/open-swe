@@ -85,7 +85,9 @@ async def test_upload_completes_external_upload_without_sending_token(slack_api,
     with patch.object(
         httpx2,
         "AsyncClient",
-        side_effect=lambda **kwargs: async_client(**kwargs, transport=httpx2.MockTransport(upload)),
+        side_effect=lambda **kwargs: async_client(
+            **{**kwargs, "transport": httpx2.MockTransport(upload)}
+        ),
     ):
         assert (
             await slack_utils.upload_slack_thread_file(
@@ -130,7 +132,9 @@ async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect, monk
     with patch.object(
         httpx2,
         "AsyncClient",
-        side_effect=lambda **kwargs: async_client(**kwargs, transport=httpx2.MockTransport(upload)),
+        side_effect=lambda **kwargs: async_client(
+            **{**kwargs, "transport": httpx2.MockTransport(upload)}
+        ),
     ):
         with pytest.raises(slack_utils.SlackRequestError, match="unsafe_upload_url"):
             await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")

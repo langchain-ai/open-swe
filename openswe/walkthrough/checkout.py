@@ -7,12 +7,14 @@ everything is read through those refs and the working tree is never touched.
 
 import re
 import shlex
+import uuid
 from dataclasses import dataclass
 from typing import Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
+from openswe.sandboxes.repo_prep import BLOBLESS_CLONE_ARGS
 from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import LineRef
 from openswe.walkthrough.render import render_chunk
@@ -76,11 +78,15 @@ class PinnedCheckout:
         )
         await self._run(
             f"[ -d {shlex.quote(name)}/.git ] || gh repo clone {shlex.quote(full_name)} "
-            f"{shlex.quote(name)} -- --quiet\n"
+            f"{shlex.quote(name)} -- --quiet {BLOBLESS_CLONE_ARGS}\n"
             f"cd {shlex.quote(name)}\n"
-            f"for ref in {base} {head} {pull_ref}; do\n"
-            '  git fetch --quiet origin "$ref" 2>/dev/null || true\n'
+            # The scout's repo prep has usually fetched both already; each fetch is a GitHub round trip.
+            f"for sha in {base} {head}; do\n"
+            '  git cat-file -e "$sha^{commit}" 2>/dev/null'
+            ' || git fetch --quiet origin "$sha" 2>/dev/null || true\n'
             "done\n"
+            f"git cat-file -e {head}^{{commit}} 2>/dev/null"
+            f" || git fetch --quiet origin {pull_ref} 2>/dev/null || true\n"
             f"git cat-file -e {base}^{{commit}}\n"
             f"git cat-file -e {head}^{{commit}}\n"
             f"git update-ref {MERGE_BASE_REF} $(git merge-base {base} {head})\n"
@@ -100,30 +106,38 @@ class PinnedCheckout:
     async def changes(self) -> list[FileChange]:
         return parse(await self.diff())
 
-    async def head_file(self, path: str) -> str:
-        return await self._run(f"git show {HEAD_REF}:{shlex.quote(path)}")
+    async def head_files(self, paths: list[str]) -> dict[str, list[str]]:
+        """``paths`` at the head, as lines, read in one sandbox round trip."""
+        if not paths:
+            return {}
+        marker = f"walkthrough-file-{uuid.uuid4().hex}"
+        output = await self._run(
+            "".join(
+                f"printf '%s\\n' {marker}\ngit show {HEAD_REF}:{shlex.quote(path)}\nprintf '\\n'\n"
+                for path in paths
+            )
+        )
+        # Each file is followed by one extra newline, so a missing final newline can't
+        # glue its last line to the next marker.
+        texts = [text.removesuffix("\n") for text in output.split(f"{marker}\n")[1:]]
+        return {path: text.splitlines() for path, text in zip(paths, texts, strict=True)}
 
-    async def render(
-        self,
-        refs: list[LineRef],
-        changes: list[FileChange],
-        *,
-        head_files: dict[str, list[str]] | None = None,
-    ) -> str:
-        """``refs`` as a reader sees a chunk: its own lines only, at real line numbers.
+    async def render(self, refs: list[LineRef], changes: list[FileChange]) -> str:
+        """``refs`` as a reader sees a chunk: its own lines only, at real line numbers."""
+        return (await self.render_chunks([refs], changes))[0]
 
-        ``head_files`` caches files read at the head across calls.
-        """
+    async def render_chunks(
+        self, chunks: list[list[LineRef]], changes: list[FileChange]
+    ) -> list[str]:
+        """Each chunk's lines rendered as by ``render``, reading the head once for all of them."""
         index = {LineRef.of(line): line for change in changes for line in change.lines}
-        lines = [index[ref] for ref in refs if ref in index]
-        paths = {line.path for line in lines}
-        cache = {} if head_files is None else head_files
-        for change in changes:
-            if change.path in paths and not change.deleted and change.path not in cache:
-                cache[change.path] = (await self.head_file(change.path)).splitlines()
-        head = {path: cache[path] for path in paths if path in cache}
+        chunk_lines = [[index[ref] for ref in refs if ref in index] for refs in chunks]
+        paths = {line.path for lines in chunk_lines for line in lines}
+        head = await self.head_files(
+            [change.path for change in changes if change.path in paths and not change.deleted]
+        )
         added = {
             change.path: {line.lineno for line in change.lines if line.sign == "+"}
             for change in changes
         }
-        return render_chunk(lines, head, added)
+        return [render_chunk(lines, head, added) for lines in chunk_lines]

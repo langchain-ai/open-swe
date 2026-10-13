@@ -1,7 +1,7 @@
-import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { api, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 import { SplitButton } from "@/components/SplitButton"
