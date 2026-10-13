@@ -7,13 +7,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from langchain.agents.middleware.types import AgentState
-from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
+from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
@@ -30,18 +30,33 @@ class DesignReminderMiddleware(OpenSWEMiddleware):
         backend = SANDBOX_BACKENDS.get(thread_id)
         if backend is None:
             return None
+        snapshot_path = f"/tmp/open-swe-design-{uuid4().hex}.json"
         try:
+            work_dir = await resolve_sandbox_work_dir(backend)
+            [upload] = await backend.aupload_files(
+                [(snapshot_path, json.dumps(self._snapshots.get(thread_id, {})).encode())]
+            )
+            if upload.error:
+                raise RuntimeError(f"Could not upload design snapshot: {upload.error}")
             response = await backend.aexecute(
-                "python3 -c "
+                f"cd {shlex.quote(work_dir)} && python3 -c "
                 + shlex.quote(_SNAPSHOT_SCRIPT)
                 + " "
-                + shlex.quote(json.dumps(self._snapshots.get(thread_id, {}))),
+                + shlex.quote(snapshot_path),
                 timeout=10,
             )
+            if response.output:
+                logger.warning(
+                    "Design snapshot diagnostics",
+                    extra={"thread_id": thread_id, "diagnostics": response.output},
+                )
             if response.exit_code != 0:
                 logger.warning("Design snapshot failed", extra={"thread_id": thread_id})
                 return None
-            data: object = json.loads(response.output)
+            [download] = await backend.adownload_files([snapshot_path])
+            if download.content is None:
+                raise RuntimeError(f"Could not download design snapshot: {download.error}")
+            data: object = json.loads(download.content)
             if isinstance(data, dict) and all(
                 isinstance(key, str) and isinstance(value, str) for key, value in data.items()
             ):
@@ -49,12 +64,17 @@ class DesignReminderMiddleware(OpenSWEMiddleware):
             logger.warning("Invalid design snapshot", extra={"thread_id": thread_id})
         except Exception:
             logger.warning("Design snapshot unavailable", exc_info=True)
+        finally:
+            try:
+                cleanup = await backend.aexecute(f"rm -f {shlex.quote(snapshot_path)}", timeout=10)
+                if cleanup.exit_code != 0:
+                    logger.warning("Design snapshot cleanup failed", extra={"thread_id": thread_id})
+            except Exception:
+                logger.warning("Design snapshot cleanup unavailable", exc_info=True)
         return None
 
-    async def abefore_agent(
-        self, state: AgentState, runtime: Runtime, config: RunnableConfig
-    ) -> None:
-        thread_id = RunConfig.from_config(config).thread_id
+    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> None:
+        thread_id = RunConfig.from_runtime().thread_id
         if thread_id:
             self._inactive.discard(thread_id)
             self._reminded.discard(thread_id)
@@ -66,9 +86,9 @@ class DesignReminderMiddleware(OpenSWEMiddleware):
                     self._inactive.add(thread_id)
 
     async def abefore_model(
-        self, state: AgentState, runtime: Runtime, config: RunnableConfig
+        self, state: AgentState, runtime: Runtime
     ) -> dict[str, list[RunMessage]] | None:
-        thread_id = RunConfig.from_config(config).thread_id
+        thread_id = RunConfig.from_runtime().thread_id
         if not thread_id or thread_id in self._inactive or thread_id in self._reminded:
             return None
         snapshot = await self._snapshot(thread_id)

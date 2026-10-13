@@ -16,7 +16,7 @@ def snapshot(workspace: Path, previous: dict[str, str] | None = None) -> dict[st
     previous = previous or {}
     roots = [workspace, *(path for path in workspace.iterdir() if path.is_dir())]
     for root in roots:
-        if not (root / ".git").exists():
+        if root.is_symlink() or not (root / ".git").exists():
             continue
         if not any(
             (root / directory / skill / "SKILL.md").is_file()
@@ -80,4 +80,6 @@ def snapshot(workspace: Path, previous: dict[str, str] | None = None) -> dict[st
 
 
 if __name__ == "__main__":
-    print(json.dumps(snapshot(Path.cwd(), json.loads(sys.argv[1]) if len(sys.argv) > 1 else None)))
+    snapshot_path = Path(sys.argv[1])
+    previous = json.loads(snapshot_path.read_text())
+    snapshot_path.write_text(json.dumps(snapshot(Path.cwd(), previous)))

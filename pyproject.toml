@@ -93,6 +93,10 @@ packages = ["openswe"]
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.per-file-target-version]
+# This script runs on the sandbox's python3, independently of the server runtime.
+"openswe/middleware/design_snapshot.py" = "py311"
+
 [tool.ruff.lint]
 # PLC2701 (private-name imports) is preview-only; explicit-preview-rules keeps every
 # other preview rule off.
