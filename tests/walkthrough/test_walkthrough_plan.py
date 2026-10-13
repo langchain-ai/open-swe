@@ -250,6 +250,27 @@ def test_a_split_hunk_goes_to_two_chunks_and_each_part_keeps_its_new_lines_after
     assert moved.unplanned(new_changes) == []
 
 
+def test_a_push_keeps_repeated_lines_with_their_own_chunk(repo: Path) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    jobs = "def one():\n    run(1)\n    return\n\n\ndef two():\n    run(2)\n    return\n"
+    head = _commit(repo, {"jobs.py": jobs}, "jobs")
+    changes = _changes(repo, base, head)
+    plan = Plan.start(head, changes)
+    plan.split([LineRef.of(line) for line in changes[0].lines if line.text == "def two():"])
+    _place(plan, changes, "Two", FileHunks(path="jobs.py", hunks=["+6"]))
+    _place(plan, changes, "One", FileHunks(path="jobs.py", hunks=["+1"]))
+
+    new_head = _commit(repo, {"jobs.py": f"import os\n\n\n{jobs}"}, "import")
+    new_changes = _changes(repo, base, new_head)
+    moved = plan.carried_to(new_head, new_changes)
+
+    assert [(c.title, [r.lineno for r in c.lines]) for c in moved.chunks] == [
+        ("Two", [9, 10, 11]),
+        ("One", [1, 2, 3, 4, 5, 6, 7, 8]),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_replacing_chunks_merges_steps_and_releases_omitted_hunks(
     repo: Path, monkeypatch: pytest.MonkeyPatch

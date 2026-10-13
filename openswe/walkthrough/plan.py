@@ -3,16 +3,17 @@
 Planners place whole hunks, so a chunk can gather related hunks across files and
 no hunk is shared between chunks. A planner may first split a git hunk into
 smaller hunks at changed lines it names. Every changed line is in one chunk, in Other,
-or not yet planned. Lines and splits are followed by content, so the plan carries
-over to a new head: chunks and Other keep the lines that survive, a new line
-joins the chunk that holds the rest of its hunk, and the remaining new or edited
-lines come back unplanned for a planner to place.
+or not yet planned. Lines and splits are followed by content, in order within their
+file, so the plan carries over to a new head: chunks and Other keep the lines that
+survive, a new line joins the chunk that holds the rest of its hunk, and the
+remaining new or edited lines come back unplanned for a planner to place.
 """
 
 import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Self
 from uuid import uuid7
 
@@ -44,9 +45,29 @@ class LineRef(BaseModel, frozen=True):
     def of(cls, line: ChangedLine) -> Self:
         return cls(path=line.path, sign=line.sign, lineno=line.lineno, text=line.text)
 
-    @property
-    def content(self) -> tuple[str, str, str]:
-        return self.path, self.sign, self.text
+    @classmethod
+    def follow(cls, refs: Iterable[Self], changes: list[FileChange]) -> dict[Self, Self]:
+        """Each of ``refs`` mapped to its line in ``changes``, matched by content in diff order.
+
+        Matching in order keeps repeated lines such as a lone ``}`` with their neighbours.
+        """
+        old: dict[tuple[str, Sign], list[Self]] = {}
+        for ref in sorted(set(refs), key=lambda r: r.lineno):
+            old.setdefault((ref.path, ref.sign), []).append(ref)
+        new: dict[tuple[str, Sign], list[Self]] = {}
+        for change in changes:
+            for line in change.lines:
+                new.setdefault((line.path, line.sign), []).append(cls.of(line))
+        followed: dict[Self, Self] = {}
+        for side, before in old.items():
+            after = new.get(side, [])
+            matcher = SequenceMatcher(
+                None, [r.text for r in before], [r.text for r in after], autojunk=False
+            )
+            for block in matcher.get_matching_blocks():
+                for i in range(block.size):
+                    followed[before[block.a + i]] = after[block.b + i]
+        return followed
 
     @classmethod
     def spans(cls, refs: Iterable[Self]) -> list[str]:
@@ -269,28 +290,18 @@ class Plan(BaseModel):
     def carried_to(self, head_sha: str, changes: list[FileChange]) -> Self:
         """This plan on a new head, keeping every line that survives by content."""
 
-        def pool() -> dict[tuple[str, str, str], list[LineRef]]:
-            refs: dict[tuple[str, str, str], list[LineRef]] = {}
-            for change in changes:
-                for line in change.lines:
-                    ref = LineRef.of(line)
-                    refs.setdefault(ref.content, []).append(ref)
-            return refs
+        followed = LineRef.follow([*self.planned(), *self.splits], changes)
 
-        planned = pool()
-
-        def take(
-            refs: list[LineRef], available: dict[tuple[str, str, str], list[LineRef]]
-        ) -> list[LineRef]:
-            return [bucket.pop(0) for ref in refs if (bucket := available.get(ref.content))]
+        def take(refs: list[LineRef]) -> list[LineRef]:
+            return [followed[ref] for ref in refs if ref in followed]
 
         moved = type(self).start(head_sha, changes)
         for chunk in self.chunks:
-            if lines := take(chunk.lines, planned):
+            if lines := take(chunk.lines):
                 moved.chunks.append(chunk.model_copy(update={"lines": lines, "code": ""}))
-        moved.other = take(self.other, planned)
+        moved.other = take(self.other)
         moved.other_summary = self.other_summary
-        moved.splits = take(self.splits, pool())
+        moved.splits = take(self.splits)
         moved.gather_hunks(changes)
         return moved
 
