@@ -15,12 +15,13 @@ from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
 from openswe.review.approvals import fetch_approvals_md
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
-    feedback_store,
+    get_feedback,
     require_assessment_access,
     save_feedback,
 )
@@ -66,7 +67,6 @@ from openswe.review.styles import (
     ReviewStyle,
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
-    normalize_repo_full_name,
 )
 from openswe.threads.handlers import mark_review_session_viewed
 from openswe.walkthrough.record import Walkthrough
@@ -221,7 +221,7 @@ async def get_assessment_feedback(
 ) -> AssessmentFeedback | None:
     login = str(session["sub"])
     await require_assessment_access(owner, repo, pr_number, review_id, login)
-    return await feedback_store(review_id).get(login.lower())
+    return await get_feedback(review_id, login)
 
 
 @router.put("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")

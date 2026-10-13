@@ -9,8 +9,8 @@ from uuid import UUID
 from pydantic import JsonValue
 
 from openswe.github.pull_requests import PullRequest
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
-from openswe.review.styles import normalize_repo_full_name
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
 from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, WebhookSource

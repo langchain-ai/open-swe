@@ -36,11 +36,11 @@ from openswe.database.postgres import transaction
 from openswe.dispatch import create_durable_run
 from openswe.github.comments import fence_github_comment_body
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import InputMessageContext, build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
-from openswe.review.styles import normalize_repo_full_name
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope

@@ -4,13 +4,19 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
+from openswe.database.orm import NOW, Base
+from openswe.database.store_imports import StoreImport
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.ci import (
@@ -29,13 +35,14 @@ from openswe.human_review.requests import HumanReviewRequest
 from openswe.prompts import prompt
 from openswe.slack.client import GitHubPrRef, post_slack_thread_reply
 from openswe.source_context import SourceContext
-from openswe.store import TypedStore, now_iso
+from openswe.store import delete_value, now_iso, search_all_entries
 from openswe.thread_ids import baby_sit_lock_thread_id
 from openswe.threads.creation import create_lock_thread
+from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-WATCH_NAMESPACE = ["baby_sit_watches"]
+_STORE_NAMESPACE = ["baby_sit_watches"]
 WATCH_CRON_KIND = "baby_sit_watch"
 WATCH_SCHEDULE = "*/10 * * * *"
 MAX_RETRIES_PER_HEAD = 3
@@ -122,26 +129,88 @@ class BabySitWatch(BaseModel):
         )
 
 
-class BabySitWatchStore(TypedStore[BabySitWatch]):
-    def __init__(self) -> None:
-        super().__init__(WATCH_NAMESPACE, BabySitWatch)
+class WatchRow(Base):
+    __tablename__ = "baby_sit_watch"
+
+    key: Mapped[str] = mapped_column(primary_key=True)
+    owner: Mapped[str]
+    repo: Mapped[str]
+    active: Mapped[bool]
+    value: Mapped[JsonObject] = mapped_column(JSONB)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+
+class BabySitWatches:
+    async def get(self, key: str) -> BabySitWatch | None:
+        async with postgres.session() as session:
+            value = await session.scalar(select(WatchRow.value).where(WatchRow.key == key))
+        return None if value is None else BabySitWatch.model_validate(value)
 
     async def save(self, watch: BabySitWatch) -> BabySitWatch:
         watch.updated_at = now_iso()
-        return await self.put(watch.key, watch)
+        values = {
+            "owner": watch.owner,
+            "repo": watch.repo,
+            "active": watch.active,
+            "value": watch.model_dump(mode="json"),
+        }
+        upsert = insert(WatchRow).values(key=watch.key, **values)
+        async with postgres.session() as session:
+            await session.execute(
+                upsert.on_conflict_do_update(
+                    index_elements=[WatchRow.key],
+                    set_={**values, "updated_at": func.clock_timestamp()},
+                )
+            )
+        return watch
+
+    async def delete(self, key: str) -> None:
+        async with postgres.session() as session:
+            await session.execute(delete(WatchRow).where(WatchRow.key == key))
 
     async def list_active(
         self, *, owner: str | None = None, repo: str | None = None
     ) -> list[BabySitWatch]:
-        filter: dict[str, Any] = {"active": True}
+        query = select(WatchRow.value).where(WatchRow.active).order_by(WatchRow.key)
         if owner:
-            filter["owner"] = owner.strip().lower()
+            query = query.where(WatchRow.owner == owner.strip().lower())
         if repo:
-            filter["repo"] = repo.strip().lower()
-        return await self.search_all(filter=filter)
+            query = query.where(WatchRow.repo == repo.strip().lower())
+        async with postgres.session() as session:
+            values = list(await session.scalars(query))
+        return [BabySitWatch.model_validate(value) for value in values]
+
+    async def import_store(self) -> StoreImport:
+        """Move the Store's watches in; a watch PostgreSQL already has wins."""
+        moved = 0
+        for entry in await search_all_entries(_STORE_NAMESPACE):
+            try:
+                watch = BabySitWatch.model_validate(entry.value)
+            except ValidationError:
+                logger.warning(
+                    "Dropping unreadable baby-sit watch from the Store",
+                    extra={"store_key": entry.key},
+                    exc_info=True,
+                )
+            else:
+                async with postgres.session() as session:
+                    await session.execute(
+                        insert(WatchRow)
+                        .values(
+                            key=watch.key,
+                            owner=watch.owner,
+                            repo=watch.repo,
+                            active=watch.active,
+                            value=watch.model_dump(mode="json"),
+                        )
+                        .on_conflict_do_nothing()
+                    )
+            await delete_value(_STORE_NAMESPACE, entry.key)
+            moved += 1
+        return StoreImport(moved=moved)
 
 
-WATCHES = BabySitWatchStore()
+WATCHES = BabySitWatches()
 
 
 def watch_key(owner: str, repo: str, pr_number: int) -> str:

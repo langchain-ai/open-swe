@@ -21,8 +21,8 @@ from openswe.github.pull_request_key import PullRequestKey
 from openswe.ui_invalidations import outbox
 
 if TYPE_CHECKING:
+    from openswe.github.repo_names import RepoFullName
     from openswe.incidents.models import IncidentId
-    from openswe.review.styles import RepoFullName
 
 logger = logging.getLogger(__name__)
 
