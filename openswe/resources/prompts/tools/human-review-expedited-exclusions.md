@@ -1,0 +1,1 @@
+Retry `expedite_pr_approval` with `excluded` set to the returned `expedited_exclusions`. These are the previous card's still-matching exclusions with current hunk line numbers; resend them explicitly and recheck that their guidelines still apply.

@@ -30,7 +30,10 @@ _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
 @pytest.mark.parametrize("state", ["open", "cancelled", "superseded", "merged"])
-async def test_standard_review_refuses_eligible_expedited_history(state: str) -> None:
+@pytest.mark.parametrize("excluded", [False, True])
+async def test_standard_review_refuses_eligible_expedited_history(
+    state: str, excluded: bool
+) -> None:
     from typing import cast
 
     from openswe.expedited_review.eligibility import ChangedFile
@@ -42,6 +45,23 @@ async def test_standard_review_refuses_eligible_expedited_history(state: str) ->
     expedited = HumanReviewRequest(
         pull_request_id=pr.id, head_sha="abc", kind="expedited", state=cast(RequestState, state)
     )
+    file = ChangedFile(
+        filename="app.py",
+        additions=30 if excluded else 1,
+        patch="@@ -0,0 +10,30 @@\n" + "\n".join(["+pass"] * (30 if excluded else 1)),
+    )
+    if excluded:
+        expedited.excluded_hunks = [
+            {
+                "path": "app.py",
+                "header": "@@ -0,0 +1,30 @@",
+                "digest": file.hunks[0].digest,
+                "additions": 30,
+                "deletions": 0,
+                "guideline": "mechanical",
+                "reason": "qualifying refactor",
+            }
+        ]
     with (
         patch.object(HumanReviewRequest, "expedited_for", AsyncMock(return_value=expedited)),
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
@@ -56,15 +76,7 @@ async def test_standard_review_refuses_eligible_expedited_history(state: str) ->
             MagicMock(model_validate=MagicMock(return_value=MagicMock(author="ada"))),
         ),
         patch.object(User, "for_login", AsyncMock(return_value=User())),
-        patch.object(
-            ChangedFile,
-            "of_pull",
-            AsyncMock(
-                return_value=[
-                    ChangedFile(filename="app.py", additions=1, patch="@@ -0,0 +1 @@\n+pass")
-                ]
-            ),
-        ),
+        patch.object(ChangedFile, "of_pull", AsyncMock(return_value=[file])),
         patch.object(standard, "review_blockers", AsyncMock()) as blockers,
         patch.object(standard, "_permalink", AsyncMock(return_value="")),
     ):
@@ -78,6 +90,22 @@ async def test_standard_review_refuses_eligible_expedited_history(state: str) ->
     assert not result.success
     assert "Standard review cannot replace it" in result.error
     blockers.assert_not_awaited()
+    if excluded:
+        from openswe.expedited_review.eligibility import Ineligible, assess_eligibility
+        from openswe.tools.request_human_review import _review_failure
+
+        retry = _review_failure(result)
+        assert retry["expedited_exclusions"] == [
+            {
+                "path": "app.py",
+                "hunks": [10],
+                "guideline": "mechanical",
+                "reason": "qualifying refactor",
+            }
+        ]
+        assert "resend" in result.error
+        resolved = [hunk for entry in result.expedited_exclusions for hunk in entry.resolve([file])]
+        assert not isinstance(assess_eligibility([file], resolved), Ineligible)
 
 
 @pytest.mark.parametrize("fallback", ["rejected", "disabled", "author", "size"])

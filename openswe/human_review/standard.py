@@ -22,7 +22,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard.profiles import PROFILES
@@ -30,6 +30,7 @@ from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import (
     MAX_FILES,
     ChangedFile,
+    Exclusion,
     Ineligible,
     assess_eligibility,
 )
@@ -144,6 +145,7 @@ class RequestResult(BaseModel):
     reused: bool = False
     summary_updated: bool = False
     claimed: bool = False
+    expedited_exclusions: list[Exclusion] = Field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,7 +292,9 @@ async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) ->
     return True
 
 
-async def _existing(active: HumanReviewRequest) -> RequestResult:
+async def _existing(
+    active: HumanReviewRequest, *, expedited_exclusions: list[Exclusion] | None = None
+) -> RequestResult:
     if active.kind == "expedited":
         permalink = await _permalink(active)
         return RequestResult(
@@ -299,11 +303,17 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
                 "This pull request already has expedited review history. "
                 "Standard review cannot replace it, even after the card is dismissed. "
                 "Use expedite_pr_approval to restore its expedited card."
+                + (
+                    " " + prompt("tools/human-review-expedited-exclusions")
+                    if expedited_exclusions
+                    else ""
+                )
                 + (f" Open in Slack: {permalink}" if permalink else "")
             ),
             request_id=str(active.id),
             channel=active.slack_channel_id,
             permalink=permalink,
+            expedited_exclusions=expedited_exclusions or [],
         )
     return RequestResult(
         success=True,
@@ -397,7 +407,19 @@ async def _request_review(
                 if files is None:
                     return _failure("Could not check the pull request's expedited eligibility.")
                 if not isinstance(assess_eligibility(files, expedited.excluded_hunks), Ineligible):
-                    return await _existing(expedited)
+                    exclusions = [
+                        Exclusion(
+                            path=file.filename,
+                            hunks=[hunk.new_start],
+                            guideline=entry["guideline"],
+                            reason=entry["reason"],
+                        )
+                        for file in files
+                        for hunk in file.hunks
+                        for entry in expedited.excluded_hunks
+                        if entry["path"] == file.filename and entry["digest"] == hunk.digest
+                    ]
+                    return await _existing(expedited, expedited_exclusions=exclusions)
 
     blockers = await review_blockers(pull)
     if blockers is None:
