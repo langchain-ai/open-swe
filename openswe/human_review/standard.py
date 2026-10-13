@@ -27,7 +27,12 @@ from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
+from openswe.expedited_review.eligibility import (
+    MAX_FILES,
+    ChangedFile,
+    Ineligible,
+    assess_eligibility,
+)
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
     Readiness,
@@ -372,16 +377,27 @@ async def _request_review(
     channel: str,
     inline_summary: str | None,
 ) -> RequestResult:
-    expedited = await HumanReviewRequest.expedited_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if expedited is not None:
-        return await _existing(expedited)
-
-    # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if active is not None:
+    if active is not None and active.kind != "expedited":
         if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
+
+    expedited = active or await HumanReviewRequest.expedited_for(
+        pr_ref.owner, pr_ref.repo, pr_ref.number
+    )
+    if expedited is not None and expedited.state != "rejected":
+        if (await get_workspace_settings()).expedited_review_enabled:
+            payload = await or_none(pull.pull())
+            if payload is None:
+                return _failure("GitHub was unavailable while checking expedited eligibility.")
+            details = PullRequestPayload.model_validate(payload)
+            if await User.for_login("github", details.author) is not None:
+                files = await ChangedFile.of_pull(pull)
+                if files is None:
+                    return _failure("Could not check the pull request's expedited eligibility.")
+                if not isinstance(assess_eligibility(files, expedited.excluded_hunks), Ineligible):
+                    return await _existing(expedited)
 
     blockers = await review_blockers(pull)
     if blockers is None:
@@ -403,6 +419,9 @@ async def _request_review(
     pull_request, details = recorded
     if origin.thread_id:
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
+
+    if active is not None:
+        await ReviewCard(active).retire("superseded", "no longer eligible for expedited review")
 
     in_thread = origin.slack_channel_id == target.id and bool(origin.slack_thread_ts)
     try:
