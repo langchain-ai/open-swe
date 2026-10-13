@@ -333,6 +333,15 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 
 @pytest.fixture(autouse=True)
+async def _close_http_pool() -> AsyncIterator[None]:
+    """Each test runs on its own event loop, which takes its connection pool down with it."""
+    from openswe.utils.http_pool import close_pool
+
+    yield
+    await close_pool()
+
+
+@pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
     """Keep the process-global caches from leaking settings and MCP catalogs between tests."""
     from langgraph_api import cache
