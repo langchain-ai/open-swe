@@ -238,6 +238,48 @@ def _status_client() -> AsyncMock:
     return client
 
 
+async def test_idle_origin_keeps_status_until_routed_destination_finishes(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+
+    from openswe.slack import routed_work
+
+    metadata = {
+        "origin": {"routed_work_destinations": ["destination"]},
+        "destination": {"routed_work_origins": ["origin"]},
+    }
+    client = _status_client()
+
+    async def get_thread(thread_id):
+        return {"metadata": metadata[thread_id]}
+
+    async def update_thread(thread_id, *, metadata: dict):
+        metadata_by_thread[thread_id].update(metadata)
+
+    @asynccontextmanager
+    async def unlocked(*_args):
+        yield
+
+    metadata_by_thread = metadata
+    client.threads.get.side_effect = get_thread
+    client.threads.update.side_effect = update_thread
+    destination_busy = True
+
+    async def runs(thread_id, *, status, limit):
+        return [{"run_id": "queued"}] if thread_id == "destination" and destination_busy else []
+
+    client.runs.list.side_effect = runs
+    monkeypatch.setattr(routed_work, "agent_thread_pr_state_lock", unlocked)
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "origin", "C1", "1.0")
+    assert set_status.await_args.args[-1] == "Thinking..."
+    destination_busy = False
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "origin", "C1", "1.0")
+    assert set_status.await_args.args[-1] == ""
+    assert metadata["origin"]["routed_work_destinations"] == []
+    assert metadata["destination"]["routed_work_origins"] == []
+
+
 async def test_status_sync_does_not_clear_run_started_during_settlement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

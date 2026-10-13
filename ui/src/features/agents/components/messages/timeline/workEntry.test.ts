@@ -36,6 +36,22 @@ function diff(overrides: Partial<DiffData> = {}): DiffData {
 }
 
 describe("describeWorkEntry", () => {
+  it("links only successful cross-thread messages to their authorized recipient", () => {
+    const recipient = "553f74de-534d-5377-815d-c14b58b21ea2"
+    const sent = chunk({
+      title: "message_task_thread",
+      toolKind: "other",
+      output: JSON.stringify({ success: true, recipient_thread_id: recipient }),
+    })
+    expect(describeWorkEntry(sent).destinationHref).toBe(`/agents/${recipient}`)
+    expect(
+      describeWorkEntry({ ...sent, output: "invalid" }).destinationHref
+    ).toBeUndefined()
+    expect(
+      describeWorkEntry({ ...sent, status: "error" }).destinationHref
+    ).toBeUndefined()
+  })
+
   it("splits a read into a verb, file name, and full-path tooltip", () => {
     const fullPath = `${repoPath}/ui/src/AGENTS.md`
     const entry = describeWorkEntry(

@@ -30,7 +30,7 @@ from openswe.review.publish import settle_review_check_run
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import post_slack_thread_reply
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
-from openswe.slack.thinking import sync_slack_background_status
+from openswe.slack.thinking import sync_routed_slack_status, sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.threads.index import index_kept
@@ -539,6 +539,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             pickup_allowed = delegation is not None and not delegation.cancelled
         if pickup_allowed:
             await _start_run_for_pending_follow_ups(thread_id)
+    if status in _TERMINAL_RUN_STATUSES:
+        await sync_routed_slack_status(langgraph_client(), thread_id)
     if is_worker:
         await sync_slack_background_status(langgraph_client(), thread_id)
         if status in _TERMINAL_FAILURE_STATUSES:
