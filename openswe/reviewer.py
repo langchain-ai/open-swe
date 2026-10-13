@@ -93,6 +93,7 @@ from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
+from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools import (
     add_finding,
     fetch_review_diff,
@@ -133,7 +134,7 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-                ExcludeToolsMiddleware(excluded=frozenset({"grep"})),
+                ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
                 SanitizeOpenAIResponsesMiddleware(),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
@@ -1108,7 +1109,7 @@ async def build_reviewer_agent(
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
-            ExcludeToolsMiddleware(excluded=frozenset({"grep"})),
+            ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SanitizeFireworksMessagesMiddleware(),

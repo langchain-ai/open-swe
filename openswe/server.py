@@ -181,6 +181,7 @@ from openswe.sandboxes.tool_runtime import (
     ToolSurface,
     save_tool_context,
 )
+from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
@@ -331,7 +332,7 @@ DEEP_AGENT_TOOL_NAMES = {
     "task",
     "write_file",
 }
-DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
+DEEP_AGENT_EXCLUDED_TOOLS = SHELL_SEARCH_EXCLUDED_TOOLS
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
@@ -722,6 +723,7 @@ def _general_purpose_subagent(
                 _SubagentToolGuard(sandbox_only_tools),
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 TranscriptMiddleware(),
+                ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),

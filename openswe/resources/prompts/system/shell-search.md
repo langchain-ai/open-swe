@@ -1,0 +1,1 @@
+Use `rg` through `execute` for content search — always passing an explicit path argument. Use `glob` to discover paths and `read_file` to inspect files. The Deep Agents `grep` tool is not offered on this shell-backed agent.

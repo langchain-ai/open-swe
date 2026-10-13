@@ -49,6 +49,7 @@ def test_chat_excludes_mutating_filesystem_tools() -> None:
     from openswe.chat import _EXCLUDED_TOOLS
 
     assert {"write_file", "edit_file", "delete", "execute"} <= _EXCLUDED_TOOLS
+    assert "grep" not in _EXCLUDED_TOOLS
 
 
 def test_chat_general_purpose_subagent_is_read_only() -> None:
