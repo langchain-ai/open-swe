@@ -78,9 +78,13 @@ class PinnedCheckout:
             f"[ -d {shlex.quote(name)}/.git ] || gh repo clone {shlex.quote(full_name)} "
             f"{shlex.quote(name)} -- --quiet\n"
             f"cd {shlex.quote(name)}\n"
-            f"for ref in {base} {head} {pull_ref}; do\n"
-            '  git fetch --quiet origin "$ref" 2>/dev/null || true\n'
+            # The scout's repo prep has usually fetched both already; each fetch is a GitHub round trip.
+            f"for sha in {base} {head}; do\n"
+            '  git cat-file -e "$sha^{commit}" 2>/dev/null'
+            ' || git fetch --quiet origin "$sha" 2>/dev/null || true\n'
             "done\n"
+            f"git cat-file -e {head}^{{commit}} 2>/dev/null"
+            f" || git fetch --quiet origin {pull_ref} 2>/dev/null || true\n"
             f"git cat-file -e {base}^{{commit}}\n"
             f"git cat-file -e {head}^{{commit}}\n"
             f"git update-ref {MERGE_BASE_REF} $(git merge-base {base} {head})\n"
