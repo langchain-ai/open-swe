@@ -31,7 +31,9 @@ async def test_import_moves_review_records_and_keeps_decisions_made_in_postgres(
     fake_store.seed(
         ["review_styles"], "acme/kept", {"full_name": "acme/kept", "custom_prompt": "S"}
     )
-    watch = BabySitWatch(key="acme/one#7", owner="acme", repo="one", pr_number=7, head_sha="h")
+    watch = BabySitWatch(
+        key="acme/one#7", thread_id="t1", owner="acme", repo="one", pr_number=7, head_sha="h"
+    )
     fake_store.seed(["baby_sit_watches"], watch.key, watch.model_dump(mode="json"))
 
     assert await import_review_records() == StoreImport(moved=5)
@@ -47,7 +49,13 @@ async def test_import_moves_review_records_and_keeps_decisions_made_in_postgres(
     assert imported.created_at.startswith("2026-01-02T03:04:05")
     kept = await REVIEW_STYLES.get("acme/kept")
     assert kept is not None and kept.custom_prompt == "PG"
-    assert await WATCHES.list_active(owner="Acme", repo="one") == [watch]
+    [imported_watch] = await WATCHES.list_active(owner="Acme", repo="one")
+    assert (imported_watch.key, imported_watch.thread_id, imported_watch.head_sha) == (
+        "acme/one#7",
+        "t1",
+        "h",
+    )
+    assert await imported_watch.belongs_to("t1")
     assert not any(fake_store.items.values())
 
 

@@ -2,20 +2,18 @@
 
 import hashlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import delete, func, select
-from sqlalchemy.dialects.postgresql import JSONB, insert
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Row, Select, func, literal, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 
 from openswe.database import postgres
-from openswe.database.orm import NOW, Base
 from openswe.database.store_imports import StoreImport
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import get_github_app_installation_token
@@ -30,19 +28,23 @@ from openswe.github.ci import (
 from openswe.github.comments import post_github_comment
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
 from openswe.github.pull_request_status import PullRequestClient
-from openswe.github.pull_requests import PullRequestPayload
+from openswe.github.pull_requests import PullRequest, PullRequestPayload
+from openswe.github.repositories import Repository
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.prompts import prompt
 from openswe.slack.client import GitHubPrRef, post_slack_thread_reply
 from openswe.source_context import SourceContext
 from openswe.store import delete_value, now_iso, search_all_entries
+from openswe.tasks.store import Task, TaskMembership
 from openswe.thread_ids import baby_sit_lock_thread_id
 from openswe.threads.creation import create_lock_thread
 from openswe.utils.json_types import JsonObject
+from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
 _STORE_NAMESPACE = ["baby_sit_watches"]
+_STATE_KEY = "baby_sit"
 WATCH_CRON_KIND = "baby_sit_watch"
 WATCH_SCHEDULE = "*/10 * * * *"
 MAX_RETRIES_PER_HEAD = 3
@@ -75,16 +77,12 @@ async def _watch_lock(key: str) -> AsyncIterator[bool]:
             logger.warning("Failed to release baby-sit lock for %s", key, exc_info=True)
 
 
-class BabySitWatch(BaseModel):
+class BabySitState(BaseModel):
+    """A watch's working state, kept on its pull request at ``task_state["baby_sit"]``."""
+
     model_config = ConfigDict(extra="ignore")
 
-    key: str
     active: bool = True
-    thread_id: str = ""
-    owner: str = ""
-    repo: str = ""
-    pr_number: int = 0
-    pr_url: str = ""
     head_sha: str = ""
     head_ref: str = ""
     installation_id: int | None = None
@@ -99,11 +97,31 @@ class BabySitWatch(BaseModel):
     created_at: str = ""
     updated_at: str = ""
 
+
+class BabySitWatch(BabySitState):
+    key: str
+    task_id: UUID | None = None
+    # The coordinator of the pull request's task: the thread the watch wakes.
+    thread_id: str = ""
+    owner: str = ""
+    repo: str = ""
+    pr_number: int = 0
+    pr_url: str = ""
+
+    def state(self) -> JsonObject:
+        return self.model_dump(mode="json", include=set(BabySitState.model_fields))
+
+    async def belongs_to(self, thread_id: str) -> bool:
+        """Whether ``thread_id`` is part of the task this watch works for."""
+        context = await TaskMembership.context_for_thread(thread_id)
+        return context is not None and context.task.id == self.task_id
+
     def dispatch_config(self) -> dict[str, Any]:
         configurable = dict(self.run_config)
         configurable.update(
             {
                 "source": configurable.get("source") or "github",
+                "thread_id": self.thread_id,
                 "repo": {"owner": self.owner, "name": self.repo},
                 "pr_number": self.pr_number,
                 "baby_sit_watch_key": self.key,
@@ -129,56 +147,50 @@ class BabySitWatch(BaseModel):
         )
 
 
-class WatchRow(Base):
-    __tablename__ = "baby_sit_watch"
-
-    key: Mapped[str] = mapped_column(primary_key=True)
-    owner: Mapped[str]
-    repo: Mapped[str]
-    active: Mapped[bool]
-    value: Mapped[JsonObject] = mapped_column(JSONB)
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-
-
 class BabySitWatches:
+    """Watches, each kept on its pull request beside the task it works for."""
+
     async def get(self, key: str) -> BabySitWatch | None:
+        full_name, _, number = key.rpartition("#")
         async with postgres.session() as session:
-            value = await session.scalar(select(WatchRow.value).where(WatchRow.key == key))
-        return None if value is None else BabySitWatch.model_validate(value)
-
-    async def save(self, watch: BabySitWatch) -> BabySitWatch:
-        watch.updated_at = now_iso()
-        values = {
-            "owner": watch.owner,
-            "repo": watch.repo,
-            "active": watch.active,
-            "value": watch.model_dump(mode="json"),
-        }
-        upsert = insert(WatchRow).values(key=watch.key, **values)
-        async with postgres.session() as session:
-            await session.execute(
-                upsert.on_conflict_do_update(
-                    index_elements=[WatchRow.key],
-                    set_={**values, "updated_at": func.clock_timestamp()},
+            row = (
+                await session.execute(
+                    self._select().where(
+                        Repository.key == full_name, PullRequest.number == int(number)
+                    )
                 )
-            )
-        return watch
-
-    async def delete(self, key: str) -> None:
-        async with postgres.session() as session:
-            await session.execute(delete(WatchRow).where(WatchRow.key == key))
+            ).first()
+        return None if row is None else self._watch(row)
 
     async def list_active(
         self, *, owner: str | None = None, repo: str | None = None
     ) -> list[BabySitWatch]:
-        query = select(WatchRow.value).where(WatchRow.active).order_by(WatchRow.key)
-        if owner:
-            query = query.where(WatchRow.owner == owner.strip().lower())
-        if repo:
-            query = query.where(WatchRow.repo == repo.strip().lower())
+        query = self._select().where(
+            PullRequest.task_state[_STATE_KEY]["active"].as_boolean().is_(True)
+        )
+        if owner and repo:
+            query = query.where(Repository.key == f"{owner}/{repo}".strip().lower())
         async with postgres.session() as session:
-            values = list(await session.scalars(query))
-        return [BabySitWatch.model_validate(value) for value in values]
+            rows = (await session.execute(query.order_by(Repository.key, PullRequest.number))).all()
+        return [self._watch(row) for row in rows]
+
+    async def save(self, watch: BabySitWatch) -> BabySitWatch:
+        watch.updated_at = now_iso()
+        merged = func.coalesce(PullRequest.task_state, literal({}, JSONB)).op("||")(
+            literal({_STATE_KEY: watch.state()}, JSONB)
+        )
+        values = {"task_state": merged}
+        if watch.task_id is not None:
+            values["task_id"] = watch.task_id
+        if not await self._update(watch.key, values):
+            await PullRequest(owner=watch.owner, repo=watch.repo, number=watch.pr_number).ensure()
+            if not await self._update(watch.key, values):
+                raise RuntimeError(f"pull request {watch.pr_url} vanished while saving its watch")
+        return watch
+
+    async def delete(self, key: str) -> None:
+        remaining = PullRequest.task_state.op("-")(_STATE_KEY)
+        await self._update(key, {"task_state": func.nullif(remaining, literal({}, JSONB))})
 
     async def import_store(self) -> StoreImport:
         """Move the Store's watches in; a watch PostgreSQL already has wins."""
@@ -193,24 +205,75 @@ class BabySitWatches:
                     exc_info=True,
                 )
             else:
-                async with postgres.session() as session:
-                    await session.execute(
-                        insert(WatchRow)
-                        .values(
-                            key=watch.key,
-                            owner=watch.owner,
-                            repo=watch.repo,
-                            active=watch.active,
-                            value=watch.model_dump(mode="json"),
-                        )
-                        .on_conflict_do_nothing()
-                    )
+                if watch.thread_id and await self.get(watch.key) is None:
+                    task = await _task_for(watch, title=watch.pr_url)
+                    watch.task_id = task.id
+                    await self.save(watch)
             await delete_value(_STORE_NAMESPACE, entry.key)
             moved += 1
         return StoreImport(moved=moved)
 
+    @staticmethod
+    def _select() -> Select[str, str, int, UUID | None, JsonObject | None, str | None]:
+        return (
+            select(
+                PullRequest.owner,
+                PullRequest.repo,
+                PullRequest.number,
+                PullRequest.task_id,
+                PullRequest.task_state,
+                Task.coordinator_thread_id,
+            )
+            .join(Repository, Repository.id == PullRequest.repository_id)
+            .outerjoin(Task, Task.id == PullRequest.task_id)
+            .where(PullRequest.task_state.has_key(_STATE_KEY))
+        )
+
+    @staticmethod
+    def _watch(
+        row: Row[str, str, int, UUID | None, JsonObject | None, str | None],
+    ) -> BabySitWatch:
+        owner, repo, number, task_id, task_state, coordinator = row.tuple()
+        return BabySitWatch.model_validate(
+            {
+                **(task_state or {}).get(_STATE_KEY, {}),
+                "key": watch_key(owner, repo, number),
+                "task_id": task_id,
+                "thread_id": coordinator or "",
+                "owner": owner.lower(),
+                "repo": repo.lower(),
+                "pr_number": number,
+                "pr_url": f"https://github.com/{owner}/{repo}/pull/{number}",
+            }
+        )
+
+    @staticmethod
+    async def _update(key: str, values: Mapping[str, object]) -> bool:
+        full_name, _, number = key.rpartition("#")
+        repository_id = select(Repository.id).where(Repository.key == full_name).scalar_subquery()
+        async with postgres.session() as session:
+            updated = await session.scalar(
+                update(PullRequest)
+                .where(
+                    PullRequest.repository_id == repository_id, PullRequest.number == int(number)
+                )
+                .values(**values)
+                .returning(PullRequest.id)
+            )
+        return updated is not None
+
 
 WATCHES = BabySitWatches()
+
+
+async def _task_for(watch: BabySitWatch, *, title: str) -> Task:
+    """The task of the thread starting ``watch``, created in the thread's workspace when missing."""
+    workspace = watch.run_config.get("workspace") or watch.run_config.get("environment")
+    resolution = await resolve_workspace(
+        thread_workspace=workspace if isinstance(workspace, str) else None,
+        repo=(watch.owner, watch.repo),
+    )
+    return await Task.for_thread(watch.thread_id, title=title, workspace=resolution.slug)
 
 
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
@@ -255,6 +318,7 @@ async def _ensure_watch_cron(key: str) -> str:
 async def start_watch(
     *,
     pr_ref: GitHubPrRef,
+    title: str,
     head_sha: str,
     head_ref: str,
     installation_id: int | None,
@@ -264,8 +328,8 @@ async def start_watch(
 ) -> BabySitWatch:
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
     existing = await WATCHES.get(key)
-    if existing and existing.active and existing.thread_id != thread_id:
-        raise ValueError("This pull request is already monitored from another agent thread")
+    if existing and existing.active and not await existing.belongs_to(thread_id):
+        raise ValueError("This pull request is already monitored by another task")
 
     now = now_iso()
     carried = existing if existing is not None and existing.head_sha == head_sha else None
@@ -291,6 +355,9 @@ async def start_watch(
         created_at=existing.created_at if existing else now,
         updated_at=now,
     )
+    task = await _task_for(watch, title=title)
+    watch.task_id = task.id
+    watch.thread_id = task.require_coordinator()
     watch = await WATCHES.save(watch)
     try:
         watch.cron_id = await _ensure_watch_cron(key)
@@ -696,8 +763,8 @@ async def _record_retry(
     watch = await WATCHES.get(key)
     if not watch or not watch.active:
         return {"success": False, "error": "No active baby-sit watch for this pull request"}
-    if watch.thread_id != thread_id:
-        return {"success": False, "error": "This watch belongs to another agent thread"}
+    if not await watch.belongs_to(thread_id):
+        return {"success": False, "error": "This watch belongs to another task"}
     if watch.head_sha != head_sha:
         return {
             "success": False,

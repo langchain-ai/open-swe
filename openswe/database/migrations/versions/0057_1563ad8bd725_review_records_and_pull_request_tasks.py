@@ -2,9 +2,10 @@
 
 ``repository.review_enabled`` is the auto-review opt-in, ``NULL`` until someone
 decides. ``review_style`` holds each repository's reviewer prompt and approval
-mode, ``review_assessment`` each published assessment by GitHub review id, and
-``baby_sit_watch`` each watched pull request. Feedback on assessments lives in
-``user_record``.
+mode, and ``review_assessment`` each published assessment by GitHub review id.
+Feedback on assessments lives in ``user_record``. ``pull_request.task_id`` is the
+task working on a pull request and ``task_state`` what it keeps there, such as a
+baby-sit watch.
 """
 
 from alembic import op
@@ -35,17 +36,13 @@ def upgrade() -> None:
         )
     """)
     op.execute("""
-        CREATE TABLE baby_sit_watch (
-            key text PRIMARY KEY,
-            owner text NOT NULL,
-            repo text NOT NULL,
-            active boolean NOT NULL,
-            value jsonb NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
-        )
+        ALTER TABLE pull_request
+            ADD COLUMN task_id uuid REFERENCES task (id) ON DELETE SET NULL,
+            ADD COLUMN task_state jsonb
     """)
     op.execute(
-        "CREATE INDEX baby_sit_watch_active_repo_idx ON baby_sit_watch (owner, repo) WHERE active"
+        "CREATE INDEX pull_request_task_state_idx ON pull_request (repository_id) "
+        "WHERE task_state IS NOT NULL"
     )
 
 

@@ -13,6 +13,7 @@ from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
+from openswe.tasks.store import Task
 
 
 class _Crons:
@@ -79,6 +80,7 @@ def shared_watch_clients(registry_db: None) -> tuple[_Client, _Client]:
 async def _start_watch(client: _Client) -> baby_sit.BabySitWatch:
     return await baby_sit.start_watch(
         pr_ref=GitHubPrRef("Acme", "Repo", 7, "https://github.com/Acme/Repo/pull/7"),
+        title="Fix the build",
         head_sha="head-1",
         head_ref="feature",
         installation_id=42,
@@ -338,3 +340,31 @@ async def test_new_head_resets_retry_budget(
     assert watch is not None
     assert watch.head_sha == "head-2"
     assert watch.retry_count == 0
+
+
+async def test_only_the_watching_task_can_take_over_or_record_retries(
+    watch_client: _Client,
+) -> None:
+    watch = await _start_watch(watch_client)
+    assert watch.thread_id == "thread-1"
+    task = await Task.for_thread("thread-1", title="", workspace="default")
+    assert watch.task_id == task.id
+
+    with pytest.raises(ValueError, match="another task"):
+        await baby_sit.start_watch(
+            pr_ref=GitHubPrRef("Acme", "Repo", 7, "https://github.com/Acme/Repo/pull/7"),
+            title="Fix the build",
+            head_sha="head-1",
+            head_ref="feature",
+            installation_id=42,
+            thread_id="thread-2",
+            run_config={"thread_id": "thread-2"},
+            source_context=SourceContext(),
+        )
+    assert await baby_sit.record_retry(
+        "acme/repo#7",
+        thread_id="thread-2",
+        head_sha="head-1",
+        check_name="tests",
+        evidence="runner timeout",
+    ) == {"success": False, "error": "This watch belongs to another task"}
