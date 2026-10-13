@@ -231,9 +231,8 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
 @pytest.mark.parametrize(
     ("model", "image_type", "failure"),
     [
-        ("fireworks:accounts/fireworks/models/kimi-k3", "image", "image"),
-        ("fireworks:accounts/fireworks/models/kimi-k3", "image_url", "image"),
-        ("fireworks:accounts/fireworks/models/kimi-k3", None, None),
+        ("fireworks:accounts/fireworks/models/kimi-k3", "image", None),
+        ("fireworks:accounts/fireworks/models/kimi-k3", "image_url", None),
         ("anthropic:claude-opus-5-5", "image", None),
         ("anthropic:claude-fable-5-1", None, "unavailable"),
         ("openai:gpt-6.1-sol", None, "unavailable"),
@@ -273,7 +272,6 @@ async def test_handoff_validates_and_persists_before_selecting_model(
         error = RuntimeError if failure == "persistence" else ValueError
         match = {
             "persistence": "write failed",
-            "image": "does not support image input",
             "unavailable": "unavailable",
         }[failure]
         with tracing_context(enabled="local"), trace("agent", inputs={}) as parent:
@@ -286,7 +284,6 @@ async def test_handoff_validates_and_persists_before_selecting_model(
         assert (
             decision_span.outputs["outcome"]
             == {
-                "image": "incompatible_request",
                 "unavailable": "unavailable_request",
                 "persistence": "persistence_failure",
             }[failure]

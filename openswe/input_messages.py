@@ -201,6 +201,22 @@ def input_message_text(content: object) -> str | None:
     return "\n\n".join(texts) or None
 
 
+def input_message_elements(content: object, prefix: str) -> list[dict[str, str]]:
+    """The ``Fields`` elements whose tag starts with ``prefix``, in envelope order, as dicts."""
+    found: list[dict[str, str]] = []
+    for message in _input_message_elements(content):
+        for child in message:
+            if not child.tag.startswith(prefix):
+                continue
+            fields: dict[str, str] = {}
+            for line in (child.text or "").strip().splitlines():
+                name, separator, value = line.partition(": ")
+                if separator:
+                    fields[name] = value
+            found.append(fields)
+    return found
+
+
 def input_message_timestamps(content: object) -> set[str]:
     """Source-message timestamps the serialized envelopes in ``content`` carry."""
     return {

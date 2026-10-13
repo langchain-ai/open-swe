@@ -7,6 +7,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 import asyncio
 import posixpath
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -15,6 +16,14 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
+from openswe.attachments import (
+    MAX_ATTACHMENTS_PER_MESSAGE,
+    Attachment,
+    StagedAttachment,
+    UnsupportedAttachment,
+    envelope_data,
+)
+from openswe.attachments import stage as stage_attachments
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
@@ -200,28 +209,18 @@ async def _dispatched_slack_context(client: Any, thread_id: str) -> tuple[set[st
 
 _SLACK_CONTEXT_SENDER_ID = "system:slack-context"
 
-_SLACK_FILE_DIR = "/workspace/.open-swe/slack-files"
-_MAX_SLACK_FILE_ATTACHMENTS = 10
-
 
 @dataclass(frozen=True)
 class SlackFileEntry:
-    """A non-image file Slack attached to a message."""
+    """A file Slack attached to a message."""
 
     name: str
     url: str
-
-
-@dataclass(frozen=True)
-class StagedSlackFile:
-    """A Slack file staged in the thread's sandbox."""
-
-    filename: str
-    sandbox_path: str
+    mime_type: str | None = None
 
 
 def _slack_file_entries(messages: list[dict[str, Any]]) -> list[SlackFileEntry]:
-    """Non-image files attached to the given messages, in first-seen order."""
+    """Files attached to the given messages, in first-seen order."""
     entries: list[SlackFileEntry] = []
     seen: set[str] = set()
     for message in messages:
@@ -231,100 +230,50 @@ def _slack_file_entries(messages: list[dict[str, Any]]) -> list[SlackFileEntry]:
         for file_info in files:
             if not isinstance(file_info, dict) or file_info.get("url_private") in (None, ""):
                 continue
-            mimetype = file_info.get("mimetype")
-            if isinstance(mimetype, str) and mimetype.startswith("image/"):
-                continue
             url = str(file_info["url_private"])
             if url in seen:
                 continue
             seen.add(url)
+            name = file_info.get("name")
+            mime_type = file_info.get("mimetype")
             entries.append(
                 SlackFileEntry(
-                    name=file_info.get("name") if isinstance(file_info.get("name"), str) else "",
+                    name=name if isinstance(name, str) else "",
                     url=url,
+                    mime_type=mime_type if isinstance(mime_type, str) else None,
                 )
             )
-            if len(entries) >= _MAX_SLACK_FILE_ATTACHMENTS:
-                return entries
     return entries
 
 
-def _sanitize_slack_filename(name: str, url: str) -> str:
-    filename = name.strip()
-    if not filename or "/" in filename or "\x00" in filename:
-        parsed = urlparse(url).path
-        filename = posixpath.basename(parsed) if parsed else ""
-    filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename).strip("._") or "slack-file"
-    return filename[:120]
+async def _slack_attachments(
+    entries: list[SlackFileEntry], linked_image_urls: list[str]
+) -> tuple[list[Attachment], list[str]]:
+    """The files on the request and the images it links to, downloaded.
 
-
-async def _download_slack_files_to_sandbox(
-    entries: list[SlackFileEntry], thread_id: str, *, workspace_slug: str | None = None
-) -> list[StagedSlackFile]:
-    """Download Slack files and stage them in the thread's sandbox.
-
-    Best-effort: a missing sandbox or a failed download only skips that file.
+    A file that cannot be downloaded comes back as a note instead, so the agent
+    knows it was there.
     """
-    if not entries:
-        return []
-    try:
-        from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
-
-        backend = await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace_slug)
-    except Exception:
-        common.logger.warning(
-            "Could not reach sandbox for thread %s; skipping Slack file attachments",
-            thread_id,
-            exc_info=True,
-        )
-        return []
-    staged: list[StagedSlackFile] = []
-    used_names: set[str] = set()
-    for entry in entries:
+    attachments: list[Attachment] = []
+    notes: list[str] = []
+    for entry in entries[:MAX_ATTACHMENTS_PER_MESSAGE]:
+        label = entry.name or posixpath.basename(urlparse(entry.url).path) or "a file"
         try:
-            content = await slack_utils.download_slack_file(entry.url)
+            data = await slack_utils.download_slack_file(entry.url)
+            attachments.append(Attachment.of(data, mime_type=entry.mime_type, file_name=entry.name))
         except slack_utils.SlackFileDownloadError as error:
             common.logger.info("Slack file download skipped", extra={"slack_error": error.code})
-            continue
-        filename = _sanitize_slack_filename(entry.name, entry.url)
-        base = filename
-        suffix = 1
-        while filename in used_names:
-            filename = f"{base.rsplit('.', 1)[0] if '.' in base else base}-{suffix}"
-            suffix += 1
-        used_names.add(filename)
-        sandbox_path = posixpath.join(_SLACK_FILE_DIR, filename)
-        try:
-            responses = await backend.aupload_files([(sandbox_path, content)])
-        finally:
-            del content
-        if not responses:
-            continue
-        response = responses[0]
-        error = (
-            response.get("error")
-            if isinstance(response, dict)
-            else getattr(response, "error", None)
-        )
-        if error:
-            common.logger.info(
-                "Slack file staging failed", extra={"slack_error": str(error), "file": filename}
-            )
-            continue
-        staged.append(StagedSlackFile(filename, sandbox_path))
-    return staged
-
-
-def _slack_files_section(staged: list[StagedSlackFile]) -> str:
-    lines = [
-        "## Slack File Attachments",
-        "These files from Slack were staged into this thread's sandbox:",
-        *[
-            f"- `{file.sandbox_path}` (originally uploaded to Slack as `{file.filename}`)"
-            for file in staged
-        ],
-    ]
-    return "\n".join(lines)
+            notes.append(f"(Slack file {label} was not attached: {error.code}.)")
+        except UnsupportedAttachment as error:
+            common.logger.info("Slack file not attached", extra={"slack_error": str(error)})
+            notes.append(f"(Slack file {label} was not attached: {error}.)")
+    remaining = max(0, MAX_ATTACHMENTS_PER_MESSAGE - len(entries))
+    if linked_image_urls[:remaining]:
+        async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
+            for url in linked_image_urls[:remaining]:
+                if attachment := await common.fetch_attachment(url, http_client):
+                    attachments.append(attachment)
+    return attachments, notes
 
 
 async def _slack_accounts_by_user_id(
@@ -443,6 +392,7 @@ def _slack_context_input(
     trigger_user_id: str = "",
     request_text: str,
     request_blocks: list[dict[str, Any]],
+    attachments: Sequence[StagedAttachment] = (),
     prior_message_text: str = "",
     is_breakout: bool = False,
     turn_context: str = "",
@@ -603,6 +553,7 @@ def _slack_context_input(
                 "data": {
                     "timestamp": event_ts,
                     "explicit_bot_mention": str(explicit_mention).lower(),
+                    **envelope_data([attachment.fields() for attachment in attachments]),
                 },
             },
         )
@@ -1039,16 +990,8 @@ async def _process_slack_mention_impl(
     clean_text = _label_slack_mentions(clean_text, user_names_by_id, channel_names_by_id)
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
-    image_urls = common.dedupe_urls(
+    linked_image_urls = common.dedupe_urls(
         [url for msg in source_messages for url in common.extract_image_urls(msg.get("text", ""))]
-        + [
-            f["url_private"]
-            for msg in source_messages
-            for f in msg.get("files", [])
-            if isinstance(f, dict)
-            and f.get("mimetype", "").startswith("image/")
-            and f.get("url_private")
-        ]
         + image_urls_from_links
     )
 
@@ -1084,7 +1027,6 @@ async def _process_slack_mention_impl(
     else:
         thread_workspace = thread_record.workspace
 
-    image_model_override: tuple[str, str] | None = None
     if performance_command:
         stored_settings = await load_thread_settings(langgraph_client, thread_id)
         stored_performance = stored_settings.get("routing_models", {}).get("performance")
@@ -1093,33 +1035,6 @@ async def _process_slack_mention_impl(
         else:
             settings = await cached_workspace_settings(thread_workspace)
             thread_model_choice = settings.agent_routing_models["performance"]
-
-    if image_urls:
-        resolved_model_id = thread_model_choice[0] if thread_model_choice else None
-        if resolved_model_id is None:
-            thread_settings = await load_thread_settings(langgraph_client, thread_id)
-            resolved_model_id = thread_settings.get("model_id")
-        if resolved_model_id is None:
-            resolved_model_id = await common.resolve_agent_model_id(
-                mapped_login, workspace=thread_workspace
-            )
-        if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
-            common.logger.info(
-                "Using vision fallback model %s for %d Slack image(s); configured model %s "
-                "does not support images",
-                fallback_model_id,
-                len(image_urls),
-                resolved_model_id,
-            )
-            resolved_model_id = fallback_model_id
-            image_model_override = (fallback_model_id, fallback_effort)
-        common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
-            for image_url in image_urls:
-                image_block = await common.fetch_image_block(image_url, http_client)
-                if image_block:
-                    content_blocks.append(cast(dict[str, Any], image_block))
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with
@@ -1269,12 +1184,7 @@ async def _process_slack_mention_impl(
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace
-    if image_model_override:
-        configurable["agent_model_id"] = image_model_override[0]
-        configurable["agent_effort"] = image_model_override[1]
-        configurable["model_override_reason"] = "image_input"
-
-    if thread_model_choice and not image_model_override:
+    if thread_model_choice:
         configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice
         configurable["model_selection"] = "explicit"
 
@@ -1346,15 +1256,20 @@ async def _process_slack_mention_impl(
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
         return False
 
-    if persisted:
-        staged_files = await _download_slack_files_to_sandbox(
-            _slack_file_entries(source_messages),
-            thread_id,
-            workspace_slug=thread_workspace,
-        )
-        if staged_files:
-            files_section = _slack_files_section(staged_files)
-            turn_context = f"{turn_context}\n\n{files_section}" if turn_context else files_section
+    attachments, attachment_notes = await _slack_attachments(
+        _slack_file_entries(source_messages), linked_image_urls
+    )
+    # A sandbox is only bound once the thread's ownership is recorded.
+    staged_attachments = (
+        await stage_attachments(thread_id, attachments, workspace_slug=thread_workspace)
+        if persisted
+        else []
+    )
+    if attachments and not persisted:
+        attachment_notes.append("(The attached files could not be placed in the sandbox.)")
+    if attachment_notes:
+        clean_text = "\n".join([clean_text, *attachment_notes])
+        content_blocks[0] = {**content_blocks[0], "text": clean_text}
 
     # Anything said in a DM is said to Open SWE, and the person expects the next
     # thing they type to redirect the work in front of them rather than queue
@@ -1388,6 +1303,7 @@ async def _process_slack_mention_impl(
         trigger_user_id=user_id,
         request_text=clean_text,
         request_blocks=content_blocks,
+        attachments=staged_attachments,
         prior_message_text=request.prior_message_text,
         is_breakout=bool(request.context_thread_ts),
         turn_context=turn_context,
@@ -1436,7 +1352,7 @@ async def _process_slack_mention_impl(
         thread_id,
     )
     if performance_command and thread_model_choice:
-        selected_model = image_model_override or thread_model_choice
+        selected_model = thread_model_choice
         await slack_utils.post_slack_ephemeral_message(
             channel_id,
             user_id,
@@ -1445,7 +1361,7 @@ async def _process_slack_mention_impl(
         )
     run_id = run.get("run_id")
     if performance_command and thread_model_choice and isinstance(run_id, str) and run_id:
-        selected_model = image_model_override or thread_model_choice
+        selected_model = thread_model_choice
         await create_langsmith_feedback(
             run_id,
             "performance_model_switch_slack",

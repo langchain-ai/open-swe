@@ -1,6 +1,5 @@
 import { PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Banner } from "@langchain/macaw-components/Banner"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,7 +7,8 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
+import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
+import { PaperclipIcon } from "@phosphor-icons/react/dist/ssr/Paperclip"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
@@ -51,7 +51,7 @@ import type {
   Skill,
   WorkspaceOption,
 } from "@/lib/api"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { AttachmentChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
@@ -66,10 +66,11 @@ import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
-const MAX_IMAGE_COUNT = 5
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_ATTACHMENT_COUNT = 10
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const MAX_MENTION_SUGGESTIONS = 8
-const SUPPORTED_IMAGE_TYPES = new Set([
+/** Formats the composer previews as pictures; any other file shows as a chip. */
+const PREVIEWABLE_IMAGE_TYPES = new Set([
   "image/png",
   "image/jpeg",
   "image/gif",
@@ -106,7 +107,7 @@ export interface RestoredDraft {
   /** Changes on every restore so the same content can come back twice. */
   key: number
   text: string
-  images: Array<ImageChunk>
+  images: Array<AttachmentChunk>
   /** Replace the previous suggested prompt if it is still exactly as suggested, instead of stacking on it. */
   replacesSuggestion?: boolean
 }
@@ -123,7 +124,7 @@ export interface ChatComposerProps {
   onStop?: () => void | Promise<void>
   onSubmit?: (
     value: string,
-    images: Array<ImageChunk>,
+    images: Array<AttachmentChunk>,
     options?: SubmitOptions
   ) => void | Promise<void>
   /**
@@ -135,6 +136,8 @@ export interface ChatComposerProps {
   followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
+  /** Accept only previewable images: a legacy local session hands attachments to its model. */
+  imagesOnly?: boolean
   droppedFiles?: { key: number; files: Array<File> } | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
@@ -172,25 +175,34 @@ export interface ChatComposerProps {
   routed?: { route?: string; modelId?: string | null } | null
 }
 
-function fileToImageChunk(file: File): Promise<ImageChunk | null> {
-  if (!SUPPORTED_IMAGE_TYPES.has(file.type) || file.size > MAX_IMAGE_BYTES) {
-    return Promise.resolve(null)
-  }
-
+function fileToAttachmentChunk(file: File): Promise<AttachmentChunk | null> {
   return new Promise((resolve) => {
     const reader = new FileReader()
     reader.onload = () => {
       const dataUrl = typeof reader.result === "string" ? reader.result : ""
       const base64 = dataUrl.split(",")[1]
+      const mimeType = file.type || "application/octet-stream"
       resolve(
-        base64
-          ? { kind: "image", base64, mimeType: file.type, fileName: file.name }
+        base64 !== undefined
+          ? {
+              kind: PREVIEWABLE_IMAGE_TYPES.has(mimeType) ? "image" : "file",
+              base64,
+              mimeType,
+              fileName: file.name,
+            }
           : null
       )
     }
     reader.onerror = () => resolve(null)
     reader.readAsDataURL(file)
   })
+}
+
+function formatBytes(base64: string): string {
+  const bytes = Math.floor((base64.length * 3) / 4)
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function buildCommandItems(
@@ -276,6 +288,7 @@ export const ChatComposer = memo(function ChatComposer({
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
+  imagesOnly = false,
   models = [],
   selection = null,
   onSelectionChange,
@@ -307,7 +320,7 @@ export const ChatComposer = memo(function ChatComposer({
 }: ChatComposerProps) {
   const [value, setValue] = useState("")
   const [cursor, setCursor] = useState(0)
-  const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
+  const [pendingImages, setPendingImages] = useState<Array<AttachmentChunk>>([])
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
@@ -405,14 +418,8 @@ export const ChatComposer = memo(function ChatComposer({
     commandItems[0] ??
     null
 
-  const selectedModelSupportsImages = useMemo(() => {
-    if (!selection || pendingImages.length === 0) return true
-    return models.some((m) => m.id === selection.modelId && m.supports_images)
-  }, [models, pendingImages.length, selection])
-
   const composerEmpty = value.trim().length === 0 && pendingImages.length === 0
-  const canSubmit =
-    !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
+  const canSubmit = !disabled && !isSubmitting && !composerEmpty
 
   const applyPrompt = useCallback((nextValue: string, nextCursor: number) => {
     setValue(nextValue)
@@ -564,8 +571,7 @@ export const ChatComposer = memo(function ChatComposer({
           !isSubmitting &&
           onEmptySubmit
         ) {
-          // Only a truly empty composer sends the queue head. A draft that
-          // cannot be sent (images on a text-only model) must stay put.
+          // Only a truly empty composer sends the queue head.
           onEmptySubmit()
         }
         // Swallow it either way: a bare Enter must never insert a newline in a
@@ -590,18 +596,32 @@ export const ChatComposer = memo(function ChatComposer({
     ]
   )
 
-  const addFiles = useCallback(async (files: FileList | Array<File>) => {
-    const nextImages = await Promise.all(
-      Array.from(files).map(fileToImageChunk)
-    )
-    const validImages = nextImages.filter(
-      (image): image is ImageChunk => image !== null
-    )
-    if (validImages.length === 0) return
-    setPendingImages((prev) =>
-      [...prev, ...validImages].slice(0, MAX_IMAGE_COUNT)
-    )
-  }, [])
+  const addFiles = useCallback(
+    async (files: FileList | Array<File>) => {
+      const all = Array.from(files)
+      const accepted = all.filter(
+        (file) =>
+          file.size <= MAX_ATTACHMENT_BYTES &&
+          (!imagesOnly || PREVIEWABLE_IMAGE_TYPES.has(file.type))
+      )
+      const read = await Promise.all(accepted.map(fileToAttachmentChunk))
+      const valid = read
+        .filter(
+          (attachment): attachment is AttachmentChunk => attachment !== null
+        )
+        .slice(0, Math.max(0, MAX_ATTACHMENT_COUNT - pendingImages.length))
+      if (valid.length > 0) setPendingImages((prev) => [...prev, ...valid])
+      if (valid.length < all.length)
+        setComposerError(
+          imagesOnly
+            ? `Attach up to ${MAX_ATTACHMENT_COUNT} PNG, JPEG, GIF or WebP images.`
+            : `Attach up to ${MAX_ATTACHMENT_COUNT} files of at most ${
+                MAX_ATTACHMENT_BYTES / (1024 * 1024)
+              }MB each.`
+        )
+    },
+    [imagesOnly, pendingImages.length]
+  )
 
   useEffect(() => {
     if (droppedFiles)
@@ -694,7 +714,7 @@ export const ChatComposer = memo(function ChatComposer({
       for (const item of Array.from(event.clipboardData.items)) {
         if (item.kind !== "file") continue
         const file = item.getAsFile()
-        if (file && SUPPORTED_IMAGE_TYPES.has(file.type)) files.push(file)
+        if (file) files.push(file)
       }
       if (files.length === 0) return
       event.preventDefault()
@@ -782,14 +802,6 @@ export const ChatComposer = memo(function ChatComposer({
         </div>
       )}
 
-      {!selectedModelSupportsImages && (
-        <Banner className="mb-space-2" intent="warning">
-          {`The selected model does not accept image input. Remove the image${
-            pendingImages.length > 1 ? "s" : ""
-          } or switch to a vision-enabled model to send.`}
-        </Banner>
-      )}
-
       <div
         data-chat-composer
         className={cn(
@@ -817,13 +829,15 @@ export const ChatComposer = memo(function ChatComposer({
             <span className="rounded-md bg-brand-subtle px-space-3 py-space-1 text-xs font-medium text-brand-primary">
               {dragKind === "path"
                 ? "Drop to mention this file"
-                : "Drop images here"}
+                : "Drop files to attach"}
             </span>
           </div>
         )}
 
         <input
-          accept="image/png,image/jpeg,image/gif,image/webp"
+          accept={
+            imagesOnly ? [...PREVIEWABLE_IMAGE_TYPES].join(",") : undefined
+          }
           className="hidden"
           multiple
           onChange={handleFileChange}
@@ -833,21 +847,42 @@ export const ChatComposer = memo(function ChatComposer({
 
         {pendingImages.length > 0 && (
           <div className="mb-space-2 flex flex-wrap gap-space-2">
-            {pendingImages.map((image, index) => (
+            {pendingImages.map((attachment, index) => (
               <div
                 className="group relative"
-                key={`${image.fileName ?? "image"}-${index}`}
+                data-testid="composer-attachment"
+                key={`${attachment.fileName ?? attachment.kind}-${index}`}
               >
-                <img
-                  alt={image.fileName || "Pending image"}
-                  className="size-16 rounded-lg border border-default object-cover"
-                  src={`data:${image.mimeType};base64,${image.base64}`}
-                />
+                {attachment.kind === "image" ? (
+                  <img
+                    alt={attachment.fileName || "Pending image"}
+                    className="size-16 rounded-lg border border-default object-cover"
+                    src={`data:${attachment.mimeType};base64,${attachment.base64}`}
+                  />
+                ) : (
+                  <div
+                    className="flex h-16 w-44 items-center gap-space-2 rounded-lg border border-default bg-surface-level-1 px-space-2"
+                    title={attachment.fileName}
+                  >
+                    <FileIcon
+                      aria-hidden
+                      className="size-5 shrink-0 text-icon-secondary"
+                    />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate text-xs font-medium text-primary">
+                        {attachment.fileName || "File"}
+                      </span>
+                      <span className="truncate text-xxs text-tertiary">
+                        {formatBytes(attachment.base64)}
+                      </span>
+                    </span>
+                  </div>
+                )}
                 <IconButton
                   className="absolute -top-1.5 -right-1.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
                   color="secondary"
                   icon={XIcon}
-                  label="Remove image"
+                  label={`Remove ${attachment.fileName || "attachment"}`}
                   onClick={() =>
                     setPendingImages((prev) =>
                       prev.filter((_, i) => i !== index)
@@ -903,15 +938,17 @@ export const ChatComposer = memo(function ChatComposer({
             >
               <DropdownMenuItem
                 className="gap-space-2 text-xs"
-                disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
+                disabled={
+                  disabled || pendingImages.length >= MAX_ATTACHMENT_COUNT
+                }
                 onSelect={() => fileInputRef.current?.click()}
                 size="sm"
               >
-                <ImageSquareIcon
+                <PaperclipIcon
                   className="size-3.5 shrink-0 text-icon-secondary"
                   weight="regular"
                 />
-                Attach images
+                {imagesOnly ? "Attach images" : "Attach files"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -923,7 +960,6 @@ export const ChatComposer = memo(function ChatComposer({
                 onOpenChange={setModelPickerOpen}
                 onSelectionChange={onSelectionChange}
                 open={modelPickerOpen}
-                requireImageSupport={pendingImages.length > 0}
                 routed={routed}
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-space-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"

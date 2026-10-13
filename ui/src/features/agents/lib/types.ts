@@ -187,10 +187,44 @@ export interface RemoteImageChunk {
   credentials: "session" | "none"
   mimeType?: string
   fileName?: string
+  /** Where the agent can read the file in its sandbox. */
+  path?: string
 }
 
 /** Either image form, as a renderer receives it from `Chunk`. */
 export type AnyImageChunk = ImageChunk | RemoteImageChunk
+
+/** A non-image file carried inline, as the composer holds an upload. */
+export interface FileChunk {
+  kind: "file"
+  base64: string
+  mimeType: string
+  fileName?: string
+}
+
+/**
+ * A file the transcript references; see `RemoteImageChunk`. Without a `url` its
+ * bytes were never captured, and only its sandbox `path` is known.
+ */
+export interface RemoteFileChunk {
+  kind: "file"
+  url?: string
+  credentials?: "session" | "none"
+  mimeType?: string
+  fileName?: string
+  /** Where the agent can read the file in its sandbox. */
+  path?: string
+}
+
+/** A file attached in the composer, before it is sent. */
+export type AttachmentChunk = ImageChunk | FileChunk
+
+/** Any attachment on a message, inline or referenced. */
+export type AnyAttachmentChunk = AnyImageChunk | FileChunk | RemoteFileChunk
+
+export function isAttachmentChunk(chunk: Chunk): chunk is AnyAttachmentChunk {
+  return chunk.kind === "image" || chunk.kind === "file"
+}
 
 export type Chunk =
   | TextChunk
@@ -202,6 +236,8 @@ export type Chunk =
   | TodoChunk
   | ImageChunk
   | RemoteImageChunk
+  | FileChunk
+  | RemoteFileChunk
 
 export interface Message {
   id: string
@@ -324,7 +360,7 @@ export interface AgentSchedule {
 export interface QueuedThreadMessage {
   id: string
   content: string
-  images?: Array<AnyImageChunk>
+  images?: Array<AnyAttachmentChunk>
   createdAt: number
   /** The server has not acknowledged it yet, so it cannot be sent now or cancelled. */
   pending?: boolean
@@ -348,7 +384,7 @@ export interface PendingThreadMessage extends Omit<
   QueuedThreadMessage,
   "images" | "pending" | "mine"
 > {
-  images?: Array<ImageChunk>
+  images?: Array<AttachmentChunk>
   status: "sending" | "failed"
   /** Sent to queue behind the live run, so it renders as a queued row. */
   queued?: boolean

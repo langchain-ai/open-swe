@@ -1,7 +1,5 @@
-"""Turning a dashboard request into a LangGraph run: bodies, models, images, commands."""
+"""Turning a dashboard request into a LangGraph run: bodies, models, attachments, commands."""
 
-import base64
-import binascii
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
@@ -9,17 +7,21 @@ from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 from fastapi import HTTPException
-from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from openswe.attachments import (
+    MAX_ATTACHMENTS_PER_MESSAGE,
+    Attachment,
+    StagedAttachment,
+    UnsupportedAttachment,
+)
+from openswe.attachments import stage as stage_attachments
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
-    default_vision_model_pair,
     gate_fable_model,
-    model_supports_images,
     normalize_model_choice,
 )
 from openswe.dashboard.profiles import get_profile
@@ -72,10 +74,9 @@ from openswe.threads.summary import (
     thread_is_owner,
     thread_source,
 )
-from openswe.transcript.attachments import PendingAttachment
+from openswe.transcript import attachments as attachment_store
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
-    MessageAttachment,
     MessageCompleted,
     MessageSender,
     ThreadCreated,
@@ -111,9 +112,6 @@ DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "checkpoints",
     "events",
 )
-_SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-_MAX_DASHBOARD_IMAGES = 5
-_MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
     "id": "system:dashboard-handoff",
     "display_name": "Dashboard handoff",
@@ -133,15 +131,6 @@ _PULL_REQUEST_THREAD_SYSTEM: SystemIdentity = {
 
 class _LinkedPullRequest(BaseModel):
     pr_url: str | None = None
-
-
-class DashboardImageBody(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    kind: str | None = None
-    base64: str = Field(min_length=1)
-    mime_type: str = Field(alias="mimeType", min_length=1)
-    file_name: str | None = Field(default=None, alias="fileName")
 
 
 class ThreadRenameBody(BaseModel):
@@ -176,62 +165,6 @@ async def _resolve_agent_model_choice(
     return resolved_model, resolved_effort
 
 
-def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tuple[str, str]:
-    if not has_images or model_supports_images(model_id):
-        return model_id, effort
-    fallback_model_id, fallback_effort = default_vision_model_pair()
-    logger.info(
-        "Using vision fallback model %s for dashboard image input; configured model %s "
-        "does not support images",
-        fallback_model_id,
-        model_id,
-    )
-    return fallback_model_id, fallback_effort
-
-
-def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
-    if image.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
-        raise HTTPException(422, f"unsupported image type: {image.mime_type}")
-    try:
-        data = base64.b64decode(image.base64, validate=True)
-    except binascii.Error as exc:
-        raise HTTPException(422, "invalid image data") from exc
-    if len(data) > _MAX_DASHBOARD_IMAGE_BYTES:
-        raise HTTPException(422, "image exceeds 10MB limit")
-    return data
-
-
-def _image_blocks(
-    images: list[DashboardImageBody], *, model_id: str | None
-) -> list[ImageContentBlock]:
-    if len(images) > _MAX_DASHBOARD_IMAGES:
-        raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
-    if images and (not model_id or not model_supports_images(model_id)):
-        model_label = model_id or "the current model"
-        raise HTTPException(422, f"model {model_label} does not support image input")
-    return [
-        create_image_block(
-            base64=base64.b64encode(_decode_dashboard_image(image)).decode("ascii"),
-            mime_type=image.mime_type,
-        )
-        for image in images
-    ]
-
-
-def _user_message_content(
-    prompt: str, images: list[DashboardImageBody], *, model_id: str | None = None
-) -> str | list[ImageContentBlock | dict[str, str]]:
-    text = prompt.strip()
-    if not text and not images:
-        raise HTTPException(422, "prompt or image required")
-    if not images:
-        return text
-    return [
-        *_image_blocks(images, model_id=model_id),
-        *([{"type": "text", "text": text}] if text else []),
-    ]
-
-
 async def _resolve_requested_workspace(
     requested: object, repo_config: dict[str, str] | None, *, login: str | None
 ) -> str:
@@ -258,7 +191,6 @@ async def create_dashboard_thread_record(
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
     prompt: str,
-    images: list[DashboardImageBody] | None = None,
     title: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
@@ -274,18 +206,9 @@ async def create_dashboard_thread_record(
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
         profile, model_id, effort, workspace
     )
-    resolved_model, resolved_effort = _with_vision_fallback(
-        resolved_model,
-        resolved_effort,
-        has_images=bool(images),
-    )
-    _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or "Default"
     metadata_effort = chosen_effort
-    if images and not model_supports_images(str(metadata_model)):
-        metadata_model = resolved_model
-        metadata_effort = resolved_effort
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
     initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
@@ -585,80 +508,39 @@ def _command_prompt_text(content: Any) -> str:
     return ""
 
 
-def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
-    """Read inline image blocks for size, format, and model validation."""
-    if not isinstance(content, list):
-        return []
-    images: list[DashboardImageBody] = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "image_url":
-            image_url = block.get("image_url")
-            url = image_url.get("url") if isinstance(image_url, dict) else image_url
-            if not isinstance(url, str):
-                raise HTTPException(422, "invalid image data")
-            header, separator, data = url.partition(",")
-            if (
-                not separator
-                or not header.startswith("data:image/")
-                or not header.endswith(";base64")
-            ):
-                raise HTTPException(422, "images must be embedded as base64 data URLs")
-            images.append(DashboardImageBody(base64=data, mimeType=header[5:-7]))
-            continue
-        if not isinstance(block, dict) or block.get("type") != "image":
-            continue
-        data = block.get("base64")
-        mime = block.get("mime_type") or block.get("mimeType")
-        if not isinstance(data, str) or not isinstance(mime, str):
-            raise HTTPException(422, "invalid image data")
-        file_name = block.get("file_name") or block.get("fileName")
-        images.append(
-            DashboardImageBody(
-                base64=data,
-                mimeType=mime,
-                fileName=file_name if isinstance(file_name, str) else None,
-            )
-        )
-    return images
+def _command_attachments(content: Any) -> tuple[Any, list[Attachment]]:
+    """``content`` without its attached files, and those files' verified bytes.
 
-
-def _transcript_attachments(
-    images: list[DashboardImageBody], message_id: str
-) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
-    """Attachment rows for a command's images, and the metadata the event carries.
-
-    ``_decode_dashboard_image`` re-applies the type allowlist and the 10MB cap
-    the run already validated, so nothing reaches the database unchecked.
+    Anything that is neither text nor a base64 file is refused, so nothing
+    unchecked reaches the sandbox or the transcript.
     """
-    metadata: list[MessageAttachment] = []
-    pending: list[PendingAttachment] = []
-    for position, image in enumerate(images):
-        attachment_id = uuid.uuid7()
-        pending.append(
-            PendingAttachment(
-                attachment_id=attachment_id,
-                message_id=message_id,
-                position=position,
-                mime_type=image.mime_type,
-                file_name=image.file_name,
-                data=_decode_dashboard_image(image),
-            )
-        )
-        metadata.append(
-            MessageAttachment(
-                mime_type=image.mime_type,
-                file_name=image.file_name,
-                attachment_id=attachment_id,
-            )
-        )
-    return metadata, tuple(pending)
+    if not isinstance(content, list):
+        return content, []
+    text: list[Any] = []
+    attachments: list[Attachment] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") == "text":
+            text.append(block)
+            continue
+        try:
+            attachment = Attachment.from_block(block)
+        except UnsupportedAttachment as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if attachment is None:
+            raise HTTPException(422, "attachments must be embedded as base64")
+        attachments.append(attachment)
+    if len(attachments) > MAX_ATTACHMENTS_PER_MESSAGE:
+        raise HTTPException(422, f"at most {MAX_ATTACHMENTS_PER_MESSAGE} files can be attached")
+    return text, attachments
 
 
-def _validate_command_images(content: Any, *, model_id: str | None) -> None:
-    """Reject images for text-only models / oversize attachments (raises 422)."""
-    images = _dashboard_images_from_content(content)
-    if images:
-        _image_blocks(images, model_id=model_id)
+async def _stage_command_attachments(
+    thread_id: str, attachments: list[Attachment], metadata: Mapping[str, Any]
+) -> list[StagedAttachment]:
+    workspace = metadata.get("workspace") or metadata.get("environment")
+    return await stage_attachments(
+        thread_id, attachments, workspace_slug=workspace if isinstance(workspace, str) else None
+    )
 
 
 async def _resolve_sandbox_bridge(requested: object, *, owner_id: str) -> Bridge | None:
@@ -760,6 +642,7 @@ async def _attributed_run_messages(
     *,
     metadata: Mapping[str, Any],
     content: Any,
+    attachments: Sequence[StagedAttachment] = (),
     creating: bool,
     email: str | None,
     client: Any,
@@ -825,7 +708,9 @@ async def _attributed_run_messages(
         )
     structured = build_input_messages(
         content,
-        dashboard_input_context(sender_id, relayed_from),
+        dashboard_input_context(
+            sender_id, relayed_from, [attachment.fields() for attachment in attachments]
+        ),
         systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
@@ -898,7 +783,9 @@ async def _enrich_run_start_command(
     relayed_from = _relayed_from(params)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
-    command_images = _dashboard_images_from_content(content)
+    content, command_attachments = _command_attachments(content)
+    if creating and not _command_prompt_text(content) and not command_attachments:
+        raise HTTPException(422, "prompt or attachment required")
     invocation_id = new_invocation_id()
     invocation_started_at = datetime.now(UTC).isoformat()
     overrides = with_invocation_id(None, invocation_id)
@@ -908,9 +795,8 @@ async def _enrich_run_start_command(
 
     if creating:
         # First ``run.start`` for a client-minted thread id: stamp the full
-        # dashboard thread record (owner, title, repo, model) and validate any
-        # attached images against the resolved model before the run is
-        # forwarded to LangGraph. The repo hint rides in the client
+        # dashboard thread record (owner, title, repo, model) before the run
+        # is forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
         visibility = await _requested_visibility(client_configurable, login=login)
@@ -923,7 +809,6 @@ async def _enrich_run_start_command(
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
             visibility=visibility,
             prompt=_command_prompt_text(content),
-            images=command_images,
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             model_selection=model_selection or "auto",
@@ -939,25 +824,21 @@ async def _enrich_run_start_command(
         run_model, run_effort = normalize_model_choice(
             metadata.get("resolved_model"), metadata.get("resolved_effort")
         )
-        if command_images and run_model and run_effort:
-            overrides["agent_model_id"] = run_model
-            overrides["agent_effort"] = run_effort
-        elif chosen_model and chosen_effort:
+        if chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
     else:
         run_model, run_effort = (
             (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
         )
-        if command_images and run_model and run_effort:
-            run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
-        _validate_command_images(content, model_id=run_model)
 
+    staged = await _stage_command_attachments(thread_id, command_attachments, metadata)
     structured, injected, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
         metadata=metadata,
         content=content,
+        attachments=staged,
         creating=creating,
         email=email,
         client=client,
@@ -991,15 +872,7 @@ async def _enrich_run_start_command(
         "injected_dynamic_context_hashes": sorted(injected),
         **(sandbox_handoff or {}),
     }
-    if command_images and run_model and run_effort:
-        overrides["agent_model_id"] = run_model
-        overrides["agent_effort"] = run_effort
-        overrides["model_override_reason"] = "image_input"
-        metadata_update["model"] = run_model
-        metadata_update["effort"] = run_effort
-        metadata_update["resolved_model"] = run_model
-        metadata_update["resolved_effort"] = run_effort
-    elif chosen_model and chosen_effort:
+    if chosen_model and chosen_effort:
         overrides["agent_model_id"] = chosen_model
         overrides["agent_effort"] = chosen_effort
         metadata_update["model"] = chosen_model
@@ -1038,7 +911,7 @@ async def _enrich_run_start_command(
             # deduplicates it — and the run then has to join the turn that was
             # recorded the first time rather than one nothing was written under.
             command_id = f"message:{message_id}:requested"
-            attachments, pending = _transcript_attachments(command_images, message_id)
+            attachments, pending = attachment_store.capture(message_id, staged)
             appended = await append(
                 thread_id,
                 [
@@ -1168,8 +1041,8 @@ async def steer_running_thread(
         params = {}
     content = _command_message_content(params)
     relayed_from = _relayed_from(params)
-    command_images = _dashboard_images_from_content(content)
-    if not _command_prompt_text(content) and not command_images:
+    content, command_attachments = _command_attachments(content)
+    if not _command_prompt_text(content) and not command_attachments:
         raise HTTPException(422, "a follow-up needs a message")
 
     client = langgraph_client()
@@ -1178,19 +1051,13 @@ async def steer_running_thread(
     live_run_id = turn.run_id if turn is not None else None
     if live_run_id is None and isinstance(latest_run_id, str) and latest_run_id:
         live_run_id = latest_run_id
-    # The run keeps the model it started with, so images are held to it. Thread
-    # metadata may already name the model of a follow-up queued behind it.
-    run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
-    image_blocks = _image_blocks(
-        command_images,
-        model_id=run_model if isinstance(run_model, str) else thread_model_choice(metadata)[0],
-    )
-
+    staged = await _stage_command_attachments(thread_id, command_attachments, metadata)
     structured, _, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
         metadata=metadata,
         content=content,
+        attachments=staged,
         creating=False,
         email=email,
         client=client,
@@ -1206,7 +1073,7 @@ async def steer_running_thread(
 
     if turn is not None:
         turn_id = turn.turn_id
-        attachments, pending = _transcript_attachments(command_images, message_id)
+        attachments, pending = attachment_store.capture(message_id, staged)
         await append(
             thread_id,
             [
@@ -1230,7 +1097,7 @@ async def steer_running_thread(
 
     payload: dict[str, Any] = {
         "text": _command_prompt_text(content),
-        "images": list(image_blocks),
+        "attachments": [attachment.fields() for attachment in staged],
         "sender": {
             "id": f"github:{login}",
             "platform": "github",
@@ -1301,18 +1168,6 @@ async def _run_is_live(client: Any, thread_id: str, run_id: str | None) -> bool:
         return False
     status = run.get("status") if isinstance(run, Mapping) else getattr(run, "status", None)
     return status in {"pending", "running"}
-
-
-async def _run_metadata(client: Any, thread_id: str, run_id: str | None) -> Mapping[str, Any]:
-    if run_id is None:
-        return {}
-    try:
-        run = await client.runs.get(thread_id, run_id)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not read run %s before steering", run_id, exc_info=True)
-        return {}
-    metadata = run.get("metadata") if isinstance(run, Mapping) else None
-    return metadata if isinstance(metadata, Mapping) else {}
 
 
 async def queue_follow_up_run(
@@ -1589,8 +1444,8 @@ async def _enrich_system_run_start_command(
     prompt = _command_prompt_text(content)
     if not prompt.strip():
         raise HTTPException(422, "a run needs a prompt")
-    if _dashboard_images_from_content(content):
-        raise HTTPException(422, "machine principals cannot attach images")
+    if _command_attachments(content)[1]:
+        raise HTTPException(422, "machine principals cannot attach files")
 
     if not creating and client_configurable.get("sandbox_bridge_id") is not None:
         raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")

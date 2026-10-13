@@ -4,12 +4,15 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any
 
 import httpx2
-from langchain_core.messages.content import create_text_block
 
+from openswe.attachments import Attachment, envelope_data
+from openswe.attachments import stage as stage_attachments
 from openswe.input_messages import (
+    FieldValue,
     PersonIdentity,
     RunInput,
     human_input,
@@ -177,50 +180,23 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         ticket_url=ticket_url,
         description=description,
     )
-    description_blocks: list[dict[str, Any]] = [
-        cast(dict[str, Any], create_text_block(issue_prompt))
-    ]
-    image_blocks_by_url: dict[str, dict[str, Any]] = {}
 
     # Resolve the GitHub login from the Linear email the same way Slack does, so
     # PRs open *as the triggering user* and the thread is tagged for the dashboard.
     mapped_login = await User.login_for_email(user_email) if user_email else None
     # A follow-up stays in its thread's workspace; a new issue lands in the
-    # repository's preferred one. Either way its default model and Fable flag
-    # are the ones the vision fallback checks.
+    # repository's preferred one.
     workspace = await common.get_thread_workspace(
         thread_id
     ) or await common.workspace_for_repo_config(repo_config)
 
-    image_model_override: tuple[str, str] | None = None
+    image_urls = common.dedupe_urls(image_urls)
+    fetched: dict[str, Attachment] = {}
     if image_urls:
-        image_urls = common.dedupe_urls(image_urls)
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login, workspace=workspace)
-        if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
-            common.logger.info(
-                "Using vision fallback model %s for %d Linear image(s); configured model %s "
-                "does not support images",
-                fallback_model_id,
-                len(image_urls),
-                resolved_model_id,
-            )
-            resolved_model_id = fallback_model_id
-            image_model_override = (fallback_model_id, fallback_effort)
-        common.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-        common.logger.debug("Image URLs: %s", image_urls)
-
         async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
             for image_url in image_urls:
-                image_block = await common.fetch_image_block(image_url, client)
-                if image_block:
-                    image_blocks_by_url[image_url] = cast(dict[str, Any], image_block)
-        description_blocks.extend(
-            image_blocks_by_url[url]
-            for url in common.dedupe_urls(description_image_urls)
-            if url in image_blocks_by_url
-        )
-        common.logger.info("Built %d description content block(s)", len(description_blocks))
+                if attachment := await common.fetch_attachment(image_url, client):
+                    fetched[image_url] = attachment
 
     linear_project_id = ""
     linear_issue_number = ""
@@ -245,9 +221,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
-    if image_model_override:
-        configurable["agent_model_id"] = image_model_override[0]
-        configurable["agent_effort"] = image_model_override[1]
 
     configurable["workspace"] = workspace
     configurable["environment"] = workspace
@@ -262,13 +235,25 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         source_context=SourceContext.parse({"linear_issue": configurable["linear_issue"]}),
         workspace=workspace,
     )
+    staged = dict(
+        zip(
+            fetched,
+            await stage_attachments(thread_id, list(fetched.values()), workspace_slug=workspace),
+            strict=True,
+        )
+    )
+
+    def attachment_data(urls: list[str]) -> dict[str, Mapping[str, FieldValue | None]]:
+        return envelope_data(
+            [staged[url].fields() for url in common.dedupe_urls(urls) if url in staged]
+        )
 
     run_messages = [
         system_introduction(
             {"id": "system:linear-issue", "display_name": "Linear issue", "platform": "linear"}
         ),
         system_input(
-            description_blocks if len(description_blocks) > 1 else issue_prompt,
+            issue_prompt,
             {
                 "sender_id": "system:linear-issue",
                 "surface": "linear",
@@ -280,7 +265,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                         "url": ticket_url,
                         "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",
                         "title": title,
-                    }
+                    },
+                    **attachment_data(description_image_urls),
                 },
             },
         ),
@@ -295,28 +281,18 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         if sender_id not in introduced:
             run_messages.append(person_introduction(person))
             introduced.add(sender_id)
-        body = str(comment.get("body", ""))
-        comment_image_blocks = [
-            image_blocks_by_url[url]
-            for url in common.dedupe_urls(
-                image_urls_by_comment_id.get(str(comment.get("id", "")), [])
-            )
-            if url in image_blocks_by_url
-        ]
-        blocks: str | list[dict[str, Any]] = body
-        if comment_image_blocks:
-            blocks = [
-                cast(dict[str, Any], create_text_block(body)),
-                *comment_image_blocks,
-            ]
+        comment_id = str(comment.get("id", ""))
         run_messages.append(
             human_input(
-                blocks,
+                str(comment.get("body", "")),
                 {
                     "sender_id": sender_id,
                     "surface": "linear",
                     "kind": "human",
-                    "data": {"comment_id": str(comment.get("id", ""))},
+                    "data": {
+                        "comment_id": comment_id,
+                        **attachment_data(image_urls_by_comment_id.get(comment_id, [])),
+                    },
                 },
             )
         )

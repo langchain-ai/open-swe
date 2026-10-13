@@ -1,13 +1,11 @@
 import asyncio
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
 import httpx2
 import pytest
 
 from openswe.slack import client as slack_client
-from openswe.slack import webhook as slack_webhook
 from openswe.utils import url_safety
 
 
@@ -51,10 +49,6 @@ def download_http(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(slack_client, "SLACK_BOT_TOKEN", "test-slack-token")
     monkeypatch.setattr(slack_client, "SLACK_FILE_DOWNLOAD_MAX_BYTES", 3)
     return responses, requests
-
-
-def _entry(name: str, url: str) -> slack_webhook.SlackFileEntry:
-    return slack_webhook.SlackFileEntry(name=name, url=url)
 
 
 @pytest.mark.asyncio
@@ -136,42 +130,6 @@ async def test_download_slack_file_closes_redirect_before_blocking_private_host(
     assert len(requests) == 1
     assert stream.read_count == 0
     assert stream.closed
-
-
-@pytest.mark.asyncio
-async def test_download_slack_files_uploads_before_downloading_next_file(
-    monkeypatch, tmp_path
-) -> None:
-    async def download(url: str) -> bytes:
-        if url.endswith("second.zip"):
-            assert (tmp_path / "bundle.zip").read_bytes() == b"zip"
-        return b"zip"
-
-    async def upload(files: list[tuple[str, bytes]]) -> list[dict[str, None]]:
-        for path, content in files:
-            (tmp_path / path.rsplit("/", 1)[-1]).write_bytes(content)
-        return [{"error": None} for _ in files]
-
-    backend = MagicMock()
-    backend.aupload_files = upload
-    monkeypatch.setattr(
-        "openswe.sandboxes.lifecycle.ensure_sandbox_for_thread", AsyncMock(return_value=backend)
-    )
-    monkeypatch.setattr(slack_client, "download_slack_file", download)
-
-    staged = await slack_webhook._download_slack_files_to_sandbox(
-        [
-            _entry("bundle.zip", "https://files.slack.com/first.zip"),
-            _entry("bundle.zip", "https://files.slack.com/second.zip"),
-        ],
-        "thread-1",
-    )
-
-    assert staged == [
-        slack_webhook.StagedSlackFile("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
-        slack_webhook.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
-    ]
-    assert (tmp_path / "bundle-1").read_bytes() == b"zip"
 
 
 @pytest.mark.asyncio

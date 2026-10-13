@@ -3,7 +3,10 @@ import type {
   WorkspaceFileIndex,
   WorkspacePath,
 } from "@/features/agents/lib/workspaceFiles"
-import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
+import type {
+  AgentPullRequest,
+  AttachmentChunk,
+} from "@/features/agents/lib/types"
 import type { Skill } from "@/lib/api"
 
 export type DesktopCommandId =
@@ -57,7 +60,7 @@ export type DesktopLegacyLocalActivity = Record<string, "running" | "error">
 
 export interface DesktopLegacyLocalPromptInput {
   prompt: string
-  images: Array<ImageChunk>
+  images: Array<AttachmentChunk>
   skills: Array<Skill>
 }
 

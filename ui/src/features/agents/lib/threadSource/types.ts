@@ -9,7 +9,7 @@ import type {
   SubagentToolCall,
   TranscriptToolCallState,
 } from "@/features/agents/lib/transcript/reducer"
-import type { ImageChunk, Message } from "@/features/agents/lib/types"
+import type { AttachmentChunk, Message } from "@/features/agents/lib/types"
 import type { ContextUsage } from "@/features/agents/lib/contextUsage"
 
 /** The human message and run configuration a new run starts from. */
@@ -19,7 +19,7 @@ export interface ThreadRunInput {
     /** Client-minted id, shared by the graph's message and the transcript row. */
     id: string
     text: string
-    images?: ReadonlyArray<ImageChunk>
+    images?: ReadonlyArray<AttachmentChunk>
   }
   configurable: Record<string, unknown>
   /**

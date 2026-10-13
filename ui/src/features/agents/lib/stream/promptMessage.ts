@@ -1,25 +1,27 @@
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { AttachmentChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 
-export function imageBlocks(images: ReadonlyArray<ImageChunk> = []) {
-  return images.map((image) => ({
-    type: "image" as const,
-    base64: image.base64,
-    mime_type: image.mimeType,
-    ...(image.fileName ? { file_name: image.fileName } : {}),
+export function attachmentBlocks(
+  attachments: ReadonlyArray<AttachmentChunk> = []
+) {
+  return attachments.map((attachment) => ({
+    type: attachment.kind,
+    base64: attachment.base64,
+    mime_type: attachment.mimeType,
+    ...(attachment.fileName ? { file_name: attachment.fileName } : {}),
   }))
 }
 
 /** The human message a prompt bar submission becomes on the graph. */
 export function promptMessage(
   text: string,
-  images: ReadonlyArray<ImageChunk> = []
+  attachments: ReadonlyArray<AttachmentChunk> = []
 ) {
   const trimmed = text.trim()
   return {
     type: "human" as const,
     content: [
-      ...imageBlocks(images),
+      ...attachmentBlocks(attachments),
       ...(trimmed ? [{ type: "text" as const, text: trimmed }] : []),
     ],
   }

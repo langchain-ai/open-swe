@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from openswe.attachments import envelope_attachments
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.check_message_queue import (
     LinearNotifyState,
@@ -76,29 +77,21 @@ async def test_check_message_queue_keeps_slack_for_a_message_relayed_by_another_
 
 
 @pytest.mark.asyncio
-async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
+async def test_check_message_queue_names_a_steered_follow_ups_attachments(
     registry_db: None,
 ) -> None:
-    await QueuedMessage.put("thread-1", {"text": "first", "image_urls": ["https://img.test/a.png"]})
+    fields = {"path": "/tmp/open-swe/attachments/a/report.html", "mime_type": "text/html"}
+    await QueuedMessage.put(
+        "thread-1",
+        {
+            "text": "see the report",
+            "attachments": [fields],
+            "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777004",
+            "sender": {"id": "github:octocat", "platform": "github", "github_login": "octocat"},
+        },
+    )
 
-    async def build_and_queue(payload: dict[str, Any], *, model_id: str | None) -> list:
-        await QueuedMessage.put("thread-1", {"text": "queued during the image fetch"})
-        return [{"type": "text", "text": payload["text"]}]
-
-    with (
-        patch(
-            "openswe.middleware.check_message_queue._resolve_thread_model_id",
-            return_value=None,
-        ),
-        patch(
-            "openswe.middleware.check_message_queue._build_blocks_from_payload",
-            side_effect=build_and_queue,
-        ),
-    ):
-        result = await _run({"messages": []})
+    result = await _run({"messages": []})
 
     assert result is not None
-    assert "first" in _envelope(result["messages"][-1])
-    assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
-        {"text": "queued during the image fetch"}
-    ]
+    assert envelope_attachments(result["messages"][-1]["content"]) == [fields]

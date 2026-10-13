@@ -13,8 +13,6 @@ background writer per run, so the model stream never waits on Postgres.
 """
 
 import asyncio
-import base64
-import binascii
 import contextlib
 import logging
 import re
@@ -40,6 +38,7 @@ from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 from sqlalchemy import text as sql
 
+from openswe.attachments import envelope_attachments
 from openswe.database import postgres
 from openswe.input_messages import (
     delivered_event_match_ids,
@@ -47,7 +46,6 @@ from openswe.input_messages import (
     message_sender_id,
 )
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.transcript.attachments import PendingAttachment, UnsupportedAttachment
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
     TOOL_OUTPUT_PREVIEW_CHARS,
@@ -341,77 +339,19 @@ def _usage(message: AIMessage) -> MessageUsage | None:
     )
 
 
-def _image_bytes(block: Mapping[str, object]) -> tuple[str, bytes] | None:
-    """``(mime_type, data)`` for a standard base64 image content block."""
-    mime_type = block.get("mime_type")
-    encoded = block.get("base64")
-    if not isinstance(mime_type, str) or not isinstance(encoded, str):
-        return None
-    try:
-        return mime_type, base64.b64decode(encoded, validate=True)
-    except binascii.Error:
-        logger.warning("Skipping an undecodable transcript attachment", exc_info=True)
-        return None
+def _human_attachments(message: HumanMessage) -> list[MessageAttachment]:
+    """The files a human message's envelope names in the sandbox.
 
-
-def _human_attachments(
-    message: HumanMessage, message_id: str
-) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
-    """Files on a human message, as event metadata plus the bytes to store.
-
-    Only standard base64 image blocks are captured; a remote-URL image is
-    referenced rather than copied, and anything else is skipped with a log.
+    Their bytes are not on the message; a dashboard send records them itself.
     """
-    try:
-        blocks = message.content_blocks
-    except Exception:
-        logger.debug("Could not read content blocks for attachments", exc_info=True)
-        return [], ()
-    attachments: list[MessageAttachment] = []
-    pending: list[PendingAttachment] = []
-    for block in blocks:
-        if not isinstance(block, Mapping) or block.get("type") != "image":
-            continue
-        url = block.get("url")
-        decoded = _image_bytes(block)
-        if decoded is None:
-            if isinstance(url, str) and url:
-                attachments.append(MessageAttachment(mime_type="image/*", url=url))
-            else:
-                logger.warning(
-                    "Skipping a transcript attachment with no bytes and no url",
-                    extra={"transcript": {"message_id": message_id}},
-                )
-            continue
-        mime_type, data = decoded
-        file_name = block.get("file_name")
-        attachment_id = uuid.uuid7()
-        try:
-            pending.append(
-                PendingAttachment(
-                    attachment_id=attachment_id,
-                    message_id=message_id,
-                    position=len(attachments),
-                    mime_type=mime_type,
-                    file_name=file_name if isinstance(file_name, str) else None,
-                    data=data,
-                )
-            )
-        except UnsupportedAttachment:
-            logger.warning(
-                "Skipping an unsupported transcript attachment",
-                exc_info=True,
-                extra={"transcript": {"message_id": message_id, "mime_type": mime_type}},
-            )
-            continue
-        attachments.append(
-            MessageAttachment(
-                mime_type=mime_type,
-                file_name=file_name if isinstance(file_name, str) else None,
-                attachment_id=attachment_id,
-            )
+    return [
+        MessageAttachment(
+            mime_type=fields.get("mime_type") or "application/octet-stream",
+            file_name=fields.get("name"),
+            path=fields["path"],
         )
-    return attachments, tuple(pending)
+        for fields in envelope_attachments(message.content)
+    ]
 
 
 def _tool_output(content: object) -> tuple[str, bool]:
@@ -853,7 +793,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 continue
             state.seen_human_ids.add(message_id)
             text = _transcribed_human_text(message)
-            attachments, pending = _human_attachments(message, message_id)
+            attachments = _human_attachments(message)
             if not text and not attachments:
                 continue
             state.enqueue(
@@ -873,7 +813,6 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                     actor_kind="user",
                     run_id=state.run_id,
                     turn_id=state.turn_id,
-                    attachments=pending,
                 )
             )
 
@@ -1152,9 +1091,9 @@ def _turn_requested(
     state: RunState, human: HumanMessage, ids: RunIds, metadata: Mapping[str, object]
 ) -> Command:
     message_id = human.id if isinstance(human.id, str) and human.id else str(uuid.uuid7())
-    # ``_start_run`` marks this message as seen, so its images can never be
+    # ``_start_run`` marks this message as seen, so its attachments can never be
     # recovered by ``_record_injected_humans``; they travel with the request.
-    attachments, pending = _human_attachments(human, message_id)
+    attachments = _human_attachments(human)
     return Command(
         command_id=f"turn:{state.turn_id}:requested",
         event=TurnRequested(
@@ -1171,7 +1110,6 @@ def _turn_requested(
         actor_kind="user",
         run_id=state.run_id,
         turn_id=state.turn_id,
-        attachments=pending,
     )
 
 

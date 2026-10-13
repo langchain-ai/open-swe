@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
+from deepagents.backends.protocol import FileUploadResponse
 
+from openswe.attachments import envelope_attachments
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
@@ -431,9 +433,9 @@ async def slack_file_mention(monkeypatch, fake_store, registry_db):
             self.workspace_slug = workspace_slug
             self.files: dict[str, bytes] = {}
 
-        async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[dict]:
+        async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
             self.files.update(files)
-            return [{"error": None} for _ in files]
+            return [FileUploadResponse(path=path) for path, _ in files]
 
     provisioned: list[Sandbox] = []
 
@@ -487,73 +489,32 @@ async def slack_file_mention(monkeypatch, fake_store, registry_db):
     return request, client.threads, provisioned, captured
 
 
-@pytest.mark.parametrize("private", [False, True])
-@pytest.mark.parametrize(
-    ("existing", "tag", "environment"),
-    # A first mention with no tag, repo, or channel binding still resolves
-    # through the shared workspace resolver, which falls all the way back to
-    # the instance default rather than leaving the sandbox unbound.
-    [(False, "", "default"), (False, "env:staging", "staging"), (True, "", "staging")],
-)
-async def test_slack_files_reach_bound_sandbox_with_thread_environment(
-    slack_file_mention, private, existing, tag, environment
+async def test_slack_files_are_placed_in_the_sandbox_and_named_on_the_request(
+    slack_file_mention,
 ):
     request, threads, provisioned, captured = slack_file_mention
-    if private:
-        request = request.model_copy(update={"channel_context": SlackChannelContext(is_im=True)})
-    if existing:
-        threads.metadata = {
-            "visibility": "private" if private else "public",
-            "owner_login": "mason-gh",
-            "environment": "staging",
-            "created_at_ms": 1,
-        }
-    if tag:
-        request = request.model_copy(update={"text": f"{request.text} {tag}"})
 
     await slack_webhooks._process_slack_mention_impl(request, None)
 
     assert threads.metadata["sandbox_id"] == "sandbox-for-slack-files"
-    assert threads.metadata["visibility"] == ("private" if private else "public")
-    assert threads.metadata["owner_login"] == "mason-gh"
-    assert len(provisioned) == 1
-    assert provisioned[0].workspace_slug == environment
-    assert provisioned[0].files == {"/workspace/.open-swe/slack-files/bundle.zip": b"zip"}
-    run = captured["run_create"]["kwargs"]
-    assert run["config"]["configurable"].get("environment") == environment
-    assert "/workspace/.open-swe/slack-files/bundle.zip" in str(run["input"]["messages"])
+    ((path, data),) = provisioned[0].files.items()
+    assert path.startswith("/tmp/open-swe/attachments/") and path.endswith("/bundle.zip")
+    assert data == b"zip"
+    trigger = captured["run_create"]["kwargs"]["input"]["messages"][-1]
+    assert envelope_attachments(trigger["content"]) == [
+        {"path": path, "mime_type": "application/zip", "name": "bundle.zip"}
+    ]
 
 
-@pytest.mark.parametrize("failure", ["account", "public-persistence", "private-persistence"])
-async def test_slack_file_provisioning_requires_account_and_persisted_thread(
-    monkeypatch, slack_file_mention, failure
-):
-    request, threads, provisioned, captured = slack_file_mention
-    if failure == "account":
-        monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=None))
-        monkeypatch.setattr(
-            webhook_common, "has_access_token_record", AsyncMock(return_value=False)
-        )
-    else:
-        monkeypatch.setattr(
-            threads, "create", AsyncMock(side_effect=RuntimeError("store unavailable"))
-        )
+async def test_slack_files_are_not_downloaded_without_an_account(monkeypatch, slack_file_mention):
+    request, _, _, captured = slack_file_mention
+    monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "has_access_token_record", AsyncMock(return_value=False))
 
-    if failure == "private-persistence":
-        request = request.model_copy(update={"channel_context": SlackChannelContext(is_im=True)})
-        with pytest.raises(RuntimeError, match="authorization metadata"):
-            await slack_webhooks._process_slack_mention_impl(request, None)
-    else:
-        await slack_webhooks._process_slack_mention_impl(request, None)
+    await slack_webhooks._process_slack_mention_impl(request, None)
 
-    assert provisioned == []
-    assert threads.metadata is None
-    if failure == "public-persistence":
-        assert "/workspace/.open-swe/slack-files/" not in str(
-            captured["run_create"]["kwargs"]["input"]
-        )
-    else:
-        assert "run_create" not in captured
+    slack_utils.download_slack_file.assert_not_awaited()
+    assert "run_create" not in captured
 
 
 @pytest.mark.parametrize("explicitly_tagged", [True, False])

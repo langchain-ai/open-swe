@@ -150,8 +150,7 @@ from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.multimodal import (
     dedupe_urls,  # noqa: F401
     extract_image_urls,  # noqa: F401
-    fetch_image_block,  # noqa: F401
-    vision_not_supported_warning,  # noqa: F401
+    fetch_attachment,  # noqa: F401
 )
 from openswe.utils.repo import extract_repo_from_text
 from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
@@ -232,7 +231,7 @@ __all__ = [
     "extract_pr_context",
     "extract_repo_from_text",
     "fetch_github_pr_metadata",
-    "fetch_image_block",
+    "fetch_attachment",
     "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_event_comments",

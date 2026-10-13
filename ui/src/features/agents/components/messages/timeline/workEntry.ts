@@ -263,7 +263,8 @@ export function liveActivityLabel(
     if (
       chunk.kind === "code" ||
       chunk.kind === "list" ||
-      chunk.kind === "image"
+      chunk.kind === "image" ||
+      chunk.kind === "file"
     ) {
       return "Preparing response…"
     }

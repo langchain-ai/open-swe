@@ -34,7 +34,7 @@ import {
 import { attachmentUrl, fetchToolOutput } from "./api"
 import type { StructuredEntity } from "@/features/agents/lib/structuredInputMessages"
 import type {
-  AnyImageChunk,
+  AnyAttachmentChunk,
   Chunk,
   Message,
   ToolExecutionChunk,
@@ -874,30 +874,34 @@ function toolChunk(
 /**
  * The attachments a message carries, as chunks a renderer can show: an
  * attachment is fetched from our own API with the session, a bare `url` is a
- * remote reference the browser loads itself, and one with neither has no bytes
- * to show.
+ * remote reference the browser loads itself, and one with neither shows only
+ * its sandbox path, or nothing when it has none.
  */
-function imageChunks(
+function attachmentChunks(
   threadId: string,
   attachments: ReadonlyArray<TranscriptAttachment>
-): Array<AnyImageChunk> {
-  const chunks: Array<AnyImageChunk> = []
-  for (const image of attachments) {
-    const source = image.attachment_id
+): Array<AnyAttachmentChunk> {
+  const chunks: Array<AnyAttachmentChunk> = []
+  for (const attachment of attachments) {
+    const source = attachment.attachment_id
       ? {
-          url: attachmentUrl(threadId, image.attachment_id),
+          url: attachmentUrl(threadId, attachment.attachment_id),
           credentials: "session" as const,
         }
-      : image.url
-        ? { url: image.url, credentials: "none" as const }
+      : attachment.url
+        ? { url: attachment.url, credentials: "none" as const }
         : null
-    if (!source) continue
-    chunks.push({
-      kind: "image",
-      ...source,
-      ...(image.mime_type ? { mimeType: image.mime_type } : {}),
-      ...(image.file_name ? { fileName: image.file_name } : {}),
-    })
+    if (!source && !attachment.path) continue
+    const fields = {
+      ...(attachment.mime_type ? { mimeType: attachment.mime_type } : {}),
+      ...(attachment.file_name ? { fileName: attachment.file_name } : {}),
+      ...(attachment.path ? { path: attachment.path } : {}),
+    }
+    chunks.push(
+      source && attachment.mime_type.startsWith("image/")
+        ? { kind: "image", ...source, ...fields }
+        : { kind: "file", ...source, ...fields }
+    )
   }
   return chunks
 }
@@ -939,7 +943,7 @@ function buildHumanMessage(
   if (entity?.senderType === "self") return null
   const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
   const text = taskEvent?.content ?? parsed.content
-  const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
+  const chunks: Array<Chunk> = attachmentChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
   if (!chunks.length && !taskEvent) return null
   return {
@@ -1082,7 +1086,7 @@ function turnMessages(
       const chunks: Array<Chunk> = []
       const reasoning = row.reasoning.trim()
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
-      chunks.push(...imageChunks(state.threadId, row.attachments))
+      chunks.push(...attachmentChunks(state.threadId, row.attachments))
       const text = row.text.trim()
       if (text) chunks.push({ kind: "text", text })
       append(row.messageId, row.createdAt, chunks, row.invocationId)

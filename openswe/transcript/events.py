@@ -70,6 +70,8 @@ class MessageAttachment(BaseModel):
     file_name: str | None = None
     url: str | None = None
     attachment_id: UUID | None = None
+    path: str | None = None
+    """Where the file was placed in the thread's sandbox for the agent to read."""
 
 
 class MessageUsage(BaseModel):
