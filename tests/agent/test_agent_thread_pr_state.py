@@ -400,6 +400,7 @@ async def test_merged_pr_subscribes_when_a_rollout_check_was_requested() -> None
         patch(
             "openswe.webhooks.common.subscribe_merged_thread", new_callable=AsyncMock
         ) as subscribe,
+        patch("openswe.webhooks.common.ask_to_monitor_rollout", new_callable=AsyncMock) as ask,
     ):
         await webhook_common.update_agent_thread_pr_state(
             _pr_payload(state="closed", merged=True, merge_sha=_MERGE_SHA)
@@ -411,27 +412,36 @@ async def test_merged_pr_subscribes_when_a_rollout_check_was_requested() -> None
     assert subscribe.await_args.kwargs["owner"] == "lc"
     assert subscribe.await_args.kwargs["repo"] == "repo"
     assert subscribe.await_args.kwargs["number"] == 7
+    ask.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_merged_pr_does_not_subscribe_without_a_rollout_check_request() -> None:
+async def test_merged_pr_asks_to_monitor_when_no_rollout_check_was_requested() -> None:
     metadata = {
         "kind": "agent",
         "pr_url": "https://github.com/lc/repo/pull/7",
         "pr_state": "open",
     }
+    client = _merging_client(metadata)
     with (
-        patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
+        patch("openswe.webhooks.common.get_client", return_value=client),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
         patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
         patch(
             "openswe.webhooks.common.subscribe_merged_thread", new_callable=AsyncMock
         ) as subscribe,
+        patch("openswe.webhooks.common.ask_to_monitor_rollout", new_callable=AsyncMock) as ask,
     ):
         await webhook_common.update_agent_thread_pr_state(
             _pr_payload(state="closed", merged=True, merge_sha=_MERGE_SHA)
         )
     subscribe.assert_not_awaited()
+    ask.assert_awaited_once()
+    assert ask.await_args is not None
+    assert ask.await_args.kwargs["owner"] == "lc"
+    assert ask.await_args.kwargs["number"] == 7
+    assert client.threads.update.await_args is not None
+    assert client.threads.update.await_args.kwargs["metadata"]["merge_commit_sha"] == _MERGE_SHA
 
 
 @pytest.mark.asyncio
