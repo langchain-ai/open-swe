@@ -787,6 +787,19 @@ async def _mcp_tools_for(
     return await load_mcp_tools(*sources)
 
 
+async def _run_mcp_tools(
+    thread_id: str, credential_login: str | None, workspace: str
+) -> tuple[str | None, list[Any]]:
+    """The workspace's Managed Tools gateway and the MCP tools the run may use."""
+    managed_gateway = (
+        (await cached_workspace_settings(workspace)).managed_tools_gateway_id
+        if credential_login
+        else None
+    )
+    async with aphase(thread_id, "factory.mcp_tools"):
+        return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
+
+
 async def _mcp_code_mode(
     thread_id: str,
     tools: Sequence[BaseTool],
@@ -1474,6 +1487,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
 
     local_run = is_desktop_run(cfg)
+    stop_summary_mode = cfg.stop_summary is True
+    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+    # MCP loading needs only who the run acts for and where, and it is the slowest
+    # lookup here, so it overlaps the settings and access lookups below.
+    mcp_tools_task = (
+        asyncio.ensure_future(_run_mcp_tools(thread_id, credential_login, workspace))
+        if not stop_summary_mode and not local_run and credential_scope_known
+        else None
+    )
     task_coordination = (
         None if local_run else await TaskCoordinationMiddleware.for_thread(thread_id)
     )
@@ -1730,19 +1752,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.tool_access"):
         tool_access = await resolve_access(cfg, login=profile_login)
 
-    stop_summary_mode = cfg.stop_summary is True
     cli_result_required = not stop_summary_mode and bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
-    mcp_tools: list[Any] = []
-    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
-    managed_gateway = (
-        (await cached_workspace_settings(workspace)).managed_tools_gateway_id
-        if credential_login and not stop_summary_mode and not local_run
-        else None
+    managed_gateway, mcp_tools = (
+        await mcp_tools_task if mcp_tools_task is not None else (None, list[Any]())
     )
-    if not stop_summary_mode and not local_run and credential_scope_known:
-        async with aphase(thread_id, "factory.mcp_tools"):
-            mcp_tools = await _mcp_tools_for(credential_login, workspace, managed_gateway)
 
     slack_tools = [
         manage_code_channel,

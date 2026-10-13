@@ -95,9 +95,9 @@ class PlanWorkspace:
             if stored is not None
             else Plan.start(head_sha, changes)
         )
-        head_files: dict[str, list[str]] = {}
-        for chunk in plan.chunks:
-            chunk.code = await checkout.render(chunk.lines, changes, head_files=head_files)
+        codes = await checkout.render_chunks([chunk.lines for chunk in plan.chunks], changes)
+        for chunk, code in zip(plan.chunks, codes, strict=True):
+            chunk.code = code
         if await Walkthrough.install(
             pull_request.id,
             plan,

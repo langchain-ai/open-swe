@@ -345,6 +345,23 @@ class User(Base):
             )
 
     @classmethod
+    async def for_identities(
+        cls, provider: Provider, external_ids: Iterable[str]
+    ) -> dict[str, Self]:
+        """The people owning those provider accounts, keyed by account id; unknown ids are absent."""
+        wanted = {external_id for external_id in external_ids if external_id}
+        if not wanted or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls, UserIdentity.external_id)
+                .join(cls.identities)
+                .where(UserIdentity.provider == provider, UserIdentity.external_id.in_(wanted))
+                .options(selectinload(cls.identities))
+            )
+            return {external_id: user for user, external_id in rows.tuples()}
+
+    @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
         """The person behind a mutable handle; the most recently seen one wins."""
         if not postgres.configured():

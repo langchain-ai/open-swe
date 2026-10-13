@@ -144,7 +144,12 @@ function StandardUserMessage({ message }: { message: Message }) {
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
     >
-      <div className="max-w-[80%]">
+      <div
+        className={cn(
+          "flex max-w-[80%] flex-col",
+          isSystem ? "items-start" : "items-end"
+        )}
+      >
         {!isSystem &&
           (message.structuredSenderName ||
             isSlack ||
