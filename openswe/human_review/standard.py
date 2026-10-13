@@ -291,8 +291,9 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
         return RequestResult(
             success=False,
             error=(
-                "This pull request has an open expedited review card. Dismiss it before "
-                "asking for a standard review."
+                "This pull request already has expedited review history. "
+                "Standard review cannot replace it, even after the card is dismissed. "
+                "Use expedite_pr_approval to restore its expedited card."
                 + (f" Open in Slack: {permalink}" if permalink else "")
             ),
             request_id=str(active.id),
@@ -371,6 +372,10 @@ async def _request_review(
     channel: str,
     inline_summary: str | None,
 ) -> RequestResult:
+    expedited = await HumanReviewRequest.expedited_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if expedited is not None:
+        return await _existing(expedited)
+
     # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None:
