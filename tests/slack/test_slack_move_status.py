@@ -12,6 +12,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import lookup_slack_thread_id
 from openswe.slack.tools import move_thread
 from openswe.source_context import SlackThreadRef
+from tests.slack.test_slack_thread_mapping import patch_mutation_transactions
 
 StatusCall = tuple[str, str, str]
 
@@ -52,12 +53,15 @@ class _Threads:
     def __init__(self, metadata: dict[str, object]) -> None:
         self.metadata = metadata
         self.locks: set[str] = set()
+        self.lock_metadata: dict[str, dict[str, object]] = {}
         self.updates = 0
         self.reads_fail_after_first_update = False
         self.failing_reads = 0
         self.max_updates: int | None = None
 
     async def get(self, thread_id: str) -> dict[str, object]:  # noqa: ARG002
+        if thread_id in self.lock_metadata:
+            return {"metadata": self.lock_metadata[thread_id]}
         if self.failing_reads:
             self.failing_reads -= 1
             raise RuntimeError("read timed out")
@@ -71,11 +75,15 @@ class _Threads:
         self.updates += 1
         self.metadata.update(metadata)
 
-    async def create(self, *, thread_id: str, if_exists: str, ttl: int) -> None:  # noqa: ARG002
+    async def create(
+        self, *, thread_id: str, if_exists: str, ttl: int, metadata: dict[str, object] | None = None
+    ) -> None:
         self.locks.add(thread_id)
+        self.lock_metadata[thread_id] = metadata or {}
 
     async def delete(self, thread_id: str) -> None:
         self.locks.discard(thread_id)
+        self.lock_metadata.pop(thread_id, None)
 
 
 class _Runs:
@@ -101,6 +109,7 @@ class _LangGraph:
 
 @pytest.fixture
 def statuses(monkeypatch: pytest.MonkeyPatch) -> list[StatusCall]:
+    patch_mutation_transactions(monkeypatch)
     calls: list[StatusCall] = []
 
     async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:
