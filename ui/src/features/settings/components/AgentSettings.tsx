@@ -10,12 +10,6 @@ export function AgentSettings() {
         description="Give runs a filtered digest of your recent threads."
       />
       <ProfileSwitchRow
-        field="preserve_sandbox_memory"
-        label="Keep sandbox memory on auto-stop"
-        description="When an idle sandbox stops, save its running processes so the next run resumes where it left off. Applies to new sandboxes."
-        fallback
-      />
-      <ProfileSwitchRow
         field="auto_human_review_enabled"
         label="Allow automatic review picks"
         description="Let Open SWE pick you for human reviews. People can still name you explicitly when this is off."
