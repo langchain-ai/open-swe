@@ -38,6 +38,7 @@ from openswe.threads.summary import (
     _thread_is_busy,
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from openswe.utils.thread_ops import langgraph_client, langgraph_url
@@ -161,11 +162,13 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
     principal: Principal | None = None,
+    relayed_from: str | None = None,
 ) -> tuple[int, bytes, str | None]:
     """Forward one command, enriched for whoever sent it.
 
     ``principal`` is how a machine gets in. Without one the sender is the person
     named by ``login``, which is what the dashboard and the agent's own tools pass.
+    ``relayed_from`` names the agent thread that sent it on that person's behalf.
     """
     received_at_ms = _now_ms()
     principal = principal or Principal.of_login(login, email)
@@ -211,6 +214,10 @@ async def proxy_dashboard_thread_commands(
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
     start_params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
+    start_params.pop(RELAYED_FROM_KEY, None)
+    if relayed_from and method == "run.start":
+        start_params[RELAYED_FROM_KEY] = relayed_from
+        parsed["params"] = start_params
     # The client's queue-or-steer choice rides the run's multitask strategy.
     # LangGraph's commands endpoint does not take it, so it is consumed here.
     enqueue = start_params.pop("multitask_strategy", None) == "enqueue"
@@ -298,7 +305,7 @@ async def proxy_dashboard_thread_commands(
             return 200, json.dumps(requeued).encode(), "application/json"
         if response.status_code >= 400:
             await _fail_requested_turn(thread_id, enriched)
-    if run_start_succeeded and not creating:
+    if run_start_succeeded and not creating and not relayed_from:
         try:
             await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
         except Exception:

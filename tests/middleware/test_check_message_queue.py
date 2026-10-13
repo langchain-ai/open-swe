@@ -52,6 +52,30 @@ async def test_check_message_queue_announces_the_move_to_web_only_once(registry_
 
 
 @pytest.mark.asyncio
+async def test_check_message_queue_keeps_slack_for_a_message_relayed_by_another_thread(
+    registry_db: None,
+) -> None:
+    await QueuedMessage.put(
+        "thread-1",
+        {
+            "text": "Pushed the fix",
+            "relayed_from_thread_id": "worker-thread",
+            "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777003",
+            "sender": {"id": "github:octocat", "platform": "github", "github_login": "octocat"},
+        },
+    )
+
+    result = await _run({"messages": [], "reply_surface": "slack"})
+
+    assert result is not None
+    assert "reply_surface" not in result
+    envelopes = "".join(_envelope(message) for message in result["messages"])
+    assert "system:dashboard-handoff" not in envelopes
+    assert 'surface="automation"' in envelopes
+    assert 'relayed_from_thread="worker-thread"' in envelopes
+
+
+@pytest.mark.asyncio
 async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
     registry_db: None,
 ) -> None:
