@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, JsonValue
 
 from openswe.database import configured
+from openswe.dispatch import dispatch_agent_run
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.repositories import Repository
@@ -38,6 +39,7 @@ class RolloutAccepted(TypedDict):
 
 _AUDIENCE = "openswe-rollout"
 ROLLOUT_CHECK_REQUESTED = "rollout_check"
+MERGE_COMMIT_SHA = "merge_commit_sha"
 _DEPLOYED = "deployed"
 _MAX_COMMITS = 5000
 _MAX_SUBSCRIPTIONS = 5
@@ -110,6 +112,32 @@ def _stored_body(target: str, commits: list[str]) -> bytes:
 def _delivery_id(target: str, commits: list[str]) -> str:
     canonical = json.dumps({"commits": commits, "target": target}, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+_ASK_TO_MONITOR = (
+    "This pull request just merged. Ask the person, on this thread's existing channel, "
+    "whether to monitor its rollout after it deploys. Ask once. If they agree, call "
+    "request_rollout_check. If they decline, stop. Do not call listen_events yourself."
+)
+_PR_URL_RE = re.compile(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+
+
+def remembered_merge_sha(sha: str) -> str:
+    """A full merge SHA safe to store, or empty when the value is not one."""
+    cleaned = sha.strip().lower()
+    return cleaned if _SHA_RE.fullmatch(cleaned) else ""
+
+
+def merged_pull_request(metadata: dict[str, object]) -> tuple[str, str, int, str] | None:
+    """The tracked pull request and its merge commit, once that commit is known."""
+    sha = metadata.get(MERGE_COMMIT_SHA)
+    url = metadata.get("pr_url")
+    if not isinstance(sha, str) or not isinstance(url, str):
+        return None
+    match = _PR_URL_RE.fullmatch(url)
+    if match is None or not _SHA_RE.fullmatch(sha):
+        return None
+    return match.group(1), match.group(2), int(match.group(3)), sha
 
 
 def _instructions(sha: str) -> str:
@@ -255,6 +283,42 @@ async def subscribe_merged_thread(
     except Exception:  # noqa: BLE001
         logger.warning(
             "Subscribing a merged thread to deployments failed",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
+
+
+async def ask_to_monitor_rollout(
+    thread_id: str,
+    *,
+    owner: str,
+    repo: str,
+    number: int,
+    metadata: dict[str, object],
+) -> None:
+    """Ask once, on the thread's own channel, whether to monitor this rollout."""
+    try:
+        workspace = metadata.get("workspace")
+        config = _run_config(
+            thread_id,
+            owner,
+            repo,
+            number,
+            workspace if isinstance(workspace, str) else "",
+            metadata,
+        )
+        source = config.get("source")
+        await dispatch_agent_run(
+            thread_id,
+            _ASK_TO_MONITOR,
+            config,
+            source=source if isinstance(source, str) else "github",
+            thread_title=None,
+            multitask_strategy="enqueue",
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Asking whether to monitor a rollout failed",
             extra={"agent_thread_id": thread_id},
             exc_info=True,
         )
