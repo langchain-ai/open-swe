@@ -316,6 +316,37 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
 
 
+@pytest.mark.parametrize("relayed", [False, True])
+async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
+    monkeypatch: pytest.MonkeyPatch, relayed: bool
+) -> None:
+    async def canonical(person: dict[str, str]) -> dict[str, str]:
+        return person
+
+    monkeypatch.setattr(User, "canonical_person", canonical)
+    metadata = {"source": "slack", "source_context": {"slack_thread": {"thread_ts": "1.2"}}}
+    created: dict[str, object] = {"metadata": dict(metadata)}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    params: dict[str, object] = {
+        "input": {"messages": [{"type": "human", "content": "Pushed the fix"}]}
+    }
+    if relayed:
+        params[thread_runs.RELAYED_FROM_KEY] = "coordinator-tid"
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "existing-tid", "octocat", {"method": "run.start", "params": params}, metadata=metadata
+    )
+
+    texts = "".join(str(message["content"]) for message in enriched["params"]["input"]["messages"])
+    assert ("system:dashboard-handoff" in texts) is not relayed
+    assert ('surface="web"' in texts) is not relayed
+    assert thread_runs.RELAYED_FROM_KEY not in enriched["params"]
+    source = "slack" if relayed else "dashboard"
+    assert enriched["params"]["config"]["configurable"]["source"] == source
+    assert cast(dict[str, object], created["metadata"])["source"] == source
+
+
 @pytest.mark.parametrize("selection_changed", [False, True])
 async def test_enrich_run_start_command_preserves_explicit_auto_intent(
     monkeypatch: pytest.MonkeyPatch, selection_changed: bool
@@ -912,7 +943,7 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
     flat_parent = {"id": "t3"}
     await thread_listing.attach_task_workers(client, [flat_parent], "octocat", None)
     assert "taskWorkers" not in flat_parent
-    monkeypatch.setattr(thread_listing, "task_coordination_enabled", AsyncMock(return_value=True))
+    preferences.return_value = UserPreferences(experimental_task_coordination=True)
     first = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=1)
     assert [item["id"] for item in first["items"]] == ["t3"]
     parent = first["items"][0]
@@ -963,7 +994,11 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
 async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(thread_listing, "task_coordination_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        User,
+        "preferences_for_login",
+        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
+    )
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
     threads = _make_threads(12, resolved_before=0)
     for index, thread in enumerate(threads):
@@ -1402,7 +1437,6 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "append", fake_append)
     monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr("openswe.thread_feedback.note_feedback_activity", AsyncMock())
 
     result = await thread_runs.steer_running_thread(
         "tid",

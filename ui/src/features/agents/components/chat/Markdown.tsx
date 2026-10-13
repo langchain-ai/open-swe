@@ -38,20 +38,6 @@ interface MarkdownProps {
   enlargeImages?: boolean
 }
 
-/**
- * Must stay referentially and structurally stable while a message is streaming.
- * Streamdown keys its animate plugin on JSON.stringify(animated); changing
- * stagger/duration recreates the plugin, resets prevContentLength, and
- * re-animates text that was already on screen.
- */
-const STREAMDOWN_ANIMATED = {
-  sep: "word",
-  animation: "slideUp",
-  duration: 60,
-  stagger: 10,
-  easing: "ease-out",
-} as const
-
 const REMARK_PLUGINS = [
   ...Object.values(defaultRemarkPlugins),
   remarkGithubAlerts,
@@ -317,7 +303,6 @@ export const Markdown = memo(function Markdown({
           mode={isLive ? "streaming" : "static"}
           parseIncompleteMarkdown={isLive}
           isAnimating={isLive}
-          animated={isLive ? STREAMDOWN_ANIMATED : false}
           shikiTheme={SHIKI_THEME}
           className="streamdown-agent max-w-full min-w-0 space-y-0"
           components={components}

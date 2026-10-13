@@ -1069,7 +1069,7 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     await schedules.launch_scheduled_agent_run(record["id"])
     run_config = fake_client.runs.created[0]["config"]
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
-    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: fake_client)
+    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: fake_client)
 
     assert await server._admin_thread(run_config, None) is True
     assert RunConfig.from_config(run_config).github_login is None

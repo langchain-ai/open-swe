@@ -93,12 +93,9 @@ class PinnedCheckout:
     async def merge_base(self) -> str:
         return (await self._run(f"git rev-parse {MERGE_BASE_REF}")).strip()
 
-    async def diff(self, *, path: str = "", zero: bool = True) -> str:
-        """The PR's diff from its merge base, zero-context unless ``zero`` is false."""
-        scope = f" -- {shlex.quote(path)}" if path else ""
-        return await self._run(
-            f"{_DIFF}{' -U0' if zero else ''} {MERGE_BASE_REF} {HEAD_REF}{scope}"
-        )
+    async def diff(self) -> str:
+        """The PR's diff from its merge base, with git's default context."""
+        return await self._run(f"{_DIFF} {MERGE_BASE_REF} {HEAD_REF}")
 
     async def changes(self) -> list[FileChange]:
         return parse(await self.diff())

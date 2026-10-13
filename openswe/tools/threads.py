@@ -891,6 +891,7 @@ async def _send_message(
 ) -> dict[str, Any]:
     # The dashboard's own send: a busy thread gets the message steered into its
     # open turn or queued as a follow-up run, both shown on the transcript at once.
+    # Marked as relayed so it never moves the recipient's conversation to Web.
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
@@ -902,11 +903,13 @@ async def _send_message(
             "config": {"configurable": configurable},
         },
     }
+    caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
         email=actor.email,
+        relayed_from=caller_thread_id if isinstance(caller_thread_id, str) else None,
     )
     try:
         reply = _CommandReply.model_validate_json(content or b"{}")

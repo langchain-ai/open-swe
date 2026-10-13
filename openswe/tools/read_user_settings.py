@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _PROFILE_SETTING_KEYS = (
     "auto_fix_ci",
+    "auto_human_review_enabled",
     "draft_prs",
     "review_draft_prs",
     "recent_thread_context_enabled",
@@ -32,9 +33,7 @@ _PROFILE_SETTING_KEYS = (
 def _safe_profile_settings(
     profile: dict[str, Any] | None, *, own_settings: bool = False
 ) -> dict[str, Any]:
-    if not profile:
-        return {}
-    normalized = normalize_profile_for_response(profile)
+    normalized = normalize_profile_for_response(profile or {})
     keys = PROFILE_SETTING_KEYS if own_settings else _PROFILE_SETTING_KEYS
     return {key: normalized[key] for key in keys if key in normalized}
 

@@ -245,7 +245,7 @@ async def _pr_thread_ids(owner: str, repo: str, number: int) -> list[str]:
 
 
 async def find_pr_threads(
-    owner: str, repo: str, number: int, login: str, email: str | None
+    owner: str, repo: str, number: int, login: str, email: str | None, *, unlisted: bool = False
 ) -> list[Thread]:
     client = langgraph_client()
     candidates: dict[str, Thread] = {}
@@ -258,6 +258,8 @@ async def find_pr_threads(
             continue
         metadata = thread_metadata(thread)
         if metadata.get("kind") or metadata.get("graph_id") not in (None, "agent"):
+            continue
+        if (metadata.get("unlisted") is True) is not unlisted:
             continue
         try:
             _assert_thread_postable(metadata, login, email)
@@ -290,11 +292,12 @@ async def _find_or_create_pr_thread(
     *,
     prompt: str,
     title: str,
+    unlisted: bool = False,
     review_chat: bool = False,
 ) -> str:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
-    candidates = await find_pr_threads(owner, repo, number, login, email)
+    candidates = await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
     if candidates:
         return candidates[0]["thread_id"]
     thread = await create_dashboard_thread_record(
@@ -312,6 +315,7 @@ async def _find_or_create_pr_thread(
             "pr_url": url,
             "pr_number": number,
             "source_context": {"pr_number": number},
+            "unlisted": unlisted,
             "review_chat": review_chat,
         },
     )
@@ -416,6 +420,7 @@ async def dispatch_pull_request_prompt(
     *,
     title: str,
     before_dispatch: Callable[[str], Awaitable[None]],
+    unlisted: bool = False,
 ) -> str:
     """Enqueue ``prompt`` on ``login``'s thread for a pull request, creating it if needed; its id.
 
@@ -426,7 +431,7 @@ async def dispatch_pull_request_prompt(
     client = langgraph_client()
     async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
-            owner, repo, number, login, None, prompt=prompt, title=title
+            owner, repo, number, login, None, prompt=prompt, title=title, unlisted=unlisted
         )
         await before_dispatch(thread_id)
         await client.threads.update(thread_id=thread_id, metadata={"review_chat": False})

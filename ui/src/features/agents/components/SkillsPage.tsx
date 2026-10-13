@@ -2,11 +2,11 @@ import { Button } from "@langchain/macaw-components/Button"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import { Text } from "@langchain/macaw-components/Text"
 import { useEffect, useState } from "react"
 
 import type { Skill } from "@/lib/api"
-import { InstructionsEditor } from "@/components/InstructionsEditor"
+import { EditorScreen } from "@/components/EditorScreen"
+import { TextEditor } from "@/components/TextEditor"
 import {
   useCreateAgentSkill,
   useDeleteAgentSkill,
@@ -101,8 +101,6 @@ export function SkillsPage() {
     remove.mutate(selectedName, { onSuccess: clear })
   }
 
-  if (skills.isLoading) return <Skeleton className="m-space-5 h-64 flex-1" />
-
   const dirty =
     selected != null &&
     (draft.description !== selected.description ||
@@ -110,149 +108,132 @@ export function SkillsPage() {
   const creating = selectedName === null
 
   return (
-    <main className="min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-space-5 py-space-6">
-        <Text as="h1" variant="h3" weight="medium" color="primary">
-          Skills
-        </Text>
-        <p className="mt-space-1 text-xs text-secondary">
-          Reusable instructions Open SWE loads when a task matches their
-          description.
-        </p>
-
-        <GroupedTabs<Scope>
-          size="xs"
-          className="mt-space-4 w-fit"
-          value={organization ? "organization" : "personal"}
-          onChange={(scope) => selectScope(scope === "organization")}
-          options={SCOPES}
-        />
-
-        <div className="mt-space-5 grid gap-space-5 md:grid-cols-[220px_minmax(0,1fr)]">
-          <section>
-            {canEdit && (
-              <Button size="xs" className="w-full" onClick={clear}>
-                New skill
-              </Button>
-            )}
-            <div className="mt-space-3 space-y-space-1">
-              {(skills.data ?? []).map((skill) => (
-                <button
-                  key={skill.name}
-                  type="button"
-                  onClick={() => select(skill)}
-                  className={cn(
-                    "w-full rounded-md px-space-2 py-space-2 text-left transition-colors",
-                    selectedName === skill.name
-                      ? "bg-selected"
-                      : "hover:bg-surface-level-1-hover"
-                  )}
-                >
-                  <span className="block truncate text-xs font-medium text-primary">
-                    {skill.name}
-                  </span>
-                  <span className="mt-0.5 block truncate text-xxs text-secondary">
-                    {skill.description}
-                  </span>
-                </button>
-              ))}
-              {skills.data?.length === 0 && (
-                <p className="px-space-2 py-space-4 text-xs text-secondary">
-                  No skills yet.
-                </p>
-              )}
-            </div>
-          </section>
-
-          <section className="space-y-space-4 rounded-lg border border-default bg-surface-level-2 p-space-4">
-            {!canEdit && !selected ? (
-              <p className="text-xs text-secondary">
-                Select an organization skill to view it.
+    <EditorScreen
+      title="Skills"
+      description="Reusable instructions Open SWE loads when a task matches their description."
+      actions={
+        <>
+          {error && (
+            <span className="text-xs text-error-secondary">{error}</span>
+          )}
+          {dirty && (
+            <span className="text-xs text-secondary">Unsaved changes</span>
+          )}
+          {canEdit && !creating && (
+            <Button
+              size="xs"
+              color="error"
+              disabled={remove.isPending}
+              onClick={onDelete}
+            >
+              Delete
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              size="xs"
+              disabled={
+                !draft.description.trim() ||
+                (creating
+                  ? !newName.trim() || create.isPending
+                  : !dirty || update.isPending)
+              }
+              onClick={() => void (creating ? add() : save())}
+            >
+              {creating ? "Create skill" : "Save skill"}
+            </Button>
+          )}
+        </>
+      }
+      sidebar={
+        <>
+          <GroupedTabs<Scope>
+            size="xs"
+            className="w-fit"
+            value={organization ? "organization" : "personal"}
+            onChange={(scope) => selectScope(scope === "organization")}
+            options={SCOPES}
+          />
+          {canEdit && (
+            <Button size="xs" className="w-full" onClick={clear}>
+              New skill
+            </Button>
+          )}
+          <div className="space-y-space-1">
+            {skills.isLoading && <Skeleton className="h-24" />}
+            {(skills.data ?? []).map((skill) => (
+              <button
+                key={skill.name}
+                type="button"
+                onClick={() => select(skill)}
+                className={cn(
+                  "w-full rounded-md px-space-2 py-space-2 text-left transition-colors",
+                  selectedName === skill.name
+                    ? "bg-selected"
+                    : "hover:bg-surface-level-1-hover"
+                )}
+              >
+                <span className="block truncate text-xs font-medium text-primary">
+                  {skill.name}
+                </span>
+                <span className="mt-0.5 block truncate text-xxs text-secondary">
+                  {skill.description}
+                </span>
+              </button>
+            ))}
+            {skills.data?.length === 0 && (
+              <p className="px-space-2 py-space-4 text-xs text-secondary">
+                No skills yet.
               </p>
-            ) : (
-              <>
-                {creating ? (
-                  <Input
-                    id="skill-name"
-                    label="Name"
-                    size="md"
-                    value={newName}
-                    onChange={setNewName}
-                    placeholder="address-review-feedback"
-                    hintText="Lowercase letters, numbers, and single hyphens."
-                  />
-                ) : (
-                  <p className="text-sm font-medium text-primary">
-                    {selectedName}
-                  </p>
-                )}
-
-                <Input
-                  id="skill-description"
-                  label="Description"
-                  size="md"
-                  value={draft.description}
-                  onChange={(description) =>
-                    setDraft((value) => ({ ...value, description }))
-                  }
-                  disabled={!canEdit}
-                  placeholder="What this skill does and when Open SWE should use it"
-                />
-
-                <div className="space-y-space-2">
-                  <Text variant="sm" weight="medium">
-                    Instructions
-                  </Text>
-                  <InstructionsEditor
-                    value={draft.instructions}
-                    onChange={(instructions) =>
-                      setDraft((value) => ({ ...value, instructions }))
-                    }
-                    disabled={!canEdit}
-                    placeholder="Write the skill workflow in Markdown."
-                  />
-                </div>
-
-                {canEdit && (
-                  <div className="flex items-center gap-space-2">
-                    <Button
-                      size="xs"
-                      disabled={
-                        !draft.description.trim() ||
-                        (creating
-                          ? !newName.trim() || create.isPending
-                          : !dirty || update.isPending)
-                      }
-                      onClick={() => void (creating ? add() : save())}
-                    >
-                      {creating ? "Create skill" : "Save skill"}
-                    </Button>
-                    {dirty && (
-                      <span className="text-xs text-secondary">
-                        Unsaved changes
-                      </span>
-                    )}
-                    {!creating && (
-                      <Button
-                        size="xs"
-                        color="error"
-                        className="ml-auto"
-                        disabled={remove.isPending}
-                        onClick={onDelete}
-                      >
-                        Delete
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {error && (
-                  <p className="text-xs text-error-secondary">{error}</p>
-                )}
-              </>
             )}
-          </section>
-        </div>
-      </div>
-    </main>
+          </div>
+        </>
+      }
+    >
+      {!canEdit && !selected ? (
+        <p className="m-auto p-space-5 text-xs text-secondary">
+          Select an organization skill to view it.
+        </p>
+      ) : (
+        <>
+          <div className="grid gap-space-4 border-b border-default p-space-4 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+            <Input
+              id="skill-name"
+              label="Name"
+              size="md"
+              value={selectedName ?? newName}
+              onChange={setNewName}
+              disabled={!creating}
+              placeholder="address-review-feedback"
+              hintText={
+                creating
+                  ? "Lowercase letters, numbers, and single hyphens."
+                  : undefined
+              }
+            />
+            <Input
+              id="skill-description"
+              label="Description"
+              size="md"
+              value={draft.description}
+              onChange={(description) =>
+                setDraft((value) => ({ ...value, description }))
+              }
+              disabled={!canEdit}
+              placeholder="What this skill does and when Open SWE should use it"
+            />
+          </div>
+          <TextEditor
+            value={draft.instructions}
+            onChange={(instructions) =>
+              setDraft((value) => ({ ...value, instructions }))
+            }
+            ariaLabel="Skill instructions"
+            disabled={!canEdit}
+            placeholder="Write the skill workflow in Markdown."
+          />
+        </>
+      )}
+    </EditorScreen>
   )
 }
