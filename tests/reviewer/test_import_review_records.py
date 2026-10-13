@@ -35,8 +35,17 @@ async def test_import_moves_review_records_and_keeps_decisions_made_in_postgres(
         key="acme/one#7", thread_id="t1", owner="acme", repo="one", pr_number=7, head_sha="h"
     )
     fake_store.seed(["baby_sit_watches"], watch.key, watch.model_dump(mode="json"))
+    stale = BabySitWatch(
+        key="acme/one#8",
+        thread_id="t2",
+        owner="acme",
+        repo="one",
+        pr_number=8,
+        run_config={"workspace": "deleted"},
+    )
+    fake_store.seed(["baby_sit_watches"], stale.key, stale.model_dump(mode="json"))
 
-    assert await import_review_records() == StoreImport(moved=5)
+    assert await import_review_records() == StoreImport(moved=6)
 
     assert await list_enabled_review_repos() == ["Acme/One"]
     imported = await REVIEW_STYLES.get("acme/one")

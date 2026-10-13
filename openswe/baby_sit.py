@@ -9,7 +9,7 @@ from uuid import UUID
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Row, Select, func, literal, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -198,17 +198,18 @@ class BabySitWatches:
         for entry in await search_all_entries(_STORE_NAMESPACE):
             try:
                 watch = BabySitWatch.model_validate(entry.value)
-            except ValidationError:
-                logger.warning(
-                    "Dropping unreadable baby-sit watch from the Store",
-                    extra={"store_key": entry.key},
-                    exc_info=True,
-                )
-            else:
                 if watch.thread_id and await self.get(watch.key) is None:
                     task = await _task_for(watch, title=watch.pr_url)
                     watch.task_id = task.id
                     await self.save(watch)
+            except ValueError:
+                # Unreadable, or its thread's workspace is gone: one stale watch
+                # must not keep every later one in the Store.
+                logger.warning(
+                    "Dropping a baby-sit watch the Store import cannot attach to a task",
+                    extra={"store_key": entry.key},
+                    exc_info=True,
+                )
             await delete_value(_STORE_NAMESPACE, entry.key)
             moved += 1
         return StoreImport(moved=moved)
