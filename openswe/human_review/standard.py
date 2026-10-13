@@ -953,6 +953,13 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     states = await latest_review_states(pull, snapshot.author)
     if states is None:
         return False
+    await ReviewPicks(request).complete(
+        {
+            login.lower()
+            for login, state in states.items()
+            if state in {"APPROVED", "CHANGES_REQUESTED"}
+        }
+    )
     if request.kind == "posted":
         await _settle_posted(request, pull, snapshot, states)
         return True

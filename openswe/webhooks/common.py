@@ -145,7 +145,7 @@ from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
-from openswe.utils.json_types import ThreadLike, as_thread_dict
+from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict, thread_metadata
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.multimodal import (
     dedupe_urls,  # noqa: F401
@@ -820,6 +820,52 @@ async def get_slack_repo_config(
     return SlackRepoResolution(Repo.model_validate(repo_config), explicit)
 
 
+@dataclass(frozen=True)
+class ThreadRecord:
+    """One read of a thread, for everything a webhook asks before dispatching to it."""
+
+    exists: bool
+    metadata: JsonObject
+
+    @classmethod
+    async def read(cls, thread_id: str) -> ThreadRecord:
+        """A thread that does not exist yet reads as an empty record; other failures raise."""
+        try:
+            thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
+        except Exception as exc:
+            if is_not_found_error(exc):
+                return cls(exists=False, metadata={})
+            raise
+        return cls(exists=True, metadata=thread_metadata(thread))
+
+    def authorize(self, github_login: str) -> JsonObject:
+        """Reject a private-thread follow-up from someone who may not prompt it."""
+        if thread_is_private(self.metadata) and not thread_is_promptable(
+            self.metadata, github_login
+        ):
+            raise HTTPException(404, "thread not found")
+        return self.metadata
+
+    @property
+    def model_choice(self) -> tuple[str, str] | None:
+        """The model the thread was explicitly pinned to, if any."""
+        if self.metadata.get("model_selection") != "explicit":
+            return None
+        model_id, effort = normalize_model_choice(
+            self.metadata.get("model"), self.metadata.get("effort")
+        )
+        return (model_id, effort) if model_id and effort else None
+
+    @property
+    def workspace(self) -> str | None:
+        """The workspace the thread was created in; ``environment`` is the pre-workspace key."""
+        for key in ("workspace", "environment"):
+            value = self.metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+
 async def thread_exists(thread_id: str) -> bool:
     """Return whether a LangGraph thread already exists."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -846,40 +892,25 @@ async def ensure_thread_exists_for_metadata(
 
 async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
     """Return the explicit model choice persisted for a thread, if any."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
-        thread = await langgraph_client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        if not is_not_found_error(exc):
-            logger.warning("Failed to fetch model metadata for thread %s", thread_id)
+        record = await ThreadRecord.read(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to fetch model metadata for thread %s", thread_id)
         return None
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    if not isinstance(metadata, dict) or metadata.get("model_selection") != "explicit":
-        return None
-    model_id, effort = normalize_model_choice(metadata.get("model"), metadata.get("effort"))
-    return (model_id, effort) if model_id and effort else None
+    return record.model_choice
 
 
 async def get_thread_workspace(thread_id: str) -> str | None:
-    """The workspace a thread was created in; ``environment`` is the pre-workspace key."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    """The workspace a thread was created in."""
     try:
-        thread = await langgraph_client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        if not is_not_found_error(exc):
-            logger.warning(
-                "Failed to fetch workspace metadata for thread",
-                extra={"agent_thread_id": thread_id},
-            )
+        record = await ThreadRecord.read(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to fetch workspace metadata for thread",
+            extra={"agent_thread_id": thread_id},
+        )
         return None
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    if not isinstance(metadata, dict):
-        return None
-    for key in ("workspace", "environment"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    return record.workspace
 
 
 async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
@@ -1044,18 +1075,9 @@ def build_github_issue_comments_text(
     return "\n\n## Comments:\n" + "".join(lines)
 
 
-async def authorize_github_thread(thread_id: str, github_login: str) -> dict[str, Any]:
+async def authorize_github_thread(thread_id: str, github_login: str) -> JsonObject:
     """Reject private-thread follow-ups before reading credentials or dispatching."""
-    try:
-        thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
-    except Exception as exc:
-        if is_not_found_error(exc):
-            return {}
-        raise
-    metadata = as_thread_dict(thread).get("metadata") or {}
-    if thread_is_private(metadata) and not thread_is_promptable(metadata, github_login):
-        raise HTTPException(404, "thread not found")
-    return metadata
+    return (await ThreadRecord.read(thread_id)).authorize(github_login)
 
 
 async def trigger_or_queue_run(
@@ -1074,13 +1096,12 @@ async def trigger_or_queue_run(
     ``token_repositories`` is recorded if this creates the thread; a thread that
     must be narrowed but could not record it is not started.
     """
-    await authorize_github_thread(thread_id, github_login)
+    record = await ThreadRecord.read(thread_id)
+    record.authorize(github_login)
     # An existing thread keeps the workspace it started in even if its
     # repository has since moved: the settings and MCP connections a
     # conversation began with must not change under it.
-    workspace = await get_thread_workspace(thread_id) or await workspace_for_repo_config(
-        repo_config
-    )
+    workspace = record.workspace or await workspace_for_repo_config(repo_config)
     persisted = await upsert_agent_thread_metadata(
         thread_id,
         source="github",

@@ -8,6 +8,7 @@ itself.
 """
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -38,6 +39,11 @@ async def test_a_bound_channel_outranks_a_named_repository(
         return False
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(
+        webhook_common.ThreadRecord,
+        "read",
+        AsyncMock(return_value=webhook_common.ThreadRecord(exists=False, metadata={})),
+    )
 
     await WORKSPACES.create(WorkspaceCreate(name="Internal", repos=["acme/internal"]), "alice")
     await WORKSPACES.create(

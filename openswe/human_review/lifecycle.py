@@ -829,6 +829,36 @@ class ReviewPicks:
 
     request: HumanReviewRequest
 
+    async def complete(self, reviewed: set[str]) -> None:
+        """Mark completed reviewers' assignment DMs stale without removing their participation."""
+        for participant in self.request.participants:
+            if participant.github_login.lower() not in reviewed:
+                continue
+            message = participant.pick_message
+            if message is None:
+                continue
+            status = "Review submitted on GitHub. This assignment is no longer active."
+            if not await message.show(status):
+                continue
+            if participant.user.slack_user_id:
+                await note_for_concierge(
+                    participant.user.slack_user_id,
+                    message.channel_id,
+                    prompt(
+                        "slack/concierge-dm-edited",
+                        text=message.text,
+                        status=status,
+                    ),
+                )
+            async with HumanReviewRequest.locked(self.request.id) as (_, row):
+                if row is None:
+                    continue
+                for current in row.participants:
+                    if current.user_id == participant.user_id and current.dm_ts == message.ts:
+                        current.dm_channel_id = current.dm_ts = current.dm_text = ""
+                        if current.decision == "picked":
+                            current.decision = "review"
+
     async def _unrequest(self, pull: PullRequestClient, login: str) -> None:
         try:
             await pull.remove_requested_reviewers([login])
@@ -894,6 +924,7 @@ class ReviewPicks:
                 extra={"request_id": str(request.id)},
             )
             return request
+        await self.complete(reviewed)
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is None:
                 return request
