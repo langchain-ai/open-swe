@@ -86,7 +86,11 @@ from openswe.transcript.events import (
 )
 from openswe.transcript.turns import OpenTurn, recorded_turn_id
 from openswe.users import User
-from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from openswe.utils.dashboard_handoff import (
+    DASHBOARD_HANDOFF_BODY,
+    RELAYED_FROM_KEY,
+    dashboard_input_context,
+)
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
@@ -330,7 +334,7 @@ async def create_dashboard_thread_record(
         client,
         thread_id,
         title=initial_title,
-        metadata={**metadata, "feedback_initiator_login": login},
+        metadata=metadata,
         if_exists="raise",
     )
     thread = await client.threads.get(thread_id)
@@ -563,6 +567,12 @@ def _command_message_id(params: dict[str, Any]) -> str | None:
     return message_id if isinstance(message_id, str) and message_id else None
 
 
+def _relayed_from(params: dict[str, Any]) -> str | None:
+    """Take the relaying thread's id off a ``run.start`` command's params."""
+    relayed_from = params.pop(RELAYED_FROM_KEY, None)
+    return relayed_from if isinstance(relayed_from, str) and relayed_from else None
+
+
 def _command_prompt_text(content: Any) -> str:
     if isinstance(content, str):
         return content.strip()
@@ -757,6 +767,7 @@ async def _attributed_run_messages(
     sandbox_handoff: Mapping[str, Any] | None = None,
     review_chat_pr_url: str | None = None,
     prior_state: Awaitable[ThreadState] | None = None,
+    relayed_from: str | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -791,7 +802,7 @@ async def _attributed_run_messages(
         person["email"] = email
     sender_id = (await User.canonical_person(person))["id"]
     notices: list[tuple[SystemIdentity, str]] = []
-    if metadata.get("source") == "slack":
+    if metadata.get("source") == "slack" and relayed_from is None:
         notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
     if sandbox_handoff is not None:
         to_cloud = sandbox_handoff.get("sandbox_id") is None
@@ -816,7 +827,7 @@ async def _attributed_run_messages(
         )
     structured = build_input_messages(
         content,
-        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+        dashboard_input_context(sender_id, relayed_from),
         systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
@@ -888,6 +899,7 @@ async def _enrich_run_start_command(
         )
     )
     content = _command_message_content(params)
+    relayed_from = _relayed_from(params)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)
@@ -956,6 +968,7 @@ async def _enrich_run_start_command(
         sandbox_handoff=sandbox_handoff,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         prior_state=prior_state,
+        relayed_from=relayed_from,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
@@ -974,7 +987,8 @@ async def _enrich_run_start_command(
     if isinstance(run_input, dict):
         run_input["messages"] = structured
     metadata_update: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
+        # A relay keeps the thread answering where its person is.
+        **({} if relayed_from else {"source": DASHBOARD_SOURCE}),
         # Continuing on the web promotes a `/oswe` question thread for good.
         "unlisted": False,
         "model_selection": model_selection,
@@ -996,7 +1010,6 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
-    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(client, thread_id):
@@ -1159,6 +1172,7 @@ async def steer_running_thread(
     if not isinstance(params, dict):
         params = {}
     content = _command_message_content(params)
+    relayed_from = _relayed_from(params)
     command_images = _dashboard_images_from_content(content)
     if not _command_prompt_text(content) and not command_images:
         raise HTTPException(422, "a follow-up needs a message")
@@ -1185,6 +1199,7 @@ async def steer_running_thread(
         creating=False,
         email=email,
         client=client,
+        relayed_from=relayed_from,
     )
     client_message_id = _command_message_id(params)
     message_id = (
@@ -1228,10 +1243,12 @@ async def steer_running_thread(
             **({"email": email} if email else {}),
         },
         "queue_id": message_id,
-        "surface": "web",
+        "surface": "automation" if relayed_from else "web",
         "created_at_ms": _now_ms(),
     }
-    if metadata.get("source") == "slack":
+    if relayed_from:
+        payload[RELAYED_FROM_KEY] = relayed_from
+    elif metadata.get("source") == "slack":
         payload["source"] = DASHBOARD_SOURCE
     if not await queue_message_for_thread(thread_id, payload):
         raise HTTPException(502, "failed to deliver the follow-up to the running agent")
@@ -1257,14 +1274,16 @@ async def steer_running_thread(
         thread_id=thread_id,
         metadata={
             "updated_at_ms": now_ms,
-            "feedback_last_activity_at_ms": now_ms,
             **await participant_metadata(metadata, login=login, email=email),
         },
     )
-    try:
-        await _notify_slack_web_handoff(thread_id, metadata, client)
-    except Exception:
-        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
+    if not relayed_from:
+        try:
+            await _notify_slack_web_handoff(thread_id, metadata, client)
+        except Exception:
+            logger.exception(
+                "Failed to update Slack message for dashboard handoff on %s", thread_id
+            )
     return {
         "id": command.get("id"),
         "type": "success",

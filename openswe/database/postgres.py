@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from operator import attrgetter
 from pathlib import Path
 from time import perf_counter
@@ -150,8 +150,21 @@ async def transaction() -> AsyncIterator[AsyncConnection]:
         yield conn
 
 
+def read_only_transaction() -> AbstractAsyncContextManager[AsyncConnection]:
+    return _read_only_transaction(discard_connection=False)
+
+
+def untrusted_read_only_transaction() -> AbstractAsyncContextManager[AsyncConnection]:
+    """A ``read_only_transaction`` for arbitrary SQL, whose connection never returns to the pool.
+
+    Read-only SQL can still leave session state that a rollback keeps, such as
+    a session advisory lock.
+    """
+    return _read_only_transaction(discard_connection=True)
+
+
 @asynccontextmanager
-async def read_only_transaction() -> AsyncIterator[AsyncConnection]:
+async def _read_only_transaction(*, discard_connection: bool) -> AsyncIterator[AsyncConnection]:
     async with engine().connect() as conn:
         transaction = await conn.begin()
         try:
@@ -161,7 +174,8 @@ async def read_only_transaction() -> AsyncIterator[AsyncConnection]:
         finally:
             if transaction.is_active:
                 await transaction.rollback()
-            await conn.invalidate()
+            if discard_connection:
+                await conn.invalidate()
 
 
 @asynccontextmanager

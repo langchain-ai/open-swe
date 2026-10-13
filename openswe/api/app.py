@@ -30,6 +30,7 @@ from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
 from openswe.utils.event_loop import pin_single_event_loop
+from openswe.utils.http_pool import close_pool as close_http_pool
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
     try:
+        from openswe.server import warm_agent_build
+
+        warm_agent_build()
+    except Exception:  # noqa: BLE001
+        # Runs still build whatever is missing on first use, just more slowly.
+        logger.warning("Warming the agent build failed", exc_info=True)
+    try:
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(REMOTE_RUNTIME.lifespan())
             if AGENT_MCP is not None:
@@ -165,6 +173,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await transcript_listener.stop()
         await LISTENER.stop()
         await stop_worker()
+        await close_http_pool()
         await database.close()
 
 

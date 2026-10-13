@@ -217,3 +217,32 @@ async def test_aexecute_retries_a_transient_rejection(monkeypatch: pytest.Monkey
 
     assert resp.exit_code == 0
     assert attempts == 2
+
+
+class _StatSandbox(_FakeSandbox):
+    def __init__(self, handle: _FakeHandle, *, size_bytes: int):
+        super().__init__(handle)
+        self._size_bytes = size_bytes
+
+    async def stat(self, path: str) -> SimpleNamespace:  # noqa: ARG002
+        return SimpleNamespace(size_bytes=self._size_bytes)
+
+
+async def test_aread_pages_a_large_file_inside_the_sandbox() -> None:
+    """The file API returns whole files, so a large one must not be pulled into the worker."""
+    handle = _FakeHandle(result=SimpleNamespace(stdout="", stderr="", exit_code=0))
+    sb = _backend(handle)
+    sandbox = _StatSandbox(handle, size_bytes=64 * 1024 * 1024)
+    object.__setattr__(sb, "_async_sandbox", sandbox)
+    downloads: list[str] = []
+
+    def read(path: str, **_: object) -> bytes:
+        downloads.append(path)
+        return b""
+
+    object.__setattr__(sb, "_sandbox", SimpleNamespace(name="sandbox-test", read=read))
+
+    await sb.aread("/workspace/build.log", limit=100)
+
+    assert downloads == []
+    assert sandbox.run_calls

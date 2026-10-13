@@ -2,7 +2,6 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``openswe.dispatch``). Successful
-runs schedule a private feedback prompt five quiet minutes later, and successful
 Slack runs enqueue deferred session-cost enrichment. Failures (``error`` /
 ``timeout``) post a short reply so a run that died never leaves the user silent.
 
@@ -34,7 +33,6 @@ from openswe.slack.code_channels import is_code_channel_session, set_session_sta
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
-from openswe.thread_feedback import schedule_answer_feedback
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
@@ -371,14 +369,6 @@ async def _handle_successful_run(
     await _settle_code_channel_session(client, thread_id, metadata)
     await sync_slack_background_status(client, thread_id)
     payload_metadata = payload.get("metadata")
-    automated = (
-        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
-    )
-    if not automated:
-        try:
-            await schedule_answer_feedback(thread_id, run_id, metadata)
-        except Exception:
-            logger.warning("Could not schedule completion feedback", extra={"thread_id": thread_id})
     invocation_id = _invocation_id(payload)
     if invocation_id is None:
         return {"status": "ignored", "reason": "missing or conflicting invocation_id"}
@@ -502,10 +492,7 @@ def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: 
 
 
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
-    """Handle a platform run-completion webhook POST.
-
-    Schedules feedback prompts, enqueues cost refreshes, and posts failure replies.
-    """
+    """Settle a completed run, enqueue cost refreshes, and post failure replies."""
     status = payload.get("status")
     thread_id = payload.get("thread_id")
     raw_run_id = payload.get("run_id")

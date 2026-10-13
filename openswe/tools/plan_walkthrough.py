@@ -7,7 +7,7 @@ from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
 from openswe.ui_invalidations import Topic
 from openswe.walkthrough.checkout import CheckoutError
-from openswe.walkthrough.plan import FileRanges, RangeError
+from openswe.walkthrough.plan import FileHunks, FileSplits, RangeError
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError
 
@@ -34,24 +34,40 @@ async def _planned(workspace: PlanWorkspace, **result: object) -> dict[str, Any]
 
 async def walkthrough_plan_chunk(
     title: str,
-    show: list[FileRanges],
+    show: list[FileHunks],
     explanation: str,
-    other: list[FileRanges] | None = None,
+    other: list[FileHunks] | None = None,
     after: int | None = None,
+    replace: list[int] | None = None,
 ) -> dict[str, Any]:
     """Implement the `walkthrough_plan_chunk` tool."""
     try:
         workspace = await _workspace()
         number = await workspace.plan_chunk(
-            title=title, show=show, explanation=explanation, other=other, after=after
+            title=title,
+            show=show,
+            explanation=explanation,
+            other=other,
+            after=after,
+            replace=replace,
         )
     except PLANNING_ERRORS as exc:
         return {"success": False, "error": str(exc)}
     return await _planned(workspace, chunk=number)
 
 
+async def walkthrough_split_hunks(files: list[FileSplits]) -> dict[str, Any]:
+    """Implement the `walkthrough_split_hunks` tool."""
+    try:
+        workspace = await _workspace()
+        await workspace.split(files)
+    except PLANNING_ERRORS as exc:
+        return {"success": False, "error": str(exc)}
+    return await _planned(workspace)
+
+
 async def walkthrough_move_to_other(
-    files: list[FileRanges], restore: bool = False
+    files: list[FileHunks], restore: bool = False
 ) -> dict[str, Any]:
     """Implement the `walkthrough_move_to_other` tool."""
     try:

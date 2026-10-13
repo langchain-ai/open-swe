@@ -19,7 +19,8 @@ ASSISTANT_ID = "review-scout"
 # The reviewer waits this long for the walkthrough before reviewing without it;
 # the scout keeps running and still stores its result for the review page.
 SCOUT_WAIT_SECONDS = 600
-_POLL_SECONDS = 5
+# The reviewer resumes up to one interval after the scout finishes; a poll is one run read.
+_POLL_SECONDS = 1
 _ACTIVE_STATUSES = frozenset({"pending", "running"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
