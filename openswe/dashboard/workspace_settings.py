@@ -95,7 +95,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
     # The LangSmith Managed Tools gateway private threads load with the owner's own
-    # LangSmith connection; unset means none.
+    # LangSmith connection; unset means none. Only the instance record's value is read.
     managed_tools_gateway_id: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -439,19 +439,27 @@ async def _workspace_record(slug: str) -> dict[str, Any]:
     return _set_fields(record)
 
 
+def fallback_settings() -> WorkspaceSettings:
+    """The hardcoded defaults, for when the store cannot be read."""
+    return WorkspaceSettings(_default_settings())
+
+
+async def load_instance_settings() -> WorkspaceSettings:
+    """:func:`get_instance_settings`, but raising when the store read fails."""
+    return _finish({**_default_settings(), **await _instance_record()})
+
+
 async def get_instance_settings() -> WorkspaceSettings:
     """The instance record merged over the hardcoded defaults.
 
     Every workspace inherits these; see :func:`get_workspace_settings` for what a
     run actually sees.
     """
-    defaults = _default_settings()
     try:
-        instance = await _instance_record()
+        return await load_instance_settings()
     except Exception:
         logger.warning("instance settings lookup failed; using defaults", exc_info=True)
-        return WorkspaceSettings(defaults)
-    return _finish({**defaults, **instance})
+        return fallback_settings()
 
 
 async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
@@ -465,14 +473,18 @@ async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSetti
     to pick a model, so an unreachable store must degrade to the defaults
     rather than fail every run at once.
     """
-    defaults = _default_settings()
-    slug = resolve_settings_workspace(workspace)
     try:
-        instance, overrides = await asyncio.gather(_instance_record(), _workspace_record(slug))
+        return await load_workspace_settings(workspace)
     except Exception:
         logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
-        return WorkspaceSettings(defaults)
-    return _finish({**defaults, **instance, **overrides})
+        return fallback_settings()
+
+
+async def load_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
+    """:func:`get_workspace_settings`, but raising when the store read fails."""
+    slug = resolve_settings_workspace(workspace)
+    instance, overrides = await asyncio.gather(_instance_record(), _workspace_record(slug))
+    return _finish({**_default_settings(), **instance, **overrides})
 
 
 class WorkspaceSettingsView(TypedDict):
@@ -546,6 +558,7 @@ async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str,
     changes = await _settings_changes(value)
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
     _bind_settings_changes(changes)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
     return value
 
@@ -568,6 +581,7 @@ async def upsert_workspace_overrides(
     _bind_settings_changes(changes, workspace=slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
     return await workspace_settings_view(slug)
 
@@ -577,6 +591,7 @@ async def delete_workspace_settings(slug: str) -> None:
     await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
 
 
@@ -786,6 +801,13 @@ class WorkspaceSettings(Mapping[str, Any]):
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
+
+
+async def _forget_cached_settings() -> None:
+    # The cache module imports this one, so it is imported here.
+    from openswe.dashboard.workspace_settings_cache import forget_cached_settings
+
+    await forget_cached_settings()
 
 
 router = APIRouter(tags=["settings"])

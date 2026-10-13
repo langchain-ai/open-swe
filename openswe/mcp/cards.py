@@ -135,7 +135,7 @@ class ConnectCard(BaseModel):
             if not await _consented(self.login, self.gateway, auth_id):
                 return
             # Another of the card's services may still be missing; its consent resumes.
-            status = await gateway_status(self.login, self.gateway, [])
+            status = await gateway_status(self.login, self.gateway)
             if status.missing_for(self.services):
                 return
             key = f"{self.thread_id}:{self.card_id}"

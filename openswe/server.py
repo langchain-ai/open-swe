@@ -102,7 +102,7 @@ from openswe.input_messages import (
 )
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.instance import instance_mcp_source
-from openswe.mcp.managed import managed_mcp_source
+from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
@@ -777,7 +777,7 @@ async def _mcp_tools_for(
     """Load the run's MCPs by tier: instance, then workspace, then the user's own.
 
     A later tier's connection replaces a same-named one from the tier before. The
-    workspace's LangSmith Managed Tools gateway comes last, used as the private owner.
+    instance's LangSmith Managed Tools gateway comes last, used as the private owner.
     """
     sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
     if credential_login:
@@ -790,12 +790,8 @@ async def _mcp_tools_for(
 async def _run_mcp_tools(
     thread_id: str, credential_login: str | None, workspace: str
 ) -> tuple[str | None, list[Any]]:
-    """The workspace's Managed Tools gateway and the MCP tools the run may use."""
-    managed_gateway = (
-        (await cached_workspace_settings(workspace)).managed_tools_gateway_id
-        if credential_login
-        else None
-    )
+    """The instance's Managed Tools gateway and the MCP tools the run may use."""
+    managed_gateway = await instance_gateway() if credential_login else None
     async with aphase(thread_id, "factory.mcp_tools"):
         return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
 
