@@ -1,11 +1,11 @@
 ---
 name: linear-tickets
-description: Create or update high-quality Linear tickets while preserving the originating report, diagnostic links, attachments, and reporter/requester attribution. Read this whenever someone asks to create, recreate, or update a Linear issue.
+description: Create, recreate, or update Linear issues while preserving source material and attribution. Read only when the request explicitly names Linear, a Linear team, or a Linear issue key; "ticket" alone does not trigger this skill.
 ---
 
 # Linear tickets
 
-Use the configured Linear MCP tools. Load only the tools needed for the request.
+"Ticket" alone is not a Linear request: the repository may define its own ticket workflow. Resolve ambiguous terms through repository instructions, skills, search, and CLI help before choosing a tracker. Create a Linear issue only when the user requests one. For explicit Linear work, use the configured Linear MCP tools and load only the tools needed for the request.
 
 ## Before writing
 
