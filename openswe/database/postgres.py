@@ -249,10 +249,115 @@ def upgrade(
             "transaction_per_migration": True,
         },
     )
-    if ENV.OPENSWE_ENV.optional() == "preview":
+    history = (
+        PreviewMigrationHistory(conn, migrations, schema)
+        if ENV.OPENSWE_ENV.optional() == "preview"
+        else None
+    )
+    if history is not None:
+        history.restore_known_heads(context.get_current_heads())
         drop_superseded_revisions(conn, context, migrations, schema)
     with Operations.context(context):
         context.run_migrations()
+    if history is not None:
+        history.record_applied(context.get_current_heads())
+
+
+class PreviewMigrationHistory:
+    def __init__(self, conn: Connection, migrations: ScriptDirectory, schema: str) -> None:
+        self.conn = conn
+        self.migrations = migrations
+        self.table = f"{schema}.preview_migration_history"
+        self.version_table = f"{schema}.alembic_version"
+        self.known = {script.revision for script in migrations.walk_revisions()}
+        conn.execute(
+            text(
+                f"CREATE TABLE IF NOT EXISTS {self.table} "
+                "(revision text PRIMARY KEY, parents text[] NOT NULL)"
+            )
+        )
+
+    def restore_known_heads(self, heads: tuple[str, ...]) -> None:
+        unknown = set(heads) - self.known
+        if not unknown:
+            return
+        restored = {
+            parent for head in unknown for parent in self.known_ancestors(head, frozenset())
+        }
+        logger.warning(
+            "Restoring orphaned preview migration revisions from recorded ancestry",
+            extra={"orphaned_revisions": sorted(unknown), "restored_revisions": sorted(restored)},
+        )
+        self.conn.execute(
+            text(f"DELETE FROM {self.version_table} WHERE version_num IN :revisions").bindparams(
+                bindparam("revisions", expanding=True)
+            ),
+            {"revisions": sorted(unknown)},
+        )
+        for parent in sorted(restored):
+            self.conn.execute(
+                text(
+                    f"INSERT INTO {self.version_table} (version_num) VALUES (:revision) "
+                    "ON CONFLICT (version_num) DO NOTHING"
+                ),
+                {"revision": parent},
+            )
+
+    def known_ancestors(self, revision: str, visited: frozenset[str]) -> set[str]:
+        if revision in self.known:
+            return {revision}
+        parents = self.conn.scalar(
+            text(f"SELECT parents FROM {self.table} WHERE revision = :revision"),
+            {"revision": revision},
+        )
+        if parents is None and revision == "7d34d8e5b6a3":
+            parents = ["6f06bbadfc02", "a823229a905f"]
+        if (
+            revision in visited
+            or not isinstance(parents, list)
+            or not parents
+            or not all(isinstance(parent, str) for parent in parents)
+        ):
+            logger.error(
+                "Cannot recover orphaned preview migration; manually replace its stamp with verified parents",
+                extra={"orphaned_revision": revision},
+            )
+            raise RuntimeError(
+                f"Preview migration {revision} has no recoverable recorded ancestry; "
+                "manually replace its alembic_version stamp with verified parent revisions"
+            )
+        return {
+            ancestor
+            for parent in parents
+            for ancestor in self.known_ancestors(parent, visited | {revision})
+        }
+
+    def record_applied(self, heads: tuple[str, ...]) -> None:
+        applied = {
+            script.revision: script
+            for head in heads
+            for script in self.migrations.walk_revisions(head=head)
+        }
+        for revision, script in applied.items():
+            parents: list[str] = []
+            for revisions in (script.down_revision, script.dependencies):
+                references = (revisions,) if isinstance(revisions, str) else revisions or ()
+                parents.extend(
+                    self.migrations.get_revision(reference).revision for reference in references
+                )
+            existing = self.conn.scalar(
+                text(f"SELECT parents FROM {self.table} WHERE revision = :revision"),
+                {"revision": revision},
+            )
+            if existing is not None and existing != sorted(set(parents)):
+                raise RuntimeError(f"Preview migration {revision} changed its recorded ancestry")
+            self.conn.execute(
+                text(
+                    f"INSERT INTO {self.table} (revision, parents) VALUES (:revision, :parents) "
+                    "ON CONFLICT (revision) DO NOTHING"
+                ),
+                {"revision": revision, "parents": sorted(set(parents))},
+            )
 
 
 def drop_superseded_revisions(
