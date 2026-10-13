@@ -1,6 +1,7 @@
+import { Card } from "@langchain/macaw-components/Card"
 import { useEffect, useState } from "react"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SettingsRow } from "@/components/AppShell"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { buildEnvironmentDiagnostics } from "@/lib/environment-diagnostics"
 import {
@@ -21,7 +22,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
   }, [])
 
   return (
-    <SettingsSection id="about" title="About">
+    <Card id="about" className="divide-y divide-default overflow-hidden p-0">
       {version ? (
         <SettingsRow
           label="Open SWE Desktop"
@@ -30,26 +31,19 @@ export function AboutSection({ user }: { user: SessionUser }) {
           }
         />
       ) : null}
-      <details className="group p-space-4 text-xs break-words text-secondary">
-        <summary className="focus-visible:outline-focus w-fit cursor-pointer rounded-sm font-medium text-primary focus-visible:outline-2">
-          <span className="group-open:hidden">Show diagnostics</span>
-          <span className="hidden group-open:inline">Hide diagnostics</span>
-        </summary>
-        <div className="mt-space-4 space-y-space-2">
-          <p>
-            API: {apiBase.origin ?? "same origin"} {apiBase.path}
-          </p>
-          <p>
-            OPENSWE_ENV:{" "}
-            <IdentityValue value={buildInfo?.backend.environment} />
-          </p>
-          <BuildIdentityDetails buildInfo={buildInfo} />
-          <CopyDiagnosticsButton
-            getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
-          />
-        </div>
-      </details>
-    </SettingsSection>
+      <div className="flex flex-col gap-space-2 p-space-4 text-xs break-words text-secondary">
+        <p>
+          API: {apiBase.origin ?? "same origin"} {apiBase.path}
+        </p>
+        <p>
+          OPENSWE_ENV: <IdentityValue value={buildInfo?.backend.environment} />
+        </p>
+        <BuildIdentityDetails buildInfo={buildInfo} />
+        <CopyDiagnosticsButton
+          getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
+        />
+      </div>
+    </Card>
   )
 }
 
