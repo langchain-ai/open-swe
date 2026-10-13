@@ -33,11 +33,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from openswe.dashboard.options import (
-    SUPPORTED_MODEL_IDS,
-    gate_fable_model,
-    model_supports_effort,
-)
+from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token
 from openswe.middleware import (
@@ -144,15 +140,11 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
 async def _resolve_chat_model(cfg: RunConfig) -> tuple[str, str]:
     model_id = cfg.chat_model_id
     effort = cfg.chat_effort
-    if (
-        model_id is not None
-        and model_id in SUPPORTED_MODEL_IDS
-        and effort is not None
-        and model_supports_effort(model_id, effort)
-    ):
-        return model_id, effort
-    # Workspace review-chat default, which itself inherits the Agent default if unset.
-    return (await cached_workspace_settings(cfg.workspace_slug)).default_model("chat")
+    settings = await cached_workspace_settings(cfg.workspace_slug)
+    chosen_model, chosen_effort = settings.normalize_model_choice(model_id, effort)
+    if chosen_model and chosen_effort:
+        return chosen_model, chosen_effort
+    return settings.default_model("chat")
 
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:

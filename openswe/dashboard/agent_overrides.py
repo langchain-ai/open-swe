@@ -3,7 +3,6 @@
 import logging
 from typing import Any
 
-from openswe.dashboard.options import SUPPORTED_MODEL_IDS
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.users import User
@@ -78,7 +77,9 @@ async def resolve_agent_model_id(
     applies; omitting it reads ``default``'s, which is only right for a run
     that lands there.
     """
-    model_id, _effort = (await get_workspace_settings(workspace)).default_model("agent")
-    if isinstance(per_thread_model_id, str) and per_thread_model_id in SUPPORTED_MODEL_IDS:
-        model_id = per_thread_model_id
+    settings = await get_workspace_settings(workspace)
+    model_id, _effort = settings.default_model("agent")
+    chosen_model, _ = settings.normalize_model_choice(per_thread_model_id, "none")
+    if chosen_model is not None:
+        model_id = chosen_model
     return model_id

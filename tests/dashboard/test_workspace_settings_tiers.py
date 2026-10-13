@@ -116,3 +116,53 @@ async def test_workspace_settings_api_round_trips_overrides(
     assert (await workspace_settings.api_get_instance_settings(_session={"sub": "alice"}))[
         "review_draft_prs"
     ] is True
+
+
+async def test_unlisted_models_require_workspace_gateway_permission(
+    fake_store: FakeStore, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        workspace_settings,
+        "gateway_overrides",
+        lambda model: {"base_url": "https://gateway.example"},
+    )
+    model = "anthropic:custom-model"
+    with pytest.raises(ValueError, match="enable its gateway provider"):
+        await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(default_agent_model=model))
+    await upsert_workspace_overrides(
+        "oss",
+        WorkspaceSettingsUpdate(
+            gateway_enabled=True,
+            gateway_allowed_providers=["anthropic"],
+            default_agent_model=model,
+        ),
+    )
+    settings = await get_workspace_settings("oss")
+    from openswe.threads.runs import _resolve_agent_model_choice
+    from openswe.utils.model import provider_model_kwargs
+    from openswe.utils.thread_settings import thread_model_choice
+
+    assert await _resolve_agent_model_choice({}, model, None, "oss") == (model, "none")
+    assert thread_model_choice({"model": model}, settings) == (model, "none")
+    assert provider_model_kwargs(model, "none", max_tokens=4096) == {"max_tokens": 4096}
+    assert settings.default_model("agent") == (model, "none")
+    assert settings.normalize_model_choice(model, "high") == (model, "none")
+    assert not (await get_workspace_settings("core")).allows_unlisted_model(model)
+    assert not settings.allows_unlisted_model("openai:custom-model")
+    await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(gateway_enabled=False))
+    assert not (await get_workspace_settings("oss")).allows_unlisted_model(model)
+
+
+async def test_unlisted_models_require_gateway_credentials(
+    fake_store: FakeStore, monkeypatch
+) -> None:
+    monkeypatch.setattr(workspace_settings, "gateway_overrides", lambda model: None)
+    with pytest.raises(ValueError, match="enable its gateway provider"):
+        await upsert_workspace_overrides(
+            "oss",
+            WorkspaceSettingsUpdate(
+                gateway_enabled=True,
+                gateway_allowed_providers=["openai"],
+                default_agent_model="openai:custom-model",
+            ),
+        )

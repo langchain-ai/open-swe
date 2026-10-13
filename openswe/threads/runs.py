@@ -20,7 +20,6 @@ from openswe.dashboard.options import (
     default_vision_model_pair,
     gate_fable_model,
     model_supports_images,
-    normalize_model_choice,
 )
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.repo_access import (
@@ -163,7 +162,7 @@ async def _resolve_agent_model_choice(
     settings = await get_workspace_settings(workspace)
     resolved_model, resolved_effort = settings.default_model("agent")
     if model_id not in DEPRECATED_MODEL_IDS:
-        chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
+        chosen_model, chosen_effort = settings.normalize_model_choice(model_id, effort)
         if chosen_model and chosen_effort:
             resolved_model, resolved_effort = chosen_model, chosen_effort
     resolved_model, resolved_effort = gate_fable_model(
@@ -280,7 +279,8 @@ async def create_dashboard_thread_record(
         has_images=bool(images),
     )
     _user_message_content(prompt, images or [], model_id=resolved_model)
-    chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
+    settings = await get_workspace_settings(workspace)
+    chosen_model, chosen_effort = settings.normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or "Default"
     metadata_effort = chosen_effort
     if images and not model_supports_images(str(metadata_model)):
@@ -868,7 +868,10 @@ async def _enrich_run_start_command(
     if not isinstance(client_configurable, dict):
         client_configurable = {}
 
-    chosen_model, chosen_effort = normalize_model_choice(
+    settings = await get_workspace_settings(
+        metadata.get("workspace") or metadata.get("environment")
+    )
+    chosen_model, chosen_effort = settings.normalize_model_choice(
         client_configurable.get("agent_model_id"),
         client_configurable.get("agent_effort"),
     )
@@ -936,7 +939,10 @@ async def _enrich_run_start_command(
         metadata = thread_metadata(thread)
         if sandbox_bridge is not None:
             metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
-        run_model, run_effort = normalize_model_choice(
+        settings = await get_workspace_settings(
+            metadata.get("workspace") or metadata.get("environment")
+        )
+        run_model, run_effort = settings.normalize_model_choice(
             metadata.get("resolved_model"), metadata.get("resolved_effort")
         )
         if command_images and run_model and run_effort:
@@ -947,7 +953,9 @@ async def _enrich_run_start_command(
             overrides["agent_effort"] = chosen_effort
     else:
         run_model, run_effort = (
-            (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
+            (chosen_model, chosen_effort)
+            if chosen_model
+            else thread_model_choice(metadata, settings)
         )
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)

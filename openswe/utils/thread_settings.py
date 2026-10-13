@@ -17,6 +17,7 @@ from typing import Any, TypedDict
 from pydantic import TypeAdapter, ValidationError
 
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, normalize_model_choice
+from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,9 @@ class ThreadSettings(TypedDict, total=False):
 _THREAD_SETTINGS_ADAPTER = TypeAdapter(ThreadSettings)
 
 
-def thread_model_choice(metadata: Mapping[str, object]) -> tuple[str | None, str | None]:
+def thread_model_choice(
+    metadata: Mapping[str, object], policy: WorkspaceSettings | None = None
+) -> tuple[str | None, str | None]:
     """Prefer the saved thread setting, then the requested `model`/`effort`, then the resolved values."""
     stored = metadata.get(THREAD_SETTINGS_KEY)
     settings = stored if isinstance(stored, Mapping) else {}
@@ -54,6 +57,10 @@ def thread_model_choice(metadata: Mapping[str, object]) -> tuple[str | None, str
         (metadata.get("model"), metadata.get("effort")),
         (metadata.get("resolved_model"), metadata.get("resolved_effort")),
     ):
+        if policy is not None:
+            chosen = policy.normalize_model_choice(model, effort)
+            if chosen[0] is not None:
+                return chosen
         if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
             return model, normalize_model_choice(model, effort)[1]
     return None, None
