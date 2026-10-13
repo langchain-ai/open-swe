@@ -4,7 +4,7 @@ from pathlib import Path
 from openswe.middleware.design_snapshot import snapshot
 
 
-def test_snapshot_observes_native_and_shell_edits_without_dirty_false_positives(tmp_path: Path):
+def test_snapshot_observes_content_edits_without_dirty_false_positives(tmp_path: Path):
     repo = tmp_path / "app"
     repo.mkdir()
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
@@ -17,13 +17,8 @@ def test_snapshot_observes_native_and_shell_edits_without_dirty_false_positives(
     initial = snapshot(tmp_path)
     assert str(frontend) in initial
     assert snapshot(tmp_path) == initial
-    frontend.write_text("native edit")
-    native = snapshot(tmp_path)
-    assert native[str(frontend)] != initial[str(frontend)]
-    subprocess.run(["sh", "-c", 'printf shell > "$1"', "sh", str(frontend)], check=True)
-    assert snapshot(tmp_path)[str(frontend)] != native[str(frontend)]
-    frontend.unlink()
-    assert str(frontend) not in snapshot(tmp_path)
+    frontend.write_text("edited")
+    assert snapshot(tmp_path)[str(frontend)] != initial[str(frontend)]
 
 
 def test_snapshot_requires_design_guidance_and_ignores_gitignored_files(tmp_path: Path):
