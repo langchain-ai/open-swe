@@ -4,7 +4,6 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -40,6 +39,7 @@ import type {
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
+import { DropdownMenuItem } from "@/components/MenuItem"
 import type {
   DesktopProject,
   DesktopProjectRef,
@@ -902,7 +902,7 @@ export const ChatComposer = memo(function ChatComposer({
               sideOffset={7}
             >
               <DropdownMenuItem
-                className="gap-space-2 text-xs"
+                className="text-xs"
                 disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
                 onSelect={() => fileInputRef.current?.click()}
                 size="sm"

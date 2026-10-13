@@ -13,14 +13,14 @@ export function reviewBookmarkletUrl(origin: string): string {
 /** A link meant to be dragged to the bookmarks bar, not clicked here. */
 export function ReviewBookmarklet() {
   // React refuses `javascript:` hrefs in JSX, so the URL is set on the node itself.
-  const setBookmarkletHref = useCallback((node: HTMLAnchorElement | null) => {
+  const setBookmarkletHref = useCallback((node: HTMLElement | null) => {
     node?.setAttribute("href", reviewBookmarkletUrl(window.location.origin))
   }, [])
   return (
     <Button
+      ref={setBookmarkletHref}
       as={
         <a
-          ref={setBookmarkletHref}
           draggable
           title="Drag to your bookmarks bar, then click it on any GitHub pull request"
         />

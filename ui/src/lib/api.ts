@@ -308,7 +308,6 @@ export interface Profile {
   auto_human_review_enabled?: boolean
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
-  preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
@@ -331,7 +330,6 @@ export interface ProfileUpdate {
   auto_human_review_enabled?: boolean
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
-  preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
@@ -472,6 +470,8 @@ export interface ManagedToolsGatewayStatus {
   ready: boolean
   tool_count?: number | null
   missing: ManagedToolsMissingCredential[]
+  /** LangSmith offers no tools until every missing service is connected. */
+  all_required: boolean
 }
 
 /** The card the agent offered in a thread, identified by its tool call. */

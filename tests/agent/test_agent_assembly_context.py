@@ -98,13 +98,13 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
     ("enabled", "binding", "available"),
     [
         (False, {}, False),
-        (True, {}, False),
-        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, False),
+        (True, {}, True),
+        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True),
         (True, {"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False),
         (True, {"sandbox_id": "bridge:legacy-cli"}, False),
     ],
 )
-async def test_task_tools_remain_disabled_regardless_of_owner_opt_in_and_sandbox(
+async def test_task_tools_require_owner_opt_in_and_supported_sandbox(
     saved_thread_scope: dict[str, object],
     enabled: bool,
     binding: dict[str, str],
@@ -653,6 +653,35 @@ def pinned_settings() -> dict[str, object]:
         "model_handoff_complete": True,
         "model_routing_enabled": False,
     }
+
+
+async def test_explicit_breakout_model_survives_startup_and_followup() -> None:
+    from openswe.server import PrepareAgentRunMiddleware
+
+    config = _base_config()
+    config["configurable"].update(
+        source="slack",
+        slack_breakout=True,
+        model_selection="explicit",
+        agent_model_id="anthropic:claude-opus-5-5",
+        agent_effort="max",
+    )
+    with patch("openswe.server.store_thread_settings", new_callable=AsyncMock) as store:
+        initial = await _capture_create_deep_agent_kwargs(config)
+    snapshot = cast(dict[str, object], store.call_args.args[2])
+    assert snapshot["model_handoff_complete"] is True
+    assert snapshot["model_routing_enabled"] is False
+    followup = await _capture_create_deep_agent_kwargs(_base_config(), thread_settings=snapshot)
+    for agent in (initial, followup):
+        calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+        assert calls[0][0] == "anthropic:claude-opus-5-5"
+        assert calls[0][1]["effort"] == "max"
+        prepare = next(
+            item
+            for item in cast(list[object], agent["middleware"])
+            if isinstance(item, PrepareAgentRunMiddleware)
+        )
+        assert prepare._requested_models is None
 
 
 @pytest.mark.asyncio

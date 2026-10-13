@@ -61,7 +61,7 @@ from openswe.slack.responses import (
     ignored,
 )
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
-from openswe.slack.solo_threads import allow_solo_thread_followup
+from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
 from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
@@ -618,14 +618,23 @@ async def slack_webhook(
         and event.subtype in {"", "file_share", "thread_broadcast"}
         and (reply_thread_ts or explicit_mention)
     ):
-        solo_followup = await allow_solo_thread_followup(
-            get_langgraph_client(),
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-            message_ts=original_message_ts,
-            user_id=user_id,
-            explicit_mention=explicit_mention,
-        )
+        if explicit_mention:
+            track_explicit_mention(
+                get_langgraph_client(),
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                message_ts=original_message_ts,
+                user_id=user_id,
+            )
+        else:
+            solo_followup = await allow_solo_thread_followup(
+                get_langgraph_client(),
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                message_ts=original_message_ts,
+                user_id=user_id,
+                explicit_mention=False,
+            )
     if not (in_kitchen_channel or solo_followup):
         suggest_review()
     if not (

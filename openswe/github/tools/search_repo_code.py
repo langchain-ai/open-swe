@@ -6,6 +6,7 @@ import httpx2
 
 from openswe.github.checks import github_headers
 from openswe.run_config import RunConfig
+from openswe.utils.http_pool import pooled_transport
 
 _GITHUB_API = "https://api.github.com"
 
@@ -31,7 +32,7 @@ async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:
     headers["Accept"] = "application/vnd.github.text-match+json"
     params = {"q": f"{query} repo:{owner}/{repo}", "per_page": capped}
     try:
-        async with httpx2.AsyncClient(timeout=30) as client:
+        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30) as client:
             response = await client.get(
                 f"{_GITHUB_API}/search/code", headers=headers, params=params
             )

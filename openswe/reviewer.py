@@ -114,6 +114,7 @@ from openswe.utils.model import (
     make_model,
     provider_model_kwargs,
 )
+from openswe.utils.startup_trace import aphase
 from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
@@ -551,20 +552,48 @@ async def ensure_reviewer_github_token(thread_id: str, cfg: RunConfig) -> str | 
 async def ensure_reviewer_sandbox_for_thread(
     thread_id: str,
     cfg: RunConfig,
-) -> tuple[SandboxBackendProtocol, str | None]:
-    github_token = await ensure_reviewer_github_token(thread_id, cfg)
-    return (
-        await ensure_sandbox_for_thread(
-            thread_id,
-            workspace_slug=cfg.workspace_slug,
-            github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
-            # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
-            # re-derives every run, and reviewer threads outlive their sandbox: one
-            # thread per PR, re-triggered on every push. Refusing to replace an
-            # unreachable one would brick reviews on that PR for good.
-            allow_replacement=True,
+) -> SandboxBackendProtocol:
+    return await ensure_sandbox_for_thread(
+        thread_id,
+        workspace_slug=cfg.workspace_slug,
+        github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
+        # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
+        # re-derives every run, and reviewer threads outlive their sandbox: one
+        # thread per PR, re-triggered on every push. Refusing to replace an
+        # unreachable one would brick reviews on that PR for good.
+        allow_replacement=True,
+    )
+
+
+class _ReviewCheckout(NamedTuple):
+    work_dir: str
+    repo_ready: bool
+    sandbox_backend: SandboxBackendProtocol | None = None
+    skills_prompt: str | None = None
+
+
+async def _trusted_skills_prompt(
+    sandbox_backend: SandboxBackendProtocol,
+    sources: list[str],
+    runtime: Runtime,
+    config: RunnableConfig,
+) -> str | None:
+    """The skills section of the system prompt, listing the trusted skills in ``sources``."""
+    skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=sources)
+    skill_update = (
+        await skill_middleware.abefore_agent(cast(SkillsState, {}), runtime, config) or {}
+    )
+    if not skill_middleware.system_prompt_template:
+        return None
+    # Deepagents exposes no public formatter for the skills prompt sections.
+    return skill_middleware.system_prompt_template.format(
+        skills_locations=skill_middleware._format_skills_locations(),  # noqa: SLF001
+        skills_load_warnings=skill_middleware._format_skills_load_warnings(  # noqa: SLF001
+            skill_update.get("skills_load_errors", [])
         ),
-        github_token,
+        skills_list=skill_middleware._format_skills_list(  # noqa: SLF001
+            skill_update.get("skills_metadata", [])
+        ),
     )
 
 
@@ -621,36 +650,43 @@ async def prepare_reviewer_run(
     head_sha = cfg.head_sha or ""
     pr_number = cfg.pr_number
 
-    sandbox_backend: SandboxBackendProtocol | None = None
-    if remote_work_dir is not None:
-        github_token = await ensure_reviewer_github_token(thread_id, cfg)
-        work_dir = remote_work_dir
-        repo_ready = True
-    else:
-        try:
-            sandbox_backend, github_token = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
-        except SandboxUnreachableError as exc:
-            # Replacement was allowed and still failed, so this run dies without a
-            # sandbox. Say so on the PR instead of leaving it looking unreviewed.
-            await post_sandbox_unreachable_notification(
-                config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
+    github_token = await ensure_reviewer_github_token(thread_id, cfg)
+
+    async def _check_out() -> _ReviewCheckout:
+        if remote_work_dir is not None:
+            return _ReviewCheckout(remote_work_dir, repo_ready=True)
+        async with aphase(thread_id, "prepare.checkout"):
+            try:
+                sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
+            except SandboxUnreachableError as exc:
+                # Replacement was allowed and still failed, so this run dies without a
+                # sandbox. Say so on the PR instead of leaving it looking unreviewed.
+                await post_sandbox_unreachable_notification(
+                    config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
+                )
+                raise
+            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+            repo_ready = await prepare_review_repo(
+                sandbox_backend,
+                work_dir=work_dir,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                head_sha=head_sha,
+                pr_number=pr_number,
+                base_sha=base_sha,
             )
-            raise
-        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        repo_ready = await prepare_review_repo(
-            sandbox_backend,
-            work_dir=work_dir,
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            head_sha=head_sha,
-            pr_number=pr_number,
-            base_sha=base_sha,
-        )
-    skill_sources: list[str] = []
-    if sandbox_backend is not None and repo_ready and repo_name:
-        skill_sources = await materialize_trusted_skills(
-            sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
-        )
+            skills_prompt = None
+            if repo_ready and repo_name:
+                skill_sources = await materialize_trusted_skills(
+                    sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
+                )
+                if skill_sources:
+                    # Reading every SKILL.md takes seconds on skill-heavy repos;
+                    # here it overlaps the walkthrough wait.
+                    skills_prompt = await _trusted_skills_prompt(
+                        sandbox_backend, skill_sources, runtime, config
+                    )
+            return _ReviewCheckout(work_dir, repo_ready, sandbox_backend, skills_prompt)
 
     pr_url = cfg.pr_url or ""
     last_reviewed_sha = cfg.last_reviewed_sha or ""
@@ -679,7 +715,8 @@ async def prepare_reviewer_run(
             )
             if fetched_diff is None:
                 return "", None
-        if sandbox_backend is None:
+        checkout = await checkout_task
+        if checkout.sandbox_backend is None:
             diff_text = fetched_diff
             remote_diff_range = review_diff_range(
                 base_sha=base_sha,
@@ -715,8 +752,8 @@ async def prepare_reviewer_run(
                 re_review=is_re_review,
             )
             materialized = await materialize_review_diff(
-                sandbox_backend,
-                work_dir=f"{work_dir}/{repo_name}",
+                checkout.sandbox_backend,
+                work_dir=f"{checkout.work_dir}/{repo_name}",
                 base_ref=diff_base,
                 head_ref=diff_head,
                 merge_base=merge_base,
@@ -790,7 +827,8 @@ async def prepare_reviewer_run(
             workspace_slug=cfg.workspace_slug,
         )
         try:
-            return await target.await_walkthrough()
+            async with aphase(thread_id, "prepare.walkthrough"):
+                return await target.await_walkthrough()
         except Exception:
             logger.warning("Reviewing without a walkthrough", exc_info=True, extra=target.log_extra)
             return None
@@ -824,12 +862,21 @@ async def prepare_reviewer_run(
             )
         return content
 
+    async def _fetch_scoped_agents_md() -> dict[str, str]:
+        diff_text, _ = await diff_context_task
+        return await fetch_scoped_agents_md(
+            repo_owner, repo_name, base_sha, changed_files(diff_text), token=github_token
+        )
+
     async def _fetch_approval_policy() -> str | None:
         # Read from the default branch so a pull request cannot rewrite the policy it is judged by.
         if reviewer_eval:
             return None
         return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
 
+    # Only the diff waits on the checkout; the walkthrough above all, a whole
+    # scout run in its own sandbox, must not queue behind the clone.
+    checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
     pr_overview_task = asyncio.create_task(_fetch_pr_overview())
     walkthrough_task = asyncio.create_task(_await_walkthrough())
@@ -839,25 +886,37 @@ async def prepare_reviewer_run(
     org_guidelines_task = asyncio.create_task(_fetch_org_guidelines())
     approval_policy_task = asyncio.create_task(_fetch_approval_policy())
     api_standards_task = asyncio.create_task(_fetch_api_standards_skill())
-    diff_context = await diff_context_task
-    pr_diff_text, pr_diff_line_set = diff_context
-    scoped_agents_md_task = asyncio.create_task(
-        fetch_scoped_agents_md(
-            repo_owner,
-            repo_name,
-            base_sha,
-            changed_files(pr_diff_text),
-            token=github_token,
-        )
+    scoped_agents_md_task = asyncio.create_task(_fetch_scoped_agents_md())
+    tasks = (
+        checkout_task,
+        diff_context_task,
+        pr_overview_task,
+        walkthrough_task,
+        existing_threads_task,
+        repo_style_task,
+        agents_md_task,
+        org_guidelines_task,
+        approval_policy_task,
+        api_standards_task,
+        scoped_agents_md_task,
     )
-    pr_overview = await pr_overview_task
-    existing_threads_block = await existing_threads_task
-    repo_style_prompt = await repo_style_task
-    agents_md_content = await agents_md_task
-    scoped_agents_md = await scoped_agents_md_task
-    org_guidelines = await org_guidelines_task
-    approval_policy = await approval_policy_task
-    api_standards_skill = await api_standards_task
+    try:
+        checkout = await checkout_task
+        pr_diff_text, pr_diff_line_set = await diff_context_task
+        pr_overview = await pr_overview_task
+        existing_threads_block = await existing_threads_task
+        repo_style_prompt = await repo_style_task
+        agents_md_content = await agents_md_task
+        scoped_agents_md = await scoped_agents_md_task
+        org_guidelines = await org_guidelines_task
+        approval_policy = await approval_policy_task
+        api_standards_skill = await api_standards_task
+        walkthrough = await walkthrough_task
+    finally:
+        # A failed checkout must not leave the scout wait polling for minutes.
+        for task in tasks:
+            task.cancel()
+    work_dir, repo_ready = checkout.work_dir, checkout.repo_ready
     pr_title, pr_body = pr_overview
 
     review_context = ""
@@ -922,41 +981,14 @@ async def prepare_reviewer_run(
     )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
-    walkthrough = await walkthrough_task
     walkthrough_block = _format_walkthrough(walkthrough)
     if walkthrough_block:
         system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
     human_input_block = _format_human_input(walkthrough)
     if human_input_block:
         system_prompt = f"{system_prompt}\n\n{human_input_block}"
-    if skill_sources and sandbox_backend is not None:
-        skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
-        skill_update = (
-            await skill_middleware.abefore_agent(
-                cast(SkillsState, {}),
-                runtime,
-                config,
-            )
-            or {}
-        )
-        skill_request_state = {
-            "skills_metadata": skill_update.get("skills_metadata", []),
-            "skills_load_errors": skill_update.get("skills_load_errors", []),
-        }
-        # Deepagents exposes no public formatter for the skills prompt sections.
-        skills_locations = skill_middleware._format_skills_locations()  # noqa: SLF001
-        skills_list = skill_middleware._format_skills_list(  # noqa: SLF001
-            skill_request_state["skills_metadata"]
-        )
-        skills_load_warnings = skill_middleware._format_skills_load_warnings(  # noqa: SLF001
-            skill_request_state["skills_load_errors"]
-        )
-        if skill_middleware.system_prompt_template:
-            system_prompt = f"{system_prompt}\n\n" + skill_middleware.system_prompt_template.format(
-                skills_locations=skills_locations,
-                skills_load_warnings=skills_load_warnings,
-                skills_list=skills_list,
-            )
+    if checkout.skills_prompt:
+        system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
@@ -1087,8 +1119,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
     ) -> SandboxBackendProtocol:
-        sandbox_backend, _github_token = await ensure_reviewer_sandbox_for_thread(_thread_id, _cfg)
-        return sandbox_backend
+        await ensure_reviewer_github_token(_thread_id, _cfg)
+        return await ensure_reviewer_sandbox_for_thread(_thread_id, _cfg)
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
 

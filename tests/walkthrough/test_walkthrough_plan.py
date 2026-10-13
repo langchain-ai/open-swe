@@ -3,11 +3,14 @@ import subprocess
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.review_guide.walk import Reader, Walk
+from openswe.walkthrough.checkout import HEAD_REF, PinnedCheckout
 from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import (
     FileHunks,
@@ -287,3 +290,25 @@ async def test_replacing_chunks_merges_steps_and_releases_omitted_hunks(
     with pytest.raises(RangeError, match="another planner changed"):
         await workspace.plan_chunk(title="Stale", show=hunks[:2], explanation="Old", replace=[1])
     assert plan.chunks[0].title == "Merged"
+
+
+class _ShellBackend:
+    async def aexecute(self, command: str, timeout: int | None = None) -> ExecuteResponse:  # noqa: ARG002
+        result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+        return ExecuteResponse(output=result.stdout + result.stderr, exit_code=result.returncode)
+
+
+async def test_head_files_read_together_keep_each_files_lines(repo: Path) -> None:
+    files = {
+        "plain.py": "a\nb\n",
+        "no_newline.txt": "last",
+        "blank_tail.md": "x\n\n",
+        "empty.txt": "",
+    }
+    head = _commit(repo, files, "files")
+    _git(repo, "update-ref", HEAD_REF, head)
+    checkout = PinnedCheckout(cast(SandboxBackendProtocol, _ShellBackend()), str(repo))
+
+    assert await checkout.head_files(list(files)) == {
+        path: content.splitlines() for path, content in files.items()
+    }

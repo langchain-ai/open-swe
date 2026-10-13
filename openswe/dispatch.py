@@ -4,11 +4,13 @@ Replaces the per-site ``runs.create`` calls (plus the ``is_thread_active``
 busy-check and the custom store-queue) with one function that uses:
 
 - ``multitask_strategy="interrupt"`` by default — a follow-up halts the active run
-  (progress preserved by the sync checkpoint) and resumes the agent with full
+  (progress preserved by its checkpoints) and resumes the agent with full
   history + the new message; on an idle thread it just starts. Background
   follow-ups such as `/baby-sit` can opt into ``enqueue`` instead.
-- ``durability="sync"`` — checkpoint before each step so a crash/recycle
-  resumes from the last checkpoint instead of losing all work.
+- ``durability="async"`` — checkpoint every step, written while the next one
+  runs, so a crash/recycle resumes from at most a step back instead of losing
+  all work. ``"sync"`` made every step wait on its write (~0.3s per model/tool
+  step in prod); dashboard-started runs already use the platform's async default.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
 - ``stream_resumable=True`` — the run's event stream is retained so a client that
@@ -30,6 +32,7 @@ from datetime import UTC, datetime
 from typing import Any, Self
 from urllib.parse import urlparse
 
+from langgraph.types import Durability
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
@@ -350,7 +353,7 @@ async def create_durable_run(
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
-    durability: str = "sync",
+    durability: Durability = "async",
     if_not_exists: str = "create",
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,

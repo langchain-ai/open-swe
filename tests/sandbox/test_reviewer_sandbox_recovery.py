@@ -57,7 +57,6 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
         thread_id=thread_id,
         github_proxy_repositories=None,
         workspace_slug="large",
-        owner_login=None,
         record_stale_boot=False,
     )
     # The stale id is cleared by persisting the replacement, so later runs stop
@@ -179,13 +178,12 @@ async def test_reviewer_opts_into_replacement() -> None:
         new_callable=AsyncMock,
         return_value=sandbox_backend,
     ) as ensure:
-        result, github_token = await ensure_reviewer_sandbox_for_thread(
+        result = await ensure_reviewer_sandbox_for_thread(
             "thread-reviewer",
             RunConfig.parse({"repo": {"owner": "langchain-ai", "name": "open-swe"}}),
         )
 
     assert result is sandbox_backend
-    assert github_token is None
     assert ensure.await_args is not None
     assert ensure.await_args.kwargs["allow_replacement"] is True
 
