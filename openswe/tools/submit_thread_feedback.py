@@ -5,14 +5,10 @@ from typing import Annotated, Literal, TypedDict
 from langchain.tools import ToolRuntime
 from pydantic import Field
 
-from openswe.analytics.feedback import record_feedback_submission
 from openswe.audit_logs.tools import audit_tool
 from openswe.middleware.model_selection import ModelSelectionState, SelectedRoute, normalize_route
 from openswe.run_config import RunConfig
-from openswe.thread_feedback import Feedback, feedback_store
-from openswe.utils.langsmith import create_langsmith_thread_feedback
-from openswe.utils.thread_ops import langgraph_client
-from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.thread_feedback import record_thread_feedback
 
 
 class ThreadFeedbackResult(TypedDict):
@@ -36,33 +32,22 @@ async def submit_thread_feedback(
     run_id = str(runtime.config.get("run_id") or cfg.run_id or "")
     persisted_route = runtime.state.get("model_route") if runtime.state else None
     route: SelectedRoute | None = normalize_route(persisted_route) if persisted_route else None
-    async with agent_thread_pr_state_lock(langgraph_client(), cfg.thread_id):
-        record = await feedback_store().get(cfg.thread_id)
-        record = record or Feedback(event_id=f"tool:{run_id}", answer_run_id=run_id)
-        record.status = "completed"
-        record.rating = rating
-        record.comment = normalized_comment
-        await feedback_store().put(cfg.thread_id, record)
-        exported = await create_langsmith_thread_feedback(
-            cfg.thread_id,
-            "rating",
-            score=1.0 if rating == "good" else 0.0,
-            comment=normalized_comment or None,
-            source_info={
-                "source": "agent_thread_feedback_tool",
-                "run_id": run_id,
-                **({"model_route": route} if route else {}),
-            },
-        )
-        await record_feedback_submission(
-            feedback_key=f"thread:{cfg.thread_id}",
-            rating=5 if rating == "good" else 1,
-            source=cfg.source or "unknown",
-            run_key=run_id or None,
-            github_login=cfg.github_login,
-            user_email=cfg.user_email,
-            slack_user_id=(cfg.slack_thread.triggering_user_id if cfg.slack_thread else None),
-        )
+    exported = await record_thread_feedback(
+        cfg.thread_id,
+        rating,
+        normalized_comment,
+        event_id=f"tool:{run_id}",
+        run_id=run_id,
+        source=cfg.source or "unknown",
+        source_info={
+            "source": "agent_thread_feedback_tool",
+            "run_id": run_id,
+            **({"model_route": route} if route else {}),
+        },
+        github_login=cfg.github_login,
+        user_email=cfg.user_email,
+        slack_user_id=(cfg.slack_thread.triggering_user_id if cfg.slack_thread else None),
+    )
     return ThreadFeedbackResult(
         status="completed",
         rating=rating,

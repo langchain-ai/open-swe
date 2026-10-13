@@ -20,7 +20,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.move import move_slack_thread
-from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
+from openswe.slack.parsed_message import EmbeddedCommand, ParsedSlackMessage
 from openswe.slack.request import SlackRequest
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
@@ -53,7 +53,7 @@ class BreakoutCommand:
         )
         parts = message.argument.split(maxsplit=1)
         if (
-            message.action is not SlackAction.BREAKOUT
+            message.command is not EmbeddedCommand.BREAKOUT
             or not parts
             or not parts[0].startswith(("#", "<#"))
         ):

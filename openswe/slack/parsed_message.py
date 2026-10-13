@@ -1,12 +1,14 @@
 """Everything a person types into a Slack message for Open SWE, parsed in one place.
 
-Routing decides whether a message is addressed to Open SWE first; a command never
-makes it so. An action (`/btw`, `/breakout`, `/breakout:web`) is one of the first
-unquoted words after this bot's mention, or of the message, and the rest of the
-message is its argument:
+These are embedded commands, typed inside an ordinary message, not Slack's native
+slash commands such as `/oswe`. Routing decides whether a message is addressed to
+Open SWE first; a command never makes it so. A command (`/btw`, `/breakout`,
+`/breakout:web`, `/badbot`) is one of the first unquoted words after this bot's
+mention, or of the message, and the rest of the message is its argument:
 
     @Open SWE /breakout #eng investigate this
     @Open SWE /btw how does thread routing work?
+    @Open SWE /badbot it ignored the failing test
 
 Options (`/model:perf…`, e.g. `/model:performance`, and `/workspace:<name>`) count
 anywhere outside quotes, so `/model:perf` in backticks or quotation marks is just
@@ -27,10 +29,11 @@ from typing import Self
 from openswe.workspaces.store import slugify
 
 
-class SlackAction(StrEnum):
+class EmbeddedCommand(StrEnum):
     BY_THE_WAY = "/btw"
     BREAKOUT = "/breakout"
     BREAKOUT_WEB = "/breakout:web"
+    BAD_BOT = "/badbot"
 
 
 PERFORMANCE_MODEL = "/model:perf"
@@ -52,7 +55,7 @@ type Span = tuple[int, int]
 @dataclass(frozen=True)
 class ParsedSlackMessage:
     text: str
-    action: SlackAction | None = None
+    command: EmbeddedCommand | None = None
     performance_model: bool = False
     workspace: str | None = None
     prior_text: str = ""
@@ -115,12 +118,12 @@ class ParsedSlackMessage:
     def _leading_commands(
         cls, text: str, masked: str, mention_start: int, anchor: int
     ) -> Self | None:
-        action: SlackAction | None = None
+        command: EmbeddedCommand | None = None
         position = anchor
         while word := _WORD.match(masked, position):
             token = word[1].lower()
-            if action is None and token in SlackAction:
-                action = SlackAction(token)
+            if command is None and token in EmbeddedCommand:
+                command = EmbeddedCommand(token)
             elif not (cls._is_performance_option(token) or cls._workspace_option(word[1])):
                 break
             position = word.end()
@@ -128,7 +131,7 @@ class ParsedSlackMessage:
             return None
         return cls(
             text=text,
-            action=action,
+            command=command,
             prior_text=text[:mention_start].strip(),
             argument=text[position:].strip(),
             argument_start=position,

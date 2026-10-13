@@ -1,16 +1,17 @@
 import pytest
 
-from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
+from openswe.slack.parsed_message import EmbeddedCommand, ParsedSlackMessage
 
 
 @pytest.mark.parametrize(
-    ("text", "action", "argument", "prior_text"),
+    ("text", "command", "argument", "prior_text"),
     [
-        ("<@U0BOT> /btw why?", SlackAction.BY_THE_WAY, "why?", ""),
-        ("details <@U0BOT> /BTW why?\nmore", SlackAction.BY_THE_WAY, "why?\nmore", "details"),
-        ("/breakout fix it", SlackAction.BREAKOUT, "fix it", ""),
-        ("@openswe /breakout:web explain", SlackAction.BREAKOUT_WEB, "explain", ""),
-        ("<@U0BOT> /model:perf /breakout fix it", SlackAction.BREAKOUT, "fix it", ""),
+        ("<@U0BOT> /btw why?", EmbeddedCommand.BY_THE_WAY, "why?", ""),
+        ("details <@U0BOT> /BTW why?\nmore", EmbeddedCommand.BY_THE_WAY, "why?\nmore", "details"),
+        ("/breakout fix it", EmbeddedCommand.BREAKOUT, "fix it", ""),
+        ("@openswe /breakout:web explain", EmbeddedCommand.BREAKOUT_WEB, "explain", ""),
+        ("<@U0BOT> /model:perf /breakout fix it", EmbeddedCommand.BREAKOUT, "fix it", ""),
+        ("<@U0BOT> /badbot ignored the test", EmbeddedCommand.BAD_BOT, "ignored the test", ""),
         ("details <@U0BOT> please /btw why?", None, "details <@U0BOT> please /btw why?", ""),
         ("details /btw why? <@U0BOT>", None, "details /btw why? <@U0BOT>", ""),
         ("<@OTHER> /btw why?", None, "<@OTHER> /btw why?", ""),
@@ -20,11 +21,11 @@ from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
     ],
 )
 def test_commands_only_lead_the_message_or_follow_this_bots_mention(
-    text: str, action: SlackAction | None, argument: str, prior_text: str
+    text: str, command: EmbeddedCommand | None, argument: str, prior_text: str
 ) -> None:
     parsed = ParsedSlackMessage.parse(text, "U0BOT", "openswe")
 
-    assert (parsed.action, parsed.argument, parsed.prior_text) == (action, argument, prior_text)
+    assert (parsed.command, parsed.argument, parsed.prior_text) == (command, argument, prior_text)
 
 
 @pytest.mark.parametrize(

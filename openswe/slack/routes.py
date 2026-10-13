@@ -29,6 +29,7 @@ from openswe.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
+from openswe.slack.bad_bot import process_slack_bad_bot
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
@@ -37,7 +38,7 @@ from openswe.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
-from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
+from openswe.slack.parsed_message import EmbeddedCommand, ParsedSlackMessage
 from openswe.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
@@ -602,7 +603,7 @@ async def slack_webhook(
     message = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
     by_the_way = (
         message.argument
-        if message.action is SlackAction.BY_THE_WAY
+        if message.command is EmbeddedCommand.BY_THE_WAY
         and explicit_mention
         and not (in_code_channel or in_dm_channel or allowed_bot)
         else None
@@ -715,6 +716,19 @@ async def slack_webhook(
             )
             return accepted("Slack by-the-way question queued")
 
+        if message.command is EmbeddedCommand.BAD_BOT and allowed_bot is None:
+            if not await common.claim_slack_event(event_id, channel_id, event_ts):
+                return ignored("Duplicate Slack event delivery")
+            background_tasks.add_task(
+                process_slack_bad_bot,
+                channel_id,
+                thread_ts,
+                original_message_ts,
+                user_id,
+                message.argument,
+            )
+            return accepted("Slack bad bot feedback queued")
+
         try:
             thread_id = await common.resolve_slack_thread_id(
                 get_langgraph_client(), channel_id, thread_ts
@@ -758,7 +772,7 @@ async def slack_webhook(
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
             if (
-                message.action is SlackAction.BREAKOUT_WEB
+                message.command is EmbeddedCommand.BREAKOUT_WEB
                 and not in_dm_channel
                 and allowed_bot is None
             ):
@@ -767,7 +781,7 @@ async def slack_webhook(
                 )
                 return accepted("Slack web question queued")
             if (
-                message.action is SlackAction.BREAKOUT
+                message.command is EmbeddedCommand.BREAKOUT
                 and not (in_code_channel or in_dm_channel)
                 and allowed_bot is None
             ):
