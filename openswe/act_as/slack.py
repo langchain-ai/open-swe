@@ -85,7 +85,7 @@ async def handle_button(
         await post_slack_ephemeral_message(
             channel_id,
             user_id,
-            "I couldn't find that request. Ask Open SWE to open the PR again.",
+            "I couldn't find that request. Ask Open SWE to retry the PR action.",
         )
         return ignored("act-as request not found")
     clicker = await User.login_for_slack(user_id)
@@ -119,7 +119,7 @@ async def handle_button(
         await post_slack_ephemeral_message(
             source_channel,
             user_id,
-            f"`{request.login}` {verdict} Open SWE opening PRs as them in this thread.",
+            f"`{request.login}` {verdict} Open SWE opening, closing, or merging PRs on their behalf in this thread.",
             thread_ts=source_ts,
         )
     current = (await ThreadActAs.load(button.thread_id)).requests.get(button.fingerprint)

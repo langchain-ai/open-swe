@@ -188,6 +188,31 @@ def message_sender_id(content: object, *, kind: MessageKind | None = None) -> st
     return None
 
 
+def _latest_human_envelope(messages: Sequence[object]) -> ElementTree.Element | None:
+    for message in reversed(messages):
+        content = (
+            message.get("content")
+            if isinstance(message, Mapping)
+            else getattr(message, "content", None)
+        )
+        for envelope in reversed(_input_message_elements(content)):
+            if envelope.get("kind") == "human":
+                return envelope
+    return None
+
+
+def latest_input_is_relay(messages: Sequence[object]) -> bool:
+    """Read relay provenance from the latest human envelope, never from its body."""
+    envelope = _latest_human_envelope(messages)
+    return envelope is not None and bool(envelope.get("relayed_from_thread"))
+
+
+def latest_input_sender_id(messages: Sequence[object]) -> str | None:
+    """The latest human envelope's sender, including follow-ups injected mid-run."""
+    envelope = _latest_human_envelope(messages)
+    return envelope.get("sender") if envelope is not None else None
+
+
 def _envelope_body(message: ElementTree.Element) -> str:
     """The authored text of an envelope, accepting the stored ``<content>`` shape."""
     return (message.text or "").strip() or (message.findtext("content") or "").strip()
