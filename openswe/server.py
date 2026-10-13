@@ -143,6 +143,7 @@ from openswe.middleware.require_user_reply import (
     WEB_REPLY_SURFACE,
     ReplySurface,
 )
+from openswe.middleware.sandbox_attachments import SandboxAttachmentsMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import warn_stale_workspace
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
@@ -1142,18 +1143,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 settings["requested_model"] = requested_model
                 if requested_model:
                     option = self._requested_models[requested_model]
-                    if not option["supports_images"] and any(
-                        block.get("type") == "image"
-                        for message in state.get("messages", [])
-                        if isinstance(message, HumanMessage)
-                        for block in message.content_blocks
-                    ):
-                        decision.outcome = "incompatible_request"
-                        decision.reason = "image_input_unsupported"
-                        raise ValueError(
-                            "The requested runtime model does not support image input; "
-                            "select an image-capable model."
-                        )
                     settings.update(
                         model_id=requested_model,
                         effort=requested_effort or option["default_effort"],
@@ -1597,18 +1586,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagent_model_id, subagent_effort = routing_defaults["fast"]
         model_id, profile_effort = routing_defaults["fast"]
 
-    # Capability fallbacks can temporarily replace a pinned text-only model.
-    image_model_override: tuple[str, str] | None = None
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
     if (
-        (
-            not thread_settings.get("requested_model")
-            or cfg.model_selection == "explicit"
-            or (cfg.model_override_reason == "image_input" and not model_supports_images(model_id))
-        )
+        (not thread_settings.get("requested_model") or cfg.model_selection == "explicit")
         and isinstance(per_thread_model, str)
-        and (not reset_model_selection or cfg.model_override_reason == "image_input")
+        and not reset_model_selection
         and per_thread_model in SUPPORTED_MODEL_IDS
         and isinstance(per_thread_effort, str)
         and model_supports_effort(per_thread_model, per_thread_effort)
@@ -1617,15 +1600,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             "Applying per-thread model override",
             extra={"model_id": per_thread_model, "effort": per_thread_effort},
         )
-        if (
-            thread_settings.get("requested_model") or reset_model_selection
-        ) and cfg.model_override_reason == "image_input":
-            image_model_override = (per_thread_model, per_thread_effort)
-        else:
-            model_id = per_thread_model
-            profile_effort = per_thread_effort
-            subagent_model_id = per_thread_model
-            subagent_effort = per_thread_effort
+        model_id = per_thread_model
+        profile_effort = per_thread_effort
+        subagent_model_id = per_thread_model
+        subagent_effort = per_thread_effort
 
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
@@ -1659,10 +1637,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     ):
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
-
-    if image_model_override is not None:
-        model_id, profile_effort = image_model_override
-        subagent_model_id, subagent_effort = image_model_override
 
     # A `/oswe` question runs on the asker's own default model, and never routes
     # adaptively: one question gets one answer, so there is nothing to route.
@@ -2016,8 +1990,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if not model_supports_images(model_id):
             image_fallback.add_text_only_model(main_model)
 
-    configurable["image_model_fallback_enabled"] = image_fallback is not None
-
     def requested_model_factory(
         requested_model: str, requested_effort: str | None
     ) -> BaseChatModel:
@@ -2157,6 +2129,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         else []
                     ),
                     TranscriptMiddleware(),
+                    SandboxAttachmentsMiddleware(agent_backend),
                     *([client_tools] if client_tools else []),
                     *(
                         [IncidentMiddleware(incident_session)]

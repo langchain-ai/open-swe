@@ -15,7 +15,7 @@ import {
   newRequestId,
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { AttachmentChunk } from "@/features/agents/lib/types"
 import type {
   StoredEvent,
   ToolOutputResponse,
@@ -82,7 +82,7 @@ export function fetchToolOutput(
   )
 }
 
-/** Where one image attachment's bytes are served from. */
+/** Where one attachment's bytes are served from. */
 export function attachmentUrl(threadId: string, attachmentId: string): string {
   return dashboardApiUrl(
     transcriptPath(threadId, `/attachments/${encodeURIComponent(attachmentId)}`)
@@ -90,11 +90,11 @@ export function attachmentUrl(threadId: string, attachmentId: string): string {
 }
 
 /**
- * The bytes behind a dashboard image URL, fetched with the session cookie. An
- * `<img src>` would carry it only same-origin (a split deployment's images are
- * a third-party request), so the caller shows the blob instead.
+ * The bytes behind a dashboard attachment URL, fetched with the session cookie.
+ * An `<img src>` or link would carry it only same-origin (a split deployment's
+ * attachments are a third-party request), so the caller uses the blob instead.
  */
-export async function fetchImageBlob(url: string): Promise<Blob> {
+export async function fetchAttachmentBlob(url: string): Promise<Blob> {
   const response = await timedFetch(url, { credentials: "include" })
   if (!response.ok) throw await apiError(response)
   return await response.blob()
@@ -195,7 +195,7 @@ export interface RunStartMessage {
   /** Client-minted id; the graph's HumanMessage and the log's message row share it. */
   id: string
   text: string
-  images?: ReadonlyArray<ImageChunk>
+  images?: ReadonlyArray<AttachmentChunk>
 }
 
 export interface RunStartCommand {

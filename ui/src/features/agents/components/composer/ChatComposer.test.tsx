@@ -209,9 +209,45 @@ describe("ChatComposer options", () => {
     )
 
     expect(
-      await screen.findByRole("menuitem", { name: "Attach images" })
+      await screen.findByRole("menuitem", { name: "Attach files" })
     ).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
+  })
+
+  it("attaches several files of any type and sends them with the message", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, { onSubmit })
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("file input missing")
+
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(["<html></html>"], "report.html", { type: "text/html" }),
+          new File(["png"], "shot.png", { type: "image/png" }),
+        ],
+      },
+    })
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("composer-attachment")).toHaveLength(2)
+    )
+    expect(screen.getByText("report.html")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0]?.[1]).toEqual([
+      expect.objectContaining({
+        kind: "file",
+        mimeType: "text/html",
+        fileName: "report.html",
+      }),
+      expect.objectContaining({
+        kind: "image",
+        mimeType: "image/png",
+        fileName: "shot.png",
+      }),
+    ])
   })
 })
 

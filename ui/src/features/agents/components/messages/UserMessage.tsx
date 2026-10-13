@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { SkillPromptText } from "../SkillBadge"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
+import { MessageFile } from "./MessageFile"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
@@ -39,7 +40,12 @@ function StandardUserMessage({ message }: { message: Message }) {
   )
 
   const images = message.chunks.filter((c) => c.kind === "image")
-  const hasBody = Boolean(text) || images.length > 0 || excerpts.length > 0
+  const files = message.chunks.filter((c) => c.kind === "file")
+  const hasBody =
+    Boolean(text) ||
+    images.length > 0 ||
+    files.length > 0 ||
+    excerpts.length > 0
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
@@ -80,12 +86,25 @@ function StandardUserMessage({ message }: { message: Message }) {
                 <div
                   key={i}
                   className="overflow-hidden rounded-lg border border-default bg-surface-level-1"
+                  title={"path" in img ? img.path : undefined}
                 >
                   <MessageImage
                     chunk={img}
                     className="block h-auto max-h-[220px] w-full object-cover"
                   />
+                  {"path" in img && img.path && (
+                    <div className="truncate px-space-2 py-space-1 font-mono text-xxs text-tertiary">
+                      {img.path}
+                    </div>
+                  )}
                 </div>
+              ))}
+            </div>
+          )}
+          {files.length > 0 && (
+            <div className="mb-space-2 flex max-w-[420px] flex-col gap-space-1">
+              {files.map((file, i) => (
+                <MessageFile key={i} chunk={file} />
               ))}
             </div>
           )}

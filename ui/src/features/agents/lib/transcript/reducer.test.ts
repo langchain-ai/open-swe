@@ -531,7 +531,7 @@ describe("notices", () => {
   })
 })
 
-describe("message images", () => {
+describe("message attachments", () => {
   it("renders an attachment as an image chunk pointing at the transcript API", () => {
     const messages = toMessages(
       fromSnapshot(
@@ -554,6 +554,12 @@ describe("message images", () => {
                 }),
                 // No bytes were ever captured for this one.
                 attachment({ file_name: "lost.png" }),
+                attachment({
+                  mime_type: "text/html",
+                  file_name: "report.html",
+                  attachment_id: "66666666-7777-8888-9999-000000000000",
+                  path: "/tmp/open-swe/attachments/human-1/report.html",
+                }),
               ],
             }),
           ],
@@ -576,6 +582,18 @@ describe("message images", () => {
         url: "https://example.test/remote.png",
         credentials: "none",
         mimeType: "image/png",
+      },
+    ])
+    expect(messages[0]?.chunks.filter((c) => c.kind === "file")).toEqual([
+      {
+        kind: "file",
+        url: expect.stringContaining(
+          "/transcript/attachments/66666666-7777-8888-9999-000000000000"
+        ) as unknown as string,
+        credentials: "session",
+        mimeType: "text/html",
+        fileName: "report.html",
+        path: "/tmp/open-swe/attachments/human-1/report.html",
       },
     ])
   })

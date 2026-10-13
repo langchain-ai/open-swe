@@ -832,52 +832,6 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
         )
 
 
-async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
-    registry_db: None,
-) -> None:
-    from langchain_core.messages import convert_to_messages
-
-    from openswe.message_queue import QueuedMessage
-    from openswe.middleware.check_message_queue import (
-        LinearNotifyState,
-        check_message_queue_before_model,
-    )
-    from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
-
-    config = _base_config()
-    captured = await _capture_create_deep_agent_kwargs(
-        config,
-        thread_settings={"model_id": "fireworks:accounts/fireworks/models/kimi-k3"},
-        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
-    )
-    url = "https://example.com/image.png"
-    image = {"type": "image_url", "image_url": {"url": url}}
-    await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
-    with (
-        patch("openswe.middleware.check_message_queue.get_config", return_value=config),
-        patch("openswe.middleware.check_message_queue.fetch_image_block", return_value=image),
-    ):
-        update = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
-        )
-    assert update is not None
-    messages = convert_to_messages(update["messages"])
-    content = messages[-1].content
-    assert isinstance(content, list) and image in content
-    fallback = next(
-        item
-        for item in cast(list[object], captured["middleware"])
-        if isinstance(item, ImageModelFallbackMiddleware)
-    )
-    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
-    await fallback.awrap_model_call(
-        ModelRequest(model=cast(BaseChatModel, captured["model"]), messages=messages), handler
-    )
-    assert handler.call_args.args[0].model is not captured["model"]
-    assert handler.call_args.args[0].messages == messages
-    assert await QueuedMessage.for_thread("thread-ctx") == []
-
-
 @pytest.mark.asyncio
 async def test_historical_personal_models_and_routing_do_not_override_workspace() -> None:
     captured = await _capture_create_deep_agent_kwargs(

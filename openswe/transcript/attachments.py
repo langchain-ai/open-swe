@@ -6,6 +6,7 @@ append that references it, so a client that sees the event can always fetch the
 bytes, and a rolled-back append leaves no orphan row.
 """
 
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
@@ -13,17 +14,9 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from openswe.attachments import MAX_ATTACHMENT_BYTES, SandboxAttachment, UnsupportedAttachment
+from openswe.transcript.events import MessageAttachment
 from openswe.transcript.snapshot import reading
-
-MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
-"""Matches the per-attachment cap the dashboard command path already enforces."""
-
-ALLOWED_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-"""The bytes are served back with their stored type, so the list is exact."""
-
-
-class UnsupportedAttachment(ValueError):
-    """The attachment is not an allowed type, or is larger than the cap."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -38,10 +31,37 @@ class PendingAttachment:
     data: bytes
 
     def __post_init__(self) -> None:
-        if self.mime_type not in ALLOWED_MIME_TYPES:
-            raise UnsupportedAttachment(f"unsupported attachment type: {self.mime_type}")
         if len(self.data) > MAX_ATTACHMENT_BYTES:
-            raise UnsupportedAttachment("attachment exceeds the 10MB limit")
+            raise UnsupportedAttachment("attachment exceeds the size limit")
+
+
+def capture(
+    message_id: str, attachments: Sequence[SandboxAttachment]
+) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
+    """The metadata an event carries for ``attachments``, and the bytes to store beside it."""
+    metadata: list[MessageAttachment] = []
+    pending: list[PendingAttachment] = []
+    for position, placed in enumerate(attachments):
+        attachment_id = uuid.uuid7()
+        pending.append(
+            PendingAttachment(
+                attachment_id=attachment_id,
+                message_id=message_id,
+                position=position,
+                mime_type=placed.attachment.mime_type,
+                file_name=placed.attachment.file_name,
+                data=placed.attachment.data,
+            )
+        )
+        metadata.append(
+            MessageAttachment(
+                mime_type=placed.attachment.mime_type,
+                file_name=placed.attachment.file_name,
+                attachment_id=attachment_id,
+                path=placed.sandbox_path,
+            )
+        )
+    return metadata, tuple(pending)
 
 
 @dataclass(frozen=True, kw_only=True)

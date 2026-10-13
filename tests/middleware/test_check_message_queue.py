@@ -73,32 +73,3 @@ async def test_check_message_queue_keeps_slack_for_a_message_relayed_by_another_
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
-
-
-@pytest.mark.asyncio
-async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
-    registry_db: None,
-) -> None:
-    await QueuedMessage.put("thread-1", {"text": "first", "image_urls": ["https://img.test/a.png"]})
-
-    async def build_and_queue(payload: dict[str, Any], *, model_id: str | None) -> list:
-        await QueuedMessage.put("thread-1", {"text": "queued during the image fetch"})
-        return [{"type": "text", "text": payload["text"]}]
-
-    with (
-        patch(
-            "openswe.middleware.check_message_queue._resolve_thread_model_id",
-            return_value=None,
-        ),
-        patch(
-            "openswe.middleware.check_message_queue._build_blocks_from_payload",
-            side_effect=build_and_queue,
-        ),
-    ):
-        result = await _run({"messages": []})
-
-    assert result is not None
-    assert "first" in _envelope(result["messages"][-1])
-    assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
-        {"text": "queued during the image fetch"}
-    ]

@@ -46,6 +46,8 @@ export interface TranscriptAttachment {
   file_name: string | null
   url: string | null
   attachment_id: string | null
+  /** Where the agent can read the file in its sandbox. */
+  path?: string | null
 }
 
 /** Token accounting for one AI message, as the provider reported it. */

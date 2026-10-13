@@ -1,0 +1,5 @@
+{% if error %}
+<attachment path="{{ path }}" mime_type="{{ mime_type }}"{% if file_name %} name="{{ file_name }}"{% endif %} error="{{ error }}" />
+{% else %}
+<attachment path="{{ path }}" mime_type="{{ mime_type }}"{% if file_name %} name="{{ file_name }}"{% endif %}>The person attached this file to their message. It is in the sandbox at this path; open it with `read_file` (or any other tool) if you need its contents.</attachment>
+{% endif %}

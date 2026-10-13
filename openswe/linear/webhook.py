@@ -186,35 +186,19 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # PRs open *as the triggering user* and the thread is tagged for the dashboard.
     mapped_login = await User.login_for_email(user_email) if user_email else None
     # A follow-up stays in its thread's workspace; a new issue lands in the
-    # repository's preferred one. Either way its default model and Fable flag
-    # are the ones the vision fallback checks.
+    # repository's preferred one.
     workspace = await common.get_thread_workspace(
         thread_id
     ) or await common.workspace_for_repo_config(repo_config)
 
-    image_model_override: tuple[str, str] | None = None
     if image_urls:
         image_urls = common.dedupe_urls(image_urls)
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login, workspace=workspace)
-        if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
-            common.logger.info(
-                "Using vision fallback model %s for %d Linear image(s); configured model %s "
-                "does not support images",
-                fallback_model_id,
-                len(image_urls),
-                resolved_model_id,
-            )
-            resolved_model_id = fallback_model_id
-            image_model_override = (fallback_model_id, fallback_effort)
-        common.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-        common.logger.debug("Image URLs: %s", image_urls)
-
+        common.logger.info("Attaching %d linked image(s)", len(image_urls))
         async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
             for image_url in image_urls:
-                image_block = await common.fetch_image_block(image_url, client)
-                if image_block:
-                    image_blocks_by_url[image_url] = cast(dict[str, Any], image_block)
+                block = await common.fetch_attachment_block(image_url, client)
+                if block:
+                    image_blocks_by_url[image_url] = cast(dict[str, Any], block)
         description_blocks.extend(
             image_blocks_by_url[url]
             for url in common.dedupe_urls(description_image_urls)
@@ -245,9 +229,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
-    if image_model_override:
-        configurable["agent_model_id"] = image_model_override[0]
-        configurable["agent_effort"] = image_model_override[1]
 
     configurable["workspace"] = workspace
     configurable["environment"] = workspace

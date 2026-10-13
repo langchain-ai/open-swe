@@ -91,10 +91,9 @@ def _run_process(
         patch.object(
             linear_webhook.common, "workspace_for_repo_config", AsyncMock(return_value="oss")
         ),
-        patch.object(linear_webhook.common, "model_supports_images", return_value=True),
         patch.object(
             linear_webhook.common,
-            "fetch_image_block",
+            "fetch_attachment_block",
             new_callable=AsyncMock,
             side_effect=lambda url, _client: {"type": "image_url", "image_url": {"url": url}},
         ),

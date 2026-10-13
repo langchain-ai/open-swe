@@ -18,7 +18,7 @@ import type {
   DesktopLegacyLocalThread,
 } from "@/desktop"
 import type {
-  ImageChunk,
+  AttachmentChunk,
   Message,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
@@ -334,7 +334,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const submit = useCallback(
     async (
       prompt: string,
-      images: Array<ImageChunk>,
+      images: Array<AttachmentChunk>,
       promptSkills: DesktopLegacyLocalPromptInput["skills"] = [],
       enqueue = false
     ) => {

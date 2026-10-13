@@ -24,10 +24,11 @@ import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { formatRelativeTime } from "@/lib/utils"
 
+import { isAttachmentChunk } from "@/features/agents/lib/types"
 import type {
   AgentPullRequest,
   AgentThread,
-  ImageChunk,
+  AttachmentChunk,
   Message,
   ThreadFixScope,
 } from "@/features/agents/lib/types"
@@ -296,7 +297,7 @@ export function AgentThreadView({
   const submitMessage = useCallback(
     async (
       content: string,
-      images: Array<ImageChunk>,
+      images: Array<AttachmentChunk>,
       options?: SubmitOptions
     ) => {
       scrollControlRef.current?.scrollToBottom()
@@ -352,7 +353,7 @@ export function AgentThreadView({
   const submitWithExcerpts = useCallback(
     async (
       content: string,
-      images: Array<ImageChunk>,
+      images: Array<AttachmentChunk>,
       options?: SubmitOptions
     ) => {
       const excerpts = reviewChat?.excerpts ?? []
@@ -379,7 +380,7 @@ export function AgentThreadView({
       .join("\n")
       .trim()
   const queuedImages = (entry: QueuedTurn) =>
-    entry.message.chunks.filter((chunk) => chunk.kind === "image")
+    entry.message.chunks.filter(isAttachmentChunk)
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
   const [appliedComposerDraft, setAppliedComposerDraft] =
@@ -417,7 +418,7 @@ export function AgentThreadView({
     files: Array<File>
   } | null>(null)
   const restoreQueuedToComposer = useCallback(
-    (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
+    (texts: ReadonlyArray<string>, images: Array<AttachmentChunk>) => {
       if (texts.length === 0 && images.length === 0) return
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
@@ -430,13 +431,13 @@ export function AgentThreadView({
   // The images of a queued follow-up live with its run. Fetch them before that
   // run is withdrawn: a fetch that fails leaves the follow-up queued, intact.
   const materializeQueuedImages = useCallback(
-    async (entry: QueuedTurn): Promise<Array<ImageChunk> | null> => {
+    async (entry: QueuedTurn): Promise<Array<AttachmentChunk> | null> => {
       const { images, failed } = await materializeImages(queuedImages(entry))
       if (failed === 0) return images
       toast.error(
         failed === 1
-          ? "Couldn't load the queued message's image, so it stays queued."
-          : `Couldn't load ${failed} of the queued message's images, so it stays queued.`
+          ? "Couldn't load the queued message's attachment, so it stays queued."
+          : `Couldn't load ${failed} of the queued message's attachments, so it stays queued.`
       )
       return null
     },

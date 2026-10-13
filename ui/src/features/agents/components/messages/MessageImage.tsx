@@ -2,7 +2,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useEffect, useState } from "react"
 
 import { cn } from "@/lib/utils"
-import { fetchImageBlob } from "@/features/agents/lib/transcript/api"
+import { fetchAttachmentBlob } from "@/features/agents/lib/transcript/api"
 import type { AnyImageChunk } from "@/features/agents/lib/types"
 
 /**
@@ -25,7 +25,7 @@ function useImageSource(chunk: AnyImageChunk): {
     if (!sessionUrl) return
     let disposed = false
     let objectUrl: string | null = null
-    void fetchImageBlob(sessionUrl).then(
+    void fetchAttachmentBlob(sessionUrl).then(
       (blob) => {
         if (disposed) return
         objectUrl = URL.createObjectURL(blob)

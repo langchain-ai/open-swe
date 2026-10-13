@@ -1,4 +1,3 @@
-import base64
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -90,13 +89,6 @@ async def test_create_session_uses_saved_defaults(
     assert metadata["repo_name"] == "oss"
     assert metadata["workspace"] == "oss"
     access.assert_awaited_once_with("octocat", "acme/oss")
-
-
-def _image() -> thread_runs.DashboardImageBody:
-    return thread_runs.DashboardImageBody(
-        base64=base64.b64encode(b"image").decode("ascii"),
-        mimeType="image/png",
-    )
 
 
 def _new_thread_client(created: dict[str, object]) -> object:
@@ -378,66 +370,6 @@ async def test_enrich_run_start_command_preserves_explicit_auto_intent(
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["model_selection"] == "auto"
     assert configurable["model_selection_changed"] is selection_changed
-
-
-@pytest.mark.parametrize("creating", [False, True])
-async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
-    monkeypatch: pytest.MonkeyPatch,
-    creating: bool,
-) -> None:
-    metadata = {
-        "model": _TEXT_ONLY_MODEL,
-        "effort": "high",
-        "model_selection": "auto",
-    }
-    created: dict[str, object] = {} if creating else {"metadata": metadata}
-    _patch_new_thread_deps(
-        monkeypatch,
-        profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
-    )
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
-
-    image = _image()
-    command = {
-        "method": "run.start",
-        "params": {
-            "input": {
-                "messages": [
-                    {
-                        "type": "human",
-                        "content": [
-                            {
-                                "type": "image",
-                                "base64": image.base64,
-                                "mime_type": image.mime_type,
-                            },
-                            {"type": "text", "text": "see attached"},
-                        ],
-                    }
-                ]
-            },
-            "config": {"configurable": {}},
-        },
-    }
-
-    enriched = await thread_runs._enrich_run_start_command(
-        "new-tid",
-        "octocat",
-        command,
-        metadata={} if creating else metadata,
-        creating=creating,
-    )
-
-    stamped = created["metadata"]
-    assert isinstance(stamped, dict)
-    assert stamped["model"] == _VISION_MODEL
-    assert stamped["effort"] == "medium"
-    assert stamped["resolved_model"] == _VISION_MODEL
-    assert stamped["resolved_effort"] == "medium"
-    configurable = enriched["params"]["config"]["configurable"]
-    assert configurable["agent_model_id"] == _VISION_MODEL
-    assert configurable["agent_effort"] == "medium"
-    assert configurable["model_override_reason"] == "image_input"
 
 
 async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:

@@ -172,10 +172,11 @@ async def api_get_thread_tool_output(
     return {"output": output}
 
 
-def _content_disposition(file_name: str | None) -> str:
-    """``inline`` with a filename reduced to characters no header can misread."""
+def _content_disposition(file_name: str | None, mime_type: str) -> str:
+    """Images open inline, anything else downloads; the filename is reduced to safe characters."""
+    disposition = "inline" if mime_type.startswith("image/") else "attachment"
     safe = _UNSAFE_FILE_NAME.sub("_", file_name or "").strip("._-")[:100]
-    return f'inline; filename="{safe}"' if safe else "inline"
+    return f'{disposition}; filename="{safe}"' if safe else disposition
 
 
 @router.get("/threads/{thread_id}/transcript/attachments/{attachment_id}")
@@ -193,7 +194,7 @@ async def api_get_thread_attachment(
         content=attachment.data,
         media_type=attachment.mime_type,
         headers={
-            "Content-Disposition": _content_disposition(attachment.file_name),
+            "Content-Disposition": _content_disposition(attachment.file_name, attachment.mime_type),
             "X-Content-Type-Options": "nosniff",
             # An SVG opened directly would otherwise run script on this origin.
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
