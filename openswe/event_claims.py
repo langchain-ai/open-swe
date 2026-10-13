@@ -7,6 +7,8 @@ fails before its side effect releases the claim, so a later delivery of the
 same event (a provider retry or a manual redelivery) runs.
 A claim lapses at ``expires_at`` and can then be taken again. Each claim also
 sweeps a few lapsed ones, so the table stays about as large as the live claims.
+Short-lived mutexes use the same claims, so one whose holder never releases it
+lapses on its own.
 """
 
 from datetime import timedelta

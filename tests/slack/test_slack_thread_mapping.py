@@ -1,10 +1,12 @@
 import asyncio
+from datetime import timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import text
 
-from openswe.database import postgres
+from openswe import event_claims
+from openswe.slack import client as slack_client
 from openswe.slack.client import (
     SlackThreadMappingError,
     bind_slack_thread_id,
@@ -119,20 +121,19 @@ async def test_thread_mutation_lock_serializes_same_thread() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
-async def test_thread_mutation_lock_frees_when_its_holder_cannot_release() -> None:
+async def test_thread_mutation_lock_lapses_when_its_holder_cannot_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client: Any = _Client()
+    monkeypatch.setattr(slack_client, "_SLACK_THREAD_MUTATION_LOCK_TTL", timedelta(seconds=0.5))
+    monkeypatch.setattr(event_claims, "release", AsyncMock(side_effect=RuntimeError("503")))
 
     async with slack_thread_mutation_lock(client, "C1", "1.0"):
-        async with postgres.transaction() as conn:
-            await conn.execute(
-                text(
-                    "SELECT pg_terminate_backend(pid) FROM pg_locks "
-                    "WHERE locktype = 'advisory' AND pid <> pg_backend_pid()"
-                )
-            )
-        async with asyncio.timeout(2):
-            async with slack_thread_mutation_lock(client, "C1", "1.0"):
-                pass
+        pass
+
+    async with asyncio.timeout(3):
+        async with slack_thread_mutation_lock(client, "C1", "1.0"):
+            pass
 
 
 @pytest.mark.asyncio
