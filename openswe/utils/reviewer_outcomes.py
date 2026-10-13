@@ -15,15 +15,18 @@ import uuid
 from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
+from langsmith.utils import LangSmithNotFoundError
 
 from openswe.config import ENV
 from openswe.review.findings import Finding
 from openswe.run_config import RunConfig
+from openswe.utils import ttl_cache
 from openswe.utils.langsmith import async_langsmith_client, sync_langsmith_client
 
 logger = logging.getLogger(__name__)
 
 OUTCOMES_DATASET_NAME = ENV.REVIEWER_OUTCOMES_DATASET.get()
+_DATASET_ID_TTL_SECONDS = 3600
 
 TRUE_POSITIVE = "true_positive"
 FALSE_POSITIVE = "false_positive"
@@ -69,25 +72,25 @@ def _outcomes_credentials() -> tuple[str, str] | None:
     return api_key, ENV.LANGSMITH_ENDPOINT.get()
 
 
-async def _find_dataset(client: AsyncLangSmithClient) -> Any:
-    async for dataset in client.list_datasets(dataset_name=OUTCOMES_DATASET_NAME):
-        if dataset.name == OUTCOMES_DATASET_NAME:
-            return dataset
-    return None
+async def _ensure_dataset(client: AsyncLangSmithClient) -> uuid.UUID:
+    try:
+        return (await client.read_dataset(dataset_name=OUTCOMES_DATASET_NAME)).id
+    except LangSmithNotFoundError:
+        ds = await client.create_dataset(
+            dataset_name=OUTCOMES_DATASET_NAME,
+            description=(
+                "Open SWE reviewer finding outcomes (resolved / dismissed / 👍👎) "
+                "captured in production."
+            ),
+        )
+        return ds.id
 
 
-async def _ensure_dataset(client: AsyncLangSmithClient) -> Any:
-    existing = await _find_dataset(client)
-    if existing is not None:
-        return existing.id
-    ds = await client.create_dataset(
-        dataset_name=OUTCOMES_DATASET_NAME,
-        description=(
-            "Open SWE reviewer finding outcomes (resolved / dismissed / 👍👎) "
-            "captured in production."
-        ),
+async def _dataset_id(client: AsyncLangSmithClient) -> uuid.UUID:
+    """The outcomes dataset's id, looked up by exact name once per process."""
+    return await ttl_cache.cached(
+        "reviewer:outcomes-dataset-id", _DATASET_ID_TTL_SECONDS, lambda: _ensure_dataset(client)
     )
-    return ds.id
 
 
 def _example_id(repo: str, finding_id: str, label_source: str) -> uuid.UUID:
@@ -104,7 +107,7 @@ async def _create_or_update_example(
     client: AsyncLangSmithClient,
     credentials: tuple[str, str],
     *,
-    dataset_id: Any,
+    dataset_id: uuid.UUID,
     example_id: uuid.UUID,
     inputs: dict[str, Any],
     outputs: dict[str, Any],
@@ -190,7 +193,7 @@ async def upsert_finding_outcome(
         await _create_or_update_example(
             client,
             credentials,
-            dataset_id=await _ensure_dataset(client),
+            dataset_id=await _dataset_id(client),
             example_id=_example_id(repo, finding_id, label_source),
             inputs=inputs,
             outputs=outputs,
@@ -233,7 +236,7 @@ async def upsert_run_outcome(
         await _create_or_update_example(
             client,
             credentials,
-            dataset_id=await _ensure_dataset(client),
+            dataset_id=await _dataset_id(client),
             example_id=uuid.uuid5(uuid.NAMESPACE_URL, f"run-outcome:{run_id}:{label_source}"),
             inputs=inputs,
             outputs=outputs,

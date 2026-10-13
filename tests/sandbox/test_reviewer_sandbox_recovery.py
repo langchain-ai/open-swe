@@ -178,13 +178,12 @@ async def test_reviewer_opts_into_replacement() -> None:
         new_callable=AsyncMock,
         return_value=sandbox_backend,
     ) as ensure:
-        result, github_token = await ensure_reviewer_sandbox_for_thread(
+        result = await ensure_reviewer_sandbox_for_thread(
             "thread-reviewer",
             RunConfig.parse({"repo": {"owner": "langchain-ai", "name": "open-swe"}}),
         )
 
     assert result is sandbox_backend
-    assert github_token is None
     assert ensure.await_args is not None
     assert ensure.await_args.kwargs["allow_replacement"] is True
 
