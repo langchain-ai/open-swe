@@ -365,7 +365,10 @@ def _setup_slack_mention_fakes(
 
 
 @pytest.mark.asyncio
-async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fake_store):
+@pytest.mark.parametrize("model_choice", [None, ("anthropic:claude-opus-5-5", "max")])
+async def test_web_question_keeps_context_without_slack_delivery(
+    monkeypatch, fake_store, model_choice: tuple[str, str] | None
+):
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     persisted = AsyncMock(return_value=True)
@@ -384,13 +387,17 @@ async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fa
         bot_user_id="UBOT",
         context_thread_ts="1700000000.000100",
     )
-    assert await slack_webhooks.process_slack_web_mention(request, None)
+    assert await slack_webhooks.process_slack_web_mention(request, None, model_choice=model_choice)
     run = captured["run_create"]
     assert isinstance(run, dict)
     config = run["kwargs"]["config"]["configurable"]
     assert config["source"] == "web"
     assert "slack_thread" not in config
     assert "slack_breakout" not in config
+    if model_choice is not None:
+        assert config["agent_model_id"] == model_choice[0]
+        assert config["agent_effort"] == model_choice[1]
+        assert config["model_selection"] == "explicit"
     assert persisted.await_args.kwargs["visibility"] == "private"
     assert persisted.await_args.kwargs["source_context"] is None
     messages = str(run["kwargs"]["input"])

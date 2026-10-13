@@ -798,10 +798,14 @@ async def process_slack_web_mention(
     repo: common.SlackRepoResolution | None,
     *,
     inherited_workspace: str | None = None,
+    model_choice: tuple[str, str | None] | None = None,
 ) -> bool:
     """Dispatch a web-only request seeded from Slack without Slack delivery."""
     return await _process_slack_mention_impl(
-        request.model_copy(update={"web_only": True}), repo, inherited_workspace=inherited_workspace
+        request.model_copy(update={"web_only": True}),
+        repo,
+        inherited_workspace=inherited_workspace,
+        model_choice=model_choice,
     )
 
 
@@ -810,6 +814,7 @@ async def _process_slack_mention_impl(
     repo_resolution: common.SlackRepoResolution | None,
     *,
     inherited_workspace: str | None = None,
+    model_choice: tuple[str, str | None] | None = None,
 ) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
@@ -1054,7 +1059,7 @@ async def _process_slack_mention_impl(
 
     # A DM always answers on the person's own default model: a per-thread model
     # choice is never routed into it.
-    thread_model_choice = None if concierge_mode else thread_record.model_choice
+    thread_model_choice = None if concierge_mode else model_choice or thread_record.model_choice
 
     # Routing comes before the run's repository: a repository nobody named
     # must not outrank the channel's binding, and once a workspace has won, a
