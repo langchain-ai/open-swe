@@ -41,7 +41,7 @@ def download_http(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         httpx2,
         "AsyncClient",
-        lambda **kwargs: async_client(**kwargs, transport=httpx2.MockTransport(handle)),
+        lambda **kwargs: async_client(**{**kwargs, "transport": httpx2.MockTransport(handle)}),
     )
     monkeypatch.setattr(
         url_safety,

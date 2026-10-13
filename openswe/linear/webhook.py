@@ -21,6 +21,7 @@ from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.thread_ids import linear_issue_thread_id
 from openswe.users import User
+from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks import common
 
 
@@ -210,7 +211,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         common.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
         common.logger.debug("Image URLs: %s", image_urls)
 
-        async with httpx2.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(
+            transport=pooled_transport(), timeout=common.DEFAULT_HTTP_TIMEOUT
+        ) as client:
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, client)
                 if image_block:

@@ -27,9 +27,8 @@ class _FakeClient:
     async def __aexit__(self, *exc: Any) -> None:
         return None
 
-    async def list_datasets(self, dataset_name: str):  # noqa: ANN001
-        yield _FakeDataset("ds_wrong", "other-dataset")
-        yield _FakeDataset("ds_123", dataset_name)
+    async def read_dataset(self, dataset_name: str) -> _FakeDataset:
+        return _FakeDataset("ds_123", dataset_name)
 
     async def create_example(self, **kwargs: Any) -> None:
         if self.conflict_once:
