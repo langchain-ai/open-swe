@@ -56,7 +56,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
+    from openswe.thread_feedback import run_feedback_import
     from openswe.threads.blobs import run_blob_import
+    from openswe.threads.pins import import_store_pins
+    from openswe.threads.plan_store import run_plan_import
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
@@ -108,11 +111,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # import succeeds.
         logger.exception("Importing skills from the LangGraph Store failed")
     try:
+        # Pinned threads used to live in the LangGraph Store, keyed by login.
+        await run_store_import("thread_pins", import_store_pins)
+    except Exception:  # noqa: BLE001
+        # Startup continues: pins still in the Store are missing from the
+        # sidebar until an import succeeds.
+        logger.exception("Importing thread pins from the LangGraph Store failed")
+    try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()
     except Exception:  # noqa: BLE001
         logger.exception("Deleting review-style analyzer crons failed")
     blob_import = asyncio.create_task(run_blob_import())
+    plan_import = asyncio.create_task(run_plan_import())
+    feedback_import = asyncio.create_task(run_feedback_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -155,6 +167,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             yield
     finally:
         blob_import.cancel()
+        plan_import.cancel()
+        feedback_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()

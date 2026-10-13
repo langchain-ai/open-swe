@@ -87,6 +87,28 @@ class UserRecords:
                 )
             )
 
+    async def add(self, login: str, value: JsonObject, key: str = "") -> None:
+        """Write a record unless one already exists, keeping the existing one and its place."""
+        async with postgres.session() as session:
+            user_id = await session.scalar(select(user_id_for_login(login)))
+            if user_id is None:
+                raise UnknownUser(login)
+            await session.execute(
+                insert(UserRecord)
+                .values(user_id=user_id, kind=self.kind, key=key, value=value)
+                .on_conflict_do_nothing()
+            )
+
+    async def keys(self, login: str) -> list[str]:
+        """The person's keys of this kind, oldest write first."""
+        async with postgres.session() as session:
+            keys = await session.scalars(
+                select(UserRecord.key)
+                .where(UserRecord.user_id == user_id_for_login(login), UserRecord.kind == self.kind)
+                .order_by(UserRecord.updated_at, UserRecord.key)
+            )
+            return list(keys)
+
     async def delete(self, login: str, key: str = "") -> None:
         async with postgres.session() as session:
             await session.execute(delete(UserRecord).where(self._where(login, key)))

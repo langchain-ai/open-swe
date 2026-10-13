@@ -4,7 +4,23 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from openswe.database import postgres
+from openswe.threads.plan_store import (
+    LEGACY_PLAN_COMMENTS_NAMESPACE,
+    LEGACY_PLAN_CONTENT_NAMESPACE,
+    LEGACY_PLAN_DISMISSED_NAMESPACE,
+    ThreadPlan,
+    get_plan_content,
+    import_store_plans,
+    list_plan_comments,
+    plan_is_dismissed,
+)
 from tests.conftest import FakeStore
+
+
+async def _seed_plan(thread_id: str, value: dict[str, Any]) -> None:
+    async with postgres.session() as session:
+        session.add(ThreadPlan(thread_id=thread_id, value=value))
 
 
 async def test_save_plan_rejects_html_outside_plans_dir() -> None:
@@ -78,7 +94,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
 
 
 async def test_republished_artifact_drops_legacy_approval(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
@@ -104,7 +120,7 @@ async def test_republished_artifact_drops_legacy_approval(
 
 
 async def test_dismissal_clears_when_artifact_is_republished(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
@@ -125,13 +141,11 @@ async def test_dismissal_clears_when_artifact_is_republished(
 
 @pytest.mark.parametrize("status", ["ready", "approved", "cancelled", "shared"])
 async def test_artifact_comments_remain_authorized_without_approval_gates(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, status: str
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, status: str
 ) -> None:
-    from openswe.threads import plan_api, plan_store
+    from openswe.threads import plan_api
 
-    fake_store.seed(
-        plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>", "status": status}
-    )
+    await _seed_plan("t", {"html": "<p>Report</p>", "status": status})
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
@@ -146,11 +160,11 @@ async def test_artifact_comments_remain_authorized_without_approval_gates(
 
 
 async def test_submit_artifact_comments_dispatches_only_for_comment_author(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
-    from openswe.threads import plan_api, plan_store
+    from openswe.threads import plan_api
 
-    fake_store.seed(plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>"})
+    await _seed_plan("t", {"html": "<p>Report</p>"})
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
@@ -173,13 +187,12 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
 
 
 async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
     path = "/workspace/plans/legacy.md"
-    fake_store.seed(
-        plan_store.PLAN_CONTENT_NAMESPACE,
+    await _seed_plan(
         "t",
         {
             "markdown": "# Old plan",
@@ -200,3 +213,33 @@ async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
     assert (await plan_api.get_plan("t", author))["markdown"] == "# Updated"
     assert (await plan_api.get_plan_comments("t", author))["comments"] == [comment]
     write.assert_awaited_once_with("t", "# Updated", plan_file_path=path)
+
+
+async def test_store_import_keeps_newer_postgres_plans_and_is_idempotent(
+    registry_db: None, fake_store: FakeStore
+) -> None:
+    comment = {
+        "author": "Alice",
+        "author_login": "alice",
+        "body": "Looks good",
+        "anchor": None,
+        "created_at": "2026-09-01T00:00:00+00:00",
+    }
+    for thread_id in ("moved", "republished"):
+        fake_store.seed(
+            LEGACY_PLAN_CONTENT_NAMESPACE, thread_id, {"html": "<p>old</p>", "revision": "r1"}
+        )
+        fake_store.seed([*LEGACY_PLAN_COMMENTS_NAMESPACE, thread_id], "c1", {**comment, "id": "c1"})
+        fake_store.seed(LEGACY_PLAN_DISMISSED_NAMESPACE, thread_id, {"revision": "r1"})
+    await _seed_plan("republished", {"html": "<p>new</p>", "revision": "r2"})
+
+    await import_store_plans()
+    await import_store_plans()
+
+    assert await get_plan_content("moved") == {"html": "<p>old</p>", "revision": "r1"}
+    assert await list_plan_comments("moved") == [{**comment, "id": "c1"}]
+    assert await plan_is_dismissed("moved")
+    assert await get_plan_content("republished") == {"html": "<p>new</p>", "revision": "r2"}
+    assert await list_plan_comments("republished") == []
+    assert not await plan_is_dismissed("republished")
+    assert not any(fake_store.items.values())
