@@ -1043,6 +1043,7 @@ async def _enrich_run_start_command(
         overrides["transcript_turn_id"] = str(turn_id)
 
     overrides["model_selection"] = model_selection
+    overrides["relayed_from_thread"] = relayed_from
     overrides["model_selection_changed"] = (
         client_configurable.get("model_selection_changed") is True
     )

@@ -57,7 +57,7 @@ Returns:
     returned — read it and decide what to do next.
 
 Shared threads and acting as someone:
-    In a thread with more than one participant, a PR first needs the approval of
+    In a shared thread, a relay, or a run acting as another person, a PR first needs the approval of
     the person it opens as, unless they chose "Always allow". The tool
     DMs them an approval card in Slack and waits up to 30 seconds: on
     approval it proceeds, otherwise it returns

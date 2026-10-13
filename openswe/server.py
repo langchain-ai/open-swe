@@ -107,6 +107,7 @@ from openswe.middleware import (
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
     ModelSelectionMiddleware,
+    PullRequestActionGuardMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -2065,6 +2066,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 max_delay=10.0,
             ),
             PullRequestCreationGuardMiddleware(),
+            PullRequestActionGuardMiddleware(),
             WorkflowPushGuardMiddleware(),
             *([task_coordination] if task_coordination else []),
             *(
@@ -2121,7 +2123,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     incident_middleware=IncidentMiddleware(incident_session)
                     if incident_session is not None
                     else None,
-                    guard_middleware=[PullRequestCreationGuardMiddleware()],
+                    guard_middleware=[
+                        PullRequestCreationGuardMiddleware(),
+                        PullRequestActionGuardMiddleware(),
+                    ],
                     inherited_middleware_exclusions=(
                         check_message_queue_before_model.name,
                         deliver_event_matches_before_model.name,

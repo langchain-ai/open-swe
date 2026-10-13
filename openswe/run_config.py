@@ -118,6 +118,7 @@ class RunConfig(BaseModel):
     linear_issue: LinearIssueRef | None = None
     github_issue: GitHubIssueRef | None = None
     github_pr_or_issue: GitHubPROrIssueRef | None = None
+    relayed_from_thread: str | None = None
 
     # Pull request under review
     pr_number: Int | None = None

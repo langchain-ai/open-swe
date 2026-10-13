@@ -75,6 +75,7 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
+from openswe.middleware.pr_action_guard import PullRequestActionGuardMiddleware
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
@@ -163,6 +164,7 @@ _BOX_CHECKS: Final[Sequence[tuple[type, SandboxCheck | None]]] = (
     (ValidateImageReadsMiddleware, None),
     (SubdirAgentsReadMiddleware, None),
     (PullRequestCreationGuardMiddleware, "push_guards"),
+    (PullRequestActionGuardMiddleware, "push_guards"),
     (WorkflowPushGuardMiddleware, "push_guards"),
     (TranscriptMiddleware, None),
     (FilesystemMiddleware, None),

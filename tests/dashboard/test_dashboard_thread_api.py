@@ -413,6 +413,10 @@ async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
     texts = "".join(str(message["content"]) for message in enriched["params"]["input"]["messages"])
     assert ("system:dashboard-handoff" in texts) is not relayed
     assert ('surface="web"' in texts) is not relayed
+    assert ('relayed_from_thread="coordinator-tid"' in texts) is relayed
+    assert enriched["params"]["config"]["configurable"].get("relayed_from_thread") == (
+        "coordinator-tid" if relayed else None
+    )
     assert thread_runs.RELAYED_FROM_KEY not in enriched["params"]
     source = "slack" if relayed else "dashboard"
     assert enriched["params"]["config"]["configurable"]["source"] == source
