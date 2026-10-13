@@ -335,6 +335,7 @@ export function Header({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuItem
+              className="gap-space-2"
               onSelect={() =>
                 window.open(githubUrl, "_blank", "noopener,noreferrer")
               }
@@ -343,13 +344,17 @@ export function Header({
               Open on GitHub
             </DropdownMenuItem>
             <DropdownMenuItem
+              className="gap-space-2"
               onSelect={() => copyText(window.location.href, "Copied the link")}
             >
               <LinkIcon aria-hidden size={16} weight="regular" />
               Copy link to this page
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={openShortcutReference}>
+            <DropdownMenuItem
+              className="gap-space-2"
+              onSelect={openShortcutReference}
+            >
               <KeyboardIcon aria-hidden size={16} weight="regular" />
               Keyboard shortcuts
             </DropdownMenuItem>
