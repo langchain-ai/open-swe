@@ -60,7 +60,7 @@ function StandardUserMessage({ message }: { message: Message }) {
       {hasBody && (
         <div
           className={cn(
-            "relative overflow-hidden rounded-xl p-space-3",
+            "relative max-w-full overflow-hidden rounded-xl p-space-3",
             isSystem
               ? "mt-space-1 border border-default bg-surface-level-2"
               : "bg-surface-level-2"
@@ -93,7 +93,7 @@ function StandardUserMessage({ message }: { message: Message }) {
             <div
               ref={textRef}
               className={cn(
-                "text-sm leading-[1.6] break-words whitespace-pre-wrap text-primary",
+                "text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-primary",
                 !isSystem && !expanded && "overflow-hidden"
               )}
               style={
