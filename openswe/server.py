@@ -134,6 +134,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from openswe.middleware.design_reminder import DesignReminderMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
 from openswe.middleware.prepare_run import PrepareRunState
@@ -2188,6 +2189,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ToolErrorMiddleware(),
                     ExcludeToolsMiddleware(excluded=excluded_tools),
                     SubdirAgentsReadMiddleware(),
+                    DesignReminderMiddleware(),
                     ToolRetryMiddleware(
                         max_retries=2,
                         tools=["task"],
