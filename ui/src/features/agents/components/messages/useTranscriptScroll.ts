@@ -147,6 +147,21 @@ export function useTranscriptScroll({
     }
   }, [])
 
+  const scrollToMessage = useCallback(
+    (message: HTMLElement) => {
+      const el = scrollRef.current
+      if (!el) return
+      state.current.followTail = false
+      state.current.pendingRestoreTop = null
+      state.current.prependAnchor = null
+      cancelScheduledJump()
+      el.scrollTop +=
+        message.getBoundingClientRect().top - el.getBoundingClientRect().top
+      settle(el, el.scrollTop)
+    },
+    [cancelScheduledJump, settle]
+  )
+
   const scrollToBottom = useCallback(() => {
     state.current.followTail = true
     state.current.pendingRestoreTop = null
@@ -254,5 +269,6 @@ export function useTranscriptScroll({
     showScrollToBottom,
     scrollToBottom,
     capturePrependAnchor,
+    scrollToMessage,
   }
 }

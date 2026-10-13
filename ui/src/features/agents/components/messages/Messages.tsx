@@ -3,7 +3,9 @@ import {
   CaretDownIcon,
   XIcon,
 } from "@langchain/macaw-components/icons"
-import { memo, useEffect, useMemo } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
+import { toast } from "sonner"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -152,7 +154,42 @@ export const Messages = memo(function MessagesComponent({
     showScrollToBottom,
     scrollToBottom,
     capturePrependAnchor,
+    scrollToMessage,
   } = useTranscriptScroll({ scrollKey, messages, isStreaming })
+  const [messageHash, setMessageHash] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.hash.slice(1)
+  )
+  const locatedMessage = useRef<string | null>(null)
+
+  useEffect(() => {
+    const updateHash = () => {
+      locatedMessage.current = null
+      setMessageHash(window.location.hash.slice(1))
+    }
+    updateHash()
+    window.addEventListener("hashchange", updateHash)
+    return () => window.removeEventListener("hashchange", updateHash)
+  }, [])
+
+  useEffect(() => {
+    if (!threadId || !messageHash.startsWith("message-")) return
+    const targetKey = `${threadId}/${messageHash}`
+    if (locatedMessage.current === targetKey) return
+    const target = document.getElementById(messageHash)
+    if (target && contentRef.current?.contains(target)) {
+      scrollToMessage(target)
+      locatedMessage.current = targetKey
+    } else if (messages.length > 0 && loadEarlier && !loadEarlier.loading) {
+      loadEarlier.onLoadEarlier()
+    }
+  }, [
+    threadId,
+    messageHash,
+    messages,
+    loadEarlier,
+    contentRef,
+    scrollToMessage,
+  ])
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
@@ -226,27 +263,61 @@ export const Messages = memo(function MessagesComponent({
               const messageIsStreaming = isStreaming && isLastMessage
               const messageIsMarkdownLive = message.id === liveMarkdownMessageId
 
-              if (
+              const messageAnchor = `message-${encodeURIComponent(message.id)}`
+              const isUser =
                 message.author === "user" ||
                 message.structuredSenderKind === "system"
-              ) {
-                return <UserMessage key={message.id} message={message} />
-              }
 
               return (
-                <AgentTurn
+                <div
                   key={message.id}
-                  message={message}
-                  isStreaming={messageIsStreaming && !isOffloading}
-                  isMarkdownLive={messageIsMarkdownLive}
-                  repoPath={repoPath}
-                  activityLabel={messageIsStreaming ? activityLabel : undefined}
-                  costUsd={costsByTurn.get(message.id)}
-                  onApprove={onApprove}
-                  onReject={onReject}
-                  onAutoApprove={onAutoApprove}
-                  onOpenFile={onOpenFile}
-                />
+                  id={messageAnchor}
+                  className="group/message relative rounded-md target:ring-2 target:ring-focus"
+                >
+                  {threadId && (
+                    <IconButton
+                      icon={LinkIcon}
+                      label="Copy message link"
+                      size="xs"
+                      color="secondary"
+                      variant="plain"
+                      className="-left-space-5 absolute top-0 opacity-0 group-hover/message:opacity-100 focus-visible:opacity-100"
+                      onClick={async () => {
+                        const url = new URL(
+                          `/agents/${encodeURIComponent(threadId)}`,
+                          window.location.origin
+                        )
+                        url.hash = messageAnchor
+                        try {
+                          await navigator.clipboard.writeText(url.href)
+                          toast.success("Message link copied")
+                        } catch {
+                          toast.error(
+                            "Unable to copy message link. Check clipboard permissions."
+                          )
+                        }
+                      }}
+                    />
+                  )}
+                  {isUser ? (
+                    <UserMessage message={message} />
+                  ) : (
+                    <AgentTurn
+                      message={message}
+                      isStreaming={messageIsStreaming && !isOffloading}
+                      isMarkdownLive={messageIsMarkdownLive}
+                      repoPath={repoPath}
+                      activityLabel={
+                        messageIsStreaming ? activityLabel : undefined
+                      }
+                      costUsd={costsByTurn.get(message.id)}
+                      onApprove={onApprove}
+                      onReject={onReject}
+                      onAutoApprove={onAutoApprove}
+                      onOpenFile={onOpenFile}
+                    />
+                  )}
+                </div>
               )
             })}
             <ReviewChatActions messages={visibleMessages} />
