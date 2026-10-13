@@ -93,6 +93,21 @@
               {
                 "name": "tailwind-merge",
                 "message": "Use cn from @/lib/utils (Macaw's token-aware merge)."
+              },
+              {
+                "name": "@langchain/macaw-components/DropdownMenu",
+                "importNames": [
+                  "DropdownMenuItem",
+                  "DropdownMenuSubTrigger"
+                ],
+                "message": "Import menu rows from @/components/MenuItem so leading icons get the standard gap."
+              },
+              {
+                "name": "@langchain/macaw-components/ContextMenu",
+                "importNames": [
+                  "ContextMenuItem"
+                ],
+                "message": "Import menu rows from @/components/MenuItem so leading icons get the standard gap."
               }
             ],
             "patterns": [

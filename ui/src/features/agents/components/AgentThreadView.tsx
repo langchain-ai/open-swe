@@ -39,7 +39,6 @@ import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -950,17 +949,6 @@ export function AgentThreadView({
                   settingUpSandbox={settingUpSandbox}
                   pollWorkflowApprovalsWhileActive={isStreaming}
                   contentWidthClass="max-w-3xl"
-                  footer={
-                    !isStreaming &&
-                    !sendMessage.isPending &&
-                    queuedRows.length === 0 && (
-                      <ThreadFeedbackCard
-                        key={`${thread.id}:${session.data?.login ?? ""}`}
-                        threadId={thread.id}
-                        login={session.data?.login ?? null}
-                      />
-                    )
-                  }
                 />
               </Profiler>
             </PullRequestPreviewProvider>

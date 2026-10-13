@@ -83,16 +83,24 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     user_records.seed("profile", "bob", {"draft_prs": True})
     user_records.seed("dashboard_preferences", "Alice", prefs)
     user_records.seed("github_oauth_token", "Alice", {"encrypted_gh_token": "secret"})
-    result = await save_user_settings({"auto_fix_ci": False, "default_workspace": "  NEW  "})
+    result = await save_user_settings(
+        {"auto_fix_ci": False, "auto_human_review_enabled": False, "default_workspace": "  NEW  "}
+    )
     assert result == {
         "ok": True,
         "login": "Alice",
-        "updated": {"auto_fix_ci": False, "default_workspace": "new"},
+        "updated": {
+            "auto_fix_ci": False,
+            "auto_human_review_enabled": False,
+            "default_workspace": "new",
+        },
     }
     saved = user_records.get("profile", "Alice")
     assert {key: saved[key] for key in profile} == profile
     assert not legacy_model_settings.keys() & saved.keys()
     assert saved["auto_fix_ci"] is False
+    participant = (await read_user_settings())["participants"][0]
+    assert participant["profile"]["auto_human_review_enabled"] is False
     assert user_records.get("profile", "bob") == {"draft_prs": True}
     assert user_records.get("github_oauth_token", "Alice") == {"encrypted_gh_token": "secret"}
     saved_prefs = user_records.get("dashboard_preferences", "Alice")
@@ -165,7 +173,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_model": "anthropic:claude-fable-5-1"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
         {"branch_prefix": "new/", "default_visibility": "invalid"},
-        {"preserve_sandbox_memory": None, "auto_fix_ci": False},
+        {"pr_review_links": None, "auto_fix_ci": False},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -203,7 +211,7 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     assert user_records.items == before
 
 
-async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
+async def test_feature_flag_requires_user_and_validates_before_writing(
     user_records: FakeUserRecords, requester: dict[str, object], saved_scope: dict[str, object]
 ) -> None:
     from openswe.users import User, UserPreferences
@@ -211,7 +219,7 @@ async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
     ) as save:
-        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"pr_review_links": True, "auto_fix_ci": False}))[
             "ok"
         ] is False
         save.assert_awaited_once()
@@ -220,13 +228,13 @@ async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
         User,
         "update_preferences",
         new_callable=AsyncMock,
-        return_value=UserPreferences(preserve_sandbox_memory=True),
+        return_value=UserPreferences(pr_review_links=True),
     ) as save:
-        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"pr_review_links": True, "auto_fix_ci": False}))[
             "updated"
-        ] == {"preserve_sandbox_memory": True, "auto_fix_ci": False}
+        ] == {"pr_review_links": True, "auto_fix_ci": False}
         assert save.await_args.args[0] == "Alice"
-        assert save.await_args.args[1].preserve_sandbox_memory is True
+        assert save.await_args.args[1].pr_review_links is True
     assert user_records.get("profile", "Alice")["auto_fix_ci"] is False
 
 
@@ -282,8 +290,8 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "login": "Alice",
             "profile": {
                 **ordinary,
+                "auto_human_review_enabled": True,
                 "concierge_mode": False,
-                "preserve_sandbox_memory": True,
                 "pr_review_links": False,
                 "pr_failure_reactions": False,
                 "prefer_tools_in_sandbox": False,

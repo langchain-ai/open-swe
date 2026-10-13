@@ -1,12 +1,11 @@
 import { CheckIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
 } from "@langchain/macaw-components/DropdownMenu"
 import type { ComponentProps } from "react"
 
-import { cn } from "@/lib/utils"
+import { DropdownMenuItem } from "@/components/MenuItem"
 
 /**
  * Macaw ships no checkbox or radio menu items, so this is a plain item that
@@ -30,7 +29,7 @@ export function MenuCheckItem({
     <DropdownMenuItem
       role={type === "radio" ? "menuitemradio" : "menuitemcheckbox"}
       aria-checked={checked}
-      className={cn("gap-space-2", className)}
+      className={className}
       onSelect={(event) => {
         onSelect?.(event)
         if (onCheckedChange) {

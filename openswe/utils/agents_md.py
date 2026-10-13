@@ -12,6 +12,8 @@ from urllib.parse import quote
 
 import httpx2
 
+from openswe.utils.http_pool import pooled_transport
+
 logger = logging.getLogger(__name__)
 
 # Cap the inlined content. AGENTS.md / CLAUDE.md is meant to be a short
@@ -69,7 +71,7 @@ async def fetch_agents_md(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx2.AsyncClient(timeout=timeout) as client:
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
         for filename in _AGENT_DOC_FILENAMES:
             url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filename}"
             try:
@@ -145,7 +147,7 @@ async def fetch_scoped_agents_md(
         headers["Authorization"] = f"Bearer {token}"
 
     semaphore = asyncio.Semaphore(_SCOPED_FETCH_CONCURRENCY)
-    async with httpx2.AsyncClient(timeout=timeout) as client:
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
 
         async def _fetch(candidate: str) -> tuple[str, str] | None:
             directory = posixpath.dirname(candidate)

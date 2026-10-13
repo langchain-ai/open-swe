@@ -26,6 +26,8 @@ from urllib.parse import quote
 import httpx2
 from pydantic import BaseModel
 
+from openswe.utils.http_pool import pooled_transport
+
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient
 
@@ -117,6 +119,7 @@ async def github_client(
     async with httpx2.AsyncClient(
         headers=merged_headers or None,
         timeout=timeout or DEFAULT_TIMEOUT,
+        transport=pooled_transport(),
     ) as client:
         yield client
 

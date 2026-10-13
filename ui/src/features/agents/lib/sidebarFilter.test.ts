@@ -39,6 +39,24 @@ describe("filterThreads", () => {
     expect(filterThreads(threads, DEFAULT_SIDEBAR_FILTERS)).toHaveLength(1)
   })
 
+  it("keeps the actively viewed thread visible despite source and automation filters", () => {
+    const active = makeThread({
+      id: "active-thread",
+      source: "slack",
+      threadCategory: "automation",
+    })
+    const hidden = makeThread({ source: "slack" })
+    const visible = makeThread({ source: "github" })
+
+    expect(
+      filterThreads(
+        [active, hidden, visible],
+        filters({ sources: ["github"] }),
+        active.id
+      )
+    ).toEqual([active, visible])
+  })
+
   it("includes automations when requested", () => {
     const ordinary = makeThread()
     const automation = makeThread({

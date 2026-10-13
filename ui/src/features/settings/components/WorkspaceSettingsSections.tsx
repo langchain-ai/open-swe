@@ -157,7 +157,6 @@ export function DefaultRepoSection({
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
                 triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
-                dropdownClassName="w-56"
                 disabled={!settings.data}
               />
             </div>

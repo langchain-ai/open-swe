@@ -6,7 +6,6 @@ import {
 } from "@langchain/macaw-components/icons"
 import { Avatar } from "@langchain/macaw-components/Avatar"
 import { Button } from "@langchain/macaw-components/Button"
-import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import {
   HoverCard,
   HoverCardContent,
@@ -19,6 +18,7 @@ import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullReques
 import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 import { useState } from "react"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import type {
   AgentPullRequest,
   AgentPullRequestHealth,

@@ -10,7 +10,9 @@ argument or the sandbox.
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from functools import partial
 from typing import Literal
 from urllib.parse import quote
@@ -30,7 +32,7 @@ from openswe.dashboard.langsmith_oauth import (
     langsmith_oauth_configured,
 )
 from openswe.mcp.models import MCPConnection
-from openswe.mcp.runtime import MCPSource
+from openswe.mcp.runtime import MCPSource, refresh_mcp_catalog
 from openswe.mcp.transport import mcp_http_client
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,7 @@ logger = logging.getLogger(__name__)
 GATEWAYS_PATH = "/v1/managed-tools/gateways"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
 CONNECTION_NAME = "lmt"
+_MISSING_CREDENTIALS_META = "com.langchain.langsmith/missingCredentials"
 _TIMEOUT_SECONDS = 30
 _MAX_PAGES = 5
 # LangSmith holds each status request open this long while consent is pending.
@@ -76,7 +79,7 @@ class ConsentLink(BaseModel):
 
 
 class GatewayCredentialsRequired(ManagedToolsError):
-    """LMT's 428: every service in the gateway this person still has to connect."""
+    """LMT's 428: a gateway that offers no tools until every listed service is connected."""
 
     def __init__(self, missing: list[MissingCredential], links: dict[str, ConsentLink]) -> None:
         super().__init__("Connect every service in this gateway before using its tools")
@@ -91,18 +94,44 @@ class Gateway(BaseModel):
 
 
 class GatewayStatus(BaseModel):
-    """What one person sees for a gateway: ready, or what to connect first."""
+    """What one person sees for a gateway: every service connected, or what is left."""
 
     gateway: Gateway
     workspaces: list[str]
     ready: bool
     tool_count: int | None = None
     missing: list[MissingCredential] = Field(default_factory=list)
+    all_required: bool = False
+    """LangSmith withholds every tool until all of ``missing`` are connected. Otherwise
+    the connected services' tools load and each missing one can be connected alone."""
 
-    @property
-    def consent_only(self) -> bool:
-        """Every missing service has a consent link to wait on; API keys are set in LangSmith."""
-        return all(item.kind == "oauth" for item in self.missing)
+    def missing_for(self, services: Sequence[str]) -> list[MissingCredential]:
+        """The unconnected services among ``services`` (slugs or names, as people say them).
+
+        Every unconnected service when none is named, or when the gateway needs them all.
+        """
+        if self.all_required or not services:
+            return self.missing
+        keys = {key for service in services if (key := _match_key(service))}
+        return [
+            item
+            for item in self.missing
+            if item.slug in services or any(key in _match_key(item.display_name) for key in keys)
+        ]
+
+
+def _match_key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+@dataclass(frozen=True)
+class _Listing:
+    """One tools/list read: how many tools it offered, and what is still unconnected."""
+
+    tool_count: int | None
+    missing: list[MissingCredential]
+    links: dict[str, ConsentLink]
+    all_required: bool
 
 
 def managed_tools_configured() -> bool:
@@ -134,8 +163,7 @@ def _client() -> httpx2.AsyncClient:
     return mcp_http_client(langsmith_issuer(), timeout=httpx2.Timeout(_TIMEOUT_SECONDS))
 
 
-def _credentials_required(body: object) -> GatewayCredentialsRequired:
-    entries = body.get("credentials") if isinstance(body, dict) else None
+def _credentials(entries: object) -> tuple[list[MissingCredential], dict[str, ConsentLink]]:
     missing: list[MissingCredential] = []
     links: dict[str, ConsentLink] = {}
     for entry in entries if isinstance(entries, list) else []:
@@ -154,7 +182,13 @@ def _credentials_required(body: object) -> GatewayCredentialsRequired:
             links[slug] = ConsentLink(
                 url=url, auth_id=auth_id if isinstance(auth_id, str) else None
             )
-    return GatewayCredentialsRequired(missing, links)
+    return missing, links
+
+
+def _credentials_required(body: object) -> GatewayCredentialsRequired:
+    return GatewayCredentialsRequired(
+        *_credentials(body.get("credentials") if isinstance(body, dict) else None)
+    )
 
 
 def _failure(response: httpx2.Response) -> ManagedToolsError:
@@ -273,36 +307,49 @@ async def _with_session[T](
         raise ManagedToolsError("Could not reach the managed tools gateway; retry later") from None
 
 
-async def _tool_count(client: Client[StreamableHttpTransport]) -> int:
-    return len(await client.list_tools(max_pages=_MAX_PAGES))
+async def _listing(login: str, gateway: str) -> _Listing:
+    """Read the gateway's tools as ``login``, under either of LMT's connection policies.
+
+    A gateway that requires every connection answers 428 until all are made. One that
+    allows partial use lists the connected services' tools and names the rest in _meta.
+    """
+    try:
+        result = await _with_session(login, gateway, lambda client: client.list_tools_mcp())
+    except GatewayCredentialsRequired as required:
+        return _Listing(None, required.missing, required.links, all_required=True)
+    missing, links = _credentials((result.meta or {}).get(_MISSING_CREDENTIALS_META))
+    return _Listing(len(result.tools), missing, links, all_required=False)
 
 
 async def gateway_status(login: str, gateway: str, workspaces: list[str]) -> GatewayStatus:
-    """Whether ``login`` can use the gateway now, or which services to connect first."""
+    """Whether ``login`` has connected every service in the gateway, or which are left."""
     summary = await get_gateway(login, gateway)
-    try:
-        count = await _with_session(login, gateway, _tool_count)
-    except GatewayCredentialsRequired as required:
-        return GatewayStatus(
-            gateway=summary, workspaces=workspaces, ready=False, missing=required.missing
-        )
-    return GatewayStatus(gateway=summary, workspaces=workspaces, ready=True, tool_count=count)
+    listing = await _listing(login, gateway)
+    return GatewayStatus(
+        gateway=summary,
+        workspaces=workspaces,
+        ready=not listing.missing,
+        tool_count=listing.tool_count,
+        missing=listing.missing,
+        all_required=listing.all_required,
+    )
 
 
 async def connect_link(login: str, gateway: str, slug: str) -> ConsentLink | None:
     """A fresh consent link for one service in the gateway; None when it is connected."""
-    try:
-        await _with_session(login, gateway, _tool_count)
-    except GatewayCredentialsRequired as required:
-        if any(item.slug == slug and item.kind == "secret" for item in required.missing):
-            raise ManagedToolsError(
-                "Set this service's API key in LangSmith, then refresh"
-            ) from None
-        if slug in required.links:
-            return required.links[slug]
-        if any(item.slug == slug for item in required.missing):
-            raise ManagedToolsError("LangSmith did not return a consent link; retry") from None
+    listing = await _listing(login, gateway)
+    if any(item.slug == slug and item.kind == "secret" for item in listing.missing):
+        raise ManagedToolsError("Set this service's API key in LangSmith, then refresh")
+    if slug in listing.links:
+        return listing.links[slug]
+    if any(item.slug == slug for item in listing.missing):
+        raise ManagedToolsError("LangSmith did not return a consent link; retry")
     return None
+
+
+async def refresh_tools(login: str, gateway: str) -> None:
+    """Re-read the gateway's cached tool list, so a newly connected service's tools load."""
+    await refresh_mcp_catalog(managed_mcp_source(login, gateway), CONNECTION_NAME)
 
 
 async def consent_outcome(login: str, auth_id: str) -> ConsentOutcome:
