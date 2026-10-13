@@ -45,7 +45,7 @@ def snapshot(workspace: Path, previous: dict[str, str] | None = None) -> dict[st
                 capture_output=True,
                 check=True,
             )
-        except OSError, subprocess.CalledProcessError:
+        except (OSError, subprocess.CalledProcessError):
             logger.warning("Design repository snapshot unavailable: %s", root, exc_info=True)
             fingerprints.update(
                 {key: value for key, value in previous.items() if Path(key).is_relative_to(root)}
