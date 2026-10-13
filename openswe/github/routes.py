@@ -4,7 +4,9 @@ from fastapi import APIRouter, Response
 
 from openswe.github import webhook as service
 from openswe.human_review.completed_reviews import CompletedReview
+from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
+from openswe.ui_invalidations import Topic
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.routing import WorkspaceLookupError, repo_is_routable
@@ -38,14 +40,17 @@ async def github_webhook(
 
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
+    refs = EventRefs.github(body)
     await EventLog.record(
         request,
         body,
         "github",
         event_type=event_type,
         delivery_id=delivery_id,
-        refs=EventRefs.github(body),
+        refs=refs,
     )
+    if refs.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
     common.logger.info(
         "GitHub webhook received",
         extra={
@@ -113,6 +118,8 @@ async def github_webhook(
             background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
         if action in {"opened", "edited"} or action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
+        if action == "synchronize":
+            background_tasks.add_task(notify_pr_updated, payload)
         if action == "opened" or action in common.GH_PR_AGENT_STATE_ACTIONS:
             try:
                 await common.update_agent_pr_usage_from_webhook(payload, delivery_id=delivery_id)

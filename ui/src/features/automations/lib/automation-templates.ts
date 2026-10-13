@@ -1,13 +1,11 @@
-import {
-  BookOpenIcon,
-  BugIcon,
-  FlaskIcon,
-  GitPullRequestIcon,
-  NotePencilIcon,
-  PackageIcon,
-  ShieldCheckIcon,
-} from "@phosphor-icons/react"
-import type { Icon } from "@phosphor-icons/react"
+import { PackageRegularIcon } from "@langchain/macaw-components/icons"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { BookOpenIcon } from "@phosphor-icons/react/dist/ssr/BookOpen"
+import { BugIcon } from "@phosphor-icons/react/dist/ssr/Bug"
+import { FlaskIcon } from "@phosphor-icons/react/dist/ssr/Flask"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { NotePencilIcon } from "@phosphor-icons/react/dist/ssr/NotePencil"
+import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
 
 export interface AutomationTemplate {
   /** Stable id used as the `?template=` search param on the new-automation route. */
@@ -18,7 +16,7 @@ export interface AutomationTemplate {
   prompt: string
   /** Default 5-field cron expression (UTC). */
   schedule: string
-  icon: Icon
+  icon: IconComponent
 }
 
 export const AUTOMATION_TEMPLATES: ReadonlyArray<AutomationTemplate> = [
@@ -46,7 +44,7 @@ export const AUTOMATION_TEMPLATES: ReadonlyArray<AutomationTemplate> = [
     description:
       "Scan for outdated packages, security patches, and breaking changes.",
     schedule: "0 9 * * 1",
-    icon: PackageIcon,
+    icon: PackageRegularIcon,
     prompt: `Scan this repository's dependency manifests and lockfiles for outdated packages and known security advisories. Prioritize security patches and safe minor/patch upgrades, and note any major upgrades that may contain breaking changes. Open a draft pull request that bumps the low-risk, well-tested upgrades, and summarize the riskier ones for manual review.`,
   },
   {

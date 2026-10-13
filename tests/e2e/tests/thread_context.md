@@ -23,7 +23,7 @@ web_url: http://127.0.0.1:3100/agents/<thread-id>
 <dynamic-context kind="system" id="system:slack-context">
 display_name: Slack context
 platform: slack
-content: This is a non-kitchen Slack channel. Always respond when a human explicitly tags you, even if the message is a question, comment, or ambiguous request rather than an implementation task. Do not ignore a message that tags you. Respond appropriately with `slack_reply`, unless another tool has already responded visibly, such as an approval card or a breakout thread; in those flows, follow their instructions for `slack_no_reply_needed`. Responding does not mean turning discussion into a code-change task.
+content: This is a non-kitchen Slack channel. Always respond when a human explicitly tags you, even if the message is a question, comment, or ambiguous request rather than an implementation task. Do not ignore a message that tags you. Respond appropriately with `slack_reply`, unless another tool has already responded visibly, such as an approval card or a breakout thread; in those flows, follow their instructions for `slack_no_reply_needed`. Responding does not mean turning discussion into a code-change task, but a reported problem is a request to investigate and fix it.
 </dynamic-context>
 ```
 

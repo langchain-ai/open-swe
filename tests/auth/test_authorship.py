@@ -156,3 +156,38 @@ async def test_config_identity_without_trusted_slack_name_stays_blank(
     assert identity.analytics_display_name == ""
     assert identity.display_name_source is None
     assert identity.commit_name == "Linear Mason"
+
+
+async def test_installation_token_identity_skips_the_user_endpoint(
+    github_client: _FakeAsyncClient, installation_token: None
+) -> None:
+    github_client._responses.append(
+        _FakeResponse(200, {"id": 42, "login": "mason-gh", "name": "Mason"})
+    )
+    config = {"configurable": {"source": "slack", "github_login": "mason-gh"}}
+
+    identity = await resolve_triggering_user_identity(config, "ghs_workspacebot")
+
+    assert identity is not None
+    assert identity.github_login == "mason-gh"
+    assert [url for url, _ in github_client.requests] == ["https://api.github.com/users/mason-gh"]
+
+
+async def test_user_token_identity_is_shared_until_it_expires_but_failures_are_not(
+    github_client: _FakeAsyncClient,
+) -> None:
+    github_client._responses.extend(
+        [
+            _FakeResponse(401, {"message": "Bad credentials"}),
+            _FakeResponse(200, {"id": 7, "login": "mason-gh", "name": "Mason"}),
+        ]
+    )
+    no_login: dict[str, Any] = {"configurable": {}}
+
+    assert await resolve_triggering_user_identity(no_login, "gho_user") is None
+    first = await resolve_triggering_user_identity(no_login, "gho_user")
+    second = await resolve_triggering_user_identity(no_login, "gho_user")
+
+    assert first is not None and first.github_login == "mason-gh"
+    assert second == first
+    assert [url for url, _ in github_client.requests] == ["https://api.github.com/user"] * 2

@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 
-import { SettingsPanel, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { Skeleton } from "@/components/ui/skeleton"
+import { EditorScreen } from "@/components/EditorScreen"
+import { TextEditor } from "@/components/TextEditor"
 import { api, type UserInstructions } from "@/lib/api"
+import { ConfirmDialog } from "./ConfirmDialog"
 
 export function PersonalInstructionsSection() {
   const qc = useQueryClient()
@@ -15,10 +17,12 @@ export function PersonalInstructionsSection() {
   })
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [confirmingClear, setConfirmingClear] = useState(false)
 
   const saved = instructions.data?.instructions ?? ""
   const value = draft ?? saved
   const dirty = draft !== null && draft !== saved
+  const ready = instructions.isSuccess
 
   const onSuccess = (text: string) => {
     qc.setQueryData<UserInstructions>(["myInstructions"], (current) => ({
@@ -40,77 +44,88 @@ export function PersonalInstructionsSection() {
     meta: { errorTitle: "Couldn't clear instructions" },
     mutationFn: () => api.deleteMyInstructions(),
     onSuccess: () => onSuccess(""),
+    onSettled: () => setConfirmingClear(false),
   })
   const mutating = save.isPending || clear.isPending
 
-  const onClear = () => {
-    if (
-      !window.confirm(
-        "Clear your personal instructions? This cannot be undone."
-      )
-    ) {
-      return
-    }
-    clear.mutate()
-  }
-
   return (
-    <SettingsSection title="Personal instructions">
-      <SettingsPanel>
-        {instructions.isLoading ? (
-          <Skeleton className="h-40 w-full" />
-        ) : instructions.isError ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs text-destructive">
-              Could not load your instructions:{" "}
-              {instructions.error instanceof Error
-                ? instructions.error.message
-                : "unknown error"}
-              . Editing is disabled so a failed load can't overwrite them.
-            </p>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void instructions.refetch()}
-            >
-              Retry
-            </Button>
-          </div>
-        ) : (
+    <EditorScreen
+      title="Instructions"
+      description="Standing instructions added to the agent's system prompt for every run you trigger, on any surface. Repository instructions and AGENTS.md win when they conflict."
+      actions={
+        ready && (
           <>
-            <InstructionsEditor
-              value={value}
-              onChange={setDraft}
-              disabled={mutating}
-              placeholder="e.g. Always run the linter before pushing. Prefer terse Slack updates."
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                disabled={!dirty || mutating}
-                onClick={() => save.mutate(value)}
-              >
-                Save instructions
-              </Button>
-              {dirty && (
-                <span className="text-xs text-muted-foreground">
-                  Unsaved changes
-                </span>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto"
-                disabled={mutating || (!saved && !dirty)}
-                onClick={onClear}
-              >
-                Clear
-              </Button>
-            </div>
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && (
+              <span className="text-xs text-error-secondary">{error}</span>
+            )}
+            {dirty && (
+              <span className="text-xs text-secondary">Unsaved changes</span>
+            )}
+            <Button
+              size="xs"
+              color="secondary"
+              variant="outlined"
+              disabled={mutating || (!saved && !dirty)}
+              onClick={() => setConfirmingClear(true)}
+            >
+              Clear
+            </Button>
+            <Button
+              size="xs"
+              color="primary"
+              disabled={!dirty || mutating}
+              onClick={() => save.mutate(value)}
+            >
+              Save instructions
+            </Button>
           </>
-        )}
-      </SettingsPanel>
-    </SettingsSection>
+        )
+      }
+    >
+      {instructions.isLoading ? (
+        <Skeleton className="m-space-5 flex-1" />
+      ) : instructions.isError ? (
+        <div className="p-space-5">
+          <Banner
+            intent="error"
+            title="Could not load your instructions."
+            action={
+              <Button
+                size="xs"
+                color="secondary"
+                variant="outlined"
+                onClick={() => void instructions.refetch()}
+              >
+                Retry
+              </Button>
+            }
+          >
+            {instructions.error instanceof Error
+              ? instructions.error.message
+              : "Unknown error"}
+            . Editing is disabled so a failed load can&apos;t overwrite them.
+          </Banner>
+        </div>
+      ) : (
+        <TextEditor
+          value={value}
+          onChange={setDraft}
+          ariaLabel="Personal instructions"
+          disabled={mutating}
+          placeholder="e.g. Always run the linter before pushing. Prefer terse Slack updates."
+        />
+      )}
+      <ConfirmDialog
+        open={confirmingClear}
+        onOpenChange={setConfirmingClear}
+        title="Clear your personal instructions?"
+        description="This cannot be undone."
+        confirmLabel="Clear instructions"
+        pendingLabel="Clearing…"
+        pending={clear.isPending}
+        destructive
+        onConfirm={() => clear.mutate()}
+      />
+    </EditorScreen>
   )
 }

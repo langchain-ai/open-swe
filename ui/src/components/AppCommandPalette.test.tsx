@@ -114,6 +114,6 @@ describe("AppCommandPalette", () => {
     )
 
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" })
-    expect(onOpenChange).toHaveBeenCalledWith(false, expect.anything())
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })

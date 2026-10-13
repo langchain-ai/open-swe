@@ -41,6 +41,7 @@ class StoreEntry(NamedTuple):
 
     namespace: list[str] | None
     value: dict[str, Any]
+    key: str = ""
 
 
 _DEFAULT_PAGE_SIZE = 100
@@ -74,6 +75,11 @@ def _unwrap(item: Any) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _item_key(item: Any) -> str:
+    key = item.get("key") if isinstance(item, dict) else getattr(item, "key", None)
+    return key if isinstance(key, str) else ""
+
+
 def _item_namespace(item: Any) -> list[str] | None:
     """The item's own ``namespace``, when the transport reports one."""
     namespace = (
@@ -94,6 +100,13 @@ async def get_value(namespace: Namespace, key: str) -> dict[str, Any] | None:
 
 async def put_value(namespace: Namespace, key: str, value: Mapping[str, Any]) -> None:
     await store_client().store.put_item(list(namespace), key, value)
+
+
+async def put_expiring_value(
+    namespace: Namespace, key: str, value: Mapping[str, Any], *, ttl_minutes: int
+) -> None:
+    """Store an item the Store sweeps once ``ttl_minutes`` have passed."""
+    await store_client().store.put_item(list(namespace), key, value, ttl=ttl_minutes)
 
 
 async def delete_value(namespace: Namespace, key: str) -> None:
@@ -163,13 +176,24 @@ async def search_all_entries(
         if not items:
             return entries
         entries.extend(
-            StoreEntry(_item_namespace(item), value)
+            StoreEntry(_item_namespace(item), value, _item_key(item))
             for item in items
             if (value := _unwrap(item)) is not None
         )
         if len(items) < page_size:
             return entries
         offset += len(items)
+
+
+async def search_entries(
+    namespace: Namespace, *, limit: int = _DEFAULT_PAGE_SIZE
+) -> list[StoreEntry]:
+    """The first page of :func:`search_all_entries`, for callers that drain as they go."""
+    return [
+        StoreEntry(_item_namespace(item), value, _item_key(item))
+        for item in await _search_items(namespace, None, limit, 0)
+        if (value := _unwrap(item)) is not None
+    ]
 
 
 RecordT = TypeVar("RecordT", bound=BaseModel)

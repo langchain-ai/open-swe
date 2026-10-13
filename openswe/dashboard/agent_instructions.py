@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP, filter_repo_models_for_user
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.review.styles import normalize_repo_full_name
@@ -97,6 +98,7 @@ async def api_list_agent_instructions(
 
 
 @router.post("/agent-instructions")
+@audit_endpoint
 async def api_create_agent_instructions(
     body: AgentInstructionsCreate,
     session: dict[str, Any] = SESSION_DEP,
@@ -119,6 +121,7 @@ async def api_get_agent_instructions(
 
 
 @router.put("/agent-instructions/{full_name:path}")
+@audit_endpoint
 async def api_update_agent_instructions(
     full_name: str,
     body: AgentInstructionsUpdate,
@@ -130,6 +133,7 @@ async def api_update_agent_instructions(
 
 
 @router.delete("/agent-instructions/{full_name:path}")
+@audit_endpoint
 async def api_delete_agent_instructions(
     full_name: str,
     session: dict[str, Any] = SESSION_DEP,

@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import cast
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -11,6 +12,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from langgraph.typing import StateT
 from langgraph_sdk import get_client
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
@@ -98,44 +100,69 @@ class ToolSurface:
         if self.graph is None:
             raise RuntimeError("Tool graph was not initialized")
         node = self.graph.builder.nodes["tools"].runnable
-        builder = StateGraph(self.graph.builder.state_schema)
-        builder.add_node("tools", node)
-        builder.add_edge(START, "tools")
-        builder.add_edge("tools", END)
-        executor = builder.compile(store=ToolStore())
-        call_id = f"sandbox-{uuid4().hex}"
-        call = AIMessage(content="", tool_calls=[{"name": name, "args": arguments, "id": call_id}])
-        messages = state.get("messages", [])
+        if not isinstance(node, ToolNode):
+            raise RuntimeError("Agent tools node is unavailable")
         loaded = state.get("loaded_integration_tools", [])
         integration_names = list(loaded) if isinstance(loaded, list) else []
         if name in self.integration_names and name not in integration_names:
             integration_names.append(name)
-        state = {
-            **state,
-            "messages": [*(messages if isinstance(messages, list) else []), call],
-            "loaded_integration_tools": integration_names,
-        }
-        update: dict[str, object] = {}
-        async for chunk in executor.astream(state, config, stream_mode="updates"):
-            values = chunk.get("tools")
-            if isinstance(values, dict):
-                update.update(values)
-        results = update.get("messages", [])
-        result = (
-            next(
-                (
-                    message
-                    for message in results
-                    if isinstance(message, ToolMessage) and message.tool_call_id == call_id
-                ),
-                None,
-            )
-            if isinstance(results, list)
-            else None
+        return await invoke_tool_node(
+            node,
+            self.graph.builder.state_schema,
+            {**state, "loaded_integration_tools": integration_names},
+            config,
+            name,
+            arguments,
         )
-        if result is None or not isinstance(results, list):
-            raise RuntimeError("Tool did not return a result")
-        return {"status": result.status, "content": _json.validate_python(result.content)}
+
+
+async def invoke_tool_node(
+    node: ToolNode,
+    state_schema: type[StateT],
+    state: Mapping[str, object],
+    config: RunnableConfig,
+    name: str,
+    arguments: Mapping[str, JsonValue],
+) -> dict[str, JsonValue]:
+    """Run one tool call through ``node`` as the agent's own tools node would.
+
+    Injected state, the runnable config and the Store resolve exactly as in a graph run.
+    """
+    builder = StateGraph(state_schema)
+    builder.add_node("tools", node)
+    builder.add_edge(START, "tools")
+    builder.add_edge("tools", END)
+    executor = builder.compile(store=ToolStore())
+    call_id = f"sandbox-{uuid4().hex}"
+    call = AIMessage(
+        content="", tool_calls=[{"name": name, "args": dict(arguments), "id": call_id}]
+    )
+    messages = state.get("messages", [])
+    input_state = {
+        **state,
+        "messages": [*(messages if isinstance(messages, list) else []), call],
+    }
+    update: dict[str, object] = {}
+    async for chunk in executor.astream(cast(StateT, input_state), config, stream_mode="updates"):
+        values = chunk.get("tools")
+        if isinstance(values, dict):
+            update.update(values)
+    results = update.get("messages", [])
+    result = (
+        next(
+            (
+                message
+                for message in results
+                if isinstance(message, ToolMessage) and message.tool_call_id == call_id
+            ),
+            None,
+        )
+        if isinstance(results, list)
+        else None
+    )
+    if result is None or not isinstance(results, list):
+        raise RuntimeError("Tool did not return a result")
+    return {"status": result.status, "content": _json.validate_python(result.content)}
 
 
 async def load_tool_surface(

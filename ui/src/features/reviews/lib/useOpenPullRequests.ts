@@ -8,12 +8,13 @@ export function useOpenPullRequests(
   login: string,
   repo: string[],
   sort: ReviewSort,
-  direction: "asc" | "desc"
+  direction: "asc" | "desc",
+  scope: "mine" | "review-assigned" | "review-requested"
 ) {
   return useInfiniteQuery({
-    queryKey: ["my-pull-requests", login, repo, sort, direction],
+    queryKey: ["open-pull-requests", login, scope, repo, sort, direction],
     queryFn: ({ pageParam }) =>
-      api.myPullRequests(repo.join(","), sort, direction, pageParam),
+      api.openPullRequests(repo.join(","), sort, direction, pageParam, scope),
     initialPageParam: 1,
     getNextPageParam: (last) => last.nextPage ?? undefined,
     // Re-sorting keeps the previous snapshot on screen: blanking the list and

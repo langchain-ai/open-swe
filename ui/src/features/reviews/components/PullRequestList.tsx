@@ -19,6 +19,7 @@ export function PullRequestList({
   compact,
   children,
   onEndReached,
+  footer,
 }: {
   rows: OpenPullRequest[]
   // Rows that could be shown, loaded or not. Rows arriving while the end is
@@ -28,6 +29,7 @@ export function PullRequestList({
   compact?: boolean
   children: (pr: OpenPullRequest) => ReactNode
   onEndReached: () => void
+  footer?: ReactNode
 }) {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState(0)
@@ -80,12 +82,13 @@ export function PullRequestList({
           ))}
         </ul>
       ) : (
-        <ul className={compact ? undefined : "space-y-3"}>
+        <ul className={compact ? undefined : "space-y-space-3"}>
           {rows.map((pr) => (
             <li key={pullRequestKey(pr)}>{children(pr)}</li>
           ))}
         </ul>
       )}
+      {footer}
     </div>
   )
 }

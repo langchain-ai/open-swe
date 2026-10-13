@@ -25,7 +25,7 @@ export function DiffView({ diffData, snippet = false }: DiffViewProps) {
 
   if (isBinary) {
     return (
-      <div className="mt-2 font-mono text-xs text-gray-500">
+      <div className="mt-space-2 font-mono text-xxs text-tertiary">
         Binary file - diff not available
       </div>
     )
@@ -33,19 +33,21 @@ export function DiffView({ diffData, snippet = false }: DiffViewProps) {
 
   if (stats.additions === 0 && stats.deletions === 0) {
     return (
-      <div className="mt-2 font-mono text-xs text-gray-500">No changes</div>
+      <div className="mt-space-2 font-mono text-xxs text-tertiary">
+        No changes
+      </div>
     )
   }
 
   return (
-    <div className="mt-2 font-mono text-xs">
-      <div className="mb-1 flex items-center gap-2 text-gray-500">
-        <span className="text-gray-400">{displayPath}</span>
+    <div className="mt-space-2 font-mono text-xxs">
+      <div className="mb-space-1 flex items-center gap-space-2 text-tertiary">
+        <span className="text-secondary">{displayPath}</span>
         {diffData.isNewFile && !snippet && <span>(new)</span>}
-        <span className="text-green-400">+{stats.additions}</span>
-        <span className="text-red-400">-{stats.deletions}</span>
+        <span className="text-success-secondary">+{stats.additions}</span>
+        <span className="text-error-secondary">-{stats.deletions}</span>
       </div>
-      <div className="max-h-60 overflow-auto rounded-lg border border-border/60 bg-card">
+      <div className="max-h-60 overflow-auto rounded-lg border border-subtle bg-surface-level-1">
         <ScopedFileDiff
           oldFile={{ name: displayPath, contents: originalContent ?? "" }}
           newFile={{ name: displayPath, contents: newContent }}

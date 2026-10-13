@@ -1,5 +1,6 @@
 """Record authenticated dashboard write-method requests, never their payloads."""
 
+from collections.abc import Callable
 from uuid import UUID
 
 from fastapi.routing import APIRoute
@@ -11,6 +12,12 @@ from openswe.audit_logs.models import AuditLog, AuditLogEnrichments
 from openswe.audit_logs.store import append_safely
 
 _STATE_KEY = "audit_log"
+
+
+def audit_endpoint[F: Callable[..., object]](endpoint: F) -> F:
+    """Opt a durable or security-sensitive dashboard mutation into audit capture."""
+    vars(endpoint)["__audit_endpoint__"] = True
+    return endpoint
 
 
 def bind_actor(
@@ -67,6 +74,7 @@ class AuditLogMiddleware:
             if (
                 isinstance(route, APIRoute)
                 and (path := _route_path(scope, route)).startswith("/dashboard/api/")
+                and getattr(route.endpoint, "__audit_endpoint__", False)
                 and entry.enrichments.actor_kind is not None
             ):
                 entry.operation_name = route.name.removeprefix("api_")[:128]

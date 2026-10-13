@@ -43,8 +43,8 @@ async def api_ui_invalidations(
 ) -> StreamingResponse:
     """``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``."""
     ages = _parse_subscriptions(t or [])
-    allowed = await asyncio.gather(*(Topic.may_hear(session, topic) for topic in ages))
-    heard = {topic: age for (topic, age), ok in zip(ages.items(), allowed, strict=True) if ok}
+    audible = await Topic.audible(session, ages)
+    heard = {topic: age for topic, age in ages.items() if topic in audible}
     denied = sorted(set(ages) - set(heard))
     return StreamingResponse(
         _stream(heard, denied), media_type="text/event-stream", headers=_SSE_HEADERS

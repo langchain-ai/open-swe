@@ -19,6 +19,7 @@ from openswe.input_messages import (
     system_input,
     system_introduction,
 )
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
@@ -138,20 +139,22 @@ async def cancel_active_runs(thread_id: str, *, keep_run_id: str = "") -> None:
 async def queued_context_count(thread_id: str) -> int:
     """Count of messages waiting to reach this thread's agent.
 
-    Combines the legacy in-run injection queue (``queue_context`` /
-    ``queue_message_for_thread``, still used by Slack context and the
-    ``send_dashboard_message`` agent tool) with genuine pending runs
+    Combines the in-run injection queue (``queue_context`` /
+    ``queue_message_for_thread``, used by Slack context and steered
+    follow-ups) with genuine pending runs
     (a composer follow-up enqueued via the server-backed queue adapter is a
     real LangGraph run, not a KV-store entry, and would otherwise be
     invisible here).
     """
     try:
-        item = await store_client().store.get_item(("queue", thread_id), "pending_messages")
+        kv_count = len(await QueuedMessage.for_thread(thread_id))
     except Exception:  # noqa: BLE001
-        item = None
-    value = item.get("value") if isinstance(item, dict) else None
-    messages = value.get("messages") if isinstance(value, dict) else None
-    kv_count = len(messages) if isinstance(messages, list) else 0
+        logger.warning(
+            "Could not count queued messages",
+            exc_info=True,
+            extra={"incident": {"thread_id": thread_id}},
+        )
+        kv_count = 0
     return kv_count + len(await _runs(thread_id, "pending"))
 
 

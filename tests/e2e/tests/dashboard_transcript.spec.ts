@@ -172,7 +172,7 @@ test.describe("transcript rendering", () => {
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
 
-    await page.getByRole("link", { name: "New Thread" }).click();
+    await page.getByRole("link", { name: "New", exact: true }).click();
     await expect(page).toHaveURL(/\/agents\/?$/);
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/agents/${threadId}$`));

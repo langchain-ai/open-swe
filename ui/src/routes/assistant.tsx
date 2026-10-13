@@ -6,7 +6,7 @@ import {
   useMatch,
   useRouterState,
 } from "@tanstack/react-router"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
@@ -43,7 +43,7 @@ function AssistantLayout() {
     (session.data && (profile.isPending || localThreads.isLoading))
   )
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-background">
+      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )

@@ -9,7 +9,6 @@ from openswe import credential_scope
 from openswe.dashboard import profiles
 from openswe.github import thread_token
 from openswe.github import token as auth
-from openswe.tool_loaders import notion_mcp
 
 
 @pytest.fixture
@@ -248,38 +247,6 @@ async def test_system_thread_cannot_use_private_credentials(thread_metadata, cre
     with pytest.raises(RuntimeError, match="System threads"):
         await auth.resolve_github_token(config(), "thread-1")
     credentials.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_public_notion_tools_do_not_load_personal_credentials(monkeypatch, thread_metadata):
-    monkeypatch.setattr("openswe.run_config.get_config", config)
-    get_token = AsyncMock(return_value="notion-token")
-    monkeypatch.setattr(notion_mcp, "get_notion_access_token", get_token)
-    monkeypatch.setattr(notion_mcp, "_build_mcp_tools", AsyncMock(return_value=[]))
-    assert await notion_mcp.load_notion_tools("alice") == []
-    get_token.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_cached_notion_tool_cannot_run_in_public_thread(monkeypatch, thread_metadata):
-    from langchain_core.tools import StructuredTool
-
-    async def search(query: str) -> str:
-        return query
-
-    tool = notion_mcp._refreshing_tool(
-        StructuredTool.from_function(
-            coroutine=search, name="notion_search", description="Search Notion"
-        )
-    )
-    monkeypatch.setattr("openswe.run_config.get_config", config)
-    monkeypatch.setattr(notion_mcp, "resolve_participant", AsyncMock(return_value="alice"))
-    get_token = AsyncMock(return_value="notion-token")
-    monkeypatch.setattr(notion_mcp, "get_notion_access_token", get_token)
-    monkeypatch.setattr(notion_mcp, "_build_mcp_tools", AsyncMock(return_value=[]))
-    with pytest.raises(RuntimeError, match="private"):
-        await tool.ainvoke({"on_behalf_of": "alice", "query": "roadmap"})
-    get_token.assert_not_awaited()
 
 
 @pytest.mark.asyncio

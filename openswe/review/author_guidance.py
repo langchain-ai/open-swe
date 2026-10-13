@@ -25,6 +25,8 @@ from pydantic import BaseModel, ConfigDict
 
 from openswe.github.pull_requests import PullRequest
 from openswe.input_messages import input_message_text, message_sender_id
+from openswe.review_guide.buttons import LABELS as BUTTON_LABELS
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -74,6 +76,15 @@ class SteeringHistory(BaseModel):
         turns = [turn for thread_id in thread_ids for turn in await cls._human_turns(thread_id)]
         if not turns:
             return None
+        # The author's feedback while being walked through what the agent did steers the PR
+        # too. A guide forked from the builder repeats the builder's turns under the same ids.
+        seen = {turn.message_id for turn in turns if turn.message_id}
+        for thread_id in await ReviewGuideSession.author_threads(pull_request.id):
+            for turn in await cls._human_turns(thread_id):
+                if turn.text in BUTTON_LABELS or (turn.message_id and turn.message_id in seen):
+                    continue
+                seen.add(turn.message_id)
+                turns.append(turn)
         follow_ups = turns[1:]
         return cls(
             request=turns[0],
@@ -128,16 +139,15 @@ class SteeringHistory(BaseModel):
         return turns
 
     def messages_block(self) -> str:
-        """Every human message as a ``<message author="..." turn="...">`` entry, oldest first."""
+        """Every human message as a ``<message author="...">`` entry, oldest first."""
         entries = [
-            f'<message author="{html.escape(turn.author)}" '
-            f'turn="{"opening request" if turn is self.request else "follow-up"}">\n'
+            f'<message author="{html.escape(turn.author)}">\n'
             f"{_CLOSING_MESSAGE_TAG_RE.sub(lambda m: f'</{m.group(1)}_>', turn.text)}\n"
             "</message>"
             for turn in self.turns
         ]
         if self.omitted_follow_ups:
             entries.insert(
-                1, f"<omitted>{self.omitted_follow_ups} earlier follow-ups are not shown.</omitted>"
+                1, f"<omitted>{self.omitted_follow_ups} earlier messages are not shown.</omitted>"
             )
         return "\n".join(entries)

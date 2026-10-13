@@ -21,6 +21,8 @@ from openswe.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 _RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
+# One key per run: metadata updates merge top-level keys, so concurrent refreshes never race.
+RUN_COST_KEY_PREFIX = "run_cost_usd:"
 
 
 class AgentCostRefresh(TypedDict, closed=True):
@@ -96,6 +98,21 @@ async def schedule_agent_cost_refresh(
     return True
 
 
+async def _store_run_cost(payload: AgentCostRefresh, cost: float, client: LangGraphClient) -> None:
+    """Record the run's cost on its thread's metadata for the dashboard."""
+    try:
+        await client.threads.update(
+            payload["thread_id"],
+            metadata={f"{RUN_COST_KEY_PREFIX}{payload['invocation_id']}": cost},
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not store run cost on thread",
+            extra={"usage_run_id": payload["invocation_id"]},
+            exc_info=True,
+        )
+
+
 async def run_agent_cost_refresh(
     state: Mapping[str, Any], *, client: LangGraphClient | None = None
 ) -> dict[str, Any]:
@@ -146,6 +163,7 @@ async def run_agent_cost_refresh(
             )
             snapshot = None
         else:
+            await _store_run_cost(payload, snapshot.total_cost, client)
             return {"status": "updated"}
 
     next_attempt = attempt + 1

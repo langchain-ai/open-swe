@@ -43,6 +43,7 @@ class SlackRef(SlackPayload):
 class SlackItem(SlackPayload):
     """``event.item``: the reacted-to message, or a code-channel context-bar item."""
 
+    type: str = ""
     channel: str = ""
     ts: str = ""
     key: str | None = None
@@ -299,6 +300,8 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
+    kind: str = ""
+    subject: str = ""
 
 
 class SlackViewSubmission(SlackPayload):
