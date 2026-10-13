@@ -52,6 +52,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.database.store_imports import run_store_import
+    from openswe.mcp.import_records import import_store_mcp_connections
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
@@ -117,6 +118,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Startup continues: pins still in the Store are missing from the
         # sidebar until an import succeeds.
         logger.exception("Importing thread pins from the LangGraph Store failed")
+    try:
+        # Instance, workspace, and personal MCP connections used to live in the
+        # LangGraph Store.
+        await run_store_import("mcp_connections", import_store_mcp_connections)
+    except Exception:  # noqa: BLE001
+        # Startup continues: runs go without the tools of connections still in
+        # the Store until an import succeeds.
+        logger.exception("Importing MCP connections from the LangGraph Store failed")
     try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()

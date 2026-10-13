@@ -1,11 +1,10 @@
+import pytest
+
 from openswe.mcp.models import MCPConnectionUpdate
-from openswe.mcp.workspace import (
-    WORKSPACE_MCPS_NAMESPACE,
-    list_workspace_mcps,
-    save_workspace_mcp,
-    workspace_mcp_source,
-)
-from tests.conftest import FakeStore
+from openswe.mcp.records import WORKSPACE_MCPS_NAMESPACE
+from openswe.mcp.workspace import list_workspace_mcps, save_workspace_mcp, workspace_mcp_source
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 def _update(name: str) -> MCPConnectionUpdate:
@@ -14,7 +13,7 @@ def _update(name: str) -> MCPConnectionUpdate:
     )
 
 
-async def test_connections_are_isolated_per_workspace(fake_store: FakeStore) -> None:
+async def test_connections_are_isolated_per_workspace() -> None:
     await save_workspace_mcp("default", "incident", _update("incident"))
     await save_workspace_mcp("oss", "docs", _update("docs"))
     assert [c["name"] for c in await list_workspace_mcps("default")] == ["incident"]
