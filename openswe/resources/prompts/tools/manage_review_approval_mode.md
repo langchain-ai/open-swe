@@ -1,6 +1,6 @@
 Read or set a repository's approval mode when the user requests a settings change. Requires a currently authorized workspace admin. `read` requires a private admin surface; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement. Authorization is rechecked on every call.
 
-Approval criteria live in the repository's `.open-swe/APPROVALS.md`, read from the pull request's base commit; this tool does not edit them. Change the file through a pull request instead.
+Approval criteria live in the repository's `.open-swe/APPROVALS.md`, read from the repository's default branch; this tool does not edit them. Change the file through a pull request instead.
 
 - `action`: `read` or `set`.
 - `repository`: `owner/repo`. Repository access is required.

@@ -48,6 +48,10 @@ RETIRED_PROFILE_KEYS = frozenset(
 
 
 class ProfileRecords(UserRecords):
+    async def allows_auto_human_review(self, login: str) -> bool:
+        profile = await self.get(login) or {}
+        return profile.get("auto_human_review_enabled", True) is not False
+
     async def put(self, login: str, value: JsonObject, key: str = "") -> None:
         await super().put(
             login,
@@ -69,6 +73,7 @@ class ProfileUpdate(BaseModel):
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
+    auto_human_review_enabled: bool = True
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     preserve_sandbox_memory: bool | None = None
@@ -93,6 +98,7 @@ class ProfileUpdate(BaseModel):
 
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
+    value.setdefault("auto_human_review_enabled", True)
     for field in RETIRED_PROFILE_KEYS:
         value.pop(field, None)
     return value
@@ -122,6 +128,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
+        "auto_human_review_enabled": (
+            update.auto_human_review_enabled
+            if "auto_human_review_enabled" in update.model_fields_set
+            else existing.get("auto_human_review_enabled", True)
+        ),
         "recent_thread_context_enabled": (
             update.recent_thread_context_enabled
             if "recent_thread_context_enabled" in update.model_fields_set
@@ -356,9 +367,7 @@ async def get_my_profile(
     profile, preferences = await asyncio.gather(
         get_profile(session["sub"]), User.preferences_for_login(session["sub"])
     )
-    if not profile:
-        return preferences.model_dump()
-    return {**normalize_profile_for_response(profile), **preferences.model_dump()}
+    return {**normalize_profile_for_response(profile or {}), **preferences.model_dump()}
 
 
 @router.post("/profile/slack-onboarding-dismissal")

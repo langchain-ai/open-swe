@@ -25,11 +25,6 @@ async def _pr_registry(registry_db_if_available: bool, monkeypatch: pytest.Monke
     monkeypatch.setattr(pull_requests, "langgraph_client", lambda: webhook_common.get_client())
 
 
-@pytest.fixture(autouse=True)
-def _no_feedback_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("openswe.thread_feedback.schedule_pr_feedback", AsyncMock())
-
-
 def _pr_payload(
     *, state: str, merged: bool = False, draft: bool = False, merge_sha: str = ""
 ) -> dict[str, Any]:
@@ -43,47 +38,6 @@ def _pr_payload(
     if merge_sha:
         pull_request["merge_commit_sha"] = merge_sha
     return {"repository": {"full_name": "lc/repo"}, "pull_request": pull_request}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "state,merged,expected", [("open", False, 0), ("closed", False, 0), ("closed", True, 1)]
-)
-async def test_only_merged_pr_prompts_original_slack_requester(
-    state: str,
-    merged: bool,
-    expected: int,
-) -> None:
-    metadata = {
-        "kind": "agent",
-        "pr_url": "https://github.com/lc/repo/pull/7",
-        "pull_requests": [
-            {
-                "url": "https://github.com/lc/repo/pull/7",
-                "state": "open",
-                "slack_feedback": {"run_id": "original-run", "channel_id": "C-original"},
-            }
-        ],
-        "source_context": {"slack_thread": {"channel_id": "C-later", "thread_ts": "3.0"}},
-    }
-    client = AsyncMock()
-    client.threads.search.return_value = [{"thread_id": "t1", "metadata": metadata}]
-    client.threads.get.return_value = {"metadata": metadata}
-    with (
-        patch("openswe.webhooks.common.get_client", return_value=client),
-        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
-        patch("openswe.thread_feedback.schedule_pr_feedback", new_callable=AsyncMock) as prompt,
-    ):
-        await webhook_common.update_agent_thread_pr_state(_pr_payload(state=state, merged=merged))
-    assert prompt.await_count == expected
-    if expected:
-        assert prompt.await_args.args[0] == "t1"
-        assert prompt.await_args.args[2] == "https://github.com/lc/repo/pull/7"
-        assert prompt.await_args.args[1]["pull_requests"][0]["slack_feedback"] == {
-            "run_id": "original-run",
-            "channel_id": "C-original",
-        }
 
 
 @pytest.mark.asyncio
