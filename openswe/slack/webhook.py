@@ -644,16 +644,23 @@ async def process_slack_mention(
         and not request.concierge_mode
         and not request.message_update
     )
-    if show_status:
-        await restore_slack_thinking_status(request.channel_id, status_ts)
+    # Showing the status shouldn't hold up the run, but it has to land before the
+    # run's own status updates or a clear, or it would overwrite them.
+    status_shown = (
+        asyncio.ensure_future(restore_slack_thinking_status(request.channel_id, status_ts))
+        if show_status
+        else None
+    )
     try:
         status_handed_off = await _process_slack_mention_impl(
-            request, repo, inherited_workspace=inherited_workspace
+            request, repo, inherited_workspace=inherited_workspace, status_shown=status_shown
         )
-        if show_status and not status_handed_off:
+        if status_shown is not None and not status_handed_off:
+            await asyncio.wait({status_shown})
             await _clear_early_status_if_idle(request, status_ts)
     except Exception as exc:  # noqa: BLE001
-        if show_status:
+        if status_shown is not None:
+            await asyncio.wait({status_shown})
             await _clear_early_status_if_idle(request, status_ts)
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
@@ -811,6 +818,7 @@ async def _process_slack_mention_impl(
     repo_resolution: common.SlackRepoResolution | None,
     *,
     inherited_workspace: str | None = None,
+    status_shown: asyncio.Future[bool] | None = None,
 ) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
@@ -1418,6 +1426,8 @@ async def _process_slack_mention_impl(
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    if status_shown is not None:
+        await asyncio.wait({status_shown})
     try:
         run = await _dispatch_or_queue_slack_run(
             langgraph_client,
