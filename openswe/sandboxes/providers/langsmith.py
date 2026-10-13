@@ -64,6 +64,9 @@ SERVICE_URL_TIMEOUT_SECONDS = 15.0
 _KILL_TIMEOUT_SECONDS = 5.0
 # The most entries the sandbox file API returns for one listing.
 _LS_MAX_ENTRIES = 1000
+# Above this, a file API read would pull the whole file into the worker to return
+# one page; the base class's read script pages inside the sandbox instead.
+_FILE_API_READ_MAX_BYTES = 2 * 1024 * 1024
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -697,11 +700,20 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        """Read through the sandbox file API rather than a read script run as a command.
+        """Read small files through the sandbox file API rather than a read script.
 
         Every command opens its own exec WebSocket, while the file API reuses the
-        client's pooled HTTP connection, so this is a single request.
+        client's pooled HTTP connection. The file API returns the whole file, so
+        large files, and files the API cannot stat, go through the read script,
+        which pages inside the sandbox.
         """
+        try:
+            stat = await self._aget_sandbox().stat(file_path)
+        except SandboxClientError:
+            logger.debug("Sandbox file API stat failed; using the read script", exc_info=True)
+            return await super().aread(file_path, offset, limit)
+        if stat.size_bytes > _FILE_API_READ_MAX_BYTES:
+            return await super().aread(file_path, offset, limit)
         return await asyncio.to_thread(self.read, file_path, offset, limit)
 
     async def als(self, path: str) -> LsResult:
