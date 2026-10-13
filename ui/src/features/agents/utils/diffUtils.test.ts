@@ -1,9 +1,15 @@
 /** @vitest-environment jsdom */
 
 import { beforeEach, describe, expect, it } from "vitest"
+import {
+  getSharedHighlighter,
+  parseDiffFromFile,
+  renderDiffWithHighlighter,
+} from "@pierre/diffs"
 
 import {
   DIFF_FIXED_LINE_HEIGHT_CSS,
+  DIFF_WORKER_HIGHLIGHTER_OPTIONS,
   buildDiffOptions,
   fileContentsCacheKey,
   readStoredDiffOverflow,
@@ -33,6 +39,44 @@ describe("diff overflow preference", () => {
     expect(wrapOptions.diffStyle).toBe("split")
     expect(wrapOptions.unsafeCSS).not.toContain(DIFF_FIXED_LINE_HEIGHT_CSS)
   })
+})
+
+describe("word-level highlighting", () => {
+  it.each(["README.md", "example.py"])(
+    "highlights changed words in long %s lines on both rendering paths",
+    async (name) => {
+      const unchanged = "unchanged prose ".repeat(70)
+      const diff = parseDiffFromFile(
+        { name, contents: `before ${unchanged}\n` },
+        { name, contents: `after ${unchanged}\n` }
+      )
+      const options = {
+        ...buildDiffOptions("unified", "wrap", "light"),
+        useTokenTransformer: false,
+      }
+      const highlighter = await getSharedHighlighter({
+        themes: [options.theme.light, options.theme.dark],
+        langs: ["text"],
+      })
+      for (const renderOptions of [
+        options,
+        { ...options, ...DIFF_WORKER_HIGHLIGHTER_OPTIONS },
+      ]) {
+        const result = renderDiffWithHighlighter(
+          diff,
+          highlighter,
+          renderOptions,
+          {
+            forcePlainText: true,
+          }
+        )
+        const output = JSON.stringify(result)
+        expect(output).toContain('"data-diff-span":""')
+        expect(output).toContain('"value":"before"')
+        expect(output).toContain('"value":"after"')
+      }
+    }
+  )
 })
 
 describe("fileContentsCacheKey", () => {
