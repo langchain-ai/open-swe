@@ -15,7 +15,6 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import (
     Origin,
-    RequestResult,
     ReviewStatus,
     assign,
     request_review,
@@ -38,15 +37,6 @@ from openswe.users import User
 
 def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
-
-
-def _review_failure(result: RequestResult) -> dict[str, Any]:
-    response = _failure(result.error)
-    if result.expedited_exclusions:
-        response["expedited_exclusions"] = [
-            entry.model_dump() for entry in result.expedited_exclusions
-        ]
-    return response
 
 
 async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None:
@@ -104,7 +94,7 @@ async def request_human_review(
     )
     result = await request_review(pr_ref, origin, channel=channel, inline_summary=inline_summary)
     if not result.success:
-        return _review_failure(result)
+        return _failure(result.error)
     if result.summary_updated:
         posted = "The open review card now shows your new inline_summary."
     elif result.reused:
@@ -131,7 +121,7 @@ async def _request_for_mcp_caller(
         pr_ref, Origin(requester=requester), channel=channel, inline_summary=inline_summary
     )
     if not result.success:
-        return _review_failure(result)
+        return _failure(result.error)
     if result.reused or result.summary_updated:
         posted = "This pull request already had an open review request; no new card was posted."
     elif requester.slack_user_id and await send_dm(

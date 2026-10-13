@@ -263,23 +263,6 @@ class HumanReviewRequest(Base):
             )
 
     @classmethod
-    async def expedited_for(cls, owner: str, repo: str, number: int) -> Self | None:
-        """The latest expedited request, including cancelled and superseded cards."""
-        async with postgres.session() as session:
-            return await session.scalar(
-                cls._loaded(select(cls))
-                .join(cls.pull_request)
-                .join(PullRequest.repository)
-                .where(
-                    Repository.key == f"{owner}/{repo}".lower(),
-                    PullRequest.number == number,
-                    cls.kind == "expedited",
-                )
-                .order_by(desc(cls.created_at), desc(cls.id))
-                .limit(1)
-            )
-
-    @classmethod
     async def assigned_to(cls, user_id: UUID) -> list[Self]:
         """Open review requests for which Open SWE explicitly picked this person."""
         async with postgres.session() as session:

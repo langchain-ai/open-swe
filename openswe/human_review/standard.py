@@ -22,18 +22,12 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx2
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.expedited_review.eligibility import (
-    MAX_FILES,
-    ChangedFile,
-    Exclusion,
-    Ineligible,
-    assess_eligibility,
-)
+from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
     Readiness,
@@ -145,7 +139,6 @@ class RequestResult(BaseModel):
     reused: bool = False
     summary_updated: bool = False
     claimed: bool = False
-    expedited_exclusions: list[Exclusion] = Field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,28 +285,20 @@ async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) ->
     return True
 
 
-async def _existing(
-    active: HumanReviewRequest, *, expedited_exclusions: list[Exclusion] | None = None
-) -> RequestResult:
+async def _existing(active: HumanReviewRequest) -> RequestResult:
     if active.kind == "expedited":
         permalink = await _permalink(active)
         return RequestResult(
             success=False,
             error=(
-                "This pull request already has expedited review history. "
-                "Standard review cannot replace it, even after the card is dismissed. "
-                "Use expedite_pr_approval to restore its expedited card."
-                + (
-                    " " + prompt("tools/human-review-expedited-exclusions")
-                    if expedited_exclusions
-                    else ""
-                )
+                "This pull request has an outstanding expedited review request. "
+                "A standard review cannot run concurrently. Cancel the expedited request "
+                "before asking for a standard review."
                 + (f" Open in Slack: {permalink}" if permalink else "")
             ),
             request_id=str(active.id),
             channel=active.slack_channel_id,
             permalink=permalink,
-            expedited_exclusions=expedited_exclusions or [],
         )
     return RequestResult(
         success=True,
@@ -387,39 +372,12 @@ async def _request_review(
     channel: str,
     inline_summary: str | None,
 ) -> RequestResult:
+    # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if active is not None and active.kind != "expedited":
+    if active is not None:
         if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
-
-    expedited = active or await HumanReviewRequest.expedited_for(
-        pr_ref.owner, pr_ref.repo, pr_ref.number
-    )
-    if expedited is not None and expedited.state != "rejected":
-        if (await get_workspace_settings()).expedited_review_enabled:
-            payload = await or_none(pull.pull())
-            if payload is None:
-                return _failure("GitHub was unavailable while checking expedited eligibility.")
-            details = PullRequestPayload.model_validate(payload)
-            if await User.for_login("github", details.author) is not None:
-                files = await ChangedFile.of_pull(pull)
-                if files is None:
-                    return _failure("Could not check the pull request's expedited eligibility.")
-                if not isinstance(assess_eligibility(files, expedited.excluded_hunks), Ineligible):
-                    exclusions = [
-                        Exclusion(
-                            path=file.filename,
-                            hunks=[hunk.new_start],
-                            guideline=entry["guideline"],
-                            reason=entry["reason"],
-                        )
-                        for file in files
-                        for hunk in file.hunks
-                        for entry in expedited.excluded_hunks
-                        if entry["path"] == file.filename and entry["digest"] == hunk.digest
-                    ]
-                    return await _existing(expedited, expedited_exclusions=exclusions)
 
     blockers = await review_blockers(pull)
     if blockers is None:
@@ -441,9 +399,6 @@ async def _request_review(
     pull_request, details = recorded
     if origin.thread_id:
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
-
-    if active is not None:
-        await ReviewCard(active).retire("superseded", "no longer eligible for expedited review")
 
     in_thread = origin.slack_channel_id == target.id and bool(origin.slack_thread_ts)
     try:

@@ -29,163 +29,41 @@ from tests.conftest import FakeUserRecords
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
-@pytest.mark.parametrize("state", ["open", "cancelled", "superseded", "merged"])
-@pytest.mark.parametrize("excluded", [False, True])
-async def test_standard_review_refuses_eligible_expedited_history(
-    state: str, excluded: bool
-) -> None:
+@pytest.mark.parametrize("state", ["open", "cancelled", "superseded", "rejected", "merged"])
+async def test_standard_review_blocks_only_outstanding_expedited(state: str) -> None:
     from typing import cast
 
-    from openswe.expedited_review.eligibility import ChangedFile
     from openswe.human_review import standard
     from openswe.human_review.requests import RequestState
     from openswe.slack.client import GitHubPrRef
 
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
     expedited = HumanReviewRequest(
-        pull_request_id=pr.id, head_sha="abc", kind="expedited", state=cast(RequestState, state)
-    )
-    file = ChangedFile(
-        filename="app.py",
-        additions=30 if excluded else 1,
-        patch="@@ -0,0 +10,30 @@\n" + "\n".join(["+pass"] * (30 if excluded else 1)),
-    )
-    if excluded:
-        expedited.excluded_hunks = [
-            {
-                "path": "app.py",
-                "header": "@@ -0,0 +1,30 @@",
-                "digest": file.hunks[0].digest,
-                "additions": 30,
-                "deletions": 0,
-                "guideline": "mechanical",
-                "reason": "qualifying refactor",
-            }
-        ]
-    with (
-        patch.object(HumanReviewRequest, "expedited_for", AsyncMock(return_value=expedited)),
-        patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
-        patch.object(
-            standard,
-            "get_workspace_settings",
-            AsyncMock(return_value=MagicMock(expedited_review_enabled=True)),
-        ),
-        patch.object(
-            standard,
-            "PullRequestPayload",
-            MagicMock(model_validate=MagicMock(return_value=MagicMock(author="ada"))),
-        ),
-        patch.object(User, "for_login", AsyncMock(return_value=User())),
-        patch.object(ChangedFile, "of_pull", AsyncMock(return_value=[file])),
-        patch.object(standard, "review_blockers", AsyncMock()) as blockers,
-        patch.object(standard, "_permalink", AsyncMock(return_value="")),
-    ):
-        result = await standard._request_review(
-            GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"),
-            MagicMock(pull=AsyncMock(return_value={})),
-            standard.Origin(),
-            channel="",
-            inline_summary="A summary",
-        )
-    assert not result.success
-    assert "Standard review cannot replace it" in result.error
-    blockers.assert_not_awaited()
-    if excluded:
-        from openswe.expedited_review.eligibility import Ineligible, assess_eligibility
-        from openswe.tools.request_human_review import _review_failure
-
-        retry = _review_failure(result)
-        assert retry["expedited_exclusions"] == [
-            {
-                "path": "app.py",
-                "hunks": [10],
-                "guideline": "mechanical",
-                "reason": "qualifying refactor",
-            }
-        ]
-        assert "resend" in result.error
-        resolved = [hunk for entry in result.expedited_exclusions for hunk in entry.resolve([file])]
-        assert not isinstance(assess_eligibility([file], resolved), Ineligible)
-
-
-@pytest.mark.parametrize("fallback", ["rejected", "disabled", "author", "size"])
-async def test_standard_review_allows_impossible_expedited_fallback(fallback: str) -> None:
-    from openswe.expedited_review.eligibility import ChangedFile
-    from openswe.human_review import standard
-    from openswe.slack.client import GitHubPrRef
-
-    expedited = HumanReviewRequest(
-        pull_request_id=User().id,
-        head_sha="abc",
-        kind="expedited",
-        state="rejected" if fallback == "rejected" else "cancelled",
+        pull_request_id=User().id, head_sha="abc", kind="expedited", state=cast(RequestState, state)
     )
     with (
-        patch.object(HumanReviewRequest, "expedited_for", AsyncMock(return_value=expedited)),
-        patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
         patch.object(
-            standard,
-            "get_workspace_settings",
-            AsyncMock(return_value=MagicMock(expedited_review_enabled=fallback != "disabled")),
-        ),
-        patch.object(
-            standard,
-            "PullRequestPayload",
-            MagicMock(model_validate=MagicMock(return_value=MagicMock(author="ada"))),
-        ),
-        patch.object(
-            User, "for_login", AsyncMock(return_value=None if fallback == "author" else User())
-        ),
-        patch.object(
-            ChangedFile,
-            "of_pull",
-            AsyncMock(
-                return_value=[
-                    ChangedFile(
-                        filename="app.py",
-                        additions=30,
-                        patch="@@ -0,0 +1,30 @@\n" + "\n".join(["+pass"] * 30),
-                    )
-                ]
-            ),
+            HumanReviewRequest,
+            "active_for",
+            AsyncMock(return_value=expedited if expedited.active else None),
         ),
         patch.object(standard, "review_blockers", AsyncMock(return_value=["a draft"])) as blockers,
-    ):
-        result = await standard._request_review(
-            GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"),
-            MagicMock(pull=AsyncMock(return_value={})),
-            standard.Origin(),
-            channel="",
-            inline_summary=None,
-        )
-    assert "cannot be put up for review" in result.error
-    blockers.assert_awaited_once()
-
-
-async def test_standard_card_summary_is_correctable_despite_expedited_history() -> None:
-    from openswe.human_review import standard
-    from openswe.slack.client import GitHubPrRef
-
-    request = HumanReviewRequest(pull_request_id=User().id, head_sha="abc", kind="standard")
-    with (
-        patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=request)),
-        patch.object(HumanReviewRequest, "expedited_for", AsyncMock()) as history,
-        patch.object(standard.Origin, "asked", return_value=True),
-        patch.object(
-            standard,
-            "_resummarize",
-            AsyncMock(return_value=standard.RequestResult(success=True, summary_updated=True)),
-        ),
+        patch.object(standard, "_permalink", AsyncMock(return_value="")),
     ):
         result = await standard._request_review(
             GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"),
             MagicMock(),
             standard.Origin(),
             channel="",
-            inline_summary="Updated summary",
+            inline_summary=None,
         )
-    assert result.success and result.summary_updated
-    history.assert_not_awaited()
+    assert not result.success
+    if state == "open":
+        assert "cannot run concurrently" in result.error
+        assert "Cancel" in result.error
+        blockers.assert_not_awaited()
+    else:
+        assert "cannot be put up for review" in result.error
+        blockers.assert_awaited_once()
 
 
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
