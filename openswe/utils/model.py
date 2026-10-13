@@ -106,16 +106,11 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
     provider defaults below (see :mod:`openswe.utils.gateway`).
     """
-    model_kwargs: dict[str, object] = dict(kwargs)
+    model_kwargs: dict[str, object] = dict(model_request_defaults(model_id))
+    model_kwargs.update(kwargs)
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
     if model_id.startswith(_TIMEOUT_PROVIDER_PREFIXES):
-        model_kwargs.setdefault(
-            "timeout",
-            900.0 if model_id == "google_genai:gemini-4-argon" else DEFAULT_REQUEST_TIMEOUT_SECONDS,
-        )
-
-    if model_id == "google_genai:gemini-4-argon":
-        model_kwargs["temperature"] = None
+        model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
     if model_id.startswith("openai:"):
         model_kwargs["base_url"] = (
@@ -185,6 +180,12 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     if primary_model_id.startswith("openai:"):
         return "anthropic:claude-opus-5-5"
     return None
+
+
+def model_request_defaults(model_id: str) -> ModelKwargs:
+    if model_id == "google_genai:gemini-4-argon":
+        return {"timeout": 900.0, "temperature": None}
+    return {}
 
 
 def supports_google_thinking_level(model_id: str) -> bool:
@@ -278,7 +279,8 @@ def provider_model_kwargs(
     openai_reasoning_default: OpenAIReasoning | None = None,
 ) -> ModelKwargs:
     """Build provider-specific kwargs for ``make_model`` from a model id and effort."""
-    kwargs: ModelKwargs = {"max_tokens": max_tokens}
+    kwargs = model_request_defaults(model_id)
+    kwargs["max_tokens"] = max_tokens
     if model_id.startswith("openai:"):
         reasoning = openai_reasoning_for(profile_effort)
         if reasoning is not None:
