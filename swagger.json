@@ -1122,6 +1122,25 @@
         "title": "CommentBody",
         "type": "object"
       },
+      "ConnectedService": {
+        "description": "A service in the gateway this person has connected.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "tool_count"
+        ],
+        "title": "ConnectedService",
+        "type": "object"
+      },
       "Conversation": {
         "properties": {
           "items": {
@@ -1856,6 +1875,13 @@
             "title": "All Required",
             "type": "boolean"
           },
+          "connected": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedService"
+            },
+            "title": "Connected",
+            "type": "array"
+          },
           "gateway": {
             "$ref": "#/components/schemas/Gateway"
           },
@@ -1880,18 +1906,10 @@
               }
             ],
             "title": "Tool Count"
-          },
-          "workspaces": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Workspaces",
-            "type": "array"
           }
         },
         "required": [
           "gateway",
-          "workspaces",
           "ready"
         ],
         "title": "GatewayStatus",
@@ -2655,7 +2673,7 @@
         "type": "object"
       },
       "ManagedToolsView": {
-        "description": "The managed tools gateways the caller's workspaces use, and what each still needs.",
+        "description": "The instance's managed tools gateway (none or one), and what the caller still needs.",
         "properties": {
           "configured": {
             "title": "Configured",
@@ -10416,7 +10434,7 @@
     },
     "/dashboard/api/managed-tools/gateways": {
       "get": {
-        "description": "Gateways an admin can pick for a workspace, read with the admin's own LangSmith login.",
+        "description": "Gateways an admin can pick for the instance, read with the admin's own LangSmith login.",
         "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
         "responses": {
           "200": {
