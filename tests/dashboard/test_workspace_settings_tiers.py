@@ -96,6 +96,31 @@ async def test_a_save_reaches_cached_reads_at_once(fake_store: FakeStore) -> Non
     ] == "be public"
 
 
+async def test_a_failed_store_read_is_not_cached(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The defaults a failed read falls back to must not reach other replicas' reads."""
+    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="internal only"))
+    real_record = workspace_settings._instance_record
+
+    async def unavailable() -> dict[str, object]:
+        raise RuntimeError("store unavailable")
+
+    monkeypatch.setattr(workspace_settings, "_instance_record", unavailable)
+    assert (await workspace_settings_cache.cached_instance_settings())["org_guidelines"] is None
+    assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
+        "org_guidelines"
+    ] is None
+
+    monkeypatch.setattr(workspace_settings, "_instance_record", real_record)
+    assert (await workspace_settings_cache.cached_instance_settings())[
+        "org_guidelines"
+    ] == "internal only"
+    assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
+        "org_guidelines"
+    ] == "internal only"
+
+
 async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(
     fake_store: FakeStore, registry_db
 ) -> None:

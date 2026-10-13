@@ -18,8 +18,9 @@ from uuid import uuid4
 
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
-    get_instance_settings,
-    get_workspace_settings,
+    fallback_settings,
+    load_instance_settings,
+    load_workspace_settings,
     resolve_settings_workspace,
 )
 
@@ -32,31 +33,38 @@ _GENERATION_KEY = "openswe:settings:generation"
 async def _cached(name: str, load: Callable[[], Awaitable[WorkspaceSettings]]) -> WorkspaceSettings:
     from langgraph_api.cache import cache_get, cache_set
 
+    key: str | None = None
     try:
         generation = await cache_get(_GENERATION_KEY)
         key = f"openswe:settings:{generation if isinstance(generation, str) else '0'}:{name}"
         cached = await cache_get(key)
     except Exception:
         logger.warning("Shared settings cache read failed", exc_info=True)
-        return await load()
+        cached = None
     if isinstance(cached, dict):
         return WorkspaceSettings(cached)
-    settings = await load()
     try:
-        await cache_set(key, dict(settings), SETTINGS_TTL)
+        settings = await load()
     except Exception:
-        logger.warning("Shared settings cache write failed", exc_info=True)
+        # Fail soft for this read only; caching the defaults would hand them to every replica.
+        logger.warning("settings lookup failed; using defaults", exc_info=True)
+        return fallback_settings()
+    if key is not None:
+        try:
+            await cache_set(key, dict(settings), SETTINGS_TTL)
+        except Exception:
+            logger.warning("Shared settings cache write failed", exc_info=True)
     return settings
 
 
 async def cached_workspace_settings(workspace: str | None) -> WorkspaceSettings:
     slug = resolve_settings_workspace(workspace)
-    return await _cached(f"workspace:{slug}", lambda: get_workspace_settings(slug))
+    return await _cached(f"workspace:{slug}", lambda: load_workspace_settings(slug))
 
 
 async def cached_instance_settings() -> WorkspaceSettings:
     """The instance record alone, for settings no workspace may override."""
-    return await _cached("instance", get_instance_settings)
+    return await _cached("instance", load_instance_settings)
 
 
 async def forget_cached_settings() -> None:

@@ -273,10 +273,31 @@ async def _gateway_detail(login: str, gateway: str) -> dict[str, object]:
     return response.json()
 
 
-async def _server_names(login: str) -> dict[str, str]:
-    """Display names by server id. OAuth built-ins are not listed; callers fall back."""
+@dataclass(frozen=True)
+class _Server:
+    """What LMT's server list says about one server: its name and credential slugs."""
+
+    name: str
+    slugs: frozenset[str]
+
+
+def _server(item: dict[str, object]) -> _Server:
+    # A missing credential names its server by one of these (smith-go connectionSlug).
+    slugs = {f"mt-{item['id']}"}
+    if isinstance(key := item.get("key"), str) and key:
+        slugs |= {key, f"mt-builtin-{key}"}
+    connection = item.get("connection")
+    if isinstance(connection, dict) and isinstance(
+        slug := connection.get("agent_auth_connection_slug"), str
+    ):
+        slugs.add(slug)
+    return _Server(name=str(item["name"]), slugs=frozenset(slugs))
+
+
+async def _servers(login: str) -> dict[str, _Server]:
+    """Servers by id and key. OAuth built-ins are not listed; callers fall back."""
     headers = await _headers(login)
-    names: dict[str, str] = {}
+    servers: dict[str, _Server] = {}
     async with _client() as client:
         cursor: str | None = None
         for _ in range(_MAX_PAGES):
@@ -288,14 +309,18 @@ async def _server_names(login: str) -> dict[str, str]:
                 raise _failure(response)
             payload = response.json()
             for item in payload.get("items", []):
-                if isinstance(item, dict) and isinstance(item.get("name"), str):
-                    for key in ("id", "key"):
-                        if isinstance(item.get(key), str):
-                            names[item[key]] = item["name"]
+                if not isinstance(item, dict):
+                    continue
+                if not isinstance(item.get("name"), str) or not isinstance(item.get("id"), str):
+                    continue
+                server = _server(item)
+                for key in ("id", "key"):
+                    if isinstance(item.get(key), str):
+                        servers[item[key]] = server
             cursor = payload.get("next_cursor")
             if not cursor:
                 break
-    return names
+    return servers
 
 
 @dataclass(frozen=True)
@@ -337,17 +362,23 @@ def _fallback_name(tool: dict[str, object]) -> str:
 
 
 def _connected_services(
-    sources: list[_Source], names: dict[str, str], listing: _Listing
+    sources: list[_Source], servers: dict[str, _Server], listing: _Listing
 ) -> list[ConnectedService]:
-    missing_keys = {_match_key(item.display_name) for item in listing.missing} | {
-        _match_key(item.slug) for item in listing.missing
-    }
+    missing_slugs = {item.slug for item in listing.missing}
+    missing_names = {_match_key(item.display_name) for item in listing.missing}
     connected: list[ConnectedService] = []
     for source in sources:
-        name = names.get(source.id) or source.fallback_name
+        server = servers.get(source.id)
+        name = server.name if server else source.fallback_name
+        slugs = (
+            server.slugs
+            if server
+            else frozenset({source.id, f"mt-{source.id}", f"mt-builtin-{source.id}"})
+        )
         if listing.all_required:
-            # LangSmith listed nothing, so a service counts as connected when it is not missing.
-            if {_match_key(name), _match_key(source.id)} & missing_keys:
+            # LangSmith listed nothing, so a service counts as connected when it is not missing:
+            # matched by credential slug first, then by name.
+            if slugs & missing_slugs or _match_key(name) in missing_names:
                 continue
             count = len(source.tool_names)
         else:
@@ -441,11 +472,11 @@ async def gateway_status(
     connected: list[ConnectedService] = []
     if with_connected:
         try:
-            names = await _server_names(login)
+            servers = await _servers(login)
         except ManagedToolsError:
             logger.warning("Managed tools server names unavailable", exc_info=True)
-            names = {}
-        connected = _connected_services(_sources(detail), names, listing)
+            servers = {}
+        connected = _connected_services(_sources(detail), servers, listing)
     return GatewayStatus(
         gateway=_gateway(detail),
         ready=not listing.missing,

@@ -174,6 +174,15 @@ async def test_gateway_status_names_the_services_already_connected(monkeypatch):
         ("Langchain docs", 1),
     ]
 
+    # LMT names a missing server by its credential slug, not the server's own name.
+    notion = {"kind": "oauth", "slug": f"mt-{notion_id}", "display_name": "Notion"}
+    listing[0] = managed._credentials_required({"credentials": [notion]})
+    required = await managed.gateway_status("alice", GATEWAY_ID, with_connected=True)
+    assert [(item.name, item.tool_count) for item in required.connected] == [
+        ("Linear", 1),
+        ("Langchain docs", 1),
+    ]
+
 
 async def test_only_the_instance_picks_the_gateway(fake_store):
     await upsert_workspace_overrides(

@@ -439,19 +439,27 @@ async def _workspace_record(slug: str) -> dict[str, Any]:
     return _set_fields(record)
 
 
+def fallback_settings() -> WorkspaceSettings:
+    """The hardcoded defaults, for when the store cannot be read."""
+    return WorkspaceSettings(_default_settings())
+
+
+async def load_instance_settings() -> WorkspaceSettings:
+    """:func:`get_instance_settings`, but raising when the store read fails."""
+    return _finish({**_default_settings(), **await _instance_record()})
+
+
 async def get_instance_settings() -> WorkspaceSettings:
     """The instance record merged over the hardcoded defaults.
 
     Every workspace inherits these; see :func:`get_workspace_settings` for what a
     run actually sees.
     """
-    defaults = _default_settings()
     try:
-        instance = await _instance_record()
+        return await load_instance_settings()
     except Exception:
         logger.warning("instance settings lookup failed; using defaults", exc_info=True)
-        return WorkspaceSettings(defaults)
-    return _finish({**defaults, **instance})
+        return fallback_settings()
 
 
 async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
@@ -465,14 +473,18 @@ async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSetti
     to pick a model, so an unreachable store must degrade to the defaults
     rather than fail every run at once.
     """
-    defaults = _default_settings()
-    slug = resolve_settings_workspace(workspace)
     try:
-        instance, overrides = await asyncio.gather(_instance_record(), _workspace_record(slug))
+        return await load_workspace_settings(workspace)
     except Exception:
         logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
-        return WorkspaceSettings(defaults)
-    return _finish({**defaults, **instance, **overrides})
+        return fallback_settings()
+
+
+async def load_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
+    """:func:`get_workspace_settings`, but raising when the store read fails."""
+    slug = resolve_settings_workspace(workspace)
+    instance, overrides = await asyncio.gather(_instance_record(), _workspace_record(slug))
+    return _finish({**_default_settings(), **instance, **overrides})
 
 
 class WorkspaceSettingsView(TypedDict):
