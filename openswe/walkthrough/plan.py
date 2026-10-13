@@ -28,6 +28,7 @@ MAX_OTHER_SUMMARY_CHARS = 1_200
 _MAX_ERRORS = 20
 _MAX_UNPLANNED_FILES = 200
 _LINE_NAME_RE = re.compile(r"[+-]\d+")
+_WORD_RE = re.compile(r"\w")
 
 
 class RangeError(ValueError):
@@ -165,6 +166,24 @@ class Hunks:
 
     def key(self, line: ChangedLine) -> tuple[str, str]:
         return line.path, self.names.get(LineRef.of(line), line_name(line))
+
+    def groups(self, lines: Iterable[ChangedLine]) -> dict[tuple[str, str], list[ChangedLine]]:
+        grouped: dict[tuple[str, str], list[ChangedLine]] = {}
+        for line in lines:
+            grouped.setdefault(self.key(line), []).append(line)
+        return grouped
+
+    def fragments(self, before: Self, lines: list[ChangedLine]) -> list[tuple[str, str]]:
+        """Hunks new since ``before`` that hold only braces, punctuation or blank lines."""
+        existing = {
+            frozenset(LineRef.of(line) for line in hunk) for hunk in before.groups(lines).values()
+        }
+        return [
+            key
+            for key, hunk in self.groups(lines).items()
+            if frozenset(LineRef.of(line) for line in hunk) not in existing
+            and not any(_WORD_RE.search(line.text) for line in hunk)
+        ]
 
     def summary(self, lines: list[ChangedLine]) -> str:
         files = {line.path for line in lines}

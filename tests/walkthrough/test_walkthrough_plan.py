@@ -12,6 +12,7 @@ from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import (
     FileHunks,
     FileRanges,
+    Hunks,
     LineRef,
     Plan,
     PlanChunk,
@@ -269,6 +270,21 @@ def test_a_push_keeps_repeated_lines_with_their_own_chunk(repo: Path) -> None:
         ("Two", [9, 10, 11]),
         ("One", [1, 2, 3, 4, 5, 6, 7, 8]),
     ]
+
+
+def test_a_split_that_leaves_only_closing_braces_is_a_fragment(repo: Path) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"link.go": "func a() {\n\tif ok {\n\t\treturn\n\t}\n}\n"}, "go")
+    changes = _changes(repo, base, head)
+    lines = changes[0].lines
+    plan = Plan.start(head, changes)
+    at = {line.text: LineRef.of(line) for line in lines}
+
+    assert Hunks.of(changes, [at["\t}"]]).fragments(plan.hunks(changes), lines) == [
+        ("link.go", "+4")
+    ]
+    assert Hunks.of(changes, [at["\tif ok {"]]).fragments(plan.hunks(changes), lines) == []
 
 
 @pytest.mark.asyncio
