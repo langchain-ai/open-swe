@@ -4,6 +4,7 @@ from sqlalchemy import text
 from openswe.dashboard.profiles import PROFILES
 from openswe.database.postgres import transaction
 from openswe.database.store_imports import StoreImport, run_store_import
+from openswe.users import UserPreferences
 from openswe.users.import_records import import_user_records
 from openswe.users.models import User
 from tests.conftest import FakeStore
@@ -39,6 +40,22 @@ async def test_import_moves_known_people_and_keeps_postgres_values(
     assert await PROFILES.get("ada") == {"draft_prs": False}
     assert await PROFILES.get("bob") == {"draft_prs": True}
     assert list(fake_store.values(["profiles"])) == ["carol"]
+
+
+async def test_moving_profiles_keeps_their_concierge_opt_in(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    await User.sign_in("github", "1", login="ada")
+    fake_store.seed(
+        ["profiles"], "ada", {"login": "ada", "draft_prs": False, "dm_session_enabled": True}
+    )
+
+    await import_user_records()
+
+    assert await User.preferences_for_login("ada") == UserPreferences(concierge_mode=True)
+    assert fake_store.values(["profiles"]) == {}
 
 
 async def test_an_import_retires_only_after_a_quiet_day() -> None:

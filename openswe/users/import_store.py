@@ -3,8 +3,10 @@
 Before the ``users`` table, a person was a Store record keyed by GitHub login:
 ``github_login`` ⇄ ``work_email`` ⇄ ``slack_user_id``. This copies each one
 into a ``users`` row with a GitHub identity (and a Slack one when the record
-has a member id), then deletes the record, so the import is idempotent and a
-later release can drop this module. It is the only reader of that namespace.
+has a member id), then deletes the record, so the import is idempotent. It runs
+through :func:`openswe.database.store_imports.run_store_import`, which retires
+it once a pass finds nothing left; a later release can then drop this module.
+It is the only reader of that namespace.
 
 GitHub identities are keyed by the account's numeric id, which the records
 never stored, so a login with no ``users`` row costs one ``GET /users/{login}``
@@ -18,6 +20,7 @@ import logging
 import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from openswe.database.store_imports import StoreImport
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.http import GITHUB_API_BASE, github_client, github_request
 from openswe.store import delete_value, search_all_values
@@ -45,11 +48,11 @@ class _GithubAccount(BaseModel):
     login: str
 
 
-async def import_user_mappings() -> int:
-    """Copy every legacy mapping into ``users``; returns how many were imported."""
+async def import_user_mappings() -> StoreImport:
+    """Copy every legacy mapping into ``users``; records left behind count as waiting."""
     records = await search_all_values(USER_MAPPINGS_NAMESPACE)
     if not records:
-        return 0
+        return StoreImport()
     token = await get_github_app_installation_token()
     if token is None:
         logger.warning(
@@ -82,7 +85,7 @@ async def import_user_mappings() -> int:
         "Legacy user mappings processed",
         extra={"imported_users": imported, "skipped_users": skipped},
     )
-    return imported
+    return StoreImport(imported, skipped)
 
 
 async def _import_mapping(mapping: _Mapping, token: str | None) -> bool:
