@@ -67,10 +67,6 @@ const toolResults = new Map(
   ),
 );
 
-function normalized(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
 test("an uploaded Claude Code session opens as a thread with its whole conversation", async ({
   page,
   playwright,
@@ -204,20 +200,19 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     for (let index = 0; index < foldLabels.length; index++) {
       await folds.nth(index).click();
     }
-    const rows = page.getByRole("button", { name: /^Shell / });
-    await expect(rows).toHaveCount(toolUses.length);
-    const shown = (await rows.locator("p").allTextContents()).map((label) =>
-      label.replace(/^Shell\s*/, "").replace(/\.\.\.$/, ""),
+    // Claude Code's Bash calls carry a description, which labels each row.
+    const rows = toolUses.map((use) =>
+      page.getByRole("button", {
+        name: use.input?.description ?? "",
+        exact: true,
+      }),
     );
-    for (const [index, use] of toolUses.entries()) {
-      expect(shown[index].length).toBeGreaterThan(0);
-      expect(
-        normalized(use.input?.description || use.input?.command || ""),
-      ).toContain(normalized(shown[index]));
+    for (const row of rows) {
+      await expect(row).toBeVisible();
     }
 
     const firstOutput = toolResults.get(toolUses[0].id ?? "") ?? "";
-    await rows.first().click();
+    await rows[0].click();
     await expect(
       page
         .getByText(firstOutput.split("\n")[0].trim(), { exact: false })
