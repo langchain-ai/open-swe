@@ -76,7 +76,7 @@ class SandboxCreateConfig:
         if workspace is not None and workspace.inherit_default_sandbox:
             workspace = await load_workspace(None)
         create_params = workspace.sandbox_create_params() if workspace is not None else {}
-        create_params["preserve_memory_on_stop"] = True
+        create_params = {**create_params, "preserve_memory_on_stop": True}
         if workspace is None:
             return cls(snapshot_id=None, create_params=create_params)
         return cls(
@@ -121,9 +121,7 @@ async def _create_sandbox_with_proxy(
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
-        config = await SandboxCreateConfig.resolve(
-            workspace_slug, source=source
-        )
+        config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
     # The proxy token does not depend on the sandbox, so it is minted while the box boots.
     token = (
         asyncio.ensure_future(_proxy_token(thread_id, workspace_slug, github_proxy_repositories))

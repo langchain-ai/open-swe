@@ -28,6 +28,7 @@ async def test_inherited_sandbox_tracks_default_without_changing_workspace_ident
     assert config.snapshot_id == "snap-1"
     assert config.resources == {"mem_bytes": 1234}
     assert config.create_params == {"preserve_memory_on_stop": True}
+    assert default.create_params == {"preserve_memory_on_stop": False}
     assert child.prompt == "Child instructions"
     default.snapshot_id = "snap-2"
     assert (await SandboxCreateConfig.resolve("child")).snapshot_id == "snap-2"
