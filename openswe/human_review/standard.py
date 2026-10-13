@@ -303,12 +303,7 @@ async def _existing(active: HumanReviewRequest, auto_merge: bool | None = None) 
         permalink = await _permalink(active)
         return RequestResult(
             success=False,
-            error=(
-                "This pull request has an outstanding expedited review request. "
-                "A standard review cannot run concurrently. Cancel the expedited request "
-                "before asking for a standard review."
-                + (f" Open in Slack: {permalink}" if permalink else "")
-            ),
+            error=prompt("tools/human-review-existing-expedited", permalink=permalink),
             request_id=str(active.id),
             channel=active.slack_channel_id,
             permalink=permalink,
