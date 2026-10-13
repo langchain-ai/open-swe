@@ -180,7 +180,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     # The scripted model ends its turn in plain text, so the reply requirement
     # posts on its behalf; that path is covered in its own suite.
     monkeypatch.setattr(
-        "openswe.slack.tools.reply.slack_reply", AsyncMock(return_value={"success": True})
+        "openswe.slack.tools.reply.send_slack_reply", AsyncMock(return_value={"success": True})
     )
     config = _incident_config(
         **({"incident_request": "Open a PR for the confirmed fix"} if requested_action else {})
