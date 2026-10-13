@@ -3,6 +3,7 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx2
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig, RunnableLambda
@@ -15,6 +16,7 @@ from openswe.dashboard.options import available_requested_models
 from openswe.middleware.model_selection import (
     ModelSelectionMiddleware,
     ModelSelectionState,
+    RouteSelection,
     SelectedRoute,
 )
 from openswe.middleware.prepare_run import PrepareRunState
@@ -210,7 +212,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     selection = handoff.middleware._model_selection
     assert selection is not None
     selection._routing_mode = "auto"
-    classify = AsyncMock(return_value=fresh_route)
+    classify = AsyncMock(return_value=RouteSelection(fresh_route))
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     state: ModelSelectionState = {
         "messages": [HumanMessage(content="Fix the typo")],
@@ -226,6 +228,64 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     )
     assert (await selection.abefore_model(state, MagicMock()))["model_route"] == fresh_route
     classify.assert_awaited_once_with("Fix the typo")
+
+
+async def test_prepare_auth_fallback_attributes_default_without_pinning_route(
+    handoff: Handoff, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    handoff.middleware._requested_models = None
+    selection = handoff.middleware._model_selection
+    assert selection is not None
+    selection._routing_mode = "auto"
+    monkeypatch.setenv("TYPESAFE_API_KEY", "rejected-key")
+    monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    requests: list[httpx2.Request] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx2.Response(403)
+        return httpx2.Response(
+            200,
+            json={
+                "model": "jev-1.13.0",
+                "answers": {
+                    "route": {
+                        "type": "choice",
+                        "choice": "fast",
+                        "confidence": 0.95,
+                        "probabilities": {"fast": 1.0},
+                    }
+                },
+            },
+        )
+
+    client = httpx2.AsyncClient
+    monkeypatch.setattr(
+        httpx2,
+        "AsyncClient",
+        lambda **kwargs: client(**kwargs, transport=httpx2.MockTransport(handle)),
+    )
+    state: PrepareRunState = {"messages": [HumanMessage(content="Fix the typo")]}
+    prepared = await handoff.prepare(state)
+    assert "model_route" not in prepared
+    assert prepared["selected_model_id"] == "openai:gpt-6.1-sol"
+    assert handoff.record.call_args.kwargs["model_id"] == "openai:gpt-6.1-sol"
+    assert (
+        handoff.middleware._config["configurable"]["resolved_agent_model_id"]
+        == "openai:gpt-6.1-sol"
+    )
+    state.update(cast(PrepareRunState, prepared))
+    assert len(requests) == 1
+    recovered = await handoff.prepare(state)
+    assert recovered["model_route"] == "fast"
+    assert recovered["selected_model_id"] == "openai:gpt-6-luna"
+    state.update(cast(PrepareRunState, recovered))
+    assert await selection.abefore_model(cast(ModelSelectionState, state), MagicMock()) == {
+        "model_route": "fast"
+    }
+    assert len(requests) == 2
 
 
 @pytest.mark.parametrize(
