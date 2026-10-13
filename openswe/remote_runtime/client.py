@@ -47,7 +47,10 @@ def remote_runtime_client(assistant_id: str) -> LangGraphClient | None:
         raise RemoteRuntimeConfigurationError(
             "REMOTE_RUNTIME_TOKEN_SECRET is required to run graphs in another deployment"
         )
-    return get_client(url=url.rstrip("/"), api_key=ENV.REVIEWER_RUNTIME_API_KEY.optional())
+    return get_client(
+        url=url.rstrip("/"),
+        api_key=ENV.REVIEWER_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional(),
+    )
 
 
 async def remote_run_context(
