@@ -470,6 +470,8 @@ export interface ManagedToolsGatewayStatus {
   ready: boolean
   tool_count?: number | null
   missing: ManagedToolsMissingCredential[]
+  /** LangSmith offers no tools until every missing service is connected. */
+  all_required: boolean
 }
 
 /** The card the agent offered in a thread, identified by its tool call. */

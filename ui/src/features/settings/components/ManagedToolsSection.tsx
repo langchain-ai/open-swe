@@ -134,17 +134,22 @@ function GatewayStatus({
           <Badge color="success" size="xs">
             {`Ready · ${status.tool_count ?? status.gateway.tool_count} tools`}
           </Badge>
-        ) : (
+        ) : status.all_required ? (
           <Badge color="warning" size="xs">
             {`Connect ${status.missing.length} to use`}
+          </Badge>
+        ) : (
+          <Badge color="warning" size="xs">
+            {`${status.missing.length} not connected`}
           </Badge>
         )}
       </div>
       {status.ready ? null : (
         <>
           <p className="px-space-3 pb-space-2 text-xs text-secondary">
-            LangSmith offers this gateway&apos;s tools only after every service
-            in it is connected to your account.
+            {status.all_required
+              ? "LangSmith offers this gateway's tools only after every service in it is connected to your account."
+              : "Each service's tools load once you connect it to your account."}
           </p>
           <ul className="divide-y divide-default border-t border-default">
             {status.missing.map((credential) => (

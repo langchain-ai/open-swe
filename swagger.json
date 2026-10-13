@@ -1849,8 +1849,13 @@
         "type": "object"
       },
       "GatewayStatus": {
-        "description": "What one person sees for a gateway: ready, or what to connect first.",
+        "description": "What one person sees for a gateway: every service connected, or what is left.",
         "properties": {
+          "all_required": {
+            "default": false,
+            "title": "All Required",
+            "type": "boolean"
+          },
           "gateway": {
             "$ref": "#/components/schemas/Gateway"
           },
