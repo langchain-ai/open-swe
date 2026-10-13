@@ -29,7 +29,7 @@ def upgrade() -> None:
     """)
     op.execute("""
         CREATE TABLE review_assessment (
-            review_id bigint PRIMARY KEY,
+            github_review_id bigint PRIMARY KEY,
             value jsonb NOT NULL,
             published_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )

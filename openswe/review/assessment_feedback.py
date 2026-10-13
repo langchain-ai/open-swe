@@ -29,7 +29,7 @@ _FEEDBACK_NAMESPACE = ["review_assessment_feedback"]
 class AssessmentRow(Base):
     __tablename__ = "review_assessment"
 
-    review_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    github_review_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     value: Mapped[JsonObject] = mapped_column(JSONB)
     published_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
@@ -44,20 +44,22 @@ class PublishedAssessment(ReviewAssessment):
     run_id: str | None = None
 
     @classmethod
-    async def get(cls, review_id: int) -> Self | None:
+    async def get(cls, github_review_id: int) -> Self | None:
         async with postgres.session() as session:
             value = await session.scalar(
-                select(AssessmentRow.value).where(AssessmentRow.review_id == review_id)
+                select(AssessmentRow.value).where(
+                    AssessmentRow.github_review_id == github_review_id
+                )
             )
         return None if value is None else cls.model_validate(value)
 
     async def save(self) -> None:
         value = self.model_dump(mode="json")
-        upsert = insert(AssessmentRow).values(review_id=self.review_id, value=value)
+        upsert = insert(AssessmentRow).values(github_review_id=self.review_id, value=value)
         async with postgres.session() as session:
             await session.execute(
                 upsert.on_conflict_do_update(
-                    index_elements=[AssessmentRow.review_id], set_={"value": value}
+                    index_elements=[AssessmentRow.github_review_id], set_={"value": value}
                 )
             )
 
@@ -165,7 +167,7 @@ async def import_store_assessments() -> StoreImport:
                     await session.execute(
                         insert(AssessmentRow)
                         .values(
-                            review_id=assessment.review_id,
+                            github_review_id=assessment.review_id,
                             value=assessment.model_dump(mode="json"),
                         )
                         .on_conflict_do_nothing()
