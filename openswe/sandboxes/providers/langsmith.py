@@ -15,11 +15,13 @@ from deepagents.backends.protocol import (
     ExecuteResponse,
     ReadResult,
     SandboxBackendProtocol,
+    WriteResult,
 )
 from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
     ResourceNotFoundError,
+    SandboxClientError,
     SandboxConnectionError,
     SandboxServerReloadError,
 )
@@ -697,6 +699,17 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         client's pooled HTTP connection, so this is a single request.
         """
         return await asyncio.to_thread(self.read, file_path, offset, limit)
+
+    async def awrite(self, file_path: str, content: str) -> WriteResult:
+        """Upload through the sandbox file API, which creates missing parent directories.
+
+        The base class first runs a ``mkdir -p`` preflight as its own command.
+        """
+        try:
+            await self._aget_sandbox().write(file_path, content.encode("utf-8"))
+        except SandboxClientError as e:
+            return WriteResult(error=f"Failed to write file '{file_path}': {e}")
+        return WriteResult(path=file_path)
 
     async def adelete(self, file_path: str) -> DeleteResult:
         quoted = shlex.quote(file_path)
