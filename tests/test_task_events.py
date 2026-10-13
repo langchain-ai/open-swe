@@ -9,6 +9,11 @@ from uuid import uuid4
 from xml.etree import ElementTree
 
 import pytest
+from deepagents.middleware.summarization import (
+    SummarizationEvent,
+    SummarizationState,
+    _DeepAgentsSummarizationMiddleware,
+)
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -522,6 +527,59 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
         assert previous.system_message == current.system_message
         assert previous.messages == current.messages[: len(previous.messages)]
     assert isinstance(received[-1].messages[-1], ToolMessage)
+
+
+async def test_task_context_returns_after_summarization_without_replacing_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.middleware import task_coordination
+
+    task = store.Task(
+        title="Repair login", workspace_id=uuid4(), coordinator_thread_id=_COORDINATOR
+    )
+    context = store.TaskContext(
+        task,
+        store.TaskMembership(thread_id=_COORDINATOR, task_id=task.id, role="coordinator"),
+    )
+    monkeypatch.setattr(postgres, "configured", lambda: False)
+    state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", False, context)
+    initial = await middleware.abefore_model(state, Runtime())
+    assert initial is not None
+    state["messages"] = add_messages(state["messages"], initial["messages"])
+    original_context = state["messages"][-1]
+    for _ in range(2):
+        cutoff = len(state["messages"])
+        state["messages"] = add_messages(
+            state["messages"],
+            [
+                AIMessage(content="", tool_calls=[{"name": "ls", "args": {}, "id": "list"}]),
+                ToolMessage(content="Files", tool_call_id="list"),
+            ],
+        )
+        event: SummarizationEvent = {
+            "cutoff_index": cutoff,
+            "summary_message": HumanMessage(content="Investigating login"),
+            "file_path": None,
+        }
+        state["_summarization_event"] = event
+        before = list(state["messages"])
+        visible_before = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(before, event)
+        assert original_context not in visible_before
+        update = await middleware.abefore_model(state, Runtime())
+        assert update is not None
+        state["messages"] = add_messages(before, update["messages"])
+        assert state["messages"][:-1] == before
+        visible = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(
+            state["messages"], event
+        )
+        assert visible[:-1] == visible_before
+        assert visible[-1].content == original_context.content
+        assert visible[-1].id != original_context.id
+        middleware = task_coordination.TaskCoordinationMiddleware(
+            _COORDINATOR, "owner", False, context
+        )
+        assert await middleware.abefore_model(state, Runtime()) is None
 
 
 async def test_workspace_deletion_cascades_through_tasks_and_messages(registry_db: None) -> None:

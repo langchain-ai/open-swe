@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Self
+from uuid import uuid4
 
 from langchain.agents.middleware import AgentState
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -9,7 +10,7 @@ from langgraph.runtime import Runtime
 
 from openswe.database import postgres
 from openswe.github.proxy import maybe_refresh_proxy_token
-from openswe.input_messages import RunMessage
+from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.tasks.flags import task_coordination_enabled, task_coordination_supported
@@ -74,19 +75,15 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
                 )
         messages: list[RunMessage] = []
         if self.context is not None:
-            context_id = f"task-context:{self.context.task.id}"
-            if not any(message.id == context_id for message in state["messages"]):
+            content = prompt(
+                "tasks/context",
+                task_id=str(self.context.task.id),
+                title=self.context.task.title,
+                coordinator_thread_id=self.context.task.coordinator_thread_id,
+            )
+            if dynamic_context_hash(content) not in visible_dynamic_context_hashes(state):
                 messages.append(
-                    {
-                        "role": "user",
-                        "id": context_id,
-                        "content": prompt(
-                            "tasks/context",
-                            task_id=str(self.context.task.id),
-                            title=self.context.task.title,
-                            coordinator_thread_id=self.context.task.coordinator_thread_id,
-                        ),
-                    }
+                    {"role": "user", "id": f"task-context:{uuid4()}", "content": content}
                 )
         if postgres.configured():
             owed = await TaskMessage.owed(self.thread_id, state["messages"])
