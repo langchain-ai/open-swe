@@ -1977,6 +1977,11 @@
             },
             "title": "Blockers",
             "type": "array"
+          },
+          "permalink": {
+            "default": "",
+            "title": "Permalink",
+            "type": "string"
           }
         },
         "required": [

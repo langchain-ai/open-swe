@@ -56,78 +56,112 @@ const pr: OpenPullRequest = {
   unresolvedThreads: 1,
 }
 
-it("requires a chosen channel when the repository has no review destination", async () => {
-  vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
-    available: false,
-    active: false,
-    blockers: [],
-  })
-  const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
-    success: true,
-    reused: false,
-    permalink: "",
-    error: "",
-    request_id: "request",
-    channel: "C0123456789",
-  })
-  render(
-    <QueryClientProvider client={new QueryClient()}>
-      <RequestHumanReview pr={pr} />
-    </QueryClientProvider>
-  )
-  await screen.findByRole("button", { name: "Choose channel" })
-  const button = screen.getByRole("button", { name: "Request review in Slack" })
-  expect(button.hasAttribute("disabled")).toBe(true)
-  fireEvent.click(screen.getByRole("button", { name: "Choose channel" }))
-  fireEvent.click(button)
-  await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
-  const requested = await screen.findByRole("button", {
-    name: "Review requested",
-  })
-  expect(requested.hasAttribute("disabled")).toBe(true)
-  expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
-})
+it.each([
+  "",
+  "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
+])(
+  "requires a channel and reuses the resulting permalink %j",
+  async (permalink) => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null)
+    vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
+      available: false,
+      active: false,
+      permalink: "",
+      blockers: [],
+    })
+    const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
+      success: true,
+      reused: false,
+      permalink,
+      error: "",
+      request_id: "request",
+      channel: "C0123456789",
+    })
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RequestHumanReview pr={pr} />
+      </QueryClientProvider>
+    )
+    await screen.findByRole("button", { name: "Choose channel" })
+    const button = screen.getByRole("button", {
+      name: "Request review in Slack",
+    })
+    expect(button.hasAttribute("disabled")).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Choose channel" }))
+    fireEvent.click(button)
+    await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
+    const requested = await screen.findByRole("button", {
+      name: "Review requested",
+    })
+    await waitFor(() =>
+      expect(requested.hasAttribute("disabled")).toBe(!permalink)
+    )
+    fireEvent.click(requested)
+    expect(open.mock.calls).toEqual(
+      permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
+    )
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
+  }
+)
 
-it("keeps the action visible while loading and reuses persisted status on remount and focus", async () => {
-  const result =
-    Promise.withResolvers<
-      Awaited<ReturnType<typeof api.humanReviewAvailability>>
-    >()
-  const availability = vi
-    .spyOn(api, "humanReviewAvailability")
-    .mockReturnValue(result.promise)
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
-  })
-  const content = (
-    <QueryClientProvider client={client}>
-      <RequestHumanReview pr={pr} />
-    </QueryClientProvider>
-  )
-  const view = render(content)
-  expect(
-    screen
-      .getByRole("button", { name: "Request review in Slack" })
-      .hasAttribute("disabled")
-  ).toBe(true)
-  await act(async () =>
-    result.resolve({ available: false, active: true, blockers: [] })
-  )
-  const requested = await screen.findByRole("button", {
-    name: "Review requested",
-  })
-  expect(requested.hasAttribute("disabled")).toBe(true)
-  expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
-  view.unmount()
-  render(content)
-  await act(async () => {
-    focusManager.setFocused(false)
-    focusManager.setFocused(true)
-  })
-  expect(
-    screen
-      .getByRole("button", { name: "Review requested" })
-      .hasAttribute("disabled")
-  ).toBe(true)
-  expect(availability).toHaveBeenCalledTimes(1)
-})
+it.each([
+  "",
+  "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
+])(
+  "reuses persisted status and permalink %j on remount and focus",
+  async (permalink) => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null)
+    const request = vi.spyOn(api, "requestHumanReview")
+    const result =
+      Promise.withResolvers<
+        Awaited<ReturnType<typeof api.humanReviewAvailability>>
+      >()
+    const availability = vi
+      .spyOn(api, "humanReviewAvailability")
+      .mockReturnValue(result.promise)
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, refetchOnWindowFocus: false },
+      },
+    })
+    const content = (
+      <QueryClientProvider client={client}>
+        <RequestHumanReview pr={pr} />
+      </QueryClientProvider>
+    )
+    const view = render(content)
+    expect(
+      screen
+        .getByRole("button", { name: "Request review in Slack" })
+        .hasAttribute("disabled")
+    ).toBe(true)
+    await act(async () =>
+      result.resolve({
+        available: false,
+        active: true,
+        permalink,
+        blockers: [],
+      })
+    )
+    const requested = await screen.findByRole("button", {
+      name: "Review requested",
+    })
+    expect(requested.hasAttribute("disabled")).toBe(!permalink)
+    expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
+    view.unmount()
+    render(content)
+    await act(async () => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+    const restored = screen.getByRole("button", { name: "Review requested" })
+    expect(restored.hasAttribute("disabled")).toBe(!permalink)
+    fireEvent.click(restored)
+    expect(open.mock.calls).toEqual(
+      permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
+    )
+    expect(request).not.toHaveBeenCalled()
+    expect(availability).toHaveBeenCalledTimes(1)
+  }
+)

@@ -27,6 +27,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   })
   const [channel, setChannel] = useState<string | null>(null)
   const active = availability.data?.active ?? false
+  const permalink = availability.data?.permalink ?? ""
   const needsChannel =
     availability.isSuccess && !availability.data.available && !active
   const blockers = availability.data?.blockers ?? []
@@ -44,7 +45,14 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       queryClient.setQueryData<
         Awaited<ReturnType<typeof api.humanReviewAvailability>>
       >(queryKey, (previous) =>
-        previous ? { ...previous, active: true, blockers: [] } : previous
+        previous
+          ? {
+              ...previous,
+              active: true,
+              permalink: result.permalink,
+              blockers: [],
+            }
+          : previous
       )
       toast.success(
         result.reused
@@ -105,9 +113,16 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           availability.isPending ||
           (needsChannel && !channel) ||
           requestReview.isPending ||
-          active
+          (active && !permalink)
         }
-        onClick={() => requestReview.mutate()}
+        onClick={() => {
+          if (active) {
+            if (permalink)
+              window.open(permalink, "_blank", "noopener,noreferrer")
+          } else {
+            requestReview.mutate()
+          }
+        }}
       />
       {reason && (
         <Popover>
