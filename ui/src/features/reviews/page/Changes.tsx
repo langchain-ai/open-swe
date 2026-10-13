@@ -122,7 +122,15 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const setEntryOrder = useReviewPage((state) => state.setEntryOrder)
   const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const theme = useResolvedTheme()
-  const [overflow] = useDiffOverflow()
+  const [storedOverflow] = useDiffOverflow()
+  const files = diff.data?.files ?? []
+  const overflow =
+    files.length > 0 &&
+    files.every((file) =>
+      /\.(md|markdown|mdown|mkdn|mkd|mdx)$/i.test(file.path)
+    )
+      ? "wrap"
+      : storedOverflow
   const handle = useRef<CodeViewHandle<Note>>(null)
   const askAboutLines = useAskAboutLines(pr)
   const markers = useFileMarkers(pr)
@@ -204,28 +212,15 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   )
 
   const options = useMemo<CodeViewReactOptions<Note>>(() => {
-    const base = buildDiffOptions(diffStyle, "wrap", theme)
+    const base = buildDiffOptions(diffStyle, overflow, theme)
     return {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
       unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-bg-context);border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
         overflow === "scroll"
-          ? `[data-overflow=scroll] [data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
+          ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
           : ""
       }`,
-      onPostRender: (container, _instance, phase, context) => {
-        if (phase === "unmount") return
-        const path =
-          context.item.type === "diff"
-            ? context.item.fileDiff.name
-            : context.item.file.name
-        const fileOverflow = /\.(md|markdown|mdown|mkdn|mkd|mdx)$/i.test(path)
-          ? "wrap"
-          : overflow
-        container.shadowRoot
-          ?.querySelector<HTMLElement>("[data-diff], [data-file]")
-          ?.setAttribute("data-overflow", fileOverflow)
-      },
       disableFileHeader: false,
       stickyHeaders: true,
       // Exact heights: CodeView positions every file from them, so an estimate
