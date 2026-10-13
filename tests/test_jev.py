@@ -35,7 +35,7 @@ def transport(
         monkeypatch.setattr(
             httpx2,
             "AsyncClient",
-            lambda **kw: client(**kw, transport=httpx2.MockTransport(handler)),
+            lambda **kw: client(**{**kw, "transport": httpx2.MockTransport(handler)}),
         )
 
     return install

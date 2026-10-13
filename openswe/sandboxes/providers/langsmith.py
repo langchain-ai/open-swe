@@ -24,6 +24,7 @@ from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
 
 logger = logging.getLogger(__name__)
@@ -425,7 +426,9 @@ async def configure_sandbox_proxy(
         *preserved_rules,
     ]
     payload = {"proxy_config": proxy_config}
-    async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
+    ) as client:
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
         except httpx2.HTTPStatusError as exc:
@@ -462,7 +465,9 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
         msg = "LANGSMITH_API_KEY not set"
         raise ValueError(msg)
     url = f"{_get_sandbox_api_endpoint()}/boxes/{sandbox_id}/service-url"
-    async with httpx2.AsyncClient(timeout=SERVICE_URL_TIMEOUT_SECONDS) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=SERVICE_URL_TIMEOUT_SECONDS
+    ) as client:
         response = await client.post(
             url,
             json={"port": port, "access": "workspace"},
