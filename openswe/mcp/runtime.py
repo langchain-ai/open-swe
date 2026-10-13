@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import httpx2
 from fastmcp import Client
@@ -25,6 +25,9 @@ from openswe.mcp.models import MCPConnection
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
 from openswe.utils.startup_trace import asubphase
+
+if TYPE_CHECKING:
+    from langgraph_api.cache import SWRResult
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
@@ -202,9 +205,7 @@ def _wrap_tool(
     )
 
 
-async def _cached_definitions(
-    source: MCPSource, record: MCPConnection
-) -> tuple[list[Tool], CatalogOutcome]:
+async def _catalog(source: MCPSource, record: MCPConnection) -> SWRResult[list[dict[str, Any]]]:
     key = (
         "mcp:"
         + hashlib.sha256(
@@ -222,10 +223,26 @@ async def _cached_definitions(
 
     from langgraph_api.cache import swr
 
-    result = await swr(key, discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE)
+    return await swr(key, discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE)
+
+
+async def _cached_definitions(
+    source: MCPSource, record: MCPConnection
+) -> tuple[list[Tool], CatalogOutcome]:
+    result = await _catalog(source, record)
     return [Tool.model_validate(tool) for tool in result.value], (
         "hit" if result.status == "fresh" else result.status
     )
+
+
+async def refresh_mcp_catalog(source: MCPSource, name: str) -> None:
+    """Re-list one connection's tools now, for a change its server made that runs must see."""
+    record = await source.get_connection(name)
+    if record is None:
+        return
+    result = await _catalog(source, record)
+    if result.status != "miss":
+        await result.mutate()
 
 
 async def _load_tools(
