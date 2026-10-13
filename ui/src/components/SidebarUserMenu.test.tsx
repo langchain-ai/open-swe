@@ -1,13 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { SidebarUserMenu } from "./SidebarUserMenu"
@@ -55,10 +49,12 @@ afterEach(() => {
   mocks.datadogSessionLink = undefined
   vi.clearAllMocks()
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe("SidebarUserMenu", () => {
-  it("copies the current Datadog session link", async () => {
+  it("keeps copy instructions visible until the dialog is reopened", async () => {
+    vi.useFakeTimers()
     mocks.datadogInitialized = true
     mocks.datadogSessionLink =
       "https://app.datadoghq.com/rum/explorer?query=session"
@@ -70,14 +66,22 @@ describe("SidebarUserMenu", () => {
 
     renderMenu()
     fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
-    fireEvent.click(screen.getByRole("button", { name: "Copy session link" }))
-
-    await waitFor(() => {
-      expect(mocks.writeText).toHaveBeenCalledWith(mocks.datadogSessionLink)
-      expect(screen.getByRole("status").textContent).toContain(
-        "Session link copied"
-      )
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy session link" }))
     })
+    expect(mocks.writeText).toHaveBeenCalledWith(mocks.datadogSessionLink)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+    expect(screen.getByRole("status").textContent).toContain(
+      "Session link copied. Include it in your message to the team."
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(screen.getByRole("button", { name: /octocat/i }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
+    expect(screen.getByRole("status").textContent).toBe("")
   })
 
   it("shows a failure state when clipboard access is denied", async () => {

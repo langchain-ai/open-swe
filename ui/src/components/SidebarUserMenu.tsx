@@ -107,7 +107,6 @@ export function SidebarUserMenu({
         setDatadogCopyStatus("error")
       }
     }
-    window.setTimeout(() => setDatadogCopyStatus("idle"), 1500)
   }
 
   return (
