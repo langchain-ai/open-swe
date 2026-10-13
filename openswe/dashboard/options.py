@@ -70,6 +70,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "google_genai:gemini-4-argon",
+        "label": "Gemini 4 Argon",
+        "efforts": ["low", "medium", "high"],
+        "default_effort": "medium",
+        "supports_images": True,
+    },
+    {
         "id": "google_genai:gemini-3.8-flash",
         "label": "Gemini 3.8 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
@@ -148,6 +155,7 @@ _PROFILE_ALIASES = {"gpt-6.1-sol": "gpt-6-sol", "gpt-6-luna": "gpt-5.6-luna"}
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "anthropic:claude-sonnet-5-5": 1_000_000,
     "anthropic:claude-haiku-5-5": 1_000_000,
+    "google_genai:gemini-4-argon": 1_048_576,
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
 }
 
