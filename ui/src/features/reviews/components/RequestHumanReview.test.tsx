@@ -13,6 +13,7 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
+import { toast } from "sonner"
 import { api, type OpenPullRequest } from "@/lib/api"
 import { RequestHumanReview } from "./RequestHumanReview"
 
@@ -60,8 +61,9 @@ it.each([
   "",
   "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
 ])(
-  "requires a channel and reuses the resulting permalink %j",
+  "silently reuses an existing request returned after choosing a channel with permalink %j",
   async (permalink) => {
+    const successToast = vi.spyOn(toast, "success")
     const open = vi.spyOn(window, "open").mockReturnValue(null)
     vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
       available: false,
@@ -71,7 +73,7 @@ it.each([
     })
     const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
       success: true,
-      reused: false,
+      reused: true,
       permalink,
       error: "",
       request_id: "request",
@@ -101,6 +103,7 @@ it.each([
       permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
     )
     expect(request).toHaveBeenCalledTimes(1)
+    expect(successToast).not.toHaveBeenCalled()
     expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
   }
 )
@@ -111,6 +114,7 @@ it.each([
 ])(
   "reuses persisted status and permalink %j on remount and focus",
   async (permalink) => {
+    const successToast = vi.spyOn(toast, "success")
     const open = vi.spyOn(window, "open").mockReturnValue(null)
     const request = vi.spyOn(api, "requestHumanReview")
     const result =
@@ -162,6 +166,7 @@ it.each([
       permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
     )
     expect(request).not.toHaveBeenCalled()
+    expect(successToast).not.toHaveBeenCalled()
     expect(availability).toHaveBeenCalledTimes(1)
   }
 )
