@@ -122,7 +122,15 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const setEntryOrder = useReviewPage((state) => state.setEntryOrder)
   const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const theme = useResolvedTheme()
-  const [overflow] = useDiffOverflow()
+  const [storedOverflow] = useDiffOverflow()
+  const files = diff.data?.files ?? []
+  const overflow =
+    files.length > 0 &&
+    files.every((file) =>
+      /\.(md|markdown|mdown|mkdn|mkd|mdx)$/i.test(file.path)
+    )
+      ? "wrap"
+      : storedOverflow
   const handle = useRef<CodeViewHandle<Note>>(null)
   const askAboutLines = useAskAboutLines(pr)
   const markers = useFileMarkers(pr)
