@@ -9,19 +9,20 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterable, Mapping
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx2
 from langgraph_sdk.client import LangGraphClient
-from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
+from sqlalchemy import text
 
 from openswe.config import ENV
+from openswe.database import postgres
 from openswe.slack.http import (
     SLACK_REQUEST_ERRORS,
     SlackClient,
@@ -33,7 +34,6 @@ from openswe.slack.http import (
 from openswe.slack.review_links import pr_review_links
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
-from openswe.threads.creation import create_lock_thread
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
@@ -57,8 +57,7 @@ SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
 SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
 SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
 SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
-_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES = 1
-_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.05
+_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.1
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
 
 
@@ -1555,35 +1554,44 @@ async def slack_thread_mutation_lock(
     thread_id: str | None = None,
     purpose: str | None = None,
 ) -> AsyncIterator[dict[str, Any] | None]:
-    """Lock a Slack thread and optionally return its current active location."""
+    """Lock a Slack thread and optionally return its current active location.
+
+    The lock is a PostgreSQL transaction-level advisory lock, so it ends with its
+    transaction or connection and a failed release can't strand it.
+    """
     channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
     lock_key = f"open-swe:slack-thread-lock:{channel}:{timestamp}"
     if purpose:
         lock_key += f":{purpose}"
-    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, lock_key))
-    deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
-    while True:
-        try:
-            await create_lock_thread(
-                langgraph_client, lock_id, ttl_minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES
-            )
-            break
-        except ConflictError:
-            if asyncio.get_running_loop().time() >= deadline:
-                raise TimeoutError("Timed out waiting for the Slack thread mutation lock") from None
-            await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
+    # Poll rather than block so waiters don't hold pool connections.
+    while (held := await _try_advisory_xact_lock(lock_key)) is None:
+        if loop.time() >= deadline:
+            raise TimeoutError("Timed out waiting for the Slack thread mutation lock")
+        await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
     try:
         yield await get_active_slack_thread(langgraph_client, thread_id) if thread_id else None
     finally:
         try:
-            await langgraph_client.threads.delete(lock_id)
+            await held.aclose()
         except Exception:
             logger.warning(
-                "Failed to release Slack thread mutation lock for %s/%s",
-                channel,
-                timestamp,
+                "Failed to release Slack thread mutation lock",
+                extra={"slack_channel": channel, "slack_thread_ts": timestamp},
                 exc_info=True,
             )
+
+
+async def _try_advisory_xact_lock(key: str) -> AsyncExitStack | None:
+    """Take ``key``'s advisory lock, returning the open transaction that holds it."""
+    async with AsyncExitStack() as attempt:
+        conn = await attempt.enter_async_context(postgres.transaction())
+        if await conn.scalar(
+            text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key}
+        ):
+            return attempt.pop_all()
+    return None
 
 
 async def fetch_slack_thread_message_by_ts(

@@ -1,10 +1,10 @@
 import asyncio
 from typing import Any
 
-import httpx2
 import pytest
-from langgraph_sdk.errors import ConflictError
+from sqlalchemy import text
 
+from openswe.database import postgres
 from openswe.slack.client import (
     SlackThreadMappingError,
     bind_slack_thread_id,
@@ -55,16 +55,6 @@ class _Store:
 class _Threads:
     def __init__(self, matches: list[dict[str, Any]] | None = None) -> None:
         self.matches = matches or []
-        self.lock_ids: set[str] = set()
-
-    async def create(self, *, thread_id: str, **_kwargs: Any) -> None:
-        if thread_id in self.lock_ids:
-            response = httpx2.Response(409, request=httpx2.Request("POST", "http://test/threads"))
-            raise ConflictError("already exists", response=response, body=None)
-        self.lock_ids.add(thread_id)
-
-    async def delete(self, thread_id: str) -> None:
-        self.lock_ids.discard(thread_id)
 
     async def search(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self.matches
@@ -91,6 +81,7 @@ def _legacy_thread(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_thread_mutation_lock_returns_active_thread() -> None:
     client: Any = _Client(matches=[_legacy_thread("agent-thread")])
 
@@ -99,6 +90,7 @@ async def test_thread_mutation_lock_returns_active_thread() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_thread_mutation_lock_serializes_same_thread() -> None:
     client: Any = _Client()
     first_entered = asyncio.Event()
@@ -123,6 +115,24 @@ async def test_thread_mutation_lock_serializes_same_thread() -> None:
     release_first.set()
     await asyncio.gather(first_task, second_task)
     assert second_entered.is_set() is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_thread_mutation_lock_frees_when_its_holder_cannot_release() -> None:
+    client: Any = _Client()
+
+    async with slack_thread_mutation_lock(client, "C1", "1.0"):
+        async with postgres.transaction() as conn:
+            await conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND pid <> pg_backend_pid()"
+                )
+            )
+        async with asyncio.timeout(2):
+            async with slack_thread_mutation_lock(client, "C1", "1.0"):
+                pass
 
 
 @pytest.mark.asyncio
