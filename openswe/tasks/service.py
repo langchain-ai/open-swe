@@ -36,7 +36,11 @@ from openswe.tools.threads import resolve_thread_actor
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
-from openswe.utils.thread_participants import PARTICIPANT_EMAILS_KEY, PARTICIPANT_LOGINS_KEY
+from openswe.utils.thread_participants import (
+    PARTICIPANT_EMAILS_KEY,
+    PARTICIPANT_LOGINS_KEY,
+    participant_ids,
+)
 from openswe.utils.thread_settings import thread_model_choice
 from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.routing import resolve_workspace
@@ -84,7 +88,9 @@ class Actor:
         return user
 
 
-async def authorized_metadata(actor: Actor, thread_id: str | None = None) -> ThreadMetadata:
+async def authorized_metadata(
+    actor: Actor, thread_id: str | None = None, *, allow_participants: bool = False
+) -> ThreadMetadata:
     if not actor.thread_id or not actor.login:
         raise PermissionError("An authenticated user and thread are required")
     await enforce_github_login_gate(actor.login)
@@ -92,11 +98,15 @@ async def authorized_metadata(actor: Actor, thread_id: str | None = None) -> Thr
     target_id = thread_id or actor.thread_id
     metadata = Thread.model_validate(await langgraph_client().threads.get(target_id)).metadata
     owner = await metadata.owner()
-    if owner.id != user.id:
+    access_metadata = metadata.json_metadata() | {"owner_login": owner.github_login}
+    if owner.id != user.id and not (
+        allow_participants
+        and target_id == actor.thread_id
+        and f"user:{user.id}" in participant_ids(access_metadata)
+    ):
         raise PermissionError(
             "Task operations require the thread owner; another user's credentials cannot be used"
         )
-    access_metadata = metadata.json_metadata() | {"owner_login": actor.login}
     assert_thread_readable(access_metadata, actor.login, actor.email)
     assert_thread_postable(access_metadata, actor.login, actor.email)
     if metadata.owner_user_id is None:
@@ -107,11 +117,18 @@ async def authorized_metadata(actor: Actor, thread_id: str | None = None) -> Thr
     return metadata
 
 
-async def authorized_context(actor: Actor, *, coordinator: bool = False) -> store.TaskContext:
-    metadata = await authorized_metadata(actor)
+async def authorized_context(
+    actor: Actor, *, coordinator: bool = False, allow_participants: bool = False
+) -> store.TaskContext:
+    metadata = await authorized_metadata(actor, allow_participants=allow_participants)
     context = await store.TaskMembership.context_for_thread(actor.thread_id)
     if context is None:
         raise ValueError("No task exists yet; spawn_worker creates it on first delegation")
+    if allow_participants and (
+        context.membership.role != "coordinator"
+        or context.task.coordinator_thread_id != actor.thread_id
+    ):
+        await authorized_metadata(actor)
     workspace = metadata.workspace or metadata.environment
     if workspace and workspace != context.task.workspace.slug:
         raise PermissionError("The thread no longer belongs to the task's workspace")
@@ -239,9 +256,11 @@ async def notify(
 
 
 async def owned_worker(
-    actor: Actor, worker_thread_id: str
+    actor: Actor, worker_thread_id: str, *, allow_participants: bool = False
 ) -> tuple[store.Task, store.TaskDelegation]:
-    context = await authorized_context(actor, coordinator=True)
+    context = await authorized_context(
+        actor, coordinator=True, allow_participants=allow_participants
+    )
     delegation = await store.TaskDelegation.get(worker_thread_id)
     membership = await store.TaskMembership.context_for_thread(worker_thread_id)
     if (
@@ -253,6 +272,17 @@ async def owned_worker(
         or membership.membership.role != "worker"
     ):
         raise PermissionError("Choose a worker belonging to this task")
+    if allow_participants:
+        coordinator = await authorized_metadata(actor, allow_participants=True)
+        owner = await coordinator.owner()
+        if (await actor.user()).id != owner.id:
+            config = await recipient_config(actor.thread_id)
+            email = config.get("user_email")
+            actor = Actor(
+                actor.thread_id,
+                str(config["github_login"]),
+                email if isinstance(email, str) else None,
+            )
     try:
         metadata = await authorized_metadata(actor, worker_thread_id)
         if metadata.workspace != context.task.workspace.slug:
@@ -450,11 +480,14 @@ async def task_status(
     actor: Annotated[Actor | dict[str, object], InjectedState],
 ) -> dict[str, object]:
     actor = await Actor.resolve(actor)
-    context = await authorized_context(actor)
+    context = await authorized_context(actor, allow_participants=True)
     workers = []
     for delegation in await store.TaskDelegation.for_task(context.task.id):
         try:
-            await authorized_metadata(actor, delegation.worker_thread_id)
+            if context.membership.role == "coordinator":
+                await owned_worker(actor, delegation.worker_thread_id, allow_participants=True)
+            else:
+                await authorized_metadata(actor, delegation.worker_thread_id)
         except NotFoundError:
             logger.info(
                 "Worker thread creation is incomplete",
@@ -482,12 +515,16 @@ async def message_task_thread(
     actor = await Actor.resolve(actor)
     if not message.strip() or not request_id:
         raise ValueError("A message and stable tool-call identity are required")
-    context = await authorized_context(actor)
+    context = await authorized_context(actor, allow_participants=True)
+    sender_label = await presentation.sender_label(actor.thread_id)
     if context.membership.role == "coordinator":
         if not worker_thread_id:
             raise ValueError("Choose an explicit worker_thread_id")
-        await owned_worker(actor, worker_thread_id)
+        await owned_worker(actor, worker_thread_id, allow_participants=True)
         recipient = worker_thread_id
+        metadata = await authorized_metadata(actor, allow_participants=True)
+        if (await actor.user()).id != (await metadata.owner()).id:
+            sender_label = actor.login
     else:
         if worker_thread_id is not None:
             raise PermissionError("Workers can only message their coordinator")
@@ -507,7 +544,7 @@ async def message_task_thread(
             task_id=context.task.id,
             sender_thread_id=UUID(actor.thread_id),
             sender_role=context.membership.role,
-            sender_label=await presentation.sender_label(actor.thread_id),
+            sender_label=sender_label,
             kind="message",
             content=message,
         ),
@@ -544,7 +581,9 @@ async def control_worker(
     action: Literal["status", "cancel", "retry"],
 ) -> dict[str, object]:
     actor = await Actor.resolve(actor)
-    task, delegation = await owned_worker(actor, worker_thread_id)
+    task, delegation = await owned_worker(
+        actor, worker_thread_id, allow_participants=action != "retry"
+    )
     if action == "retry":
         if delegation.cancelled:
             raise ValueError("Only an uncancelled worker launch can be retried")
