@@ -1,7 +1,9 @@
 """Shared async Slack SDK lifecycle and application error handling."""
 
+import asyncio
 import hashlib
 import logging
+import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Self
@@ -41,6 +43,33 @@ class _SlackResponse(aiohttp.ClientResponse):
         raise SlackApiError("Slack returned a non-JSON response.", self)
 
 
+# One session per event loop, kept open: a session per call paid a fresh TLS
+# handshake to slack.com (~70 ms) on every request. Sessions are bound to the loop
+# that made them, and each isolated-loop worker thread runs its own loop.
+_SESSIONS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, aiohttp.ClientSession] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _session() -> aiohttp.ClientSession:
+    loop = asyncio.get_running_loop()
+    session = _SESSIONS.get(loop)
+    if session is None or session.closed:
+        session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
+            response_class=_SlackResponse,
+        )
+        _SESSIONS[loop] = session
+    return session
+
+
+async def close_session() -> None:
+    """Close this event loop's Slack session; the next request opens a new one."""
+    session = _SESSIONS.pop(asyncio.get_running_loop(), None)
+    if session is not None:
+        await session.close()
+
+
 class SlackClient(AsyncWebClient):
     @classmethod
     @asynccontextmanager
@@ -48,18 +77,14 @@ class SlackClient(AsyncWebClient):
         token = ENV.SLACK_BOT_TOKEN.get()
         if not token:
             raise HTTPException(400, "Slack is not configured.")
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
-            response_class=_SlackResponse,
-        ) as session:
-            yield cls(
-                token=token,
-                base_url=SLACK_API_BASE_URL,
-                timeout=30,
-                session=session,
-                logger=_SDK_LOGGER,
-                retry_handlers=[],
-            )
+        yield cls(
+            token=token,
+            base_url=SLACK_API_BASE_URL,
+            timeout=30,
+            session=_session(),
+            logger=_SDK_LOGGER,
+            retry_handlers=[],
+        )
 
 
 def slack_retry_after(exc: Exception) -> str | None:

@@ -333,6 +333,15 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 
 @pytest.fixture(autouse=True)
+async def _close_slack_session() -> AsyncIterator[None]:
+    """Each test runs on its own event loop, which takes its Slack session down with it."""
+    from openswe.slack.http import close_session
+
+    yield
+    await close_session()
+
+
+@pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
     """Keep the process-global caches from leaking settings and MCP catalogs between tests."""
     from langgraph_api import cache

@@ -7,7 +7,7 @@ from openswe.slack.client import remove_slack_reaction
 from tests.support.slack_api import SlackAPI, slack_api_server
 
 
-async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):
+async def test_sdk_session_survives_a_rate_limit_and_is_reused(monkeypatch):
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-token")
     with slack_api_server() as api:
         monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url, raising=False)
@@ -22,7 +22,9 @@ async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):
         assert api.calls == [
             ("chat.postMessage", {"channel": "C1", "text": "Hello", "thread_ts": "1.0"})
         ]
-        assert session.closed
+        async with http.SlackClient.bot() as client:
+            assert client.session is session
+        assert session is not None and not session.closed
 
 
 async def test_removing_an_absent_reaction_is_already_settled(slack_api: SlackAPI) -> None:

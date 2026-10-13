@@ -24,6 +24,7 @@ from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.remote_runtime import server as remote_runtime_server
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
+from openswe.slack.http import close_session as close_slack_session
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
 from openswe.threads.workflow_approval_api import workflow_approval_router
@@ -172,6 +173,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await transcript_listener.stop()
         await LISTENER.stop()
         await stop_worker()
+        await close_slack_session()
         await database.close()
 
 
