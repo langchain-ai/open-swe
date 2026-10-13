@@ -17,4 +17,5 @@ dependencies = [
 ]
 
 [tool.mda]
-python-version = "3.14"
+# bsdiff4 (via langchain-quickjs) has no 3.14 wheels and MDA build images have no compiler: langchain-ai/deepagents#6878.
+python-version = "3.13"
