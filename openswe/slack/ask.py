@@ -29,7 +29,7 @@ from openswe.slack.client import (
     remove_slack_reaction,
     replace_slack_command_message,
 )
-from openswe.slack.parsed_message import SlackAction
+from openswe.slack.parsed_message import EmbeddedCommand
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
 from openswe.slack.thinking import settle_slack_thread_status
 from openswe.slack.webhook import workspace_scoped_default_repo
@@ -41,7 +41,7 @@ from openswe.workspaces.routing import resolve_workspace
 logger = logging.getLogger(__name__)
 
 ASK_COMMAND = "/oswe"
-BY_THE_WAY_COMMAND = SlackAction.BY_THE_WAY.value
+BY_THE_WAY_COMMAND = EmbeddedCommand.BY_THE_WAY.value
 _CONTEXT_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_context)", re.IGNORECASE)
 MAX_QUESTION_CHARS = 2000
 CHANNEL_CONTEXT_MESSAGE_LIMIT = 30

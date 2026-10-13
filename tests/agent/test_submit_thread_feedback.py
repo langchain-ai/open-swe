@@ -10,7 +10,7 @@ from langchain_core.tools import tool as make_tool
 from openswe.thread_feedback import Feedback, feedback_store
 from openswe.tools.submit_thread_feedback import submit_thread_feedback
 
-tool = importlib.import_module("openswe.tools.submit_thread_feedback")
+store = importlib.import_module("openswe.thread_feedback")
 
 
 @pytest.fixture
@@ -21,10 +21,10 @@ async def context(fake_store: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncMock
     async def unlocked(*args: object, **kwargs: object):
         yield
 
-    monkeypatch.setattr(tool, "agent_thread_pr_state_lock", unlocked)
-    monkeypatch.setattr(tool, "langgraph_client", lambda: None)
-    monkeypatch.setattr(tool, "create_langsmith_thread_feedback", export)
-    monkeypatch.setattr(tool, "record_feedback_submission", AsyncMock())
+    monkeypatch.setattr(store, "agent_thread_pr_state_lock", unlocked)
+    monkeypatch.setattr(store, "langgraph_client", lambda: None)
+    monkeypatch.setattr(store, "create_langsmith_thread_feedback", export)
+    monkeypatch.setattr(store, "record_feedback_submission", AsyncMock())
     return export
 
 
@@ -67,7 +67,7 @@ async def test_submits_explicit_feedback_with_run_context(context: AsyncMock) ->
             "model_route": "performance",
         },
     )
-    tool.record_feedback_submission.assert_awaited_once_with(
+    store.record_feedback_submission.assert_awaited_once_with(
         feedback_key="thread:thread-1",
         rating=1,
         source="unknown",
