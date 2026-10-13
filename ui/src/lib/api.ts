@@ -464,12 +464,17 @@ export interface ManagedToolsMissingCredential {
   kind: "oauth" | "secret"
 }
 
+export interface ManagedToolsConnectedService {
+  name: string
+  tool_count: number
+}
+
 export interface ManagedToolsGatewayStatus {
   gateway: ManagedToolsGateway
-  workspaces: string[]
   ready: boolean
   tool_count?: number | null
   missing: ManagedToolsMissingCredential[]
+  connected?: ManagedToolsConnectedService[]
   /** LangSmith offers no tools until every missing service is connected. */
   all_required: boolean
 }

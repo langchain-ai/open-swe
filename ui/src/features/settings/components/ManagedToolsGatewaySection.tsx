@@ -1,29 +1,27 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Select } from "@langchain/macaw-components/Select"
 
 import { SettingsSection } from "@/components/AppShell"
 import {
+  INSTANCE_SCOPE,
   useScopedSettings,
-  type SettingsScope,
 } from "@/features/settings/lib/settingsScope"
 import { api } from "@/lib/api"
+import { MANAGED_TOOLS_KEY } from "./ManagedToolsSection"
 import { TierRow } from "./WorkspaceSettingsSections"
 
 const NONE = "none"
 
-/** Admins pick the LangSmith Managed Tools gateway this workspace's private threads load. */
-export function ManagedToolsGatewaySection({
-  scope,
-  canEdit,
-}: {
-  scope: SettingsScope
-  canEdit: boolean
-}) {
-  const settings = useScopedSettings(scope)
+/** Instance admins pick the LangSmith Managed Tools gateway every private thread loads. */
+export function ManagedToolsGatewaySection() {
+  const qc = useQueryClient()
+  // Everyone's Connections page lists the picked gateway's services, so re-read it.
+  const settings = useScopedSettings(INSTANCE_SCOPE, () => {
+    void qc.invalidateQueries({ queryKey: MANAGED_TOOLS_KEY })
+  })
   const gateways = useQuery({
     queryKey: ["managedToolsGateways"],
     queryFn: api.listManagedToolsGateways,
-    enabled: canEdit,
     retry: false,
   })
   const current = settings.data?.managed_tools_gateway_id ?? null
@@ -42,7 +40,7 @@ export function ManagedToolsGatewaySection({
   return (
     <SettingsSection
       title="Managed Tools"
-      description="Pick a LangSmith Managed Tools gateway. Private threads in this workspace offer its tools, called with each person's own LangSmith connection; they never load in threads other people can prompt. Build and edit gateways under LangSmith Settings > Tools."
+      description="Pick a LangSmith Managed Tools gateway. Private threads in every workspace offer its tools, called with each person's own LangSmith connection; they never load in threads other people can prompt. Build and edit gateways under LangSmith Settings > Tools."
     >
       <div className="divide-y divide-default">
         <TierRow
@@ -65,7 +63,7 @@ export function ManagedToolsGatewaySection({
                   managed_tools_gateway_id: next === NONE ? null : next,
                 })
               }
-              disabled={!canEdit || !settings.data || gateways.isLoading}
+              disabled={!settings.data || gateways.isLoading}
               triggerClassName="w-64"
             />
           }

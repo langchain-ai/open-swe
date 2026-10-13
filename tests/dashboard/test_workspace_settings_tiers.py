@@ -52,7 +52,7 @@ async def test_clearing_an_override_restores_inheritance(fake_store: FakeStore) 
 
 
 async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore) -> None:
-    """The TTL cache is process-global, so its keys must carry the workspace."""
+    """The settings cache is shared by every worker, so its keys must carry the workspace."""
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(org_guidelines="internal only", fable_enabled=True)
     )
@@ -72,6 +72,28 @@ async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore)
     assert (await workspace_settings_cache.cached_workspace_settings("default"))[
         "org_guidelines"
     ] == "internal only"
+
+
+async def test_a_save_reaches_cached_reads_at_once(fake_store: FakeStore) -> None:
+    """Saves replace the cache generation, so no reader waits out the TTL."""
+    assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
+        "org_guidelines"
+    ] is None
+    assert (await workspace_settings_cache.cached_instance_settings())["org_guidelines"] is None
+
+    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="internal only"))
+    assert (await workspace_settings_cache.cached_instance_settings())[
+        "org_guidelines"
+    ] == "internal only"
+    # A workspace inherits the instance, so its cached read moves too.
+    assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
+        "org_guidelines"
+    ] == "internal only"
+
+    await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(org_guidelines="be public"))
+    assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
+        "org_guidelines"
+    ] == "be public"
 
 
 async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(

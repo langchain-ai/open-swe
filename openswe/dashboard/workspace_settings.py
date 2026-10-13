@@ -95,7 +95,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
     # The LangSmith Managed Tools gateway private threads load with the owner's own
-    # LangSmith connection; unset means none.
+    # LangSmith connection; unset means none. Only the instance record's value is read.
     managed_tools_gateway_id: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -546,6 +546,7 @@ async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str,
     changes = await _settings_changes(value)
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
     _bind_settings_changes(changes)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
     return value
 
@@ -568,6 +569,7 @@ async def upsert_workspace_overrides(
     _bind_settings_changes(changes, workspace=slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
     return await workspace_settings_view(slug)
 
@@ -577,6 +579,7 @@ async def delete_workspace_settings(slug: str) -> None:
     await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
 
 
@@ -786,6 +789,13 @@ class WorkspaceSettings(Mapping[str, Any]):
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
+
+
+async def _forget_cached_settings() -> None:
+    # The cache module imports this one, so it is imported here.
+    from openswe.dashboard.workspace_settings_cache import forget_cached_settings
+
+    await forget_cached_settings()
 
 
 router = APIRouter(tags=["settings"])
