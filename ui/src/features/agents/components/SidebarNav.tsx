@@ -2,11 +2,9 @@ import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
@@ -17,6 +15,7 @@ import { SirenIcon } from "@phosphor-icons/react/dist/ssr/Siren"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { Link, useRouterState } from "@tanstack/react-router"
 
+import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
@@ -84,7 +83,7 @@ export function SidebarNav({
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" className="w-48">
           {hidden.map((item) => (
-            <DropdownMenuItem key={item.to} asChild className="gap-space-2">
+            <DropdownMenuItem key={item.to} asChild>
               <Link {...target(item.to)} onClick={onNavigate}>
                 <item.icon size={14} weight="regular" className="shrink-0" />
                 {item.label}
@@ -93,7 +92,7 @@ export function SidebarNav({
           ))}
           {hidden.length > 0 && <DropdownMenuSeparator />}
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="gap-space-2">
+            <DropdownMenuSubTrigger>
               <PencilSimpleIcon size={14} weight="regular" />
               Edit sidebar
               <CaretRightIcon

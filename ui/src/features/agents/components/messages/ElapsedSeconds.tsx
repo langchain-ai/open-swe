@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react"
 
+import { formatElapsed } from "@/lib/utils"
+
 export function ElapsedSeconds() {
   const [seconds, setSeconds] = useState(0)
 
@@ -13,7 +15,7 @@ export function ElapsedSeconds() {
 
   return (
     <span aria-hidden className="text-xs text-secondary tabular-nums">
-      {seconds}s
+      {seconds === 0 ? "0s" : formatElapsed(seconds * 1000)}
     </span>
   )
 }

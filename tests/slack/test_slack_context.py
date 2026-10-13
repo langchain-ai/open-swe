@@ -350,12 +350,25 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(slack_webhooks, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(webhook_common.User, "login_for_slack", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common.User, "login_for_email", fake_login_for_email)
+
+    async def fake_slack_accounts(user_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+        # Follows whatever login_for_slack the test installs, as the per-user lookup did.
+        logins: dict[str, str] = {}
+        for user_id in {value for value in user_ids if value}:
+            if login := await webhook_common.User.login_for_slack(user_id):
+                logins[user_id] = login
+        return logins, {}
+
+    monkeypatch.setattr(slack_webhooks, "_slack_accounts_by_user_id", fake_slack_accounts)
     monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 
 
 @pytest.mark.asyncio
-async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fake_store):
+@pytest.mark.parametrize("model_choice", [None, ("anthropic:claude-opus-5-5", "max")])
+async def test_web_question_keeps_context_without_slack_delivery(
+    monkeypatch, fake_store, model_choice: tuple[str, str] | None
+):
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     persisted = AsyncMock(return_value=True)
@@ -374,13 +387,17 @@ async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fa
         bot_user_id="UBOT",
         context_thread_ts="1700000000.000100",
     )
-    assert await slack_webhooks.process_slack_web_mention(request, None)
+    assert await slack_webhooks.process_slack_web_mention(request, None, model_choice=model_choice)
     run = captured["run_create"]
     assert isinstance(run, dict)
     config = run["kwargs"]["config"]["configurable"]
     assert config["source"] == "web"
     assert "slack_thread" not in config
     assert "slack_breakout" not in config
+    if model_choice is not None:
+        assert config["agent_model_id"] == model_choice[0]
+        assert config["agent_effort"] == model_choice[1]
+        assert config["model_selection"] == "explicit"
     assert persisted.await_args.kwargs["visibility"] == "private"
     assert persisted.await_args.kwargs["source_context"] is None
     messages = str(run["kwargs"]["input"])

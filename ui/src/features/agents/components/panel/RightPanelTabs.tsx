@@ -8,13 +8,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ContextMenu,
   ContextMenuContent,
-  ContextMenuItem,
   ContextMenuTrigger,
 } from "@langchain/macaw-components/ContextMenu"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -31,6 +29,7 @@ import type {
   ReactNode,
 } from "react"
 
+import { ContextMenuItem, DropdownMenuItem } from "@/components/MenuItem"
 import type { RightPanelSurface } from "@/features/agents/lib/rightPanelStore"
 import type { RightPanelMode } from "@/features/agents/components/panel/RightPanelShell"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
@@ -128,7 +127,7 @@ function SurfaceMenuItem(props: {
       title={props.disabledReason}
     >
       <DropdownMenuItem
-        className="gap-space-2 text-xs data-[disabled]:pointer-events-auto"
+        className="text-xs data-[disabled]:pointer-events-auto"
         onSelect={props.onSelect}
         disabled={!props.available}
         aria-keyshortcuts={props.shortcut}

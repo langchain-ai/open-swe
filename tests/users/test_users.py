@@ -71,6 +71,8 @@ async def test_linking_slack_reaches_the_same_person_from_either_side() -> None:
     from_login = await User.for_login("github", "octocat")
     assert from_slack is not None and from_slack.id == github_user.id
     assert from_login is not None and from_login.id == github_user.id
+    by_slack_id = await User.for_identities("slack", ["U0123", "U_UNKNOWN", "1001"])
+    assert {key: user.github_login for key, user in by_slack_id.items()} == {"U0123": "OctoCat"}
     assert await _user_count() == 1
 
 

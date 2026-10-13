@@ -34,12 +34,14 @@ export function TurnFoldRow({
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
-        className="flex cursor-pointer items-center gap-space-1 rounded-md px-space-1 text-xs text-secondary tabular-nums transition-colors duration-normal select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
+        className="flex max-w-full cursor-pointer items-center gap-space-1 rounded-md px-space-1 text-left text-xs text-secondary tabular-nums transition-colors duration-normal select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       >
-        {active && <LoadingIndicator className="mr-space-1 size-3" />}
-        <span className={active ? "shimmer-text" : undefined}>{label}</span>
+        {active && <LoadingIndicator className="mr-space-1 size-3 shrink-0" />}
+        <span className={cn("min-w-0 truncate", active && "shimmer-text")}>
+          {label}
+        </span>
         {active && <ElapsedSeconds />}
-        <Caret size={12} weight="bold" aria-hidden />
+        <Caret size={12} weight="bold" aria-hidden className="shrink-0" />
       </button>
     </div>
   )

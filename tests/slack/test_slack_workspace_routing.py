@@ -8,6 +8,7 @@ itself.
 """
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -57,6 +58,11 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
         return None
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(
+        webhook_common.ThreadRecord,
+        "read",
+        AsyncMock(return_value=webhook_common.ThreadRecord(exists=False, metadata={})),
+    )
     monkeypatch.setattr(webhook_common, "fetch_slack_thread_messages", fake_thread_messages)
     monkeypatch.setattr(webhook_common, "fetch_image_block", no_image_block)
 
@@ -111,6 +117,11 @@ async def test_a_bound_channel_outranks_a_named_repository(
         return False
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(
+        webhook_common.ThreadRecord,
+        "read",
+        AsyncMock(return_value=webhook_common.ThreadRecord(exists=False, metadata={})),
+    )
 
     await WORKSPACES.create(WorkspaceCreate(name="Internal", repos=["acme/internal"]), "alice")
     await WORKSPACES.create(

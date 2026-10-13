@@ -38,6 +38,8 @@ from openswe.threads.summary import (
     _thread_is_busy,
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from openswe.utils.thread_ops import langgraph_client, langgraph_url
@@ -99,6 +101,8 @@ async def stream_thread_events(
     headers = langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
     try:
+        # Its own client, not the shared pool: the stream stays open for as long as
+        # a tab watches the thread, and open tabs must not starve other requests.
         async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream("POST", url, content=body, headers=headers) as response:
                 if response.status_code >= 400:
@@ -161,11 +165,13 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
     principal: Principal | None = None,
+    relayed_from: str | None = None,
 ) -> tuple[int, bytes, str | None]:
     """Forward one command, enriched for whoever sent it.
 
     ``principal`` is how a machine gets in. Without one the sender is the person
     named by ``login``, which is what the dashboard and the agent's own tools pass.
+    ``relayed_from`` names the agent thread that sent it on that person's behalf.
     """
     received_at_ms = _now_ms()
     principal = principal or Principal.of_login(login, email)
@@ -211,6 +217,10 @@ async def proxy_dashboard_thread_commands(
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
     start_params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
+    start_params.pop(RELAYED_FROM_KEY, None)
+    if relayed_from and method == "run.start":
+        start_params[RELAYED_FROM_KEY] = relayed_from
+        parsed["params"] = start_params
     # The client's queue-or-steer choice rides the run's multitask strategy.
     # LangGraph's commands endpoint does not take it, so it is consumed here.
     enqueue = start_params.pop("multitask_strategy", None) == "enqueue"
@@ -277,7 +287,9 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
-    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+    ) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
     try:
@@ -298,7 +310,7 @@ async def proxy_dashboard_thread_commands(
             return 200, json.dumps(requeued).encode(), "application/json"
         if response.status_code >= 400:
             await _fail_requested_turn(thread_id, enriched)
-    if run_start_succeeded and not creating:
+    if run_start_succeeded and not creating and not relayed_from:
         try:
             await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
         except Exception:
@@ -400,7 +412,9 @@ async def proxy_dashboard_thread_history(
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = langgraph_proxy_headers(content_type=content_type)
-    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+    ) as client:
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
@@ -433,7 +447,9 @@ async def proxy_dashboard_thread_runs_list(
         params.append(("status", status))
     for field in select or []:
         params.append(("select", field))
-    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+    ) as client:
         response = await client.get(url, headers=headers, params=params)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
@@ -539,7 +555,9 @@ async def proxy_dashboard_thread_run_cancel(
         raise HTTPException(403, "only its sender can withdraw a queued follow-up")
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = langgraph_proxy_headers()
-    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+    ) as client:
         response = await client.post(
             url,
             headers=headers,
