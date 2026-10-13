@@ -51,15 +51,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
-    from openswe.database.store_imports import drain_store_imports, run_store_import
+    from openswe.database.store_imports import run_store_import
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
-    from openswe.thread_feedback import FEEDBACK
-    from openswe.threads.blobs import import_store_blobs
+    from openswe.thread_feedback import run_feedback_import
+    from openswe.threads.blobs import run_blob_import
     from openswe.threads.pins import import_store_pins
-    from openswe.threads.plan_store import import_store_plans
+    from openswe.threads.plan_store import run_plan_import
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
@@ -135,16 +135,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await delete_analyzer_crons()
     except Exception:  # noqa: BLE001
         logger.exception("Deleting review-style analyzer crons failed")
-    # Thread-keyed content can be large, so it drains from the Store in the background.
-    store_imports = asyncio.create_task(
-        drain_store_imports(
-            {
-                "thread_feedback": FEEDBACK.import_store,
-                "plans": import_store_plans,
-                "thread_blobs": import_store_blobs,
-            }
-        )
-    )
+    blob_import = asyncio.create_task(run_blob_import())
+    plan_import = asyncio.create_task(run_plan_import())
+    feedback_import = asyncio.create_task(run_feedback_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -186,7 +179,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
     finally:
-        store_imports.cancel()
+        blob_import.cancel()
+        plan_import.cancel()
+        feedback_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()

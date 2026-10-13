@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.tools import tool as make_tool
 
-from openswe.thread_feedback import FEEDBACK, FEEDBACK_STORE_NAMESPACE, Feedback
+from openswe.thread_feedback import FEEDBACK, LEGACY_FEEDBACK_NAMESPACE, Feedback
 from openswe.tools.submit_thread_feedback import submit_thread_feedback
 from tests.conftest import FakeStore
 
@@ -107,11 +107,11 @@ async def test_store_import_keeps_postgres_feedback_unless_the_store_holds_the_a
     answered = Feedback(status="completed", rating="good", event_id="answer:old")
     stale = Feedback(status="ready", event_id="answer:old")
     for thread_id, record in (("answered", answered), ("pending", stale), ("legacy", stale)):
-        fake_store.seed(FEEDBACK_STORE_NAMESPACE, thread_id, record.model_dump())
+        fake_store.seed(LEGACY_FEEDBACK_NAMESPACE, thread_id, record.model_dump())
 
     await FEEDBACK.import_store()
 
     assert await FEEDBACK.get("answered") == answered
     assert await FEEDBACK.get("pending") == newer
     assert await FEEDBACK.get("legacy") == stale
-    assert fake_store.values(FEEDBACK_STORE_NAMESPACE) == {}
+    assert fake_store.values(LEGACY_FEEDBACK_NAMESPACE) == {}

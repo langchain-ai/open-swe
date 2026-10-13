@@ -20,15 +20,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.database.store_imports import StoreImport
+from openswe.database.store_imports import StoreImport, run_store_import
 from openswe.store import StoreEntry, delete_value, get_value, search_entries
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-PLAN_CONTENT_NAMESPACE = ["plan", "content"]
-PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
-PLAN_DISMISSED_NAMESPACE = ["plan", "dismissed"]
+LEGACY_PLAN_CONTENT_NAMESPACE = ["plan", "content"]
+LEGACY_PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
+LEGACY_PLAN_DISMISSED_NAMESPACE = ["plan", "dismissed"]
 
 
 class ThreadPlan(Base):
@@ -250,6 +250,14 @@ async def _merge_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> No
         )
 
 
+async def run_plan_import() -> None:
+    """Drain plans from the Store in the background, so a backlog never delays startup."""
+    try:
+        await run_store_import("plans", import_store_plans)
+    except Exception:
+        logger.exception("Importing plans from the LangGraph Store failed")
+
+
 async def import_store_plans() -> StoreImport:
     """Move plans, their comments, and dismissals from the LangGraph Store into PostgreSQL.
 
@@ -258,20 +266,20 @@ async def import_store_plans() -> StoreImport:
     where it stopped.
     """
     moved = 0
-    while page := await search_entries(PLAN_CONTENT_NAMESPACE):
+    while page := await search_entries(LEGACY_PLAN_CONTENT_NAMESPACE):
         for entry in page:
             await _import_plan(entry)
         moved += len(page)
-    while page := await search_entries(PLAN_COMMENTS_NAMESPACE):
+    while page := await search_entries(LEGACY_PLAN_COMMENTS_NAMESPACE):
         for entry in page:
             await _import_comment(
-                _entry_thread_id(entry, PLAN_COMMENTS_NAMESPACE), entry, keep=True
+                _entry_thread_id(entry, LEGACY_PLAN_COMMENTS_NAMESPACE), entry, keep=True
             )
         moved += len(page)
-    while page := await search_entries(PLAN_DISMISSED_NAMESPACE):
+    while page := await search_entries(LEGACY_PLAN_DISMISSED_NAMESPACE):
         for entry in page:
             await _import_dismissal(entry.key, entry.value)
-            await delete_value(entry.namespace or PLAN_DISMISSED_NAMESPACE, entry.key)
+            await delete_value(entry.namespace or LEGACY_PLAN_DISMISSED_NAMESPACE, entry.key)
         moved += len(page)
     return StoreImport(moved=moved)
 
@@ -295,14 +303,14 @@ async def _import_plan(entry: StoreEntry) -> None:
         )
     revision = entry.value.get("revision")
     same_revision = current == (revision if isinstance(revision, str) else None)
-    comments_namespace = [*PLAN_COMMENTS_NAMESPACE, thread_id]
+    comments_namespace = [*LEGACY_PLAN_COMMENTS_NAMESPACE, thread_id]
     while page := await search_entries(comments_namespace):
         for comment in page:
             await _import_comment(thread_id, comment, keep=same_revision)
-    if dismissal := await get_value(PLAN_DISMISSED_NAMESPACE, thread_id):
+    if dismissal := await get_value(LEGACY_PLAN_DISMISSED_NAMESPACE, thread_id):
         await _import_dismissal(thread_id, dismissal)
-        await delete_value(PLAN_DISMISSED_NAMESPACE, thread_id)
-    await delete_value(entry.namespace or PLAN_CONTENT_NAMESPACE, thread_id)
+        await delete_value(LEGACY_PLAN_DISMISSED_NAMESPACE, thread_id)
+    await delete_value(entry.namespace or LEGACY_PLAN_CONTENT_NAMESPACE, thread_id)
 
 
 async def _import_comment(thread_id: str, entry: StoreEntry, *, keep: bool) -> None:
@@ -314,7 +322,7 @@ async def _import_comment(thread_id: str, entry: StoreEntry, *, keep: bool) -> N
                 .values(_legacy_comment_row(thread_id, entry.key, entry.value))
                 .on_conflict_do_nothing()
             )
-    await delete_value(entry.namespace or [*PLAN_COMMENTS_NAMESPACE, thread_id], entry.key)
+    await delete_value(entry.namespace or [*LEGACY_PLAN_COMMENTS_NAMESPACE, thread_id], entry.key)
 
 
 def _legacy_comment_row(thread_id: str, key: str, value: dict[str, Any]) -> dict[str, object]:

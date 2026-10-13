@@ -16,7 +16,7 @@ from openswe.users.records import UnknownUser, user_id_for_login
 
 logger = logging.getLogger(__name__)
 
-THREAD_PINS_NAMESPACE = "thread_pins"
+LEGACY_THREAD_PINS_NAMESPACE = "thread_pins"
 
 
 class ThreadPin(Base):
@@ -65,7 +65,7 @@ async def import_store_pins() -> StoreImport:
     A pin whose login has no ``users`` row stays in the Store for the next startup.
     """
     moved = waiting = 0
-    for entry in await search_all_entries([THREAD_PINS_NAMESPACE]):
+    for entry in await search_all_entries([LEGACY_THREAD_PINS_NAMESPACE]):
         namespace = entry.namespace
         if namespace is None or len(namespace) != 2:
             logger.warning(

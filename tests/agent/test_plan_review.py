@@ -6,9 +6,9 @@ from fastapi import HTTPException
 
 from openswe.database import postgres
 from openswe.threads.plan_store import (
-    PLAN_COMMENTS_NAMESPACE,
-    PLAN_CONTENT_NAMESPACE,
-    PLAN_DISMISSED_NAMESPACE,
+    LEGACY_PLAN_COMMENTS_NAMESPACE,
+    LEGACY_PLAN_CONTENT_NAMESPACE,
+    LEGACY_PLAN_DISMISSED_NAMESPACE,
     ThreadPlan,
     get_plan_content,
     import_store_plans,
@@ -226,9 +226,11 @@ async def test_store_import_keeps_newer_postgres_plans_and_is_idempotent(
         "created_at": "2026-09-01T00:00:00+00:00",
     }
     for thread_id in ("moved", "republished"):
-        fake_store.seed(PLAN_CONTENT_NAMESPACE, thread_id, {"html": "<p>old</p>", "revision": "r1"})
-        fake_store.seed([*PLAN_COMMENTS_NAMESPACE, thread_id], "c1", {**comment, "id": "c1"})
-        fake_store.seed(PLAN_DISMISSED_NAMESPACE, thread_id, {"revision": "r1"})
+        fake_store.seed(
+            LEGACY_PLAN_CONTENT_NAMESPACE, thread_id, {"html": "<p>old</p>", "revision": "r1"}
+        )
+        fake_store.seed([*LEGACY_PLAN_COMMENTS_NAMESPACE, thread_id], "c1", {**comment, "id": "c1"})
+        fake_store.seed(LEGACY_PLAN_DISMISSED_NAMESPACE, thread_id, {"revision": "r1"})
     await _seed_plan("republished", {"html": "<p>new</p>", "revision": "r2"})
 
     await import_store_plans()

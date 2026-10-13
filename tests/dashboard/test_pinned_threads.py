@@ -147,7 +147,9 @@ async def test_store_import_moves_known_peoples_pins_and_keeps_the_rest_waiting(
 ) -> None:
     await pins.pin_thread("alice", "kept")
     for login in ("alice", "carol"):
-        fake_store.seed([pins.THREAD_PINS_NAMESPACE, login], "legacy", {"thread_id": "legacy"})
+        fake_store.seed(
+            [pins.LEGACY_THREAD_PINS_NAMESPACE, login], "legacy", {"thread_id": "legacy"}
+        )
 
     async def search_all_entries(namespace: Sequence[str]) -> list[StoreEntry]:
         return [
@@ -162,5 +164,5 @@ async def test_store_import_moves_known_peoples_pins_and_keeps_the_rest_waiting(
     assert await pins.import_store_pins() == StoreImport(moved=1, waiting=1)
     assert await pins.import_store_pins() == StoreImport(waiting=1)
     assert await pins.list_thread_pin_ids("alice") == ["kept", "legacy"]
-    assert list(fake_store.values([pins.THREAD_PINS_NAMESPACE, "alice"])) == []
-    assert list(fake_store.values([pins.THREAD_PINS_NAMESPACE, "carol"])) == ["legacy"]
+    assert list(fake_store.values([pins.LEGACY_THREAD_PINS_NAMESPACE, "alice"])) == []
+    assert list(fake_store.values([pins.LEGACY_THREAD_PINS_NAMESPACE, "carol"])) == ["legacy"]
