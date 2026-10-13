@@ -208,7 +208,18 @@ async def _stale_reply_guard(
         return None
     client = get_langgraph_client()
     namespace = ("slack_reply_freshness", run_id)
-    item = await client.store.get_item(namespace, "progress")
+    try:
+        item = await client.store.get_item(namespace, "progress")
+    except Exception as exc:
+        status = getattr(exc, "status_code", None)
+        if not isinstance(status, int) or not 500 <= status < 600:
+            raise
+        logger.warning(
+            "Could not read Slack reply freshness",
+            extra={"run_id": run_id, "channel_id": channel_id, "thread_ts": thread_ts},
+            exc_info=True,
+        )
+        return None
     progress = item.get("value", {}) if item else {}
     stored_seen = progress.get("seen", [])
     seen = (

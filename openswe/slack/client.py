@@ -9,19 +9,23 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterable, Mapping
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx2
 from langgraph_sdk.client import LangGraphClient
-from langgraph_sdk.errors import ConflictError
+from langgraph_sdk.errors import APIConnectionError, ConflictError, NotFoundError
 from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
+from sqlalchemy import text
 
 from openswe.config import ENV
+from openswe.database import postgres
 from openswe.slack.http import (
     SLACK_REQUEST_ERRORS,
     SlackClient,
@@ -60,6 +64,7 @@ SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
 _SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES = 1
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.05
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
+_SLACK_THREAD_MUTATION_LOCK_CLOCK_SKEW_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -1546,6 +1551,89 @@ async def fetch_slack_thread_messages(
     return messages
 
 
+@dataclass
+class _SlackThreadMutationLock:
+    client: LangGraphClient
+    lock_id: str
+    owner: str = dataclass_field(default_factory=lambda: str(uuid.uuid4()))
+
+    async def acquire(self) -> None:
+        while True:
+            try:
+                await create_lock_thread(
+                    self.client,
+                    self.lock_id,
+                    ttl_minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES,
+                    metadata={
+                        "lock_owner": self.owner,
+                        "lock_expires_at": (
+                            datetime.now(UTC)
+                            + timedelta(minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES)
+                        ).isoformat(),
+                    },
+                )
+                return
+            except ConflictError:
+                try:
+                    existing = await self.client.threads.get(self.lock_id)
+                    if self.expired(existing):
+                        await self.client.threads.delete(self.lock_id)
+                        continue
+                except NotFoundError:
+                    continue
+                await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
+
+    def expired(self, thread: Mapping[str, object]) -> bool:
+        metadata = thread.get("metadata")
+        expiry = metadata.get("lock_expires_at") if isinstance(metadata, Mapping) else None
+        legacy = expiry is None
+        value = thread.get("created_at") if legacy else expiry
+        if not isinstance(value, (str, datetime)):
+            return False
+        try:
+            expires_at = datetime.fromisoformat(value) if isinstance(value, str) else value
+        except ValueError:
+            logger.warning("Invalid Slack thread lock expiry", extra={"lock_id": self.lock_id})
+            return False
+        if expires_at.tzinfo is None:
+            return False
+        if legacy:
+            expires_at += timedelta(minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES)
+        return datetime.now(UTC) >= expires_at + timedelta(
+            seconds=_SLACK_THREAD_MUTATION_LOCK_CLOCK_SKEW_SECONDS
+        )
+
+    async def release(self) -> None:
+        for attempt in range(3):
+            try:
+                existing = await self.client.threads.get(self.lock_id)
+                metadata = existing.get("metadata") or {}
+                if metadata.get("lock_owner") != self.owner:
+                    return
+                await self.client.threads.delete(self.lock_id)
+                return
+            except NotFoundError:
+                return
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                transient = isinstance(exc, (APIConnectionError, httpx2.RequestError)) or (
+                    isinstance(status, int) and 500 <= status < 600
+                )
+                if not transient or attempt == 2:
+                    logger.warning(
+                        "Failed to release Slack thread mutation lock",
+                        extra={"lock_id": self.lock_id},
+                        exc_info=True,
+                    )
+                    return
+                logger.warning(
+                    "Retrying Slack thread mutation lock release",
+                    extra={"lock_id": self.lock_id, "attempt": attempt + 1},
+                    exc_info=True,
+                )
+                await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS * (attempt + 1))
+
+
 @asynccontextmanager
 async def slack_thread_mutation_lock(
     langgraph_client: LangGraphClient,
@@ -1562,28 +1650,23 @@ async def slack_thread_mutation_lock(
         lock_key += f":{purpose}"
     lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, lock_key))
     deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
-    while True:
+    lock = _SlackThreadMutationLock(langgraph_client, lock_id)
+    async with AsyncExitStack() as stack:
         try:
-            await create_lock_thread(
-                langgraph_client, lock_id, ttl_minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES
-            )
-            break
-        except ConflictError:
-            if asyncio.get_running_loop().time() >= deadline:
-                raise TimeoutError("Timed out waiting for the Slack thread mutation lock") from None
-            await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
-    try:
-        yield await get_active_slack_thread(langgraph_client, thread_id) if thread_id else None
-    finally:
+            async with asyncio.timeout_at(deadline):
+                conn = await stack.enter_async_context(postgres.transaction())
+                # Hold through release: a live holder must not be reclaimed when its TTL elapses.
+                await conn.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
+                    {"subject": lock_key},
+                )
+                await lock.acquire()
+        except TimeoutError:
+            raise TimeoutError("Timed out waiting for the Slack thread mutation lock") from None
         try:
-            await langgraph_client.threads.delete(lock_id)
-        except Exception:
-            logger.warning(
-                "Failed to release Slack thread mutation lock for %s/%s",
-                channel,
-                timestamp,
-                exc_info=True,
-            )
+            yield await get_active_slack_thread(langgraph_client, thread_id) if thread_id else None
+        finally:
+            await lock.release()
 
 
 async def fetch_slack_thread_message_by_ts(

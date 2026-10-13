@@ -194,6 +194,68 @@ async def test_freshness_conflicts_survive_offloaded_results(
     )
 
 
+async def test_freshness_store_5xx_allows_reply_and_releases_lock(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import httpx2
+    from langchain_core.messages import HumanMessage
+    from langgraph_sdk.errors import InternalServerError
+
+    from openswe.slack.client import slack_thread_mutation_lock
+    from tests.slack.test_slack_thread_mapping import _Client, patch_mutation_transactions
+
+    patch_mutation_transactions(monkeypatch)
+    client = _Client()
+    get_item = client.store.get_item
+
+    async def unavailable_progress(namespace: tuple[str, ...], key: str) -> object:
+        if namespace[0] == "slack_reply_freshness":
+            response = httpx2.Response(503, request=httpx2.Request("GET", "http://test/store"))
+            raise InternalServerError("unavailable", response=response, body=None)
+        return await get_item(namespace, key)
+
+    monkeypatch.setattr(client.store, "get_item", unavailable_progress)
+    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: {**_config(), "run_id": "run-1"})
+    monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", slack_thread_mutation_lock)
+
+    async def post(*_args: object, **_kwargs: object) -> str:
+        assert len(client.threads.lock_ids) == 1
+        return "2.0"
+
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    state = {
+        "messages": [HumanMessage(content='<input-message timestamp="1.0">hi</input-message>')]
+    }
+    for _attempt in range(2):
+        assert await slack_reply_tool.slack_reply("The answer", "final", state=state) == {
+            "success": True,
+            "message_ts": "2.0",
+        }
+        assert not client.threads.lock_ids
+    assert "Could not read Slack reply freshness" in caplog.text
+
+
+async def test_freshness_store_permission_error_is_not_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx2
+    from langgraph_sdk.errors import PermissionDeniedError
+
+    from tests.slack.test_slack_thread_mapping import _Client
+
+    client = _Client()
+    response = httpx2.Response(403, request=httpx2.Request("GET", "http://test/store"))
+    monkeypatch.setattr(
+        client.store,
+        "get_item",
+        AsyncMock(side_effect=PermissionDeniedError("forbidden", response=response, body=None)),
+    )
+    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
+    with pytest.raises(PermissionDeniedError):
+        await slack_reply_tool._stale_reply_guard({"messages": []}, "C1", "1.0", "run-1")
+
+
 async def test_code_channel_reply_stays_in_user_started_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
