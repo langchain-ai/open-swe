@@ -2,7 +2,7 @@ import pytest
 
 from openswe.baby_sit import WATCHES, BabySitWatch
 from openswe.database.store_imports import StoreImport
-from openswe.review.assessment_feedback import PublishedAssessment, import_store_assessments
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from openswe.review.import_records import import_review_records
 from openswe.review.styles import REVIEW_STYLES, ReviewStylePromptUpdate
@@ -85,7 +85,7 @@ async def test_assessments_drain_from_the_store(fake_store: FakeStore) -> None:
             ).model_dump(mode="json"),
         )
 
-    assert await import_store_assessments() == StoreImport(moved=2)
+    assert await PublishedAssessment.import_store() == StoreImport(moved=2)
 
     assessment = await PublishedAssessment.get(2)
     assert assessment is not None and assessment.review_id == 2

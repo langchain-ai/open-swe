@@ -21,9 +21,7 @@ from openswe.review.approvals import fetch_approvals_md
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
-    get_feedback,
-    require_assessment_access,
-    save_feedback,
+    PublishedAssessment,
 )
 from openswe.review.chat import (
     ReviewChat,
@@ -220,8 +218,8 @@ async def get_assessment_feedback(
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback | None:
     login = str(session["sub"])
-    await require_assessment_access(owner, repo, pr_number, review_id, login)
-    return await get_feedback(review_id, login)
+    assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
+    return await assessment.feedback_from(login)
 
 
 @router.put("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
@@ -234,7 +232,9 @@ async def submit_assessment_feedback(
     submission: FeedbackSubmission,
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback:
-    return await save_feedback(owner, repo, pr_number, review_id, str(session["sub"]), submission)
+    login = str(session["sub"])
+    assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
+    return await assessment.record_feedback(login, submission)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/preview")

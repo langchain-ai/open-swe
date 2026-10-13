@@ -101,7 +101,8 @@ class BabySitState(BaseModel):
 class BabySitWatch(BabySitState):
     key: str
     task_id: UUID | None = None
-    # The coordinator of the pull request's task: the thread the watch wakes.
+    # The thread the watch wakes: the starting thread until it joins a task,
+    # then that task's coordinator.
     thread_id: str = ""
     owner: str = ""
     repo: str = ""
@@ -110,6 +111,17 @@ class BabySitWatch(BabySitState):
 
     def state(self) -> JsonObject:
         return self.model_dump(mode="json", include=set(BabySitState.model_fields))
+
+    async def join_task(self, *, title: str) -> None:
+        """Join the starting thread's task, making it a new task's coordinator when it has none."""
+        workspace = self.run_config.get("workspace") or self.run_config.get("environment")
+        resolution = await resolve_workspace(
+            thread_workspace=workspace if isinstance(workspace, str) else None,
+            repo=(self.owner, self.repo),
+        )
+        task = await Task.for_thread(self.thread_id, title=title, workspace=resolution.slug)
+        self.task_id = task.id
+        self.thread_id = task.require_coordinator()
 
     async def belongs_to(self, thread_id: str) -> bool:
         """Whether ``thread_id`` is part of the task this watch works for."""
@@ -199,8 +211,7 @@ class BabySitWatches:
             try:
                 watch = BabySitWatch.model_validate(entry.value)
                 if watch.thread_id and await self.get(watch.key) is None:
-                    task = await _task_for(watch, title=watch.pr_url)
-                    watch.task_id = task.id
+                    await watch.join_task(title=watch.pr_url)
                     await self.save(watch)
             except ValueError:
                 # Unreadable, or its thread's workspace is gone: one stale watch
@@ -265,16 +276,6 @@ class BabySitWatches:
 
 
 WATCHES = BabySitWatches()
-
-
-async def _task_for(watch: BabySitWatch, *, title: str) -> Task:
-    """The task of the thread starting ``watch``, created in the thread's workspace when missing."""
-    workspace = watch.run_config.get("workspace") or watch.run_config.get("environment")
-    resolution = await resolve_workspace(
-        thread_workspace=workspace if isinstance(workspace, str) else None,
-        repo=(watch.owner, watch.repo),
-    )
-    return await Task.for_thread(watch.thread_id, title=title, workspace=resolution.slug)
 
 
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
@@ -356,9 +357,7 @@ async def start_watch(
         created_at=existing.created_at if existing else now,
         updated_at=now,
     )
-    task = await _task_for(watch, title=title)
-    watch.task_id = task.id
-    watch.thread_id = task.require_coordinator()
+    await watch.join_task(title=title)
     watch = await WATCHES.save(watch)
     try:
         watch.cron_id = await _ensure_watch_cron(key)

@@ -10,7 +10,7 @@ cutover posts once more at most.
 
 from openswe.baby_sit import WATCHES
 from openswe.database.store_imports import StoreImport
-from openswe.review.assessment_feedback import import_store_feedback
+from openswe.review.assessment_feedback import AssessmentFeedback
 from openswe.review.enabled_repos import import_store_enabled_review_repos
 from openswe.review.styles import REVIEW_STYLES
 
@@ -19,6 +19,6 @@ async def import_review_records() -> StoreImport:
     return (
         await import_store_enabled_review_repos()
         + await REVIEW_STYLES.import_store()
-        + await import_store_feedback()
+        + await AssessmentFeedback.import_store()
         + await WATCHES.import_store()
     )
