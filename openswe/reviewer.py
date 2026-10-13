@@ -566,10 +566,35 @@ async def ensure_reviewer_sandbox_for_thread(
 
 
 class _ReviewCheckout(NamedTuple):
-    sandbox_backend: SandboxBackendProtocol | None
     work_dir: str
     repo_ready: bool
-    skill_sources: list[str]
+    sandbox_backend: SandboxBackendProtocol | None = None
+    skills_prompt: str | None = None
+
+
+async def _trusted_skills_prompt(
+    sandbox_backend: SandboxBackendProtocol,
+    sources: list[str],
+    runtime: Runtime,
+    config: RunnableConfig,
+) -> str | None:
+    """The skills section of the system prompt, listing the trusted skills in ``sources``."""
+    skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=sources)
+    skill_update = (
+        await skill_middleware.abefore_agent(cast(SkillsState, {}), runtime, config) or {}
+    )
+    if not skill_middleware.system_prompt_template:
+        return None
+    # Deepagents exposes no public formatter for the skills prompt sections.
+    return skill_middleware.system_prompt_template.format(
+        skills_locations=skill_middleware._format_skills_locations(),  # noqa: SLF001
+        skills_load_warnings=skill_middleware._format_skills_load_warnings(  # noqa: SLF001
+            skill_update.get("skills_load_errors", [])
+        ),
+        skills_list=skill_middleware._format_skills_list(  # noqa: SLF001
+            skill_update.get("skills_metadata", [])
+        ),
+    )
 
 
 class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
@@ -629,7 +654,7 @@ async def prepare_reviewer_run(
 
     async def _check_out() -> _ReviewCheckout:
         if remote_work_dir is not None:
-            return _ReviewCheckout(None, remote_work_dir, repo_ready=True, skill_sources=[])
+            return _ReviewCheckout(remote_work_dir, repo_ready=True)
         async with aphase(thread_id, "prepare.checkout"):
             try:
                 sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
@@ -650,12 +675,18 @@ async def prepare_reviewer_run(
                 pr_number=pr_number,
                 base_sha=base_sha,
             )
-            skill_sources: list[str] = []
+            skills_prompt = None
             if repo_ready and repo_name:
                 skill_sources = await materialize_trusted_skills(
                     sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
                 )
-            return _ReviewCheckout(sandbox_backend, work_dir, repo_ready, skill_sources)
+                if skill_sources:
+                    # Reading every SKILL.md takes seconds on skill-heavy repos;
+                    # here it overlaps the walkthrough wait.
+                    skills_prompt = await _trusted_skills_prompt(
+                        sandbox_backend, skill_sources, runtime, config
+                    )
+            return _ReviewCheckout(work_dir, repo_ready, sandbox_backend, skills_prompt)
 
     pr_url = cfg.pr_url or ""
     last_reviewed_sha = cfg.last_reviewed_sha or ""
@@ -885,7 +916,7 @@ async def prepare_reviewer_run(
         # A failed checkout must not leave the scout wait polling for minutes.
         for task in tasks:
             task.cancel()
-    sandbox_backend, work_dir, repo_ready, skill_sources = checkout
+    work_dir, repo_ready = checkout.work_dir, checkout.repo_ready
     pr_title, pr_body = pr_overview
 
     review_context = ""
@@ -956,34 +987,8 @@ async def prepare_reviewer_run(
     human_input_block = _format_human_input(walkthrough)
     if human_input_block:
         system_prompt = f"{system_prompt}\n\n{human_input_block}"
-    if skill_sources and sandbox_backend is not None:
-        skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
-        skill_update = (
-            await skill_middleware.abefore_agent(
-                cast(SkillsState, {}),
-                runtime,
-                config,
-            )
-            or {}
-        )
-        skill_request_state = {
-            "skills_metadata": skill_update.get("skills_metadata", []),
-            "skills_load_errors": skill_update.get("skills_load_errors", []),
-        }
-        # Deepagents exposes no public formatter for the skills prompt sections.
-        skills_locations = skill_middleware._format_skills_locations()  # noqa: SLF001
-        skills_list = skill_middleware._format_skills_list(  # noqa: SLF001
-            skill_request_state["skills_metadata"]
-        )
-        skills_load_warnings = skill_middleware._format_skills_load_warnings(  # noqa: SLF001
-            skill_request_state["skills_load_errors"]
-        )
-        if skill_middleware.system_prompt_template:
-            system_prompt = f"{system_prompt}\n\n" + skill_middleware.system_prompt_template.format(
-                skills_locations=skills_locations,
-                skills_load_warnings=skills_load_warnings,
-                skills_list=skills_list,
-            )
+    if checkout.skills_prompt:
+        system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
