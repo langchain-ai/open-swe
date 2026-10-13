@@ -56,24 +56,14 @@ class UnknownTool(LookupError):
 
 @cache
 def _exposed() -> dict[str, tuple[BaseTool, Access]]:
-    from langchain_core.tools import StructuredTool
-
     from openswe.prompts import apply_tool_descriptions
     from openswe.tools.mcp_exposure import EXPOSED_TOOLS
 
     for module in _TOOL_MODULES:
         import_module(module)
     names = list(EXPOSED_TOOLS)
-    functions = apply_tool_descriptions([func for func, _ in EXPOSED_TOOLS.values()], mcp=True)
-    return {
-        name: (
-            StructuredTool.from_function(
-                coroutine=func, name=name, description=func.__doc__ or name
-            ),
-            EXPOSED_TOOLS[name][1],
-        )
-        for name, func in zip(names, functions, strict=True)
-    }
+    tools = apply_tool_descriptions([func for func, _ in EXPOSED_TOOLS.values()], mcp=True)
+    return {name: (tool, EXPOSED_TOOLS[name][1]) for name, tool in zip(names, tools, strict=True)}
 
 
 @dataclass(frozen=True)

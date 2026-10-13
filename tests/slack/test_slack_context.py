@@ -350,6 +350,16 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(slack_webhooks, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(webhook_common.User, "login_for_slack", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common.User, "login_for_email", fake_login_for_email)
+
+    async def fake_slack_accounts(user_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+        # Follows whatever login_for_slack the test installs, as the per-user lookup did.
+        logins: dict[str, str] = {}
+        for user_id in {value for value in user_ids if value}:
+            if login := await webhook_common.User.login_for_slack(user_id):
+                logins[user_id] = login
+        return logins, {}
+
+    monkeypatch.setattr(slack_webhooks, "_slack_accounts_by_user_id", fake_slack_accounts)
     monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 

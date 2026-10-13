@@ -25,6 +25,7 @@ import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
+from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
@@ -67,6 +68,7 @@ from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
 from openswe.utils.thread_ops import langgraph_client
@@ -639,6 +641,10 @@ async def assign(
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
+    if not replace and not await PROFILES.allows_auto_human_review(
+        user.github_login or github_login
+    ):
+        return _failure(f"@{github_login} opted out of automatic review picks; pick someone else.")
     if (previous := request.participant(user.id)) is not None and previous.decision == "expired":
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
@@ -709,6 +715,8 @@ async def assign(
         dm_text = (
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
+        if not replace and (base := dashboard_base_url()):
+            dm_text += f" <{base}/my-settings/agent|Turn off automatic review picks>."
         origin = added.dm_origin
         sent = await send_dm_with_location(
             user.slack_user_id,
@@ -945,6 +953,13 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     states = await latest_review_states(pull, snapshot.author)
     if states is None:
         return False
+    await ReviewPicks(request).complete(
+        {
+            login.lower()
+            for login, state in states.items()
+            if state in {"APPROVED", "CHANGES_REQUESTED"}
+        }
+    )
     if request.kind == "posted":
         await _settle_posted(request, pull, snapshot, states)
         return True
@@ -1174,7 +1189,7 @@ async def _wake_picker(
             return False
         return True
     return await ReviewCard(request).notify_agent(
-        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}"
+        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}", unlisted=True
     )
 
 

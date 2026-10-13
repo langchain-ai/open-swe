@@ -154,6 +154,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
     try:
+        from openswe.server import warm_agent_build
+
+        warm_agent_build()
+    except Exception:  # noqa: BLE001
+        # Runs still build whatever is missing on first use, just more slowly.
+        logger.warning("Warming the agent build failed", exc_info=True)
+    try:
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(REMOTE_RUNTIME.lifespan())
             if AGENT_MCP is not None:

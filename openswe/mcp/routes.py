@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.oauth import frontend_base_url
-from openswe.mcp.cards import ConnectCard
+from openswe.mcp.cards import ConnectCard, connect_service
 from openswe.mcp.instance import (
     delete_instance_mcp,
     discover_instance_mcp,
@@ -23,7 +23,6 @@ from openswe.mcp.managed import (
     GatewayStatus,
     LangSmithNotConnected,
     ManagedToolsError,
-    connect_link,
     gateway_id,
     gateway_status,
     list_gateways,
@@ -310,7 +309,7 @@ async def api_connect_managed_tool(
         else:
             if gateway_id(gateway) not in await _gateway_workspaces():
                 raise HTTPException(404, "No workspace uses this gateway")
-            link = await connect_link(session["sub"], gateway, slug)
+            link = await connect_service(session["sub"], gateway, slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
     return ManagedConnectResponse(connected=link is None, url=link.url if link else None)

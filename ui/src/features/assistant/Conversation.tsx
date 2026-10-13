@@ -11,10 +11,8 @@ import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import { useAgentThreadPullRequestStatus } from "@/features/agents/lib/queries"
 import { agentsApi } from "@/features/agents/lib/api"
-import { useSession } from "@/lib/session"
 import { pageTitle } from "@/lib/pageTitle"
 import { AssistantMessage } from "./Message"
 import { Composer } from "./Composer"
@@ -37,7 +35,6 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         ? String(streamError)
         : undefined)
   const [panelCollapsed, setPanelCollapsed] = useState(true)
-  const session = useSession()
   const checks = useAgentThreadPullRequestStatus(
     thread?.id ?? "",
     Boolean(thread?.pullRequests?.length)
@@ -143,12 +140,6 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
           )}
           {thread && (
             <>
-              {!running && (
-                <ThreadFeedbackCard
-                  threadId={thread.id}
-                  login={session.data?.login ?? null}
-                />
-              )}
               {thread.codeChannelUrl && (
                 <Link
                   href={thread.codeChannelUrl}

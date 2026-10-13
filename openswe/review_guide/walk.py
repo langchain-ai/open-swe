@@ -14,8 +14,8 @@ from typing import Self
 
 from pydantic import BaseModel
 
-from openswe.walkthrough.diff import FileChange, line_key
-from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+from openswe.walkthrough.diff import ChangedLine, FileChange, line_key
+from openswe.walkthrough.plan import Hunks, LineRef, Plan, PlanChunk
 from openswe.walkthrough.render import fenced
 
 OTHER = "other"
@@ -166,7 +166,7 @@ class WalkStatus(BaseModel):
     other_lines: int
     other_state: str
     unplanned: str
-    unplanned_lines: list[str]
+    unplanned_hunks: list[str]
     more_files_unplanned: int = 0
 
 
@@ -271,7 +271,7 @@ class Reader:
             reasons.append("Other has not been approved or skipped")
         return reasons
 
-    def status(self, unplanned: list[LineRef]) -> WalkStatus:
+    def status(self, unplanned: list[ChangedLine], hunks: Hunks) -> WalkStatus:
         current = self.walk.on_screen
         upcoming = self.next_chunk()
         chunks: list[ReaderChunk] = []
@@ -298,8 +298,9 @@ class Reader:
             if self.other_pending
             else "done"
         )
-        open_lines = self.remaining(unplanned)
-        spans = LineRef.spans(open_lines)
+        left = set(self.remaining(LineRef.of(line) for line in unplanned))
+        open_lines = [line for line in unplanned if LineRef.of(line) in left]
+        spans = hunks.spans(open_lines)
         return WalkStatus(
             on_screen=current.title if current else None,
             chunks=chunks,
@@ -314,7 +315,7 @@ class Reader:
             other_lines=len(self.remaining(self.plan.other)),
             other_state=other_state,
             unplanned=f"{len(open_lines)} lines" if open_lines else "nothing",
-            unplanned_lines=spans[:_MAX_LEFT_FILES],
+            unplanned_hunks=spans[:_MAX_LEFT_FILES],
             more_files_unplanned=max(0, len(spans) - _MAX_LEFT_FILES),
         )
 

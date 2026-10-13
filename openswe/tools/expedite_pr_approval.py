@@ -92,12 +92,12 @@ async def _resolve_exclusions(
     payload: PullRequestPayload,
     token: str,
 ) -> list[ExcludedHunk]:
-    """Resolve against the target repository's APPROVALS.md at the base commit, and audit them."""
-    approvals = await fetch_approvals_md(pr_ref.owner, pr_ref.repo, payload.base_sha, token=token)
+    """Resolve against the target repository's APPROVALS.md on its default branch, and audit them."""
+    approvals = await fetch_approvals_md(pr_ref.owner, pr_ref.repo, None, token=token)
     if approvals is None:
         raise ValueError(
             f"Nothing can be excluded: `{pr_ref.owner}/{pr_ref.repo}` has no `{APPROVALS_PATH}` "
-            "at the pull request's base commit."
+            "on its default branch."
         )
     audited = ExpeditedExclusions(
         base_sha=payload.base_sha,

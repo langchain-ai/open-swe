@@ -327,24 +327,14 @@ def _slack_files_section(staged: list[StagedSlackFile]) -> str:
     return "\n".join(lines)
 
 
-async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
-    """Map Slack user ids to the GitHub logins of linked Open SWE accounts."""
-    logins: dict[str, str] = {}
-    for user_id in {value for value in user_ids if value}:
-        login = await User.login_for_slack(user_id)
-        if login:
-            logins[user_id] = login
-    return logins
-
-
-async def _slack_person_ids_by_user_id(user_ids: list[str]) -> dict[str, str]:
-    """Map Slack user ids to the person entity ids of linked Open SWE accounts."""
-    person_ids: dict[str, str] = {}
-    for user_id in {value for value in user_ids if value}:
-        user = await User.for_identity("slack", user_id)
-        if user is not None:
-            person_ids[user_id] = f"user:{user.id}"
-    return person_ids
+async def _slack_accounts_by_user_id(
+    user_ids: list[str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """GitHub logins and person entity ids of the linked Open SWE accounts behind Slack users."""
+    users = await User.for_identities("slack", user_ids)
+    logins = {user_id: user.github_login for user_id, user in users.items() if user.github_login}
+    person_ids = {user_id: f"user:{user.id}" for user_id, user in users.items()}
+    return logins, person_ids
 
 
 def _slack_person(
@@ -706,6 +696,26 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     return Repo.model_validate(scoped) if scoped else candidate
 
 
+async def _resolved[T](value: T) -> T:
+    """``value`` as an awaitable, for a branch of an ``asyncio.gather`` with nothing to do."""
+    return value
+
+
+async def _valid_access_token(login: str | None) -> str | None:
+    """The person's usable GitHub token, or ``None`` when they have none we can use."""
+    if not login:
+        return None
+    try:
+        return await common.get_valid_access_token(login)
+    except Exception:  # noqa: BLE001
+        common.logger.debug(
+            "Failed to resolve GitHub token for %s; treating as unauthenticated",
+            login,
+            exc_info=True,
+        )
+        return None
+
+
 async def slack_login(user_id: str, user_email: str | None = None) -> str | None:
     """GitHub login for a Slack user: by Slack id first, then by profile email."""
     if login := await User.login_for_slack(user_id):
@@ -888,18 +898,25 @@ async def _process_slack_mention_impl(
             timezone_value = slack_user.get("tz")
             if isinstance(timezone_value, str):
                 user_timezone = timezone_value.strip()
-        await persist_display_name(user_id, user_name)
 
-    thread_metadata = await common.authorize_github_thread(
-        thread_id, (await slack_login(user_id, user_email) or "") if allowed_bot is None else ""
-    )
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
-    thread_messages = (
-        []
+    mapped_login, thread_record, thread_messages, _ = await asyncio.gather(
+        slack_login(user_id, user_email) if allowed_bot is None else _resolved(None),
+        common.ThreadRecord.read(thread_id),
+        _resolved([])
         if message_update
-        else await common.fetch_slack_thread_messages(
+        else common.fetch_slack_thread_messages(
             request.context_channel_id or channel_id, context_thread_ts
-        )
+        ),
+        persist_display_name(user_id, user_name) if allowed_bot is None else _resolved(None),
+    )
+    thread_metadata = thread_record.authorize(mapped_login or "")
+    # The thread's state only matters once dispatching, but reading it is one of
+    # the slowest lookups here and nothing below changes it before the run.
+    dispatched_context = asyncio.ensure_future(
+        _dispatched_slack_context(langgraph_client, thread_id)
+        if thread_record.exists
+        else _resolved((set[str](), set[str]()))
     )
     current_message = next(
         (message for message in thread_messages if str(message.get("ts")) == original_message_ts),
@@ -952,7 +969,12 @@ async def _process_slack_mention_impl(
         for message_text in message_texts
         for mentioned in slack_utils.slack_mentioned_user_ids(message_text)
     ]
-    user_names_by_id, channel_names_by_id = await asyncio.gather(
+    (
+        user_names_by_id,
+        channel_names_by_id,
+        (logins_by_user_id, person_ids_by_user_id),
+        user_token,
+    ) = await asyncio.gather(
         common.get_slack_user_names([*context_user_ids, *mentioned_user_ids]),
         _public_slack_channel_names(
             [
@@ -961,11 +983,11 @@ async def _process_slack_mention_impl(
                 for mentioned in slack_utils.slack_mentioned_channel_ids(message_text)
             ]
         ),
+        _slack_accounts_by_user_id([*context_user_ids, user_id]),
+        _valid_access_token(mapped_login),
     )
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
-    logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
-    person_ids_by_user_id = await _slack_person_ids_by_user_id([*context_user_ids, user_id])
     if common.thread_is_private(thread_metadata):
         context_messages = [
             message
@@ -983,7 +1005,7 @@ async def _process_slack_mention_impl(
         and allowed_bot is None
         and not concierge_mode
     )
-    is_first_mention = not await common.thread_exists(thread_id)
+    is_first_mention = not thread_record.exists
     # A `/workspace:<name>` command on the message that opens a thread is one
     # input to which workspace its sandbox boots from — resolved below, once the
     # triggering user's GitHub login is known. Only the opening message can pick
@@ -1030,12 +1052,9 @@ async def _process_slack_mention_impl(
         + image_urls_from_links
     )
 
-    mapped_login = await slack_login(user_id, user_email) if allowed_bot is None else None
     # A DM always answers on the person's own default model: a per-thread model
     # choice is never routed into it.
-    thread_model_choice = (
-        None if concierge_mode else await common.get_thread_model_choice(thread_id)
-    )
+    thread_model_choice = None if concierge_mode else thread_record.model_choice
 
     # Routing comes before the run's repository: a repository nobody named
     # must not outrank the channel's binding, and once a workspace has won, a
@@ -1063,7 +1082,7 @@ async def _process_slack_mention_impl(
             ).slug
         )
     else:
-        thread_workspace = await common.get_thread_workspace(thread_id)
+        thread_workspace = thread_record.workspace
 
     image_model_override: tuple[str, str] | None = None
     if performance_command:
@@ -1107,17 +1126,6 @@ async def _process_slack_mention_impl(
     # GitHub, and users whose stored authorization is no longer usable, are
     # blocked and prompted to set up via the dashboard. Bot-token-only
     # deployments are exempt — they run on the installation token.
-    user_token: str | None = None
-    if mapped_login:
-        try:
-            user_token = await common.get_valid_access_token(mapped_login)
-        except Exception:  # noqa: BLE001
-            common.logger.debug(
-                "Failed to resolve GitHub token for %s; treating as unauthenticated",
-                mapped_login,
-                exc_info=True,
-            )
-            user_token = None
     has_valid_user_token = bool(user_token)
 
     if allowed_bot is None and not has_valid_user_token:
@@ -1270,7 +1278,6 @@ async def _process_slack_mention_impl(
         configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice
         configurable["model_selection"] = "explicit"
 
-    is_first_mention = not await common.thread_exists(thread_id)
     configurable["slack_kickoff_eligible"] = (
         is_first_mention
         and not code_channel
@@ -1365,9 +1372,7 @@ async def _process_slack_mention_impl(
             explicit_request=request.explicit_request or performance_command,
         )
     )
-    visible_context_hashes, dispatched_timestamps = await _dispatched_slack_context(
-        langgraph_client, thread_id
-    )
+    visible_context_hashes, dispatched_timestamps = await dispatched_context
     # The run describes the sender and, on a follow-up, every linked person in
     # the Slack thread — the same set persisted as this thread's participants.
     described_slack_ids = {user_id} if is_first_mention else set(logins_by_user_id)

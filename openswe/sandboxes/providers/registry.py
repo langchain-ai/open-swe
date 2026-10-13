@@ -78,6 +78,7 @@ async def create_sandbox(
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
     create_params: dict[str, Any] | None = None,
+    prepare_work_dir: bool = True,
 ) -> SandboxBackendProtocol:
     """Create or reconnect to a sandbox using the configured provider.
 
@@ -98,6 +99,8 @@ async def create_sandbox(
         vcpus: Optional virtual CPU count override for a new LangSmith sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a new LangSmith sandbox.
         create_params: Optional additional LangSmith sandbox create-body fields.
+        prepare_work_dir: Whether a new LangSmith sandbox creates its work dir before
+            returning; callers that write the git identity right away do it there.
 
     Returns:
         A sandbox backend implementing SandboxBackendProtocol.
@@ -116,7 +119,7 @@ async def create_sandbox(
             }.items()
             if value is not None
         }
-        return await factory(sandbox_id, **options)
+        return await factory(sandbox_id, prepare_work_dir=prepare_work_dir, **options)
     if inspect.iscoroutinefunction(factory):
         return await factory(sandbox_id)
     return await asyncio.to_thread(factory, sandbox_id)
