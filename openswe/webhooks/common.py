@@ -89,6 +89,7 @@ from openswe.review.publish import (  # noqa: F401
 )
 from openswe.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
 from openswe.rollout_events import (
+    MERGE_COMMIT_PR_URL,
     MERGE_COMMIT_SHA,
     ROLLOUT_CHECK_REQUESTED,
     ask_to_monitor_rollout,
@@ -1555,8 +1556,19 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                         metadata_update["attention_reason"] = None
                 if newly_merged:
                     merge_sha = remembered_merge_sha(event.pull_request.merge_commit_sha or "")
-                    if merge_sha:
+                    if merge_sha and any(
+                        record.get("url") == pr_url for record in updated_pull_requests
+                    ):
+                        updated_pull_requests = [
+                            {**record, MERGE_COMMIT_SHA: merge_sha}
+                            if record.get("url") == pr_url
+                            else record
+                            for record in updated_pull_requests
+                        ]
+                        metadata_update["pull_requests"] = updated_pull_requests
+                    if merge_sha and metadata.get("pr_url") == pr_url:
                         metadata_update[MERGE_COMMIT_SHA] = merge_sha
+                        metadata_update[MERGE_COMMIT_PR_URL] = pr_url
                 if metadata_update:
                     await langgraph_client.threads.update(
                         thread_id=thread_id, metadata=metadata_update

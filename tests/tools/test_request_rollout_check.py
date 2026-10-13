@@ -36,6 +36,7 @@ async def test_request_rollout_check_subscribes_when_the_pull_request_already_me
     client.threads.get.return_value = {
         "metadata": {
             "pr_url": "https://github.com/lc/repo/pull/7",
+            "merge_commit_pr_url": "https://github.com/lc/repo/pull/7",
             "merge_commit_sha": "d" * 40,
         }
     }
@@ -60,6 +61,43 @@ async def test_request_rollout_check_subscribes_when_the_pull_request_already_me
     assert subscribe.await_args.kwargs["sha"] == "d" * 40
     assert subscribe.await_args.kwargs["owner"] == "lc"
     assert subscribe.await_args.kwargs["number"] == 7
+
+
+@pytest.mark.asyncio
+async def test_request_rollout_check_does_not_subscribe_to_a_different_pull_request() -> None:
+    client = AsyncMock()
+    client.threads.get.return_value = {
+        "metadata": {
+            "pr_url": "https://github.com/lc/repo/pull/8",
+            "merge_commit_pr_url": "https://github.com/lc/repo/pull/7",
+            "merge_commit_sha": "d" * 40,
+            "pull_requests": [
+                {"url": "https://github.com/lc/repo/pull/8", "state": "open"},
+                {
+                    "url": "https://github.com/lc/repo/pull/7",
+                    "state": "merged",
+                    "merge_commit_sha": "d" * 40,
+                },
+            ],
+        }
+    }
+    with (
+        patch(
+            "openswe.tools.request_rollout_check.RunConfig.from_runtime",
+            return_value=RunConfig(thread_id="thread-1"),
+        ),
+        patch(
+            "openswe.tools.request_rollout_check.langgraph_client",
+            return_value=client,
+        ),
+        patch(
+            "openswe.tools.request_rollout_check.subscribe_merged_thread",
+            new_callable=AsyncMock,
+        ) as subscribe,
+    ):
+        result = await request_rollout_check()
+    assert result["subscribed"] is False
+    subscribe.assert_not_awaited()
 
 
 @pytest.mark.asyncio

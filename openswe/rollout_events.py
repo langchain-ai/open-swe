@@ -11,6 +11,7 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal, TypedDict
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, JsonValue
@@ -40,6 +41,7 @@ class RolloutAccepted(TypedDict):
 _AUDIENCE = "openswe-rollout"
 ROLLOUT_CHECK_REQUESTED = "rollout_check"
 MERGE_COMMIT_SHA = "merge_commit_sha"
+MERGE_COMMIT_PR_URL = "merge_commit_pr_url"
 _DEPLOYED = "deployed"
 _MAX_COMMITS = 5000
 _MAX_SUBSCRIPTIONS = 5
@@ -128,14 +130,29 @@ def remembered_merge_sha(sha: str) -> str:
     return cleaned if _SHA_RE.fullmatch(cleaned) else ""
 
 
+def _sha_for_pull_request(metadata: dict[str, object], url: str) -> str:
+    """The merge SHA stored for ``url``, never one stored for a different pull request."""
+    records = metadata.get("pull_requests")
+    if isinstance(records, list):
+        for record in records:
+            if isinstance(record, dict) and record.get("url") == url:
+                sha = record.get(MERGE_COMMIT_SHA)
+                return remembered_merge_sha(sha) if isinstance(sha, str) else ""
+    if metadata.get(MERGE_COMMIT_PR_URL) == url:
+        sha = metadata.get(MERGE_COMMIT_SHA)
+        if isinstance(sha, str):
+            return remembered_merge_sha(sha)
+    return ""
+
+
 def merged_pull_request(metadata: dict[str, object]) -> tuple[str, str, int, str] | None:
-    """The tracked pull request and its merge commit, once that commit is known."""
-    sha = metadata.get(MERGE_COMMIT_SHA)
+    """The thread's current pull request and its merge commit, once that commit is known."""
     url = metadata.get("pr_url")
-    if not isinstance(sha, str) or not isinstance(url, str):
+    if not isinstance(url, str):
         return None
+    sha = _sha_for_pull_request(metadata, url)
     match = _PR_URL_RE.fullmatch(url)
-    if match is None or not _SHA_RE.fullmatch(sha):
+    if match is None or not sha:
         return None
     return match.group(1), match.group(2), int(match.group(3)), sha
 
@@ -223,6 +240,28 @@ async def accept_rollout_deploy(target: str, commits: list[str]) -> RolloutAccep
     return {"status": "accepted", "target": target, "commits": len(commits)}
 
 
+async def _deployment_workspace(owner: str, repo: str) -> tuple[Repository, str, UUID] | None:
+    """The repository and workspace that can keep a deployment subscription, if any."""
+    if not configured():
+        return None
+    repository = await Repository.get(f"{owner}/{repo}")
+    workspace = await workspace_for_repo(owner, repo)
+    if repository is None or not workspace:
+        logger.info(
+            "Skipping rollout monitoring; repository is not in a workspace",
+            extra={"repository": f"{owner}/{repo}"},
+        )
+        return None
+    workspace_id = await WORKSPACES.id_for_slug(workspace)
+    if workspace_id is None:
+        logger.info(
+            "Skipping rollout monitoring; workspace has no id",
+            extra={"workspace": workspace},
+        )
+        return None
+    return repository, workspace, workspace_id
+
+
 async def subscribe_merged_thread(
     thread_id: str,
     *,
@@ -239,24 +278,13 @@ async def subscribe_merged_thread(
     rest.
     """
     merge_sha = sha.strip().lower()
-    if not _SHA_RE.fullmatch(merge_sha) or not configured():
+    if not _SHA_RE.fullmatch(merge_sha):
         return
     try:
-        repository = await Repository.get(f"{owner}/{repo}")
-        workspace = await workspace_for_repo(owner, repo)
-        if repository is None or not workspace:
-            logger.info(
-                "Skipping deploy subscription; repository is not in a workspace",
-                extra={"agent_thread_id": thread_id, "repository": f"{owner}/{repo}"},
-            )
+        listener = await _deployment_workspace(owner, repo)
+        if listener is None:
             return
-        workspace_id = await WORKSPACES.id_for_slug(workspace)
-        if workspace_id is None:
-            logger.info(
-                "Skipping deploy subscription; workspace has no id",
-                extra={"agent_thread_id": thread_id, "workspace": workspace},
-            )
-            return
+        repository, workspace, workspace_id = listener
         existing = await EventSubscription.for_thread(thread_id)
         if _already_listening(existing, merge_sha):
             return
@@ -298,6 +326,8 @@ async def ask_to_monitor_rollout(
 ) -> None:
     """Ask once, on the thread's own channel, whether to monitor this rollout."""
     try:
+        if await _deployment_workspace(owner, repo) is None:
+            return
         workspace = metadata.get("workspace")
         config = _run_config(
             thread_id,
