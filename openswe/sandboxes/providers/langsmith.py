@@ -10,7 +10,12 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx2
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import DeleteResult, ExecuteResponse, SandboxBackendProtocol
+from deepagents.backends.protocol import (
+    DeleteResult,
+    ExecuteResponse,
+    ReadResult,
+    SandboxBackendProtocol,
+)
 from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
@@ -684,6 +689,14 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
+
+    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        """Read through the sandbox file API rather than a read script run as a command.
+
+        Every command opens its own exec WebSocket, while the file API reuses the
+        client's pooled HTTP connection, so this is a single request.
+        """
+        return await asyncio.to_thread(self.read, file_path, offset, limit)
 
     async def adelete(self, file_path: str) -> DeleteResult:
         quoted = shlex.quote(file_path)
