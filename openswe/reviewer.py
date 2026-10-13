@@ -47,6 +47,7 @@ from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
+    ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
@@ -132,6 +133,7 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
+                ExcludeToolsMiddleware(excluded=frozenset({"grep"})),
                 SanitizeOpenAIResponsesMiddleware(),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
@@ -1106,6 +1108,7 @@ async def build_reviewer_agent(
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            ExcludeToolsMiddleware(excluded=frozenset({"grep"})),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SanitizeFireworksMessagesMiddleware(),
