@@ -18,6 +18,31 @@ from tests.support.slack_api import SlackAPI
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["commands", "actions"])
+async def test_question_callback_delivery_preserves_shortcut_source(prefix: str) -> None:
+    sent: list[dict[str, object]] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content))
+        return httpx2.Response(200, text="ok")
+
+    url = f"https://hooks.slack.com/{prefix}/T1/B1/test-response"
+    with patch.object(
+        slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
+    ):
+        assert await slack_utils.acknowledge_slack_command(url, "Working")
+        assert await slack_utils.replace_slack_command_message(url, "Answer")
+        assert await slack_utils.clear_slack_command_message(url)
+    assert sent[0] == {"response_type": "ephemeral", "text": "Working"}
+    assert sent[1]["response_type"] == "ephemeral"
+    assert sent[1]["replace_original"] is (prefix == "commands")
+    if prefix == "actions":
+        assert len(sent) == 2
+    else:
+        assert sent[2] == {"delete_original": True}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "url",
     [

@@ -1317,7 +1317,7 @@ async def invite_to_slack_channel(channel_id: str, user_ids: Iterable[str]) -> l
 
 
 async def _post_slack_callback(
-    response_url: str, payload: dict[str, Any], path_prefix: str
+    response_url: str, payload: dict[str, Any], path_prefix: str | tuple[str, ...]
 ) -> bool:
     try:
         parsed = urlparse(response_url)
@@ -1369,7 +1369,7 @@ async def acknowledge_slack_command(response_url: str, text: str) -> bool:
     return await _post_slack_callback(
         response_url,
         {"response_type": "ephemeral", "text": text},
-        "/commands/",
+        ("/commands/", "/actions/"),
     )
 
 
@@ -1381,22 +1381,24 @@ async def replace_slack_command_message(
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
 ) -> bool:
-    """Overwrite a slash command's acknowledgement with the reply it stood in for."""
+    """Replace a command acknowledgement or publish a new ephemeral shortcut answer."""
     text, blocks = await pr_review_links(text, blocks)
     dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
     payload: dict[str, Any] = {
         "response_type": "ephemeral",
-        "replace_original": True,
+        "replace_original": urlparse(response_url).path.startswith("/commands/"),
         "text": append_slack_web_link_footer(text, dashboard_url, usage),
     }
     updated_blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
     if updated_blocks:
         payload["blocks"] = updated_blocks
-    return await _post_slack_callback(response_url, payload, "/commands/")
+    return await _post_slack_callback(response_url, payload, ("/commands/", "/actions/"))
 
 
 async def clear_slack_command_message(response_url: str) -> bool:
     """Remove a slash command's acknowledgement when something else answers instead."""
+    if urlparse(response_url).path.startswith("/actions/"):
+        return True
     return await _post_slack_callback(response_url, {"delete_original": True}, "/commands/")
 
 
