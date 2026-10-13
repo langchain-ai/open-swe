@@ -3,8 +3,8 @@
 Concierge mode used to be ``dm_session_enabled`` on the person's ``["profiles"]``
 Store record. Each pass copies every opted-in profile onto its ``users`` row
 and then drops the flag from the record, so the import is idempotent. It runs
-through :func:`openswe.database.store_imports.run_store_import`, which retires
-it once a pass finds nothing left; a later release can then delete this module.
+at the start of :func:`openswe.users.import_records.import_user_records`, before
+the profiles themselves move, and is deleted along with it.
 A choice already saved in Postgres wins, and a profile whose login has no
 ``users`` row yet keeps its flag for the next pass instead of being dropped.
 """
