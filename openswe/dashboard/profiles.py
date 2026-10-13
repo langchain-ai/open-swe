@@ -91,6 +91,9 @@ class ProfileUpdate(BaseModel):
     experimental_mcp_ptc: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    experimental_transcript_upgrade: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
@@ -155,6 +158,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
             else existing.get("experimental_background_callbacks")
+        ),
+        "experimental_transcript_upgrade": (
+            update.experimental_transcript_upgrade
+            if update.experimental_transcript_upgrade is not None
+            else existing.get("experimental_transcript_upgrade")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed

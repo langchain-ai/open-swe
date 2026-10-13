@@ -82,72 +82,96 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
     """
     if not commands:
         return AppendResult(versions=[], events=[])
-
     async with postgres.transaction() as conn:
+        result = await append_in(conn, thread_id, commands)
+    announce(thread_id, result)
+    return result
+
+
+async def append_in(
+    conn: AsyncConnection, thread_id: str, commands: Sequence[Command]
+) -> AppendResult:
+    """:func:`append`, inside a transaction the caller owns and commits.
+
+    The caller must :func:`announce` the result once that transaction commits.
+    """
+    if not commands:
+        return AppendResult(versions=[], events=[])
+    await lock_thread(conn, thread_id)
+    accepted = await _accepted_versions(
+        conn, thread_id, [command.command_id for command in commands]
+    )
+    head = (
         await conn.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
+            text("SELECT version FROM thread WHERE thread_id = :thread_id"),
             {"thread_id": thread_id},
         )
-        accepted = await _accepted_versions(
-            conn, thread_id, [command.command_id for command in commands]
-        )
-        head = (
-            await conn.execute(
-                text("SELECT version FROM thread WHERE thread_id = :thread_id"),
-                {"thread_id": thread_id},
-            )
-        ).scalar_one_or_none()
-        seen: set[str] = set(accepted)
-        pending: list[Command] = []
-        for command in commands:
-            if command.command_id in seen:
-                continue
-            seen.add(command.command_id)
-            pending.append(command)
-        if head is None and pending and pending[0].event.type != "thread.created":
-            raise ThreadNotTranscribed(thread_id)
+    ).scalar_one_or_none()
+    seen: set[str] = set(accepted)
+    pending: list[Command] = []
+    for command in commands:
+        if command.command_id in seen:
+            continue
+        seen.add(command.command_id)
+        pending.append(command)
+    if head is None and pending and pending[0].event.type != "thread.created":
+        raise ThreadNotTranscribed(thread_id)
 
-        version = head or 0
-        events: list[StoredEvent] = []
-        for command in pending:
-            version += 1
-            events.append(await _write(conn, thread_id, version, command))
-        if events:
-            await conn.execute(
-                text(
-                    """
-                    UPDATE thread SET version = :version, updated_at = clock_timestamp()
-                    WHERE thread_id = :thread_id
-                    """
-                ),
-                {"thread_id": thread_id, "version": version},
-            )
-            await conn.execute(
-                text("SELECT pg_notify(:channel, :payload)"),
-                {"channel": listener.CHANNEL, "payload": f"{thread_id}:{version}"},
-            )
+    version = head or 0
+    events: list[StoredEvent] = []
+    for command in pending:
+        version += 1
+        events.append(await _write(conn, thread_id, version, command))
+    if events:
+        await conn.execute(
+            text(
+                """
+                UPDATE thread SET version = :version, updated_at = clock_timestamp()
+                WHERE thread_id = :thread_id
+                """
+            ),
+            {"thread_id": thread_id, "version": version},
+        )
+        await conn.execute(
+            text("SELECT pg_notify(:channel, :payload)"),
+            {"channel": listener.CHANNEL, "payload": f"{thread_id}:{version}"},
+        )
 
     appended = {event.command_id: event.version for event in events}
     versions: list[int] = []
     for command in commands:
         stored = accepted.get(command.command_id)
         versions.append(stored if stored is not None else appended[command.command_id])
-    if events:
-        # The graph and the HTTP app share a process, so a subscriber here does
-        # not have to wait for the notification to come back from Postgres.
-        listener.publish(thread_id, version)
-        logger.info(
-            "Appended transcript events",
-            extra={
-                "transcript": {
-                    "thread_id": thread_id,
-                    "version": version,
-                    "appended": len(events),
-                    "event_types": [event.event_type for event in events],
-                }
-            },
-        )
     return AppendResult(versions=versions, events=events)
+
+
+def announce(thread_id: str, result: AppendResult) -> None:
+    """Tell in-process subscribers about a committed append."""
+    if not result.events:
+        return
+    version = result.events[-1].version
+    # The graph and the HTTP app share a process, so a subscriber here does
+    # not have to wait for the notification to come back from Postgres.
+    listener.publish(thread_id, version)
+    logger.info(
+        "Appended transcript events",
+        extra={
+            "transcript": {
+                "thread_id": thread_id,
+                "version": version,
+                "appended": len(result.events),
+                "event_types": [event.event_type for event in result.events],
+            }
+        },
+    )
+
+
+async def lock_thread(conn: AsyncConnection, thread_id: str) -> None:
+    """Serialize with every other writer of this thread's log until ``conn`` commits."""
+    await conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
+        {"thread_id": thread_id},
+    )
 
 
 async def delete_transcript(thread_id: str) -> bool:
@@ -162,29 +186,32 @@ async def delete_transcript(thread_id: str) -> bool:
     if not postgres.configured():
         return False
     async with postgres.transaction() as conn:
-        await conn.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
-            {"thread_id": thread_id},
-        )
-        result = await conn.execute(
-            text("DELETE FROM thread WHERE thread_id = :thread_id RETURNING thread_id"),
-            {"thread_id": thread_id},
-        )
-        deleted = result.scalar_one_or_none() is not None
-        await conn.execute(
-            text("DELETE FROM thread_command_receipt WHERE thread_id = :thread_id"),
-            {"thread_id": thread_id},
-        )
-        if deleted:
-            await conn.execute(
-                text("SELECT pg_notify(:channel, :payload)"),
-                {"channel": listener.CHANNEL, "payload": f"{thread_id}:{listener.DELETED}"},
-            )
+        deleted = await delete_in(conn, thread_id)
     if deleted:
         listener.publish(thread_id, listener.DELETED_VERSION)
         logger.info(
             "Deleted a thread transcript",
             extra={"transcript": {"thread_id": thread_id}},
+        )
+    return deleted
+
+
+async def delete_in(conn: AsyncConnection, thread_id: str) -> bool:
+    """:func:`delete_transcript`, inside a transaction the caller owns."""
+    await lock_thread(conn, thread_id)
+    result = await conn.execute(
+        text("DELETE FROM thread WHERE thread_id = :thread_id RETURNING thread_id"),
+        {"thread_id": thread_id},
+    )
+    deleted = result.scalar_one_or_none() is not None
+    await conn.execute(
+        text("DELETE FROM thread_command_receipt WHERE thread_id = :thread_id"),
+        {"thread_id": thread_id},
+    )
+    if deleted:
+        await conn.execute(
+            text("SELECT pg_notify(:channel, :payload)"),
+            {"channel": listener.CHANNEL, "payload": f"{thread_id}:{listener.DELETED}"},
         )
     return deleted
 

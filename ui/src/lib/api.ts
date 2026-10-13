@@ -299,6 +299,7 @@ export interface Profile {
   experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
+  experimental_transcript_upgrade?: boolean | null
   login?: string
   email?: string
   default_repo?: string | null
@@ -323,6 +324,7 @@ export interface ProfileUpdate {
   experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
+  experimental_transcript_upgrade?: boolean | null
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null

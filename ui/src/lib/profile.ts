@@ -182,6 +182,8 @@ export function buildProfileUpdate(
     experimental_assistant_ui: current?.experimental_assistant_ui ?? null,
     experimental_background_callbacks:
       current?.experimental_background_callbacks ?? null,
+    experimental_transcript_upgrade:
+      current?.experimental_transcript_upgrade ?? null,
     ...patch,
   }
 }

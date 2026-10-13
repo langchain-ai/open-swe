@@ -16,6 +16,9 @@ vi.mock("@/features/agents/lib/provider/useIsInAgentThreadStream", () => ({
 vi.mock("@/features/agents/lib/queries", () => ({
   useAgentThread: vi.fn(),
 }))
+vi.mock("@/features/agents/lib/transcript/useTranscriptUpgrade", () => ({
+  useTranscriptUpgrade: () => ({ kind: "settled" }),
+}))
 vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
   ThreadSourceProvider: ({ children }: { children: React.ReactNode }) =>
     children,
