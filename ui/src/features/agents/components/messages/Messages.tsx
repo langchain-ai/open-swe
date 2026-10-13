@@ -268,41 +268,43 @@ export const Messages = memo(function MessagesComponent({
                 message.author === "user" ||
                 message.structuredSenderKind === "system"
 
+              const actions = threadId ? (
+                <IconButton
+                  icon={LinkIcon}
+                  label="Copy message link"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
+                  className="opacity-0 transition-opacity duration-normal group-hover/message:opacity-100 focus-visible:opacity-100"
+                  onClick={async () => {
+                    const url = new URL(
+                      `/agents/${encodeURIComponent(threadId)}`,
+                      window.location.origin
+                    )
+                    url.hash = messageAnchor
+                    try {
+                      await navigator.clipboard.writeText(url.href)
+                      toast.success("Message link copied")
+                    } catch {
+                      toast.error(
+                        "Unable to copy message link. Check clipboard permissions."
+                      )
+                    }
+                  }}
+                />
+              ) : undefined
+
               return (
                 <div
                   key={message.id}
                   id={messageAnchor}
                   className="group/message relative rounded-md target:ring-2 target:ring-focus"
                 >
-                  {threadId && (
-                    <IconButton
-                      icon={LinkIcon}
-                      label="Copy message link"
-                      size="xs"
-                      color="secondary"
-                      variant="plain"
-                      className="-left-space-5 absolute top-0 opacity-0 group-hover/message:opacity-100 focus-visible:opacity-100"
-                      onClick={async () => {
-                        const url = new URL(
-                          `/agents/${encodeURIComponent(threadId)}`,
-                          window.location.origin
-                        )
-                        url.hash = messageAnchor
-                        try {
-                          await navigator.clipboard.writeText(url.href)
-                          toast.success("Message link copied")
-                        } catch {
-                          toast.error(
-                            "Unable to copy message link. Check clipboard permissions."
-                          )
-                        }
-                      }}
-                    />
-                  )}
                   {isUser ? (
-                    <UserMessage message={message} />
+                    <UserMessage message={message} actions={actions} />
                   ) : (
                     <AgentTurn
+                      actions={actions}
                       message={message}
                       isStreaming={messageIsStreaming && !isOffloading}
                       isMarkdownLive={messageIsMarkdownLive}

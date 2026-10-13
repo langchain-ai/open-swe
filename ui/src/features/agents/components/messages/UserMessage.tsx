@@ -1,6 +1,6 @@
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
@@ -15,20 +15,33 @@ import { cn } from "@/lib/utils"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
-export function UserMessage({ message }: { message: Message }) {
+export function UserMessage({
+  message,
+  actions,
+}: {
+  message: Message
+  actions?: ReactNode
+}) {
   if (message.taskEvent) {
     return (
       <TaskEventMessage
+        actions={actions}
         event={message.taskEvent}
         messageId={message.id}
         timestamp={message.timestampIsFallback ? undefined : message.timestamp}
       />
     )
   }
-  return <StandardUserMessage message={message} />
+  return <StandardUserMessage message={message} actions={actions} />
 }
 
-function StandardUserMessage({ message }: { message: Message }) {
+function StandardUserMessage({
+  message,
+  actions,
+}: {
+  message: Message
+  actions?: ReactNode
+}) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const { excerpts, text } = parseExcerpts(
@@ -122,13 +135,16 @@ function StandardUserMessage({ message }: { message: Message }) {
           )}
         </div>
       )}
-      {!message.timestampIsFallback && (
-        <MessageTimestamp
-          timestamp={message.timestamp}
-          align={isSystem ? "left" : "right"}
-          className="mt-space-1 pr-space-1"
-        />
-      )}
+      <div className="mt-space-1 flex items-center gap-space-1">
+        {actions}
+        {!message.timestampIsFallback && (
+          <MessageTimestamp
+            timestamp={message.timestamp}
+            align={isSystem ? "left" : "right"}
+            className="pr-space-1"
+          />
+        )}
+      </div>
     </>
   )
 
