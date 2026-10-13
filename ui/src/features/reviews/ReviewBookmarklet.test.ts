@@ -1,5 +1,17 @@
+/** @vitest-environment jsdom */
+import { render, screen } from "@testing-library/react"
+import { createElement } from "react"
 import { expect, it, vi } from "vitest"
-import { reviewBookmarkletUrl } from "./ReviewBookmarklet"
+import { ReviewBookmarklet, reviewBookmarkletUrl } from "./ReviewBookmarklet"
+
+it("provides a draggable bookmarklet link", () => {
+  render(createElement(ReviewBookmarklet))
+  const link = screen.getByRole("link", { name: "👀 Open in Open SWE" })
+  expect(link.getAttribute("href")).toBe(
+    reviewBookmarkletUrl(window.location.origin)
+  )
+  expect(link.getAttribute("draggable")).toBe("true")
+})
 
 function run(href: string) {
   const open = vi.fn()
