@@ -167,7 +167,11 @@ async def test_freshness_conflicts_survive_offloaded_results(
 
     client = _Client()
     monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
-    latest = {"human_timestamps": ["1.0", "2.0"], "formatted": "new request"}
+    latest = {
+        "human_timestamps": ["1.0", "2.0"],
+        "formatted": "new request",
+        "image_urls": {"1.0": ["seen.png"], "2.0": ["new.png"]},
+    }
     monkeypatch.setattr(slack_reply_tool, "fetch_and_format_thread", AsyncMock(return_value=latest))
     messages = [HumanMessage(content='<input-message timestamp="1.0">request</input-message>')]
     conflict = await slack_reply_tool._stale_reply_guard(
@@ -175,6 +179,7 @@ async def test_freshness_conflicts_survive_offloaded_results(
     )
     assert conflict is not None
     assert conflict["formatted"] == "new request"
+    assert conflict["image_urls"] == ["new.png"]
     messages.append(
         ToolMessage(content="Result offloaded to /large_tool_results/reply", tool_call_id="a")
     )
@@ -192,6 +197,22 @@ async def test_freshness_conflicts_survive_offloaded_results(
         await slack_reply_tool._stale_reply_guard({"messages": messages}, "C1", "1.0", "run-1")
         is None
     )
+
+
+async def test_freshness_conflict_shows_the_model_images_posted_meanwhile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conflict = {"success": False, "error": "new_slack_messages", "image_urls": ["new.png"]}
+    image = {"type": "image", "base64": "aGk=", "mime_type": "image/png"}
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: {"configurable": {}})
+    monkeypatch.setattr(slack_reply_tool, "send_slack_reply", AsyncMock(return_value=conflict))
+    monkeypatch.setattr(slack_reply_tool, "fetch_image_block", AsyncMock(return_value=image))
+
+    result = await slack_reply_tool.slack_reply("done", "final", state={"messages": []})
+
+    assert isinstance(result, list)
+    assert json.loads(result[0]["text"]) == {"success": False, "error": "new_slack_messages"}
+    assert result[1] == image
 
 
 async def test_code_channel_reply_stays_in_user_started_thread(

@@ -32,13 +32,21 @@ function SlackIcon() {
   )
 }
 
-function headerLabel(
-  isLinear: boolean,
-  status: ToolExecutionChunk["status"]
-): string {
-  const pending = status === "in_progress" || status === "pending"
-  if (isLinear) return pending ? "Commenting on Linear…" : "Commented on Linear"
-  return pending ? "Sending to Slack…" : "Sent to Slack"
+/** Reply tools return `{"success": false, ...}` first when they post nothing. */
+const NOT_POSTED = /^\W*(?:type\W+text\W+text\W+)?success\W+false/
+
+function headerLabel(chunk: ToolExecutionChunk): string {
+  const isLinear = chunk.toolKind === "linear"
+  if (chunk.status === "in_progress" || chunk.status === "pending") {
+    return isLinear ? "Commenting on Linear…" : "Sending to Slack…"
+  }
+  if (chunk.status === "error" || NOT_POSTED.test(chunk.output ?? "")) {
+    if (isLinear) return "Not posted to Linear"
+    return chunk.output?.includes("new_slack_messages")
+      ? "Not sent: new Slack messages arrived"
+      : "Not sent to Slack"
+  }
+  return isLinear ? "Commented on Linear" : "Sent to Slack"
 }
 
 type SlackTextObject = { type?: string; text?: string }
@@ -158,7 +166,7 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
         ) : (
           <SlackIcon />
         )}
-        <span>{headerLabel(isLinear, chunk.status)}</span>
+        <span>{headerLabel(chunk)}</span>
       </div>
       {isLinear ? (
         <Markdown content={replyBody(chunk)} />
