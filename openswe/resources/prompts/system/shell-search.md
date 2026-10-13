@@ -1,1 +1,0 @@
-Use `rg` through `execute` for content search and `rg --files --hidden -g '!.git'` for path discovery (add `--no-ignore` when ignored files matter) — always passing an explicit path argument. Use `read_file` to inspect files. The Deep Agents `grep` and `glob` tools are not offered on this shell-backed agent.
