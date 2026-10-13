@@ -4,7 +4,6 @@ import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
@@ -22,6 +21,7 @@ import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
 import { cn, formatRelativeTime } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
@@ -335,7 +335,6 @@ export function Header({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuItem
-              className="gap-space-2"
               onSelect={() =>
                 window.open(githubUrl, "_blank", "noopener,noreferrer")
               }
@@ -344,17 +343,13 @@ export function Header({
               Open on GitHub
             </DropdownMenuItem>
             <DropdownMenuItem
-              className="gap-space-2"
               onSelect={() => copyText(window.location.href, "Copied the link")}
             >
               <LinkIcon aria-hidden size={16} weight="regular" />
               Copy link to this page
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="gap-space-2"
-              onSelect={openShortcutReference}
-            >
+            <DropdownMenuItem onSelect={openShortcutReference}>
               <KeyboardIcon aria-hidden size={16} weight="regular" />
               Keyboard shortcuts
             </DropdownMenuItem>

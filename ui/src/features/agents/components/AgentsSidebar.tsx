@@ -10,11 +10,9 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Kbd } from "@langchain/macaw-components/Kbd"
@@ -30,6 +28,7 @@ import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
@@ -557,7 +556,7 @@ export function AgentsSidebar({
     <>
       <DropdownMenuSeparator />
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger size="sm" className="gap-space-2">
+        <DropdownMenuSubTrigger size="sm">
           <TrashIcon size={14} weight="regular" />
           Remove repository…
         </DropdownMenuSubTrigger>
