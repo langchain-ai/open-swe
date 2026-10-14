@@ -236,6 +236,7 @@ async def test_source_switch_keeps_system_prompt_and_moves_run_context_to_messag
     runs = [
         _middleware(_slack_config()),
         _middleware(github),
+        _middleware({"configurable": {"thread_id": "thread-1", "source": "dashboard"}}),
         _middleware(_slack_config(background_task_completion=True)),
         _middleware(_slack_config()),
         _middleware(_slack_config()),
@@ -257,6 +258,7 @@ async def test_source_switch_keeps_system_prompt_and_moves_run_context_to_messag
     assert run_ids == [
         "source:slack",
         "source:github",
+        "source:dashboard",
         "source:background_task",
         "source:slack",
         None,
