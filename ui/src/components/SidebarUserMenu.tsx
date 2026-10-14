@@ -226,33 +226,36 @@ export function SidebarUserMenu({
               ? "Copy your session link and include it in your message so the team can find your session replay."
               : "A session replay link is unavailable. You can still report the issue and copy diagnostics below."}
           </p>
-          {datadogInitialized && (
-            <div className="space-y-space-2">
-              <Button
-                variant="outlined"
-                size="sm"
-                aria-label="Copy session link"
-                onClick={() => void copyDatadogSessionLink()}
-              >
-                <CopyIcon size={14} weight="regular" />
-                Copy session link
-              </Button>
-              <p role="status" className="text-xs text-secondary">
-                {datadogCopyStatus === "copied"
-                  ? "Session link copied. Include it in your message to the team."
-                  : datadogCopyStatus === "error"
-                    ? "Couldn't copy the session link. You can still report the issue without it."
-                    : null}
-              </p>
-            </div>
-          )}
-          {reportOpen && (
-            <CopyDiagnosticsButton
-              getDiagnostics={() =>
-                buildEnvironmentDiagnostics(user, desktopVersion)
-              }
-            />
-          )}
+          <div className="flex flex-wrap items-start gap-space-2">
+            {datadogInitialized && (
+              <div className="space-y-space-2 pt-space-1">
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  size="xs"
+                  leftDecorator={CopyIcon}
+                  aria-label="Copy session link"
+                  onClick={() => void copyDatadogSessionLink()}
+                >
+                  Copy session link
+                </Button>
+                <p role="status" className="text-xs text-secondary">
+                  {datadogCopyStatus === "copied"
+                    ? "Session link copied. Include it in your message to the team."
+                    : datadogCopyStatus === "error"
+                      ? "Couldn't copy the session link. You can still report the issue without it."
+                      : null}
+                </p>
+              </div>
+            )}
+            {reportOpen && (
+              <CopyDiagnosticsButton
+                getDiagnostics={() =>
+                  buildEnvironmentDiagnostics(user, desktopVersion)
+                }
+              />
+            )}
+          </div>
           <DialogClose asChild>
             <Button variant="outlined" size="sm">
               Close

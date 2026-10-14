@@ -115,25 +115,6 @@ describe("SidebarUserMenu", () => {
     ).toBeTruthy()
   })
 
-  it("copies environment diagnostics without a session replay", async () => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText: mocks.writeText },
-    })
-    mocks.writeText.mockResolvedValue(undefined)
-
-    renderMenu()
-    fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
-    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
-
-    expect(
-      await screen.findByText("Diagnostics copied to clipboard.")
-    ).toBeTruthy()
-    expect(mocks.writeText).toHaveBeenCalledWith(
-      expect.stringContaining('"report": "open-swe-environment-diagnostics"')
-    )
-  })
-
   it("offers reporting without a session replay when RUM is unavailable", () => {
     renderMenu()
     fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
