@@ -1,0 +1,97 @@
+name: Deploy Managed Deep Agents
+
+# Deploys mda/openswe to the open-swe-mda-* deployments the backends' MDA_RUNTIME_URL
+# points at. Staging and preview follow main; prod follows the promotion to prod.
+# Only commits already on main are deployed: `mda deploy` can run project code
+# while it holds the workspace deploy key, so the preview tree's labeled PRs never
+# reach this workflow.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mda/openswe/**"
+      - ".github/workflows/deploy_mda.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment to update (deploys the selected ref)
+        type: choice
+        options: [staging, preview, prod]
+        required: true
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      ref:
+        description: Commit to deploy
+        type: string
+        required: true
+      base_ref:
+        description: Skip the deploy when mda/openswe is unchanged since this commit
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy open-swe-mda-${{ matrix.environment }}
+    if: github.repository == 'langchain-ai/open-swe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(inputs.environment && format('["{0}"]', inputs.environment) || '["staging", "preview"]') }}
+    concurrency:
+      group: deploy-mda-${{ matrix.environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check whether mda/openswe changed
+        id: changed
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+        run: |
+          if [[ -n "$BASE_REF" ]] && git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null \
+            && git diff --quiet "$BASE_REF" HEAD -- mda/openswe; then
+            echo "mda/openswe is unchanged since $BASE_REF; nothing to deploy."
+            echo "deploy=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >>"$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.changed.outputs.deploy == 'true'
+      - name: Install the mda CLI
+        if: steps.changed.outputs.deploy == 'true'
+        # Same version mda/openswe pins.
+        run: uv tool install managed-deepagents==0.9.1
+      - name: Deploy
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+          # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
+          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+        run: |
+          case "$ENVIRONMENT" in
+            preview) backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" ;;
+            staging) backend="https://open-swe-staging-v2-9b910587972955589372b6a585abcfa3.us.langgraph.app" ;;
+            prod) backend="https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app" ;;
+            *) echo "::error::Unknown environment $ENVIRONMENT"; exit 1 ;;
+          esac
+          # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
+          printf 'OPEN_SWE_BACKEND_URL=%s\n' "$backend" >mda/openswe/.env
+          mda deploy mda/openswe \
+            --name "open-swe-mda-$ENVIRONMENT" \
+            --deployment-type prod \
+            --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
+            --context-strategy overwrite \
+            --yes
