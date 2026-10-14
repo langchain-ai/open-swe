@@ -72,7 +72,7 @@ async def import_store_mcp_connections() -> StoreImport:
                     INSTANCE_CONNECTIONS, WORKSPACE_MCPS_NAMESPACE, entry.key, value
                 )
             case [_, workspace] as namespace:
-                connections = SharedMCPConnections("workspace", workspace)
+                connections = SharedMCPConnections(workspace)
                 present.add((connections.namespace, entry.key))
                 result += await _import(connections, namespace, entry.key, entry.value)
     for entry in await search_all_entries(USER_MCPS_NAMESPACE):

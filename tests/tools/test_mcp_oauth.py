@@ -237,7 +237,7 @@ async def test_oauth_works_through_real_mcp_discovery_and_execution(registry_db,
     record = await oauth_record()
     definitions = await runtime.discover_tools(record, ("workspace_mcps", "default"))
     assert [tool.name for tool in definitions] == ["search"]
-    await SharedMCPConnections("workspace", "default").put(
+    await SharedMCPConnections("default").put(
         record.model_copy(update={"allowed_tools": ["search"]})
     )
     tools = await loader.load_workspace_mcp_tools("default")

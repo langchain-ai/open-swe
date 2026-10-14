@@ -57,7 +57,7 @@ class MCPRoute(APIRoute):
 
 
 def _connections(workspace: str) -> SharedMCPConnections:
-    return SharedMCPConnections("workspace", workspace)
+    return SharedMCPConnections(workspace)
 
 
 async def get_workspace_mcp(workspace: str, name: str) -> MCPConnection | None:

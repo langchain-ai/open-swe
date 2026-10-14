@@ -1,8 +1,8 @@
 """MCP connections moved out of the LangGraph Store.
 
-``mcp_connection`` holds the instance tier's connections under workspace ``''``
-and each workspace's under its slug, which, as in ``settings_record``, may come
-before the workspace row does. ``value`` keeps the Store record's shape.
+``mcp_connection`` holds each workspace's connections under its slug, which,
+as in ``settings_record``, may come before the workspace row does, and the
+instance tier's without one. ``connection`` keeps the Store record's shape.
 Personal connections are ``user_record`` rows of kind ``mcp_connection``.
 """
 
@@ -17,13 +17,20 @@ depends_on = None
 def upgrade() -> None:
     op.execute("""
         CREATE TABLE mcp_connection (
-            tier text NOT NULL CHECK (tier IN ('instance', 'workspace')),
-            workspace text NOT NULL,
+            id uuid PRIMARY KEY,
+            workspace text,
             name text NOT NULL,
-            value jsonb NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            PRIMARY KEY (tier, workspace, name)
+            connection jsonb NOT NULL,
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
+    """)
+    op.execute("""
+        CREATE UNIQUE INDEX mcp_connection_workspace_name ON mcp_connection (workspace, name)
+        WHERE workspace IS NOT NULL
+    """)
+    op.execute("""
+        CREATE UNIQUE INDEX mcp_connection_instance_name ON mcp_connection (name)
+        WHERE workspace IS NULL
     """)
 
 

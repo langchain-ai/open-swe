@@ -24,7 +24,7 @@ def encryption(monkeypatch):
 async def stored(name: str) -> JsonObject:
     async with postgres.session() as session:
         value = await session.scalar(
-            select(MCPConnectionRow.value).where(
+            select(MCPConnectionRow.connection).where(
                 MCPConnectionRow.workspace == "default", MCPConnectionRow.name == name
             )
         )
@@ -64,10 +64,9 @@ async def test_corrupt_record_does_not_hide_other_connections_or_log_values(regi
     async with postgres.session() as session:
         session.add(
             MCPConnectionRow(
-                tier="workspace",
                 workspace="default",
                 name="broken",
-                value={
+                connection={
                     **saved,
                     "name": "broken",
                     "encrypted_headers": {"Authorization": "test-secret"},

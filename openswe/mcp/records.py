@@ -1,7 +1,7 @@
 """Each tier's MCP connections in PostgreSQL, by name.
 
-The instance's and each workspace's live in ``mcp_connection``, a person's in
-``user_record``. A tier's ``namespace`` keys its discovery and OAuth token
+The instance's and each workspace's live in ``mcp_connection``, the instance's
+without a workspace, and a person's in ``user_record``. A tier's ``namespace`` keys its discovery and OAuth token
 caches, and names the LangGraph Store namespace its connections came from.
 """
 
@@ -9,7 +9,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Collection, Iterable
 from datetime import datetime
-from typing import Literal
+from uuid import UUID, uuid7
 
 from pydantic import ValidationError
 from sqlalchemy import ColumnElement, and_, delete, func, select
@@ -36,10 +36,10 @@ _PERSONAL_KIND = "mcp_connection"
 class MCPConnectionRow(Base):
     __tablename__ = "mcp_connection"
 
-    tier: Mapped[str] = mapped_column(primary_key=True)
-    workspace: Mapped[str] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(primary_key=True)
-    value: Mapped[JsonObject] = mapped_column(JSONB)
+    workspace: Mapped[str | None]
+    name: Mapped[str]
+    connection: Mapped[JsonObject] = mapped_column(JSONB)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
@@ -100,43 +100,51 @@ class MCPConnections(ABC):
 class SharedMCPConnections(MCPConnections):
     """The instance tier's connections, or one workspace's."""
 
-    def __init__(self, tier: Literal["instance", "workspace"], workspace: str = "") -> None:
-        self.tier = tier
-        self.workspace = workspace.strip().lower() if tier == "workspace" else ""
+    def __init__(self, workspace: str | None = None) -> None:
+        """``workspace`` is a workspace's slug, or ``None`` for the instance tier."""
+        self.workspace = None if workspace is None else workspace.strip().lower()
         self.namespace = (
             INSTANCE_MCPS_NAMESPACE
-            if tier == "instance"
+            if self.workspace is None
             else (*WORKSPACE_MCPS_NAMESPACE, self.workspace)
         )
 
+    def _in_tier(self) -> ColumnElement[bool]:
+        if self.workspace is None:
+            return MCPConnectionRow.workspace.is_(None)
+        return MCPConnectionRow.workspace == self.workspace
+
     def _where(self, name: str | None = None) -> ColumnElement[bool]:
-        return and_(
-            MCPConnectionRow.tier == self.tier,
-            MCPConnectionRow.workspace == self.workspace,
-            *(() if name is None else (MCPConnectionRow.name == name,)),
-        )
+        return and_(self._in_tier(), *(() if name is None else (MCPConnectionRow.name == name,)))
 
     async def _value(self, name: str) -> JsonObject | None:
         async with postgres.session() as session:
-            return await session.scalar(select(MCPConnectionRow.value).where(self._where(name)))
+            return await session.scalar(
+                select(MCPConnectionRow.connection).where(self._where(name))
+            )
 
     async def _values(self) -> Iterable[JsonObject]:
         async with postgres.session() as session:
-            return list(await session.scalars(select(MCPConnectionRow.value).where(self._where())))
+            return list(
+                await session.scalars(select(MCPConnectionRow.connection).where(self._where()))
+            )
 
     async def _put(self, name: str, value: JsonObject) -> None:
         async with postgres.session() as session:
             upsert = insert(MCPConnectionRow).values(
-                tier=self.tier, workspace=self.workspace, name=name, value=value
+                id=uuid7(), workspace=self.workspace, name=name, connection=value
+            )
+            # Each tier's names are unique through a partial index of its own.
+            index_elements = (
+                [MCPConnectionRow.name]
+                if self.workspace is None
+                else [MCPConnectionRow.workspace, MCPConnectionRow.name]
             )
             await session.execute(
                 upsert.on_conflict_do_update(
-                    index_elements=[
-                        MCPConnectionRow.tier,
-                        MCPConnectionRow.workspace,
-                        MCPConnectionRow.name,
-                    ],
-                    set_={"value": value, "updated_at": func.clock_timestamp()},
+                    index_elements=index_elements,
+                    index_where=self._in_tier(),
+                    set_={"connection": value, "updated_at": func.clock_timestamp()},
                 )
             )
 
@@ -151,7 +159,7 @@ class SharedMCPConnections(MCPConnections):
             )
 
 
-INSTANCE_CONNECTIONS = SharedMCPConnections("instance")
+INSTANCE_CONNECTIONS = SharedMCPConnections()
 
 
 class UserMCPConnections(MCPConnections):
@@ -190,26 +198,21 @@ async def delete_store_copies(
     deleted = 0
     async with postgres.session() as session:
         shared = await session.execute(
-            select(MCPConnectionRow.tier, MCPConnectionRow.workspace, MCPConnectionRow.name).where(
-                MCPConnectionRow.value.has_key(STORE_COPY),
+            select(MCPConnectionRow.id, MCPConnectionRow.workspace, MCPConnectionRow.name).where(
+                MCPConnectionRow.connection.has_key(STORE_COPY),
                 MCPConnectionRow.updated_at > copied_after,
             )
         )
-        for tier, workspace, name in shared.tuples().all():
-            connections = SharedMCPConnections(
-                "instance" if tier == "instance" else "workspace", workspace
-            )
-            if (connections.namespace, name) in present:
+        for row_id, workspace, name in shared.tuples().all():
+            if (SharedMCPConnections(workspace).namespace, name) in present:
                 continue
             gone = await session.scalar(
                 delete(MCPConnectionRow)
                 .where(
-                    MCPConnectionRow.tier == tier,
-                    MCPConnectionRow.workspace == workspace,
-                    MCPConnectionRow.name == name,
-                    MCPConnectionRow.value.has_key(STORE_COPY),
+                    MCPConnectionRow.id == row_id,
+                    MCPConnectionRow.connection.has_key(STORE_COPY),
                 )
-                .returning(MCPConnectionRow.name)
+                .returning(MCPConnectionRow.id)
             )
             deleted += gone is not None
         logins = {namespace[1] for namespace, _ in present if namespace[:1] == USER_MCPS_NAMESPACE}
