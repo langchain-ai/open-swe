@@ -5,7 +5,9 @@ without a ``user_id`` and ``slack_kickoff`` without a ``kickoff_ts`` are
 tombstones: the thread stopped routing untagged messages, or its kickoff was
 removed. Kickoffs and reply progress expire once their run must be over.
 ``copied_from_store`` marks view suggestions the Store import wrote that no
-write has replaced since. Reaction event dedupe uses ``event_claim``.
+write has replaced since. Reaction event dedupe uses ``event_claim``. Slack
+users are not Open SWE users, so ``created_by`` and ``updated_by`` stay unset
+for every write these tables get today.
 """
 
 from alembic import op
@@ -24,7 +26,10 @@ def upgrade() -> None:
             message_ts text NOT NULL,
             user_id text NOT NULL,
             reactions text[] NOT NULL DEFAULT '{}',
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("""
@@ -38,7 +43,10 @@ def upgrade() -> None:
             thread_ts text NOT NULL,
             user_id text,
             last_seen double precision,
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL,
             CHECK ((user_id IS NULL) = (last_seen IS NULL))
         )
     """)
@@ -53,7 +61,10 @@ def upgrade() -> None:
             thread_ts text NOT NULL,
             kickoff_ts text,
             expires_at timestamptz NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute(
@@ -67,7 +78,10 @@ def upgrade() -> None:
             seen_ts text[] NOT NULL DEFAULT '{}',
             conflicts integer NOT NULL DEFAULT 0,
             expires_at timestamptz NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("CREATE UNIQUE INDEX slack_reply_freshness_run ON slack_reply_freshness (run_id)")
@@ -80,7 +94,10 @@ def upgrade() -> None:
             channel_id text NOT NULL,
             thread_ts text NOT NULL,
             subject text NOT NULL DEFAULT '',
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("""
@@ -93,7 +110,10 @@ def upgrade() -> None:
             view_id text NOT NULL,
             actions jsonb NOT NULL,
             copied_from_store boolean NOT NULL DEFAULT false,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("""

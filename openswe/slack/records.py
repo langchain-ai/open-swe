@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Self
 from uuid import UUID, uuid7
 
-from sqlalchemy import ColumnElement, Text, case, delete, func, select
+from sqlalchemy import ColumnElement, ForeignKey, Text, case, delete, func, select
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -50,7 +50,14 @@ class SlackReactionState(Base):
     user_id: Mapped[str]
     reactions: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     @classmethod
     async def toggle(
@@ -90,7 +97,14 @@ class SlackSoloThread(Base):
     # The latest message timestamp seen from ``user_id``.
     last_seen: Mapped[float | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     @property
     def blocked(self) -> bool:
@@ -140,7 +154,14 @@ class SlackKickoff(Base):
     expires_at: Mapped[datetime]
     kickoff_ts: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     @property
     def removed(self) -> bool:
@@ -191,7 +212,14 @@ class SlackReplyFreshness(Base):
     seen_ts: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
     conflicts: Mapped[int] = mapped_column(default=0)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     @classmethod
     async def find(cls, run_id: str) -> Self | None:
@@ -238,7 +266,14 @@ class SlackDmOrigin(Base):
     thread_ts: Mapped[str]
     subject: Mapped[str] = mapped_column(default="")
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     @classmethod
     async def find(cls, dm_channel_id: str, message_ts: str) -> Self | None:
@@ -281,7 +316,14 @@ class SlackViewSuggestions(Base):
     # Set while the row is as the LangGraph Store import copied it; any other write clears it.
     copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     @classmethod
     async def actions_for(cls, channel_id: str, view_id: str) -> JsonObject:
