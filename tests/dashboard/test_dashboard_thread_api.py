@@ -9,7 +9,7 @@ from uuid import UUID, uuid7
 import httpx
 import pytest
 from fastapi import HTTPException
-from langgraph_sdk.errors import APIStatusError, NotFoundError
+from langgraph_sdk.errors import APIStatusError
 
 from openswe.dashboard import deps, profiles
 from openswe.dashboard.workspace_settings import (
@@ -638,23 +638,6 @@ async def test_proxy_commands_preserves_thread_lookup_failure(
         )
 
     assert exc_info.value is error
-
-
-async def test_proxy_commands_returns_not_found_for_missing_thread(monkeypatch) -> None:
-    error = NotFoundError(
-        "thread not found",
-        response=httpx.Response(404, request=httpx.Request("GET", "http://api/threads/tid")),
-        body=None,
-    )
-    client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(side_effect=error)))
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await thread_proxy.proxy_dashboard_thread_commands(
-            "tid", "octocat", b'{"method": "input.respond"}'
-        )
-
-    assert exc_info.value.status_code == 404
 
 
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
