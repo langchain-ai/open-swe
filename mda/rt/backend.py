@@ -18,8 +18,8 @@ from rt.models import ModelSpec, RunModels
 BACKEND_URL_ENV: Final = "OPEN_SWE_BACKEND_URL"
 # Graph state the backend's hooks read that MDA's own middleware keeps.
 _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count")
-# Preparation waits on the review scout's walkthrough for up to ten minutes; a tool
-# call can run a long command.
+# Preparation boots a sandbox and clones the repository; a tool call can run a long
+# command.
 _LONG_CALL_SECONDS: Final = 1800.0
 _HOOK_SECONDS: Final = 300.0
 
