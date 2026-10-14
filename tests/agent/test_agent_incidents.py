@@ -20,6 +20,7 @@ from tests.agent.test_agent_assembly_context import (
     _capture_create_deep_agent_kwargs,
 )
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
+from tests.conftest import put_incident
 
 CHANNEL = {
     "id": "C1",
@@ -57,7 +58,6 @@ def _incident_config(**extra: Any) -> dict[str, Any]:
             "__is_for_execution__": True,
             "thread_id": "thread-ctx",
             "source": "incidents_agent",
-            "incident_id": "incident",
             **extra,
         }
     }
@@ -152,23 +152,26 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     handler.assert_not_awaited()
 
 
-async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread_scope):
+async def test_forged_incident_source_on_a_normal_thread_is_refused(
+    saved_thread_scope, incident_threads
+):
     saved_thread_scope.update(source="slack", visibility="public")
+    incident_threads.add("thread-ctx", source="slack", visibility="public")
     with pytest.raises(PermissionError, match="not an incident"):
         await _capture_create_deep_agent_kwargs(_incident_config())
 
 
 @pytest.mark.parametrize("requested_action", [False, True])
 async def test_main_agent_records_the_incident_report_through_the_tool(
-    fake_store, registry_db, monkeypatch, saved_thread_scope, requested_action
+    incident_threads, monkeypatch, saved_thread_scope, requested_action
 ):
     from deepagents import create_deep_agent
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.store.memory import InMemoryStore
 
-    await service.POLICIES.put("default", IncidentPolicy(enabled=True, workspace_id="T1"))
-    await service.INCIDENTS.put(
-        "incident",
+    await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1"))
+    await put_incident(
+        incident_threads,
         Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-ctx"),
     )
     saved_thread_scope.update(
@@ -254,7 +257,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     ):
         result = await agent.ainvoke({"messages": [HumanMessage(content=context["text"])]}, config)
 
-    latest = await service.REPORTS.get("incident")
+    latest = await service.REPORTS.get("thread-ctx")
     assert latest is not None
     if requested_action:
         performed.assert_awaited_once()

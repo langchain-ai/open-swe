@@ -4,40 +4,38 @@ import hashlib
 import json
 import logging
 import time
+from datetime import timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from openswe import event_claims
 from openswe.config import ENV
+from openswe.incidents.document_models import IncidentHistory
 from openswe.incidents.evidence_tools import redact
 from openswe.incidents.models import (
     Activity,
-    CommandReceipt,
     Incident,
     IncidentId,
     IncidentPolicy,
     IncidentReportRecord,
 )
+from openswe.incidents.policy import IncidentPolicies
+from openswe.incidents.records import REPORTS
+from openswe.incidents.threads import IncidentThreads
 from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackClient
-from openswe.store import TypedStore, now_iso
-from openswe.ui_invalidations import Topic
+from openswe.store import now_iso
 from openswe.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
-POLICIES = TypedStore(
-    ["incidents", "policies"], IncidentPolicy, invalidates=Topic.INCIDENT_SETTINGS
-)
-INCIDENTS = TypedStore[Incident, IncidentId](
-    ["incidents", "incidents"], Incident, invalidates=Topic.INCIDENTS
-)
-REPORTS = TypedStore[IncidentReportRecord, IncidentId](
-    ["incidents", "reports"], IncidentReportRecord, invalidates=Topic.INCIDENTS
-)
-COMMANDS = TypedStore(["incidents", "commands"], CommandReceipt)
+POLICIES = IncidentPolicies()
+INCIDENTS = IncidentThreads()
+# A retried dashboard command carries the same request id within this window.
+_COMMAND_CLAIM_TTL = timedelta(days=1)
 ACTIVE_STATUSES = frozenset({"watching", "needs_attention"})
 _VIEWS = {"active": ACTIVE_STATUSES, "inactive": frozenset({"paused", "completed"})}
 REQUIRED_SLACK_SCOPES = frozenset(
@@ -112,16 +110,19 @@ def note(target: Incident | IncidentReportRecord, kind: str, text: str) -> None:
         target.activity = target.activity[-100:]
 
 
-async def save(record: Incident) -> None:
-    from openswe.incidents import documents
+def actor_login(actor: dict[str, Any]) -> str | None:
+    """The GitHub login of the person behind ``actor``; ``None`` for a system or unlinked actor."""
+    login = actor.get("github_login")
+    return login if isinstance(login, str) and login else None
 
-    record.updated_at = now_iso()
-    await INCIDENTS.put(record.id, record)
-    await documents.preserve_metadata(record)
+
+async def save(record: Incident, *, by: str | None = None) -> None:
+    """Save ``record`` on its thread; ``by`` is the GitHub login of the person who changed it."""
+    await INCIDENTS.save(record, by=by)
 
 
 async def get_policy() -> IncidentPolicy:
-    return await POLICIES.get("default") or IncidentPolicy()
+    return await POLICIES.get() or IncidentPolicy()
 
 
 def channel_allowed(
@@ -151,7 +152,10 @@ def channel_allowed(
 
 
 async def readable(
-    record: Incident, policy: IncidentPolicy, *, raise_on_unavailable: bool = False
+    record: Incident | IncidentHistory,
+    policy: IncidentPolicy,
+    *,
+    raise_on_unavailable: bool = False,
 ) -> bool:
     """Whether responders may read this incident right now: the bot must still be a member."""
     if (
@@ -273,7 +277,7 @@ async def update_settings(
             raise HTTPException(422, "Slack installation did not report a workspace")
         bound = (current.workspace_id, current.slack_app_id)
         identity = (workspace_id, app_id)
-        if bound != identity and any(bound) and await INCIDENTS.search(limit=1):
+        if bound != identity and any(bound) and await INCIDENTS.any():
             raise HTTPException(
                 409, "Slack workspace or app cannot change with registered incidents"
             )
@@ -282,7 +286,7 @@ async def update_settings(
     candidate.enabled_at = (
         time.time() if candidate.enabled and not current.enabled else current.enabled_at
     )
-    await POLICIES.put("default", candidate)
+    await POLICIES.put(candidate)
     logger.info(
         "Incident settings updated", extra={"actor": actor.get("id"), "version": candidate.version}
     )
@@ -328,15 +332,11 @@ async def list_incidents(
     include_setup: bool = False,
 ) -> dict[str, Any]:
     policy = await get_policy()
-    records = await INCIDENTS.search_all()
+    statuses = _VIEWS.get(view, {view}) if view and view != "all" else None
     items = []
-    for record in records:
-        if record.workspace_id != policy.workspace_id:
-            continue
-        if view and view != "all" and record.status not in _VIEWS.get(view, {view}):
-            continue
+    for record in await INCIDENTS.in_workspace(policy.workspace_id, statuses):
         if await readable(record, policy):
-            item = summary(record, await REPORTS.get(record.id))
+            item = summary(record, await REPORTS.get(record.thread_id))
         elif include_setup and record.reason == "setup_failed":
             item = setup_summary(record)
         else:
@@ -373,7 +373,7 @@ async def get_incident(id: IncidentId, *, include_setup: bool = False) -> dict[s
                 "next_cursor": None,
             }
         raise HTTPException(404, "Incident not found")
-    latest = await REPORTS.get(id)
+    latest = await REPORTS.get(record.thread_id)
     status: str = record.status
     if record.status in ACTIVE_STATUSES and await turns.has_active_run(record.thread_id):
         status = "investigating"
@@ -394,7 +394,7 @@ async def get_incident(id: IncidentId, *, include_setup: bool = False) -> dict[s
         reverse=True,
     )[:100]
     return {
-        "incident": {**summary(record, latest), "status": status},
+        "incident": {**summary(record, latest), "status": status, "thread_id": record.thread_id},
         "report": latest.report.model_dump() if latest else None,
         "coverage": {"gaps": latest.report.gaps if latest else []},
         "activity": [item.model_dump() for item in activity],
@@ -414,6 +414,24 @@ def requester_identity(actor: dict[str, Any]) -> PersonIdentity:
     return person
 
 
+async def _claim_command(claim_id: str, content_hash: str) -> bool:
+    """Claim a dashboard command so its retries cannot repeat it.
+
+    A request id reused for different content is refused rather than run.
+    """
+    if await event_claims.claim("incident_command", claim_id, ttl=_COMMAND_CLAIM_TTL):
+        await event_claims.claim(
+            "incident_command_content", f"{claim_id}:{content_hash}", ttl=_COMMAND_CLAIM_TTL
+        )
+        return True
+    if await event_claims.claim(
+        "incident_command_content", f"{claim_id}:{content_hash}", ttl=_COMMAND_CLAIM_TTL
+    ):
+        await event_claims.release("incident_command_content", f"{claim_id}:{content_hash}")
+        raise HTTPException(409, "Request ID was reused with different content")
+    return False
+
+
 async def submit_command(
     id: IncidentId, action: str, text: str | None, request_id: str, actor: dict[str, Any]
 ) -> dict[str, str]:
@@ -422,24 +440,17 @@ async def submit_command(
     detail = await get_incident(id)
     content_hash = fingerprint([action, text or ""])
     claim_id = fingerprint([id, actor.get("id") or actor.get("github_login"), request_id])
-    existing = await COMMANDS.get(claim_id)
-    if existing is not None:
-        if existing.content_hash != content_hash:
-            raise HTTPException(409, "Request ID was reused with different content")
-        return {"command_id": request_id, "status": "duplicate"}
-    if action not in detail["allowed_actions"]:
-        raise HTTPException(409, "Action is not available in this incident state")
-    if action == "ask" and (not text or not text.strip() or len(text) > 8000):
-        raise HTTPException(422, "A question of 1–8000 characters is required")
-    record = await INCIDENTS.get(id)
-    assert record is not None
-    policy = await get_policy()
     # Claim the request before acting so a retried HTTP request cannot repeat the action.
-    await COMMANDS.put(
-        claim_id,
-        CommandReceipt(id=claim_id, incident_id=id, action=action, content_hash=content_hash),
-    )
+    if not await _claim_command(claim_id, content_hash):
+        return {"command_id": request_id, "status": "duplicate"}
     try:
+        if action not in detail["allowed_actions"]:
+            raise HTTPException(409, "Action is not available in this incident state")
+        if action == "ask" and (not text or not text.strip() or len(text) > 8000):
+            raise HTTPException(422, "A question of 1–8000 characters is required")
+        record = await INCIDENTS.get(id)
+        assert record is not None
+        policy = await get_policy()
         if action == "ask":
             assert text is not None
             await turns.dispatch_turn(
@@ -448,8 +459,8 @@ async def submit_command(
         elif action == "investigate_again":
             await turns.dispatch_turn(record, policy)
         else:
-            await channels.apply_control(record, action, actor)
+            await channels.apply_control(record, action, actor, by=actor_login(actor))
     except Exception:
-        await COMMANDS.delete(claim_id)
+        await event_claims.release("incident_command", claim_id)
         raise
     return {"command_id": request_id, "status": "accepted"}

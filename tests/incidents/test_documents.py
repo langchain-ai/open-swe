@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from openswe.incidents import documents, service
 from openswe.incidents.models import Evidence, Hypothesis, Incident, IncidentPolicy, IncidentReport
 from openswe.slack.channels import SlackChannel
+from tests.conftest import put_incident
 
 CHANNEL = {
     "id": "C1",
@@ -20,10 +21,8 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def record(fake_store, monkeypatch):
-    await service.POLICIES.put(
-        "default", IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
-    )
+async def record(incident_threads, monkeypatch):
+    await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1"))
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     incident = Incident(
         id="incident-1",
@@ -33,7 +32,7 @@ async def record(fake_store, monkeypatch):
         title="API availability",
         thread_id="thread-1",
     )
-    await service.INCIDENTS.put(incident.id, incident)
+    await put_incident(incident_threads, incident)
     return incident
 
 
@@ -59,11 +58,13 @@ async def current(record):
     return (await documents.document_context(record.id))["postmortem"]
 
 
-async def test_reports_replace_one_summary_and_keep_other_incidents(record):
+async def test_reports_replace_one_summary_and_keep_other_incidents(record, incident_threads):
     await documents.update_from_report(record, report())
     first = await current(record)
-    second = record.model_copy(update={"id": "incident-2", "channel_id": "C2"})
-    await service.INCIDENTS.put(second.id, second)
+    second = record.model_copy(
+        update={"id": "incident-2", "channel_id": "C2", "thread_id": "thread-2"}
+    )
+    await put_incident(incident_threads, second)
     await documents.update_from_report(second, report("Other incident"))
     await documents.update_from_report(record, report("Recovered"))
     await documents.update_from_report(record, report("Recovered"))
@@ -72,20 +73,21 @@ async def test_reports_replace_one_summary_and_keep_other_incidents(record):
     assert "Error rate increased" not in latest["markdown"]
     assert latest["markdown"].count("Recovered") == 1
     assert "Other incident" in (await current(second))["markdown"]
-    from openswe.store import search_all_values
-
-    assert len(await search_all_values(documents.SUMMARIES)) == 2
     assert "Raw sensitive evidence excerpt" not in latest["markdown"]
     assert "[1]: <https://slack.com/archives/C1/p1>" in latest["markdown"]
 
 
-async def test_curated_history_keeps_titles_but_follows_channel_access(record):
+async def test_curated_history_outlives_the_thread_but_follows_channel_access(
+    record, incident_threads
+):
     await documents.update_from_report(record, report())
     record.title, record.channel_name = "", ""
-    await service.INCIDENTS.put(record.id, record)
+    await service.save(record)
+    del incident_threads.items[record.thread_id]
     assert (await documents.search_history(q="availability"))["items"][0]["title"] == (
         "API availability"
     )
+    assert "Error rate increased" in (await current(record))["markdown"]
     SlackChannel.fetch.return_value = {**CHANNEL, "is_member": False}
     assert (await documents.search_history())["items"] == []
     with pytest.raises(HTTPException) as error:
@@ -99,12 +101,6 @@ async def test_document_reads_distinguish_outages_from_revocation(record, info, 
     with pytest.raises(HTTPException) as error:
         await current(record)
     assert error.value.status_code == status
-
-
-async def test_store_outage_is_not_an_empty_summary(record, monkeypatch):
-    monkeypatch.setattr(documents, "get_value", AsyncMock(side_effect=RuntimeError("offline")))
-    with pytest.raises(RuntimeError, match="offline"):
-        await current(record)
 
 
 async def test_documents_api_is_read_only_and_checks_channel_access(record):
@@ -124,20 +120,20 @@ async def test_documents_api_is_read_only_and_checks_channel_access(record):
         assert (await client.get(f"/documents/{record.id}")).status_code == 404
 
 
-async def test_history_cannot_follow_rebound_incident_into_a_different_workspace(record):
+async def test_history_belongs_to_the_policy_workspace(record):
     await documents.update_from_report(record, report())
-    record.workspace_id = "T2"
-    await service.INCIDENTS.put(record.id, record)
-    await service.POLICIES.put("default", IncidentPolicy(workspace_id="T2"))
+    await service.POLICIES.put(IncidentPolicy(workspace_id="T2"))
     with pytest.raises(HTTPException) as error:
         await current(record)
     assert error.value.status_code == 404
 
 
-async def test_history_pages_use_stable_cursors(record):
+async def test_history_pages_use_stable_cursors(record, incident_threads):
     await documents.update_from_report(record, report())
-    second = record.model_copy(update={"id": "incident-2", "channel_id": "C2", "title": "Other"})
-    await service.INCIDENTS.put(second.id, second)
+    second = record.model_copy(
+        update={"id": "incident-2", "channel_id": "C2", "title": "Other", "thread_id": "thread-2"}
+    )
+    await put_incident(incident_threads, second)
     await documents.update_from_report(second, report("Other incident"))
 
     page_one = await documents.search_history(limit=1)

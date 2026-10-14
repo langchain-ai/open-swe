@@ -5,52 +5,22 @@ from typing import Any
 from fastapi import HTTPException
 
 from openswe.incidents import service
-from openswe.incidents.document_models import IncidentHistory
+from openswe.incidents.document_models import IncidentHistory, IncidentPostmortem
 from openswe.incidents.models import Incident, IncidentId, IncidentReport
-from openswe.store import TypedStore, get_value, now_iso, put_value
+from openswe.incidents.records import HISTORY, POSTMORTEMS
 from openswe.ui_invalidations import Topic
 
-HISTORY = TypedStore[IncidentHistory, IncidentId](
-    ["incidents", "history"], IncidentHistory, invalidates=Topic.INCIDENTS
-)
-SUMMARIES = ["incidents", "summaries"]
 
+async def require_access(incident_id: IncidentId) -> tuple[str, IncidentHistory]:
+    """The incident's thread id and history, if responders may read it now.
 
-async def require_access(incident_id: IncidentId) -> Incident:
-    record = await service.INCIDENTS.get(incident_id)
+    Reads the history document, which outlives the incident's thread.
+    """
     policy = await service.get_policy()
-    history = await HISTORY.get(incident_id)
-    if (
-        not record
-        or record.workspace_id != policy.workspace_id
-        or record.channel_id in policy.excluded_channel_ids
-        or (
-            history
-            and (history.workspace_id, history.channel_id)
-            != (record.workspace_id, record.channel_id)
-        )
-    ):
+    found = await service.INCIDENTS.history(incident_id, policy.workspace_id)
+    if found is None or not await service.readable(found[1], policy, raise_on_unavailable=True):
         raise HTTPException(404, "Incident not found")
-    if not await service.readable(record, policy, raise_on_unavailable=True):
-        raise HTTPException(404, "Incident not found")
-    return record
-
-
-async def preserve_metadata(record: Incident) -> None:
-    previous = await HISTORY.get(record.id)
-    await HISTORY.put(
-        record.id,
-        IncidentHistory(
-            id=record.id,
-            workspace_id=record.workspace_id,
-            channel_id=record.channel_id,
-            channel_name=record.channel_name or (previous.channel_name if previous else ""),
-            title=record.title or (previous.title if previous else record.channel_name),
-            status=record.status,
-            created_at=record.created_at,
-            updated_at=now_iso(),
-        ),
-    )
+    return found
 
 
 def _linked_markdown(markdown: str, evidence: list[dict[str, Any]]) -> str:
@@ -62,14 +32,14 @@ def _linked_markdown(markdown: str, evidence: list[dict[str, Any]]) -> str:
     return markdown + ("\n\n" + "\n".join(sources) if sources else "")
 
 
-async def _saved_markdown(record: Incident) -> str | None:
-    summary = await get_value(SUMMARIES, record.id)
-    return summary["markdown"] if summary else None
+async def _saved_markdown(thread_id: str) -> str | None:
+    postmortem = await POSTMORTEMS.get(thread_id)
+    return postmortem.markdown if postmortem else None
 
 
 async def document_context(incident_id: IncidentId) -> dict[str, Any]:
-    record = await require_access(incident_id)
-    markdown = await _saved_markdown(record)
+    thread_id, _ = await require_access(incident_id)
+    markdown = await _saved_markdown(thread_id)
     return {
         "incident_id": incident_id,
         "postmortem": {"markdown": markdown} if markdown is not None else None,
@@ -111,28 +81,27 @@ async def update_from_report(record: Incident, report: IncidentReport) -> None:
     await require_access(record.id)
     markdown = f"# {record.title or record.channel_name or 'Incident'}\n\n" + _findings(report)
     markdown = _linked_markdown(markdown, [item.model_dump() for item in report.evidence])
-    await preserve_metadata(record)
-    await put_value(SUMMARIES, record.id, {"markdown": markdown})
+    await service.INCIDENTS.record_history(record)
+    await POSTMORTEMS.put(record.thread_id, IncidentPostmortem(markdown=markdown))
     await Topic.INCIDENTS.invalidate(key=record.id)
 
 
 async def search_history(
     q: str | None = None, *, limit: int = 25, cursor: str | None = None
 ) -> dict[str, Any]:
+    policy = await service.get_policy()
     items = []
-    for history in await HISTORY.search_all():
-        try:
-            record = await require_access(history.id)
-        except HTTPException:
+    for thread_id, history in await HISTORY.all():
+        if history.workspace_id != policy.workspace_id or not await service.readable(
+            history, policy
+        ):
             continue
-        markdown = await _saved_markdown(record)
+        markdown = await _saved_markdown(thread_id)
         if (
             q
             and q.casefold()
             not in f"{history.title} {history.channel_name} {markdown or ''}".casefold()
         ):
             continue
-        item = history.model_dump(exclude={"workspace_id", "channel_id"})
-        item["status"] = record.status
-        items.append(item)
+        items.append(history.model_dump(exclude={"workspace_id", "channel_id", "activity"}))
     return service.paginate(service.sort_newest_first(items), cursor, limit)

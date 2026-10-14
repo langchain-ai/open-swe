@@ -15,6 +15,7 @@ from openswe.incidents.models import (
 )
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.message_queue import QueuedMessage
+from tests.conftest import put_incident
 
 
 @pytest.fixture
@@ -23,17 +24,17 @@ def policy() -> IncidentPolicy:
 
 
 @pytest.fixture
-async def record(fake_store, policy):
-    await service.POLICIES.put("default", policy)
+async def record(incident_threads, policy):
+    await service.POLICIES.put(policy)
     record = Incident(id="i1", workspace_id="T1", channel_id="C1", thread_id="thread-1")
-    await service.INCIDENTS.put(record.id, record)
+    await put_incident(incident_threads, record)
     return record
 
 
 @pytest.fixture
-def platform(fake_store, monkeypatch):
+def platform(monkeypatch):
     runs = SimpleNamespace(list=AsyncMock(return_value=[]), cancel_many=AsyncMock())
-    client = SimpleNamespace(runs=runs, store=fake_store)
+    client = SimpleNamespace(runs=runs)
     monkeypatch.setattr(turns, "store_client", lambda: client)
     monkeypatch.setattr(turns, "create_durable_run", AsyncMock(return_value={"run_id": "r1"}))
     monkeypatch.setattr(turns, "queue_message_for_thread", AsyncMock(return_value=True))
@@ -78,7 +79,7 @@ async def test_automatic_turns_go_quiet_once_the_investigation_is_published(
 ):
     """The one automatic message is spent, so later turns only keep the record current."""
     await service.REPORTS.put(
-        record.id,
+        record.thread_id,
         IncidentReportRecord(
             incident_id=record.id,
             report=IncidentReport(summary="Deadline exhausted on oversized uploads"),
@@ -114,9 +115,7 @@ async def test_explicit_turn_interrupts_and_carries_request_and_thread(record, p
     assert "Why are we seeing 500s?" in rendered and "slack:U1" in rendered
 
 
-async def test_completion_reschedules_only_stranded_context(
-    record, policy, platform, fake_store, registry_db
-):
+async def test_completion_reschedules_only_stranded_context(record, policy, platform):
     assert (await turns.handle_run_completion("thread-1", "r1", "success"))["reason"] == (
         "incident turn complete"
     )
@@ -128,7 +127,7 @@ async def test_completion_reschedules_only_stranded_context(
     turns.create_durable_run.assert_awaited_once()
 
     record.status = "paused"
-    await service.INCIDENTS.put(record.id, record)
+    await service.save(record)
     await turns.handle_run_completion("thread-1", "r2", "success")
     turns.create_durable_run.assert_awaited_once()
     assert (await turns.handle_run_completion("unknown", "r3", "success"))["status"] == "ignored"

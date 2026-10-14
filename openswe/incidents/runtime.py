@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 from typing import Any
 
-import langgraph_sdk
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
@@ -24,6 +23,7 @@ from openswe.incidents.report import (
     digest_fields,
     finalize_report,
 )
+from openswe.incidents.threads import INCIDENT_SOURCE, incident_of
 from openswe.incidents.turns import SESSION_TS
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
@@ -32,11 +32,12 @@ from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef
 from openswe.store import now_iso
+from openswe.ui_invalidations import Topic
 from openswe.utils.dashboard_links import dashboard_incident_url
+from openswe.utils.json_types import thread_metadata
 
 logger = logging.getLogger(__name__)
 
-INCIDENT_SOURCE = "incidents_agent"
 INCIDENT_TOOL_NAMES = frozenset({"record_incident_report", "search_incidents", "read_incident"})
 
 
@@ -97,11 +98,11 @@ class IncidentSession:
 
     async def check(self) -> None:
         """Refuse to continue when the incident stopped or the policy changed underneath us."""
-        record = await service.INCIDENTS.get(self.record.id)
+        record = await service.INCIDENTS.for_thread(self.record.thread_id)
         policy = await service.get_policy()
         if (
             record is None
-            or record.thread_id != self.record.thread_id
+            or record.id != self.record.id
             or record.workspace_id != policy.workspace_id
         ):
             raise PermissionError("Incident binding is missing")
@@ -119,7 +120,7 @@ class IncidentSession:
         report = finalize_report(draft, self.collector)
         record = self.record
         digest = service.fingerprint(digest_fields(report))
-        previous = await service.REPORTS.get(record.id)
+        previous = await service.REPORTS.get(record.thread_id)
         run_id = current_run_id()
         # The postmortem update runs first: if it fails, nothing is recorded and the agent
         # sees the error instead of a report that was never fully written.
@@ -137,7 +138,8 @@ class IncidentSession:
             activity=previous.activity if previous else [],
         )
         service.note(latest, "findings", report.summary)
-        await service.REPORTS.put(record.id, latest)
+        await service.REPORTS.put(record.thread_id, latest)
+        await Topic.INCIDENTS.invalidate(key=record.id)
         explicit = self.explicit_request is not None
         delivered = latest.posted_digest == digest
         delivered_this_run = delivered and bool(run_id) and latest.posted_run_id == run_id
@@ -180,7 +182,8 @@ class IncidentSession:
                 latest.posted_digest, latest.posted_run_id = digest, run_id
                 latest.posted_at = now_iso()
                 latest.investigation_posted = latest.investigation_posted or not explicit
-                await service.REPORTS.put(record.id, latest)
+                await service.REPORTS.put(record.thread_id, latest)
+                await Topic.INCIDENTS.invalidate(key=record.id)
 
         return {
             "recorded": True,
@@ -212,15 +215,15 @@ async def load_incident_session(config: Mapping[str, Any]) -> IncidentSession:
         raise PermissionError("Incident runs require a thread")
     if cfg.get("github_login") or cfg.get("user_email") or cfg.get("local_run"):
         raise PermissionError("Incident runs cannot carry personal execution identity")
-    thread = await langgraph_sdk.get_client().threads.get(thread_id)
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    metadata = metadata if isinstance(metadata, dict) else {}
+    thread = await service.INCIDENTS.thread(thread_id)
+    if thread is None:
+        raise PermissionError("Incident binding is missing")
+    metadata = thread_metadata(thread)
     if metadata.get("source") != INCIDENT_SOURCE:
         raise PermissionError("Thread is not an incident conversation")
     if metadata.get("owner_type") != "system" or metadata.get("visibility") != "public":
         raise PermissionError("Incident conversation must be system owned and public")
-    incident_id = IncidentId(str(metadata.get("incident_id") or cfg.get("incident_id") or ""))
-    record = await service.INCIDENTS.get(incident_id) if incident_id else None
+    record = incident_of(thread)
     if record is None or record.thread_id != thread_id:
         raise PermissionError("Incident binding is missing")
     policy = await service.get_policy()

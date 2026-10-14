@@ -35,7 +35,10 @@ async def manage_incident(action: IncidentAction) -> dict[str, Any]:
                 "Admin → Incidents"
             ),
         }
-    record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
+    incident_id = service.incident_id(policy.workspace_id, channel_id)
+    record = await service.INCIDENTS.get(incident_id) or await channels.restore_incident(
+        incident_id, policy
+    )
     if record is None:
         if action != "start":
             return {

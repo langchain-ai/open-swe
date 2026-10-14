@@ -10,6 +10,7 @@ from fastapi import BackgroundTasks, HTTPException
 from openswe.incidents import channels, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.slack.channels import SlackChannel
+from tests.conftest import put_incident
 
 CHANNEL = {
     "id": "C1",
@@ -25,10 +26,8 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def configured(fake_store, monkeypatch):
-    await service.POLICIES.put(
-        "default", IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
-    )
+async def configured(incident_threads, monkeypatch):
+    await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1"))
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(channels.User, "login_for_slack", AsyncMock(return_value="sre"))
@@ -53,7 +52,17 @@ async def configured(fake_store, monkeypatch):
         AsyncMock(return_value={"profile": {"email": "sre@example.com", "display_name": "SRE"}}),
     )
     monkeypatch.setattr(channels, "resolve_slack_thread_id", AsyncMock(return_value="thread-1"))
-    monkeypatch.setattr(channels, "upsert_agent_thread_metadata", AsyncMock(return_value=True))
+
+    async def open_thread(thread_id: str, **metadata: object) -> bool:
+        if thread_id not in incident_threads.items:
+            incident_threads.add(
+                thread_id, source="incidents_agent", owner_type="system", visibility="public"
+            )
+        return True
+
+    monkeypatch.setattr(
+        channels, "upsert_agent_thread_metadata", AsyncMock(side_effect=open_thread)
+    )
     monkeypatch.setattr(channels, "post_slack_thread_reply_with_ts", AsyncMock(return_value="5.0"))
     monkeypatch.setattr(
         channels,
@@ -67,14 +76,12 @@ async def configured(fake_store, monkeypatch):
             ]
         ),
     )
-    threads = SimpleNamespace(update=AsyncMock())
-    monkeypatch.setattr(channels, "store_client", lambda: SimpleNamespace(threads=threads))
     monkeypatch.setattr(turns, "queue_context", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "schedule_automatic_turn", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "dispatch_turn", AsyncMock(return_value={"run_id": "r1"}))
     monkeypatch.setattr(turns, "cancel_active_runs", AsyncMock())
     monkeypatch.setattr(turns, "queued_context_count", AsyncMock(return_value=0))
-    return SimpleNamespace(joined=joined, threads=threads)
+    return SimpleNamespace(joined=joined, threads=incident_threads)
 
 
 @pytest.fixture
@@ -87,7 +94,7 @@ async def enrolled(configured):
         thread_id="thread-1",
         anchor_ts="5.0",
     )
-    await service.INCIDENTS.put(record.id, record)
+    await put_incident(configured.threads, record)
     return record
 
 
@@ -118,9 +125,7 @@ async def test_enrollment_binds_thread_queues_history_and_starts_one_turn(config
     assert upsert.kwargs["source"] == "incidents_agent"
     assert upsert.kwargs["owner_type"] == "system" and upsert.kwargs["visibility"] == "public"
     assert upsert.kwargs["source_context"].slack_thread.thread_ts == "0"
-    configured.threads.update.assert_awaited_once_with(
-        thread_id="thread-1", metadata={"incident_id": record.id}
-    )
+    assert configured.threads.items["thread-1"]["metadata"]["incident_id"] == record.id
     queued = [call.args[1]["ts"] for call in turns.queue_context.await_args_list]
     assert queued == ["1.0", "1.3"]
     turns.schedule_automatic_turn.assert_awaited_once()
@@ -150,7 +155,7 @@ async def test_duplicate_deliveries_are_dropped(enrolled):
 
 async def test_paused_channels_keep_context_without_scheduling(enrolled):
     enrolled.status = "paused"
-    await service.INCIDENTS.put(enrolled.id, enrolled)
+    await service.save(enrolled)
 
     response, _ = await handle(
         {"type": "message", "channel": "C1", "user": "U1", "text": "more", "ts": "3.0"}
@@ -202,7 +207,6 @@ async def test_resume_reschedules_when_context_is_waiting(enrolled):
 
 async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
     await service.POLICIES.put(
-        "default",
         IncidentPolicy(
             enabled=True, workspace_id="T1", slack_app_id="A1", excluded_channel_ids=["C1"]
         ),
@@ -233,3 +237,19 @@ async def test_complete_records_the_run_that_completed_it(enrolled):
 
     await channels.apply_control(completed, "reopen", {"id": "slack:U1"})
     assert (await service.INCIDENTS.get(enrolled.id)).completed_run_id == ""
+
+
+async def test_an_incident_whose_thread_expired_comes_back_on_its_next_event(enrolled, configured):
+    """The channel stays an incident channel after its thread's retention ends."""
+    del configured.threads.items[enrolled.thread_id]
+
+    response, _ = await handle(
+        {"type": "message", "channel": "C1", "user": "U1", "text": "still failing", "ts": "7.0"}
+    )
+
+    assert response == {"status": "accepted"}
+    restored = await service.INCIDENTS.get(enrolled.id)
+    assert restored is not None
+    assert (restored.thread_id, restored.channel_name) == (enrolled.thread_id, "inc-api")
+    assert restored.activity[-1].type == "enrolled"
+    turns.queue_context.assert_awaited_once()

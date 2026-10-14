@@ -167,7 +167,6 @@ def _configurable(
     configurable: dict[str, Any] = {
         "thread_id": record.thread_id,
         "source": "incidents_agent",
-        "incident_id": record.id,
         "slack_thread": slack_thread,
         # Always written, never omitted: a thread keeps the configurable of its earlier runs,
         # so an automatic turn that left this out would inherit the last responder question
@@ -183,7 +182,7 @@ def _configurable(
 
 async def _automatic_request(record: Incident) -> str:
     """The full flow until the investigation has been published, then quiet upkeep."""
-    latest = await service.REPORTS.get(record.id)
+    latest = await service.REPORTS.get(record.thread_id)
     published = latest is not None and latest.investigation_posted
     return AUTOMATIC_REQUEST if published else FIRST_INVESTIGATION_REQUEST
 
@@ -292,8 +291,7 @@ async def schedule_automatic_turn(record: Incident, policy: IncidentPolicy) -> b
 
 async def handle_run_completion(thread_id: str, run_id: str | None, status: str) -> dict[str, str]:
     """Follow up a finished incident run: reschedule stranded context or note a failure."""
-    records = await service.INCIDENTS.search(filter={"thread_id": thread_id})
-    record = records[0] if records else None
+    record = await service.INCIDENTS.for_thread(thread_id)
     if record is None:
         return {"status": "ignored", "reason": "unknown incident thread"}
     await Topic.INCIDENTS.invalidate(key=record.id)

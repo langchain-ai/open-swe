@@ -74,14 +74,19 @@ IncidentStatus = Literal["watching", "paused", "needs_attention", "completed"]
 
 
 class Incident(BaseModel):
-    """One enrolled Slack channel and its system-owned agent thread."""
+    """One enrolled Slack channel, kept on its system-owned agent thread.
+
+    The thread's metadata holds these fields under ``incident``; ``thread_id``
+    is the thread itself and ``activity`` lives in the incident's history
+    document, so neither is written to the metadata.
+    """
 
     id: IncidentId
     workspace_id: str
     channel_id: str
     channel_name: str = ""
     title: str = ""
-    thread_id: str = ""
+    thread_id: str = Field(default="", exclude=True)
     anchor_ts: str | None = None
     status: IncidentStatus = "watching"
     reason: str = ""
@@ -91,7 +96,7 @@ class Incident(BaseModel):
     completed_run_id: str = ""
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
-    activity: list[Activity] = Field(default_factory=list)
+    activity: list[Activity] = Field(default_factory=list, exclude=True)
 
 
 class IncidentReportRecord(BaseModel):
@@ -109,13 +114,3 @@ class IncidentReportRecord(BaseModel):
     posted_at: str = ""
     updated_at: str = Field(default_factory=now_iso)
     activity: list[Activity] = Field(default_factory=list)
-
-
-class CommandReceipt(BaseModel):
-    """A responder command claimed before its side effects, so retries cannot repeat it."""
-
-    id: str
-    incident_id: IncidentId
-    action: str
-    content_hash: str
-    created_at: str = Field(default_factory=now_iso)

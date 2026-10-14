@@ -7,7 +7,7 @@ import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -16,6 +16,7 @@ import httpx2
 import pytest
 
 from openswe import store as agent_store
+from openswe.incidents.models import Incident
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
 from openswe.tools import access as tool_access
@@ -112,6 +113,64 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     client = FakeStoreClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client.store
+
+
+class FakeThreads:
+    """In-memory stand-in for the LangGraph threads API, matching metadata by top-level keys."""
+
+    def __init__(self) -> None:
+        self.items: dict[str, dict[str, Any]] = {}
+
+    def add(self, thread_id: str, **metadata: Any) -> None:
+        self.items[thread_id] = {"thread_id": thread_id, "metadata": dict(metadata)}
+
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        if thread_id not in self.items:
+            raise _FakeStoreNotFoundError
+        return json.loads(json.dumps(self.items[thread_id]))
+
+    async def search(
+        self,
+        *,
+        metadata: dict[str, Any] | None = None,
+        limit: int = 10,
+        offset: int = 0,
+        **_: Any,
+    ) -> list[dict[str, Any]]:
+        matches = [
+            json.loads(json.dumps(thread))
+            for thread in self.items.values()
+            if all(thread["metadata"].get(key) == value for key, value in (metadata or {}).items())
+        ]
+        return matches[offset : offset + limit]
+
+    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+        if thread_id not in self.items:
+            raise _FakeStoreNotFoundError
+        self.items[thread_id]["metadata"].update(json.loads(json.dumps(metadata)))
+
+
+@pytest.fixture
+def incident_threads(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> FakeThreads:
+    """Incident threads in memory and their documents in PostgreSQL."""
+    from openswe.incidents import threads as incident_threads
+
+    threads = FakeThreads()
+    client = SimpleNamespace(threads=threads)
+    monkeypatch.setattr(incident_threads, "langgraph_client", lambda: client)
+    return threads
+
+
+async def put_incident(threads: FakeThreads, record: Incident) -> None:
+    """Give ``record`` an incident thread and save it there."""
+    from openswe.incidents import service
+
+    record.thread_id = record.thread_id or f"thread-{record.id}"
+    if record.thread_id not in threads.items:
+        threads.add(
+            record.thread_id, source="incidents_agent", owner_type="system", visibility="public"
+        )
+    await service.INCIDENTS.save(record)
 
 
 class FakeUserRecords:

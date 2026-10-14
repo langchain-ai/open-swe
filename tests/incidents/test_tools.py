@@ -9,6 +9,7 @@ from openswe import run_config
 from openswe.incidents import channels, service, tools
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.slack.channels import SlackChannel
+from tests.conftest import put_incident
 
 CHANNEL = {
     "id": "C7",
@@ -38,14 +39,13 @@ def use_config(monkeypatch, **configurable):
 
 async def fake_apply(record: Incident, action: str, actor, *, keep_run_id: str = "") -> Incident:
     record.status = {"pause": "paused", "complete": "completed"}.get(action, "watching")
-    await service.INCIDENTS.put(record.id, record)
+    await service.save(record)
     return record
 
 
 @pytest.fixture
-async def configured(fake_store, monkeypatch):
+async def configured(incident_threads, monkeypatch):
     await service.POLICIES.put(
-        "default",
         IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", channel_prefix="inc-"),
     )
     use_config(monkeypatch)
@@ -63,7 +63,7 @@ async def configured(fake_store, monkeypatch):
     )
     monkeypatch.setattr(channels, "enroll_channel", AsyncMock(return_value=record))
     monkeypatch.setattr(channels, "apply_control", AsyncMock(side_effect=fake_apply))
-    return SimpleNamespace(record=record)
+    return SimpleNamespace(record=record, threads=incident_threads)
 
 
 async def test_start_needs_a_connected_account_and_an_eligible_channel(configured, monkeypatch):
@@ -78,9 +78,7 @@ async def test_start_needs_a_connected_account_and_an_eligible_channel(configure
 
     SlackChannel.fetch.return_value = dict(CHANNEL)
     policy = await service.get_policy()
-    await service.POLICIES.put(
-        "default", policy.model_copy(update={"excluded_channel_ids": ["C7"]})
-    )
+    await service.POLICIES.put(policy.model_copy(update={"excluded_channel_ids": ["C7"]}))
     excluded = await tools.manage_incident("start")
     assert excluded["success"] is False
     channels.enroll_channel.assert_not_awaited()
@@ -88,7 +86,7 @@ async def test_start_needs_a_connected_account_and_an_eligible_channel(configure
 
 async def test_controls_change_the_current_incident_and_keep_this_run(configured):
     record = configured.record
-    await service.INCIDENTS.put(record.id, record)
+    await put_incident(configured.threads, record)
 
     paused = await tools.manage_incident("pause")
     assert (paused["changed"], paused["status"]) == (True, "paused")
@@ -116,7 +114,7 @@ async def test_a_run_cannot_reopen_the_incident_it_just_completed(configured):
     """The run that completed an incident must not undo it seconds later."""
     record = configured.record
     record.status, record.completed_run_id = "completed", "run-now"
-    await service.INCIDENTS.put(record.id, record)
+    await put_incident(configured.threads, record)
 
     for action in ("resume", "start"):
         refused = await tools.manage_incident(action)

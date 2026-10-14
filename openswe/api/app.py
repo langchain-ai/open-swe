@@ -54,6 +54,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.database.store_imports import run_store_import
+    from openswe.incidents.import_records import import_store_incidents
     from openswe.mcp.import_oauth_entries import import_store_mcp_oauth_entries
     from openswe.mcp.import_records import import_store_mcp_connections
     from openswe.review.assessment_feedback import run_assessment_import
@@ -140,6 +141,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Startup continues: MCP clients whose tokens are still in the Store
         # sign in again.
         logger.exception("Importing MCP OAuth entries from the LangGraph Store failed")
+    try:
+        # The Incidents policy, incidents, reports, history, and postmortems used
+        # to live in the LangGraph Store; incidents now live on their threads.
+        await run_store_import("incidents", import_store_incidents)
+    except Exception:  # noqa: BLE001
+        # Startup continues: Incidents stays off, and incidents still in the
+        # Store go unseen, until an import succeeds.
+        logger.exception("Importing incidents from the LangGraph Store failed")
     try:
         # Review settings, assessment feedback, and baby-sit watches used to be
         # Store records; this moves them into PostgreSQL.

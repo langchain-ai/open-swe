@@ -1,4 +1,8 @@
-"""Instance and workspace settings records in PostgreSQL: the instance's under ``""``, a workspace's under its slug."""
+"""Instance and workspace settings records in PostgreSQL.
+
+The instance's record is under ``""`` and the Incidents policy beside it under
+``incidents``; a workspace's record is under its slug.
+"""
 
 from datetime import datetime
 from typing import Literal

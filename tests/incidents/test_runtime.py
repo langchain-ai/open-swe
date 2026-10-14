@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import langgraph_sdk
 import pytest
 from langchain.agents.middleware.types import ModelRequest
 from langchain_core.messages import HumanMessage
@@ -14,6 +13,7 @@ from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
+from tests.conftest import put_incident
 
 CHANNEL = {
     "id": "C1",
@@ -27,24 +27,12 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def incident(fake_store, monkeypatch):
+async def incident(incident_threads, monkeypatch):
     policy = IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
-    await service.POLICIES.put("default", policy)
+    await service.POLICIES.put(policy)
     record = Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-ctx")
-    await service.INCIDENTS.put(record.id, record)
-    metadata = {
-        "source": "incidents_agent",
-        "owner_type": "system",
-        "visibility": "public",
-        "incident_id": "incident",
-    }
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _id: {"metadata": metadata}))
-        ),
-    )
+    await put_incident(incident_threads, record)
+    metadata = incident_threads.items["thread-ctx"]["metadata"]
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", AsyncMock(return_value="7.0"))
     return SimpleNamespace(record=record, policy=policy, metadata=metadata)
@@ -94,24 +82,22 @@ async def test_incident_runs_cannot_carry_personal_identity(incident, identity):
 
 
 async def test_binding_must_match_the_saved_incident(incident):
-    incident.record.thread_id = "other-thread"
-    await service.INCIDENTS.put(incident.record.id, incident.record)
     with pytest.raises(PermissionError, match="binding"):
-        await runtime.load_incident_session(config())
-    incident.metadata["incident_id"] = "missing"
+        await runtime.load_incident_session(config(thread_id="other-thread"))
+    del incident.metadata["incident"]
     with pytest.raises(PermissionError, match="binding"):
         await runtime.load_incident_session(config())
 
 
 async def test_paused_incidents_stop_automatic_turns_but_answer_questions(incident):
     incident.record.status = "paused"
-    await service.INCIDENTS.put(incident.record.id, incident.record)
+    await service.save(incident.record)
     with pytest.raises(PermissionError, match="not watching"):
         await runtime.load_incident_session(config())
     session = await runtime.load_incident_session(config(incident_request="status?"))
     assert session.explicit_request == "status?"
 
-    await service.POLICIES.put("default", IncidentPolicy(enabled=False, workspace_id="T1"))
+    await service.POLICIES.put(IncidentPolicy(enabled=False, workspace_id="T1"))
     with pytest.raises(PermissionError, match="disabled"):
         await runtime.IncidentMiddleware(session).awrap_model_call(request(), AsyncMock())
 
@@ -132,7 +118,7 @@ async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
 
     assert (first["posted"], second["posted"], third["posted"]) == (False, True, False)
     assert runtime.post_slack_thread_reply_with_ts.await_count == 2
-    latest = await service.REPORTS.get("incident")
+    latest = await service.REPORTS.get("thread-ctx")
     assert latest.posted_digest == latest.digest
 
 
@@ -143,7 +129,7 @@ async def test_postmortem_failure_records_nothing(incident, monkeypatch):
     )
     with pytest.raises(RuntimeError, match="store"):
         await session._record_incident_report(summary=[])
-    assert await service.REPORTS.get("incident") is None
+    assert await service.REPORTS.get("thread-ctx") is None
     runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
 
 
@@ -171,7 +157,7 @@ async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet
     # Nobody asked, so it must not present itself as answering anyone.
     assert posted.startswith("*Investigation*")
     assert "*Problem*" in posted
-    assert (await service.REPORTS.get("incident")).investigation_posted is True
+    assert (await service.REPORTS.get("thread-ctx")).investigation_posted is True
 
     # A fresh conclusion much later is still not worth interrupting the channel for.
     later = (datetime.now(UTC) + timedelta(hours=9)).isoformat()
@@ -181,7 +167,7 @@ async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet
     assert third["posted"] is False
     runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
     # The report and the postmortem still move on without it.
-    assert (await service.REPORTS.get("incident")).report.summary.startswith("Monitors are back")
+    assert (await service.REPORTS.get("thread-ctx")).report.summary.startswith("Monitors are back")
 
 
 async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(incident):

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from openswe.incidents import service, turns
 from openswe.incidents.models import Incident, IncidentPolicy, IncidentReport, IncidentReportRecord
 from openswe.slack.channels import SlackChannel
+from tests.conftest import FakeThreads, put_incident
 
 CHANNEL = {
     "id": "C1",
@@ -21,9 +22,8 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def configured(fake_store, monkeypatch):
+async def configured(incident_threads, monkeypatch):
     await service.POLICIES.put(
-        "default",
         IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", enabled_at=100),
     )
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
@@ -31,7 +31,7 @@ async def configured(fake_store, monkeypatch):
     monkeypatch.setattr(
         service, "get_langsmith_trace_url", AsyncMock(return_value="https://smith/t")
     )
-    return fake_store
+    return incident_threads
 
 
 def _auth(monkeypatch, team="T1", scopes=None):
@@ -48,22 +48,23 @@ def _auth(monkeypatch, team="T1", scopes=None):
     return service._auth_test
 
 
-async def _record(status="watching", **fields) -> Incident:
+async def _record(threads: FakeThreads, status="watching", **fields) -> Incident:
+    channel = fields.pop("channel", "C1")
     record = Incident(
         id=service.incident_id("T1", fields.pop("channel_id", "C1")),
         workspace_id="T1",
-        channel_id=fields.pop("channel", "C1"),
+        channel_id=channel,
         channel_name="inc-api",
-        thread_id="thread-1",
+        thread_id=f"thread-{channel}",
         status=status,
         **fields,
     )
-    await service.INCIDENTS.put(record.id, record)
+    await put_incident(threads, record)
     return record
 
 
 async def test_identity_cannot_change_with_registered_incidents(configured, monkeypatch):
-    await _record()
+    await _record(configured)
     _auth(monkeypatch, "T1")
     monkeypatch.setenv("SLACK_APP_ID", "A2")
     with pytest.raises(HTTPException) as error:
@@ -76,13 +77,13 @@ async def test_identity_cannot_change_with_registered_incidents(configured, monk
 
 
 async def test_list_filters_by_activity_and_hides_unreadable_channels(configured, monkeypatch):
-    watching = await _record()
-    paused = await _record(status="paused", channel_id="C2", channel="C2")
+    watching = await _record(configured)
+    paused = await _record(configured, status="paused", channel_id="C2", channel="C2")
     failed = await _record(
-        status="needs_attention", channel_id="C3", channel="C3", reason="setup_failed"
+        configured, status="needs_attention", channel_id="C3", channel="C3", reason="setup_failed"
     )
     await service.REPORTS.put(
-        watching.id,
+        watching.thread_id,
         IncidentReportRecord(
             incident_id=watching.id, report=IncidentReport(summary="Latest"), digest="d"
         ),
@@ -108,7 +109,7 @@ async def test_list_filters_by_activity_and_hides_unreadable_channels(configured
 
 
 async def test_revoked_channel_access_hides_the_incident(configured):
-    record = await _record()
+    record = await _record(configured)
     SlackChannel.fetch.return_value = {**CHANNEL, "is_member": False}
     with pytest.raises(HTTPException) as error:
         await service.get_incident(record.id)
@@ -120,7 +121,7 @@ async def test_revoked_channel_access_hides_the_incident(configured):
 
 
 async def test_questions_dispatch_explicit_turns_with_server_identity(configured, monkeypatch):
-    record = await _record()
+    record = await _record(configured)
     dispatch = AsyncMock(return_value={"run_id": "r1"})
     monkeypatch.setattr(turns, "dispatch_turn", dispatch)
 
@@ -143,19 +144,19 @@ async def test_questions_dispatch_explicit_turns_with_server_identity(configured
 
 
 async def test_cursor_pages_do_not_repeat_when_an_incident_moves_forward(configured):
-    first = await _record(channel_id="C1", channel="C1")
-    second = await _record(channel_id="C2", channel="C2")
-    third = await _record(channel_id="C3", channel="C3")
+    first = await _record(configured, channel_id="C1", channel="C1")
+    second = await _record(configured, channel_id="C2", channel="C2")
+    third = await _record(configured, channel_id="C3", channel="C3")
     for index, record in enumerate((first, second, third)):
         record.updated_at = f"2026-09-13T10:0{3 - index}:00+00:00"
-        await service.INCIDENTS.put(record.id, record)
+        await service.INCIDENTS.write_metadata(record)
 
     page_one = await service.list_incidents(limit=1)
     assert [item["id"] for item in page_one["items"]] == [first.id]
     assert page_one["next_cursor"] == f"{first.updated_at}|{first.id}"
 
     third.updated_at = "2026-09-13T11:00:00+00:00"
-    await service.INCIDENTS.put(third.id, third)
+    await service.INCIDENTS.write_metadata(third)
     page_two = await service.list_incidents(limit=1, cursor=page_one["next_cursor"])
 
     assert [item["id"] for item in page_two["items"]] == [second.id]
@@ -166,7 +167,7 @@ async def test_cursor_pages_do_not_repeat_when_an_incident_moves_forward(configu
 
 
 async def test_retried_commands_are_not_repeated(configured, monkeypatch):
-    record = await _record()
+    record = await _record(configured)
     dispatch = AsyncMock(return_value={"run_id": "r1"})
     monkeypatch.setattr(turns, "dispatch_turn", dispatch)
     actor = {"id": "github:sre", "github_login": "sre"}

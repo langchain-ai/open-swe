@@ -314,7 +314,7 @@ Slack findings and control notices use compact messages directly in the incident
 
 Ordinary channel messages, including bot alerts, are queued as context and analyzed together in one turn about 15 seconds after the first arrives; enrollment queues the most recent channel history the same way. Direct questions and pause/stop controls bypass the delay. As in the main Slack handler, a direct mention interrupts an active turn, while ordinary messages wait for the next one. Nothing runs while the channel is quiet, so there is no idle timeout or watch limit; complete, pause, or archiving the channel stops the bot.
 
-The agent stores its latest postmortem summary as Markdown in the existing LangGraph Store. The **Postmortem** tab renders it and **Copy incident** copies the text and source links for use elsewhere. **History** searches retained incident metadata and summaries, including incidents whose raw context has expired. There is no document editor or revision-history UI.
+The agent stores its latest postmortem summary as Markdown in a document beside the incident thread, in PostgreSQL. The **Postmortem** tab renders it and **Copy incident** copies the text and source links for use elsewhere. **History** searches retained incident metadata and summaries, including incidents whose raw context has expired. There is no document editor or revision-history UI.
 
 Public status-page publishing is not implemented. Authorized responders can ask the agent to edit code, open a PR as the GitHub App, or use configured integrations for a specified action. Automatic turns investigate and propose mitigation; alerts and ordinary channel messages do not authorize external changes. Personal integrations remain unavailable in these system-owned threads.
 

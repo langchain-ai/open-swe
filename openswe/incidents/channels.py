@@ -2,17 +2,18 @@
 
 import logging
 import re
-from typing import Any
+from typing import Any, get_args
 
 from fastapi import BackgroundTasks, HTTPException
 
 from openswe.config import ENV
 from openswe.incidents import service, turns
-from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.incidents.models import Incident, IncidentId, IncidentPolicy, IncidentStatus
 from openswe.incidents.presentation import report_message
 from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
+    SlackThreadMappingError,
     fetch_slack_thread_messages,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
@@ -20,11 +21,11 @@ from openswe.slack.client import (
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SlackClient, SlackRequestError
-from openswe.slack.mappings import resolve_slack_thread_id
+from openswe.slack.mappings import bind_slack_thread_id, resolve_slack_thread_id
 from openswe.source_context import SlackThreadRef, SourceContext
-from openswe.store import store_client
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_incident_url
+from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks.common import post_account_link_prompt, upsert_agent_thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -147,10 +148,30 @@ async def _post(
     return ts
 
 
+async def open_thread(record: Incident) -> None:
+    """Make ``record.thread_id`` the channel's system-owned agent thread."""
+    if not record.thread_id:
+        record.thread_id = await resolve_slack_thread_id(
+            langgraph_client(), record.channel_id, turns.SESSION_TS
+        )
+    persisted = await upsert_agent_thread_metadata(
+        record.thread_id,
+        source="incidents_agent",
+        title=record.channel_name,
+        source_context=SourceContext(
+            slack_thread=SlackThreadRef(channel_id=record.channel_id, thread_ts=turns.SESSION_TS)
+        ),
+        visibility="public",
+        owner_type="system",
+    )
+    if not persisted:
+        raise RuntimeError("could not persist incident thread metadata")
+
+
 async def enroll_channel(
     channel_id: str, channel_name: str, policy: IncidentPolicy, *, manual: bool = False
 ) -> Incident | None:
-    """Join a channel and bind it to a new system-owned agent thread.
+    """Bind a channel to a new system-owned agent thread and join it.
 
     Automatic enrollment requires the channel prefix; a manual start by a responder does not.
     """
@@ -165,6 +186,12 @@ async def enroll_channel(
         title=channel_name,
     )
     try:
+        await open_thread(record)
+    except Exception:
+        # Without a thread there is nowhere to keep the incident; Slack redelivers the event.
+        logger.exception("Incident thread setup failed", extra={"incident_id": incident_id})
+        return None
+    try:
         async with SlackClient.bot() as slack:
             await slack.conversations_join(channel=channel_id)
         info = await SlackChannel.fetch(channel_id, use_cache=False)
@@ -175,23 +202,6 @@ async def enroll_channel(
             return record
         record.channel_name = str(info.get("name") or channel_name)
         record.title = record.channel_name
-        client = store_client()
-        record.thread_id = await resolve_slack_thread_id(client, channel_id, turns.SESSION_TS)
-        persisted = await upsert_agent_thread_metadata(
-            record.thread_id,
-            source="incidents_agent",
-            title=record.channel_name,
-            source_context=SourceContext(
-                slack_thread=SlackThreadRef(channel_id=channel_id, thread_ts=turns.SESSION_TS)
-            ),
-            visibility="public",
-            owner_type="system",
-        )
-        if not persisted:
-            raise RuntimeError("could not persist incident thread metadata")
-        await client.threads.update(
-            thread_id=record.thread_id, metadata={"incident_id": incident_id}
-        )
         record.anchor_ts = await _post(record, _introduction(record))
         service.note(record, "enrolled", f"Following #{record.channel_name}.")
         await service.save(record)
@@ -211,6 +221,42 @@ async def enroll_channel(
     return record
 
 
+async def restore_incident(incident_id: IncidentId, policy: IncidentPolicy) -> Incident | None:
+    """Bring back an incident whose thread's retention ended, from its history document.
+
+    ``None`` when the incident never existed in this Slack workspace.
+    """
+    found = await service.INCIDENTS.history(incident_id, policy.workspace_id)
+    if found is None:
+        return None
+    thread_id, history = found
+    statuses: tuple[IncidentStatus, ...] = get_args(IncidentStatus)
+    record = Incident(
+        id=incident_id,
+        workspace_id=history.workspace_id,
+        channel_id=history.channel_id,
+        channel_name=history.channel_name,
+        title=history.title,
+        thread_id=thread_id,
+        status=next((status for status in statuses if status == history.status), "watching"),
+        created_at=history.created_at,
+        activity=history.activity,
+    )
+    try:
+        await bind_slack_thread_id(record.channel_id, turns.SESSION_TS, thread_id)
+    except SlackThreadMappingError:
+        logger.warning(
+            "Incident channel is bound to another thread",
+            extra={"incident_id": incident_id},
+            exc_info=True,
+        )
+        return None
+    await open_thread(record)
+    service.note(record, "enrolled", f"Following #{record.channel_name} again.")
+    await service.save(record)
+    return record
+
+
 def _is_context(message: dict[str, Any], policy: IncidentPolicy) -> bool:
     subtype = str(message.get("subtype") or "")
     return (
@@ -222,12 +268,18 @@ def _is_context(message: dict[str, Any], policy: IncidentPolicy) -> bool:
 
 
 async def apply_control(
-    record: Incident, action: str, actor: dict[str, Any], *, keep_run_id: str = ""
+    record: Incident,
+    action: str,
+    actor: dict[str, Any],
+    *,
+    keep_run_id: str = "",
+    by: str | None = None,
 ) -> Incident:
     """Pause, resume, complete, or reopen an incident and tell the channel.
 
     `keep_run_id` names the run applying the control (the manage_incident tool), which
-    must survive the cancellation of the others.
+    must survive the cancellation of the others. `by` is the GitHub login of the
+    dashboard user who sent the control.
     """
     policy = await service.get_policy()
     blocks: list[dict[str, Any]] | None = None
@@ -243,7 +295,7 @@ async def apply_control(
             else "Incident paused. Mention me with `resume` to continue."
         )
         if action == "complete":
-            latest = await service.REPORTS.get(record.id)
+            latest = await service.REPORTS.get(record.thread_id)
             if latest is not None:
                 text, blocks = report_message(
                     latest.report,
@@ -257,7 +309,7 @@ async def apply_control(
     else:
         raise ValueError(f"unknown incident control {action!r}")
     service.note(record, "control", text.split("\n", 1)[0])
-    await service.save(record)
+    await service.save(record, by=by)
     await _post(record, text, blocks=blocks)
     if action in {"resume", "reopen"} and await turns.queued_context_count(record.thread_id):
         await turns.schedule_automatic_turn(record, policy)
@@ -277,7 +329,9 @@ async def handle_slack_event(
     if not isinstance(channel_id, str) or not channel_id:
         return None
     policy = await service.get_policy()
-    record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
+    incident_id = service.incident_id(policy.workspace_id, channel_id)
+    # An incident whose thread's retention ended stays one.
+    record = await service.INCIDENTS.get(incident_id) or await restore_incident(incident_id, policy)
     enrollment = (
         kind in {"channel_created", "channel_rename"}
         and policy.enabled
