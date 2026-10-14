@@ -5,9 +5,11 @@ repository and run configuration from that token, so nothing the model writes ca
 point a call elsewhere. Every call is ``POST /remote-runtime/hooks/{hook}``.
 """
 
+import asyncio
 import os
 from collections.abc import Mapping, Sequence
-from typing import Final, Literal
+from typing import ClassVar, Final, Literal
+from weakref import WeakKeyDictionary
 
 import httpx2
 from langchain_core.messages import BaseMessage, messages_to_dict
@@ -22,6 +24,9 @@ _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count
 # call can run a long command.
 _LONG_CALL_SECONDS: Final = 1800.0
 _HOOK_SECONDS: Final = 300.0
+# Outlasts most model calls, so the hooks around one reuse the connection, and stays
+# under the load balancer's idle timeout (over 100 s).
+_KEEPALIVE_SECONDS: Final = 60.0
 
 Hook = Literal[
     "catalog",
@@ -109,6 +114,12 @@ def _messages(value: object) -> list[BaseMessage]:
 class OpenSweBackend:
     """The Open SWE backend, called with one run's token."""
 
+    # Shared by every run in this process: a run calls several hooks per model turn,
+    # and a new connection for each pays DNS, TCP and TLS to the backend again.
+    _clients: ClassVar[WeakKeyDictionary[asyncio.AbstractEventLoop, httpx2.AsyncClient]] = (
+        WeakKeyDictionary()
+    )
+
     def __init__(self, run_token: str | None) -> None:
         base = os.environ.get(BACKEND_URL_ENV, "").strip().rstrip("/")
         if not base:
@@ -120,6 +131,15 @@ class OpenSweBackend:
     def has_run(self) -> bool:
         return self._run_token is not None
 
+    @classmethod
+    def _client(cls) -> httpx2.AsyncClient:
+        loop = asyncio.get_running_loop()
+        client = cls._clients.get(loop)
+        if client is None:
+            client = httpx2.AsyncClient(limits=httpx2.Limits(keepalive_expiry=_KEEPALIVE_SECONDS))
+            cls._clients[loop] = client
+        return client
+
     async def call(
         self, hook: Hook, body: Mapping[str, JsonValue] | None = None
     ) -> dict[str, JsonValue]:
@@ -129,13 +149,13 @@ class OpenSweBackend:
             )
         timeout = _LONG_CALL_SECONDS if hook in {"prepare", "call"} else _HOOK_SECONDS
         try:
-            async with httpx2.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    f"{self._base}/remote-runtime/hooks/{hook}",
-                    headers={"Authorization": f"Bearer {self._run_token}"},
-                    json=dict(body or {}),
-                )
-                response.raise_for_status()
+            response = await self._client().post(
+                f"{self._base}/remote-runtime/hooks/{hook}",
+                headers={"Authorization": f"Bearer {self._run_token}"},
+                json=dict(body or {}),
+                timeout=timeout,
+            )
+            response.raise_for_status()
         except httpx2.HTTPError as exc:
             # Named by type only: transport errors can echo the request, and it carries the token.
             raise BackendCallError(f"{hook} failed ({type(exc).__name__})") from exc
