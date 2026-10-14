@@ -10,18 +10,21 @@ A thread's transcript is an append-only event log in the backend's PostgreSQL (`
 
 ## Using it from an agent runtime
 
-Depend on the package by path (`uv add ../libs/openswe-transcript`), then add the middleware to the agent and to every subagent. Put it inside the middleware that hands each reply to the backend, so a reply's fragments are flushed before the backend completes the message:
+Depend on the package by path (`uv add ../libs/openswe-transcript`), then add the middleware to the agent, inside the middleware that hands each reply to the backend. A reply's fragments are then flushed before the backend completes the message. `mda/agent.py` does this:
 
 ```python
 from openswe_transcript.remote import HttpFragmentSink, RemoteTranscriptMiddleware
 
-transcript = RemoteTranscriptMiddleware(HttpFragmentSink(backend_url, run_token))
-
 define_deep_agent(
     ...,
-    middleware=[BackendRunMiddleware(...), transcript, ...],
-    subagents=[{..., "middleware": [transcript, ...]}],
+    middleware=[
+        BackendRunMiddleware(...),
+        RemoteTranscriptMiddleware(HttpFragmentSink(backend_url, run_token)),
+        ...,
+    ],
 )
 ```
+
+A subagent streams under its `task` call's id, so it belongs on subagents too once the backend records their `task` calls and replies.
 
 Fragments go to the open turn of the run that `current_run_id()` names, which is the id the run's hooks report to the backend. The backend refuses fragments when the run has no open turn, and when a fragment names a message that isn't an AI message of that turn. After a refusal, the sink stops streaming for the run. Streaming is best effort: `message.completed` replaces whatever streamed, so a lost fragment heals once its message completes.

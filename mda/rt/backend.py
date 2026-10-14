@@ -11,6 +11,7 @@ from typing import Final, Literal
 
 import httpx2
 from langchain_core.messages import BaseMessage, messages_to_dict
+from openswe_transcript.remote import HttpFragmentSink
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from rt.models import ModelSpec, RunModels
@@ -120,19 +121,28 @@ class OpenSweBackend:
     def has_run(self) -> bool:
         return self._run_token is not None
 
-    async def call(
-        self, hook: Hook, body: Mapping[str, JsonValue] | None = None
-    ) -> dict[str, JsonValue]:
+    @property
+    def _token(self) -> str:
         if self._run_token is None:
             raise BackendCallError(
                 "This run carries no Open SWE run token; start it through Open SWE"
             )
+        return self._run_token
+
+    def fragment_sink(self) -> HttpFragmentSink:
+        """Where the run streams its replies for the backend's transcript."""
+        return HttpFragmentSink(self._base, self._token)
+
+    async def call(
+        self, hook: Hook, body: Mapping[str, JsonValue] | None = None
+    ) -> dict[str, JsonValue]:
+        token = self._token
         timeout = _LONG_CALL_SECONDS if hook in {"prepare", "call"} else _HOOK_SECONDS
         try:
             async with httpx2.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     f"{self._base}/remote-runtime/hooks/{hook}",
-                    headers={"Authorization": f"Bearer {self._run_token}"},
+                    headers={"Authorization": f"Bearer {token}"},
                     json=dict(body or {}),
                 )
                 response.raise_for_status()

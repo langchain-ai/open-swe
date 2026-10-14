@@ -24,11 +24,12 @@ from langchain_core.messages import SystemMessage, messages_from_dict
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
 from langgraph.runtime import Runtime
+from openswe_transcript.remote import current_run_id
 from pydantic import BaseModel, JsonValue
 
 from rt.backend import BackendCallError, OpenSweBackend, PhaseReply, run_body
 from rt.models import ModelSpec, build_model
-from rt.tools import STATE_KEY, run_id
+from rt.tools import STATE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -130,12 +131,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
             return None
-        reply = await self._backend.phase("prepare", run_body(run_id(), state))
+        reply = await self._backend.phase("prepare", run_body(current_run_id(), state))
         return {**_apply(reply), "open_swe_prepared_for": invocation}
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        reply = await self._backend.phase("before_model", run_body(run_id(), state))
+        reply = await self._backend.phase("before_model", run_body(current_run_id(), state))
         update = _apply(reply)
         if reply.system_prompt is not None:
             update["open_swe_call"] = ModelCall(
@@ -171,7 +172,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 request.override(model=build_model(call.fallback, use_gateway=call.use_gateway))
             )
         observed = await self._backend.model_result(
-            run_body(run_id(), request.state), response.result
+            run_body(current_run_id(), request.state), response.result
         )
         if observed:
             response = ModelResponse(
@@ -182,11 +183,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        return _apply(await self._backend.phase("after_model", run_body(run_id(), state)))
+        return _apply(await self._backend.phase("after_model", run_body(current_run_id(), state)))
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         try:
-            return _apply(await self._backend.phase("after_agent", run_body(run_id(), state)))
+            return _apply(
+                await self._backend.phase("after_agent", run_body(current_run_id(), state))
+            )
         except BackendCallError:
             # The backend's completion webhook settles what this run left open.
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)

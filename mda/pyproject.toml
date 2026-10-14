@@ -14,6 +14,7 @@ dependencies = [
     "httpx2>=2.12.0,<3.0.0",
     "mcp>=2.2.0,<3",
     "pydantic>=2.11",
+    "openswe-transcript",
 ]
 
 [tool.mda]
@@ -24,3 +25,6 @@ python-version = "3.13"
 # import of the backend (`openswe`) or a database driver fails to resolve.
 [tool.ty.src]
 include = ["agent.py", "identity.py", "rt"]
+
+[tool.uv.sources]
+openswe-transcript = { path = "../libs/openswe-transcript" }

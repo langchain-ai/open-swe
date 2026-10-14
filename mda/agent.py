@@ -18,6 +18,7 @@ from managed_deepagents import (
     ManagedServerRuntime,
     define_deep_agent,
 )
+from openswe_transcript.remote import RemoteTranscriptMiddleware
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
 from rt.middleware import BackendRunMiddleware, ServedToolsMiddleware
@@ -110,6 +111,10 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ],
         middleware=[
             BackendRunMiddleware(backend, context.invocation_id),
+            # Inside BackendRunMiddleware, so a reply's text reaches the transcript
+            # before the backend completes it. Not on subagents: neither their
+            # ``task`` call nor their replies reach the backend's transcript yet.
+            *([RemoteTranscriptMiddleware(backend.fragment_sink())] if backend.has_run else []),
             ServedToolsMiddleware(tools, excluded),
             *(
                 [CodeInterpreterMiddleware(ptc=_REVIEWER_PTC_TOOLS)]
