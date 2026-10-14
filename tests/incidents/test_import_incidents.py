@@ -68,6 +68,9 @@ async def test_store_import_copies_incident_state_then_retires_the_store_records
     store.seed(HISTORY_NAMESPACE, incident.id, history.model_dump(mode="json"))
     store.seed(SUMMARIES_NAMESPACE, incident.id, {"markdown": "# API"})
     store.seed(COMMANDS_NAMESPACE, "c1", _receipt("c1"))
+    # A report lives on its incident's row, so one without an incident waits in the Store.
+    orphan = report.model_copy(update={"incident_id": "gone"})
+    store.seed(REPORTS_NAMESPACE, "gone", orphan.model_dump(mode="json"))
 
     assert await import_store_incidents() == StoreImport(moved=6)
     assert await service.get_policy() == policy
@@ -85,7 +88,7 @@ async def test_store_import_copies_incident_state_then_retires_the_store_records
 
     monkeypatch.setattr(store_imports, "RETIRE_STORE_COPY_AFTER", timedelta())
     assert await import_store_incidents() == StoreImport(moved=6)
-    assert not any(store.items.values())
+    assert {namespace for namespace, items in store.items.items() if items} == {REPORTS_NAMESPACE}
     assert await service.COMMANDS.get("c1") is not None
 
 

@@ -4,13 +4,15 @@ Runs through :func:`openswe.database.store_imports.run_store_import`, which
 stops running it once a pass finds nothing left; a later release can delete
 this module.
 
-A Store record is copied, and deleted only once the copy has been in place for
-a day: replicas of the previous release read and write these records until
-their rollout finishes. A Store record saved after the copy, by such a replica,
-replaces it: by its ``updated_at``, the policy by its ``version``, and a
-postmortem by its incident history's ``updated_at``, which is saved with it.
-Only command receipts are ever deleted, so a copied receipt whose Store record
-such a replica deleted goes too.
+A Store record is copied, and deleted only once its incident row has gone a
+day without a write: replicas of the previous release read and write these
+records until their rollout finishes. A Store record saved after the copy, by
+such a replica, replaces it, comparing each record's own ``updated_at``: the
+incident's, its report's, and its history's; the policy by its ``version``;
+and a postmortem by its incident history's, which is saved with it. A report,
+history, or postmortem lives on its incident's row, so incidents move first and
+one without an incident stays in the Store. Only command receipts are ever
+deleted, so a copied receipt whose Store record such a replica deleted goes too.
 """
 
 import logging
@@ -24,6 +26,7 @@ from openswe.database.store_imports import (
     StoreImport,
     may_delete_store_copy,
     store_copy_is_newer,
+    timestamp,
 )
 from openswe.incidents.document_models import IncidentHistory
 from openswe.incidents.documents import HISTORY, POSTMORTEMS
@@ -34,6 +37,7 @@ from openswe.incidents.models import (
     IncidentPolicy,
     IncidentReportRecord,
 )
+from openswe.incidents.records import MissingIncident
 from openswe.incidents.service import COMMANDS, INCIDENTS, POLICIES, REPORTS
 from openswe.store import Namespace, StoreEntry, delete_value, search_all_entries
 
@@ -50,14 +54,13 @@ _POLICY_KEY = "default"
 
 async def import_store_incidents() -> StoreImport:
     histories = {entry.key: entry.value for entry in await _entries(HISTORY_NAMESPACE)}
+    # Postmortems compare against the history PostgreSQL held before this pass copied any.
     return (
         await _import_policy()
-        + await _import_records(INCIDENTS_NAMESPACE, Incident, INCIDENTS.written_at, INCIDENTS.put)
-        + await _import_records(
-            REPORTS_NAMESPACE, IncidentReportRecord, REPORTS.written_at, REPORTS.put
-        )
-        + await _import_records(HISTORY_NAMESPACE, IncidentHistory, HISTORY.written_at, HISTORY.put)
+        + await _import_records(INCIDENTS_NAMESPACE, Incident, INCIDENTS.get, INCIDENTS.put)
         + await _import_postmortems(histories)
+        + await _import_records(REPORTS_NAMESPACE, IncidentReportRecord, REPORTS.get, REPORTS.put)
+        + await _import_records(HISTORY_NAMESPACE, IncidentHistory, HISTORY.get, HISTORY.put)
         + await _import_commands()
     )
 
@@ -109,10 +112,10 @@ async def _import_policy() -> StoreImport:
     return result
 
 
-async def _import_records[RecordT: BaseModel](
+async def _import_records[RecordT: (Incident, IncidentReportRecord, IncidentHistory)](
     namespace: Namespace,
     model: type[RecordT],
-    written_at: Callable[[IncidentId], Awaitable[datetime | None]],
+    get: Callable[[IncidentId], Awaitable[RecordT | None]],
     put: Callable[[IncidentId, RecordT], Awaitable[RecordT]],
 ) -> StoreImport:
     result = StoreImport()
@@ -121,13 +124,24 @@ async def _import_records[RecordT: BaseModel](
         if record is None:
             continue
         key = IncidentId(entry.key)
-        current = await written_at(key)
-        if current is None or store_copy_is_newer(entry.value, current):
-            await put(key, record)
-            result += StoreImport(moved=1)
+        current = await get(key)
+        if current is None or store_copy_is_newer(entry.value, timestamp(current.updated_at)):
+            result += await _copy(namespace, entry.key, put(key, record))
         else:
-            result += await _retire(namespace, entry.key, current)
+            result += await _retire(namespace, entry.key, await INCIDENTS.written_at(key))
     return result
+
+
+async def _copy(namespace: Namespace, key: str, write: Awaitable[object]) -> StoreImport:
+    try:
+        await write
+    except MissingIncident:
+        logger.warning(
+            "Leaving an incident record without its incident in the Store",
+            extra={"store_namespace": "/".join(namespace), "store_key": key},
+        )
+        return StoreImport()
+    return StoreImport(moved=1)
 
 
 async def _import_postmortems(histories: Mapping[str, Mapping[str, object]]) -> StoreImport:
@@ -141,12 +155,14 @@ async def _import_postmortems(histories: Mapping[str, Mapping[str, object]]) -> 
             )
             continue
         key = IncidentId(entry.key)
-        current = await POSTMORTEMS.written_at(key)
-        if current is None or store_copy_is_newer(histories.get(entry.key, {}), current):
-            await POSTMORTEMS.put(key, markdown)
-            result += StoreImport(moved=1)
+        history = await HISTORY.get(key)
+        if await POSTMORTEMS.get(key) is None or (
+            history is not None
+            and store_copy_is_newer(histories.get(entry.key, {}), timestamp(history.updated_at))
+        ):
+            result += await _copy(SUMMARIES_NAMESPACE, entry.key, POSTMORTEMS.put(key, markdown))
         else:
-            result += await _retire(SUMMARIES_NAMESPACE, entry.key, current)
+            result += await _retire(SUMMARIES_NAMESPACE, entry.key, await INCIDENTS.written_at(key))
     return result
 
 

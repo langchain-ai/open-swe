@@ -1,19 +1,21 @@
 """Incident state in PostgreSQL.
 
-Each JSONB column holds its record's ``model_dump`` and is read back through the
-model; the typed columns beside it are what queries filter on. ``updated_at`` is
-when PostgreSQL last wrote the row, which the Store import compares against.
+Each incident's row also keeps its latest report, curated history, and
+postmortem, so each is written as a column of an existing row. Each JSONB
+column holds its record's ``model_dump`` and is read back through the model;
+the typed columns beside it are what queries filter on. ``updated_at`` is when
+PostgreSQL last wrote the row.
 """
 
 import logging
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from datetime import UTC, datetime
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import ForeignKey, ScalarSelect, delete, func, select, text
+from sqlalchemy import ForeignKey, ScalarSelect, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
@@ -60,54 +62,9 @@ class IncidentRow(Base):
     thread_id: Mapped[str]
     status: Mapped[str]
     incident: Mapped[JsonObject] = mapped_column(JSONB)
-    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    created_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-    updated_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-
-
-class IncidentReportRow(Base):
-    __tablename__ = "incident_report"
-
-    incident_id: Mapped[str]
-    report: Mapped[JsonObject] = mapped_column(JSONB)
-    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    created_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-    updated_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-
-
-class IncidentHistoryRow(Base):
-    __tablename__ = "incident_history"
-
-    incident_id: Mapped[str]
-    history: Mapped[JsonObject] = mapped_column(JSONB)
-    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    created_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-    updated_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-
-
-class IncidentPostmortemRow(Base):
-    __tablename__ = "incident_postmortem"
-
-    incident_id: Mapped[str]
-    markdown: Mapped[str]
+    report: Mapped[JsonObject | None] = mapped_column(JSONB, default=None)
+    history: Mapped[JsonObject | None] = mapped_column(JSONB, default=None)
+    postmortem: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -158,6 +115,36 @@ def _readable[RecordT: BaseModel](
                 exc_info=True,
             )
     return records
+
+
+class MissingIncident(LookupError):
+    """No incident row to keep a report, history, or postmortem on."""
+
+    def __init__(self, incident_id: str) -> None:
+        super().__init__(f"No incident {incident_id!r} to update")
+
+
+async def _part[ValueT](
+    column: InstrumentedAttribute[ValueT], incident_id: IncidentId
+) -> ValueT | None:
+    async with postgres.session() as session:
+        return await session.scalar(select(column).where(IncidentRow.incident_id == incident_id))
+
+
+async def _set_part(
+    incident_id: IncidentId, values: Mapping[str, object], *, by: str | None = None
+) -> None:
+    """Write one of the records kept beside the incident on its row, which must exist."""
+    async with postgres.session() as session:
+        updated = await session.scalar(
+            update(IncidentRow)
+            .where(IncidentRow.incident_id == incident_id)
+            .values(**values, updated_at=func.clock_timestamp(), updated_by=_person(by))
+            .returning(IncidentRow.id)
+        )
+        if updated is None:
+            raise MissingIncident(incident_id)
+        await Topic.INCIDENTS.invalidate(session, key=incident_id)
 
 
 class IncidentPolicies:
@@ -263,125 +250,47 @@ class Incidents:
 
 
 class IncidentReports:
-    """Each incident's latest report, by incident id."""
+    """Each incident's latest agent report, kept on its incident row."""
 
     async def get(self, incident_id: IncidentId) -> IncidentReportRecord | None:
-        async with postgres.session() as session:
-            value = await session.scalar(
-                select(IncidentReportRow.report).where(IncidentReportRow.incident_id == incident_id)
-            )
+        value = await _part(IncidentRow.report, incident_id)
         return None if value is None else IncidentReportRecord.model_validate(value)
 
     async def put(
         self, incident_id: IncidentId, record: IncidentReportRecord
     ) -> IncidentReportRecord:
-        value = record.model_dump(mode="json")
-        async with postgres.session() as session:
-            await session.execute(
-                insert(IncidentReportRow)
-                .values(id=uuid7(), incident_id=incident_id, report=value)
-                .on_conflict_do_update(
-                    index_elements=[IncidentReportRow.incident_id],
-                    set_={
-                        "report": value,
-                        "updated_at": func.clock_timestamp(),
-                        "updated_by": None,
-                    },
-                )
-            )
-            await Topic.INCIDENTS.invalidate(session, key=incident_id)
+        await _set_part(incident_id, {"report": record.model_dump(mode="json")})
         return record
-
-    async def written_at(self, incident_id: IncidentId) -> datetime | None:
-        async with postgres.session() as session:
-            return await session.scalar(
-                select(IncidentReportRow.updated_at).where(
-                    IncidentReportRow.incident_id == incident_id
-                )
-            )
 
 
 class IncidentHistories:
-    """Curated history of every incident, by incident id."""
+    """Curated history of every incident, kept on its incident row."""
 
     async def get(self, id: IncidentId) -> IncidentHistory | None:
-        async with postgres.session() as session:
-            value = await session.scalar(
-                select(IncidentHistoryRow.history).where(IncidentHistoryRow.incident_id == id)
-            )
+        value = await _part(IncidentRow.history, id)
         return None if value is None else IncidentHistory.model_validate(value)
 
     async def put(
         self, id: IncidentId, history: IncidentHistory, *, by: str | None = None
     ) -> IncidentHistory:
         """Save the history; ``by`` is the GitHub login of the person whose action changed it."""
-        value = history.model_dump(mode="json")
-        person = _person(by)
-        async with postgres.session() as session:
-            await session.execute(
-                insert(IncidentHistoryRow)
-                .values(
-                    id=uuid7(), incident_id=id, history=value, created_by=person, updated_by=person
-                )
-                .on_conflict_do_update(
-                    index_elements=[IncidentHistoryRow.incident_id],
-                    set_={
-                        "history": value,
-                        "updated_at": func.clock_timestamp(),
-                        "updated_by": person,
-                    },
-                )
-            )
-            await Topic.INCIDENTS.invalidate(session, key=id)
+        await _set_part(id, {"history": history.model_dump(mode="json")}, by=by)
         return history
 
     async def all(self) -> list[IncidentHistory]:
         async with postgres.session() as session:
-            return _readable(
-                IncidentHistory, await session.scalars(select(IncidentHistoryRow.history))
-            )
-
-    async def written_at(self, id: IncidentId) -> datetime | None:
-        async with postgres.session() as session:
-            return await session.scalar(
-                select(IncidentHistoryRow.updated_at).where(IncidentHistoryRow.incident_id == id)
-            )
+            values = await session.scalars(select(IncidentRow.history))
+            return _readable(IncidentHistory, [value for value in values if value is not None])
 
 
 class IncidentPostmortems:
-    """Each incident's latest agent postmortem, as Markdown, by incident id."""
+    """Each incident's latest agent postmortem, as Markdown, kept on its incident row."""
 
     async def get(self, incident_id: IncidentId) -> str | None:
-        async with postgres.session() as session:
-            return await session.scalar(
-                select(IncidentPostmortemRow.markdown).where(
-                    IncidentPostmortemRow.incident_id == incident_id
-                )
-            )
+        return await _part(IncidentRow.postmortem, incident_id)
 
     async def put(self, incident_id: IncidentId, markdown: str) -> None:
-        async with postgres.session() as session:
-            await session.execute(
-                insert(IncidentPostmortemRow)
-                .values(id=uuid7(), incident_id=incident_id, markdown=markdown)
-                .on_conflict_do_update(
-                    index_elements=[IncidentPostmortemRow.incident_id],
-                    set_={
-                        "markdown": markdown,
-                        "updated_at": func.clock_timestamp(),
-                        "updated_by": None,
-                    },
-                )
-            )
-            await Topic.INCIDENTS.invalidate(session, key=incident_id)
-
-    async def written_at(self, incident_id: IncidentId) -> datetime | None:
-        async with postgres.session() as session:
-            return await session.scalar(
-                select(IncidentPostmortemRow.updated_at).where(
-                    IncidentPostmortemRow.incident_id == incident_id
-                )
-            )
+        await _set_part(incident_id, {"postmortem": markdown})
 
 
 class CommandReceipts:

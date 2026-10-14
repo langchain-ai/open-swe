@@ -1,20 +1,21 @@
 """Incident state moved out of the LangGraph Store.
 
 ``incident_policy`` holds the one policy; a unique index on ``(true)`` keeps it
-to one row. ``incident``, ``incident_report``, ``incident_history`` and
-``incident_postmortem`` each hold one row per incident, unique on
-``incident_id``; each JSONB column keeps its record's Store shape.
-``incident_command`` holds responder command receipts, unique on ``claim_id``;
-``copied_from_store`` marks one the Store import copied, which the import
-deletes again if a replica of the previous release deletes it from the Store.
-``created_by`` and ``updated_by`` name the person whose action wrote the row,
-and stay NULL for the agent's own and system writes.
+to one row. ``incident`` holds one row per incident, unique on ``incident_id``:
+the incident record in ``incident``, and beside it its latest agent ``report``,
+its curated ``history`` and its ``postmortem`` Markdown, each NULL until first
+written. Each JSONB column keeps its record's Store shape. ``incident_command``
+holds responder command receipts, unique on ``claim_id``; ``copied_from_store``
+marks one the Store import copied, which the import deletes again if a replica
+of the previous release deletes it from the Store. ``created_by`` and
+``updated_by`` name the person whose action wrote the row, and stay NULL for
+the agent's own and system writes.
 """
 
 from alembic import op
 
 revision = "0d10512c3176"
-down_revision = ["2cd871a2607d", "fcab215aad3e", "bdc6cc9ba2a9"]
+down_revision = "47544c5c96d8"
 branch_labels = None
 depends_on = None
 
@@ -41,6 +42,9 @@ def upgrade() -> None:
             thread_id text NOT NULL,
             status text NOT NULL,
             incident jsonb NOT NULL,
+            report jsonb,
+            history jsonb,
+            postmortem text,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             created_by uuid REFERENCES users (id) ON DELETE SET NULL,
@@ -49,44 +53,6 @@ def upgrade() -> None:
     """)
     op.execute("CREATE UNIQUE INDEX incident_incident_id ON incident (incident_id)")
     op.execute("CREATE INDEX incident_thread_id ON incident (thread_id)")
-    op.execute("""
-        CREATE TABLE incident_report (
-            id uuid PRIMARY KEY,
-            incident_id text NOT NULL,
-            report jsonb NOT NULL,
-            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
-            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
-        )
-    """)
-    op.execute("CREATE UNIQUE INDEX incident_report_incident_id ON incident_report (incident_id)")
-    op.execute("""
-        CREATE TABLE incident_history (
-            id uuid PRIMARY KEY,
-            incident_id text NOT NULL,
-            history jsonb NOT NULL,
-            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
-            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
-        )
-    """)
-    op.execute("CREATE UNIQUE INDEX incident_history_incident_id ON incident_history (incident_id)")
-    op.execute("""
-        CREATE TABLE incident_postmortem (
-            id uuid PRIMARY KEY,
-            incident_id text NOT NULL,
-            markdown text NOT NULL,
-            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
-            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
-        )
-    """)
-    op.execute(
-        "CREATE UNIQUE INDEX incident_postmortem_incident_id ON incident_postmortem (incident_id)"
-    )
     op.execute("""
         CREATE TABLE incident_command (
             id uuid PRIMARY KEY,
