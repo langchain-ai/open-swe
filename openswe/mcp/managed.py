@@ -37,7 +37,7 @@ from openswe.mcp.transport import mcp_http_client
 
 logger = logging.getLogger(__name__)
 
-GATEWAYS_PATH = "/v1/managed-tools/gateways"
+KITS_PATH = "/v1/managed-tools/kits"
 SERVERS_PATH = "/v1/managed-tools/servers"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
 CONNECTION_NAME = "lmt"
@@ -246,7 +246,7 @@ async def list_gateways(login: str) -> list[Gateway]:
         for _ in range(_MAX_PAGES):
             params = {"page_size": "100", **({"cursor": cursor} if cursor else {})}
             response = await client.get(
-                langsmith_issuer() + GATEWAYS_PATH, headers=headers, params=params
+                langsmith_issuer() + KITS_PATH, headers=headers, params=params
             )
             if not response.is_success:
                 raise _failure(response)
@@ -266,7 +266,7 @@ async def _gateway_detail(login: str, gateway: str) -> dict[str, object]:
     headers = await _headers(login)
     async with _client() as client:
         response = await client.get(
-            f"{langsmith_issuer()}{GATEWAYS_PATH}/{gateway_id(gateway)}", headers=headers
+            f"{langsmith_issuer()}{KITS_PATH}/{gateway_id(gateway)}", headers=headers
         )
     if not response.is_success:
         raise _failure(response)
@@ -390,7 +390,7 @@ def _connected_services(
 
 
 def _mcp_url(gateway: str) -> str:
-    return f"{langsmith_issuer()}{GATEWAYS_PATH}/{gateway_id(gateway)}/mcp"
+    return f"{langsmith_issuer()}{KITS_PATH}/{gateway_id(gateway)}/mcp"
 
 
 def _gateway_client(headers: dict[str, str], gateway: str) -> Client[StreamableHttpTransport]:
