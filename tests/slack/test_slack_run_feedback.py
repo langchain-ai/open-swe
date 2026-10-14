@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack import run_feedback
-from openswe.slack.mappings import SlackMessageMapping
 from openswe.slack.payloads import SlackChannelContext, SlackInteraction
+from openswe.slack.records import SlackMessage
 
 
-def _mapping(run_id: str, triggering_user_id: str | None) -> SlackMessageMapping:
-    return SlackMessageMapping(
+def _mapping(run_id: str, triggering_user_id: str | None) -> SlackMessage:
+    return SlackMessage(
         channel_id="C1",
         message_ts="2.0",
         run_id=run_id,
@@ -92,7 +92,7 @@ async def test_rerating_updates_same_feedback_on_exact_reply_run(saved_feedback:
     ],
 )
 async def test_unknown_message_run_or_requester_cannot_be_rated(
-    saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch, mapping: SlackMessageMapping | None
+    saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch, mapping: SlackMessage | None
 ) -> None:
     monkeypatch.setattr(run_feedback, "lookup_slack_run_mapping", AsyncMock(return_value=mapping))
     payload = interaction()

@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from openswe.slack import stop as slack_stop
-from openswe.slack.mappings import (
+from openswe.slack.records import (
     bind_slack_thread_id,
     lookup_slack_thread_run_mapping,
     store_slack_message_run_mapping,

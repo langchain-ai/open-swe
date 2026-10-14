@@ -25,7 +25,7 @@ from openswe.slack.client import (
     post_slack_top_level_message_with_ts,
 )
 from openswe.slack.http import SlackRequestError
-from openswe.slack.mappings import bind_slack_thread_id, store_slack_run_mapping
+from openswe.slack.records import bind_slack_thread_id, store_slack_run_mapping
 from openswe.slack.request import SlackRequest
 from openswe.slack.solo_threads import allow_solo_thread_followup
 from openswe.source_context import SourceContext

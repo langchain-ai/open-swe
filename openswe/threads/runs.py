@@ -51,7 +51,7 @@ from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import update_slack_trace_reply_for_web_handoff
-from openswe.slack.mappings import lookup_slack_thread_run_mapping
+from openswe.slack.records import lookup_slack_thread_run_mapping
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,

@@ -8,7 +8,7 @@ import pytest
 from langsmith.utils import LangSmithError
 
 from openswe import session_cost
-from openswe.slack.mappings import SlackRunMapping
+from openswe.slack.records import SlackRun
 from openswe.utils import langsmith as ls_utils
 
 
@@ -145,7 +145,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
     monkeypatch: pytest.MonkeyPatch,
     run_cost: float | None,
 ) -> None:
-    mapping = SlackRunMapping(channel_id="C1", run_id="run-1", thread_ts="1.0", message_ts="1.1")
+    mapping = SlackRun(channel_id="C1", run_id="run-1", thread_ts="1.0", message_ts="1.1")
     monkeypatch.setattr(
         session_cost, "lookup_slack_run_message_mapping", AsyncMock(return_value=mapping)
     )

@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe import event_claims
+from openswe.database import postgres
 from openswe.slack import client as slack_client
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SlackThreadMappingError, slack_thread_mutation_lock
-from openswe.slack.mappings import (
+from openswe.slack.records import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     lookup_slack_run_mapping,
@@ -144,6 +146,20 @@ async def test_binding_refuses_to_overwrite_another_thread() -> None:
     with pytest.raises(SlackThreadMappingError, match="already mapped"):
         await bind_slack_thread_id("C1", "1.0", "two")
     assert await lookup_slack_thread_id("C1", "1.0") == "one"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_writes_add_a_stale_stub_only_for_an_unseen_channel() -> None:
+    await SlackChannel.save_all({"id": "C2", "name": "known"})
+    await bind_slack_thread_id("C1", "1.0", "one")
+    await bind_slack_thread_id("C2", "1.0", "two")
+
+    async with postgres.session() as session:
+        stub = await session.get(SlackChannel, "C1")
+        known = await session.get(SlackChannel, "C2")
+    assert stub is not None and not stub.fresh and stub.name == ""
+    assert known is not None and known.fresh and known.name == "known"
 
 
 @pytest.mark.asyncio
