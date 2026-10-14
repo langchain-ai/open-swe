@@ -8,7 +8,7 @@ Local setup: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 Before making any change, first till the soil: refactor the surrounding code so the change slots in naturally and the result reads as if it had always been designed that way. Spend real effort here rather than bolting features onto whatever shape the code happens to be in.
 
-`request_pr_review(use_mda=True)` runs that review on the Managed Deep Agents project in `mda/reviewer/` (deployed at `REVIEWER_RUNTIME_URL`) instead of the `reviewer` graph. It owns the model loop and the sandbox and calls back to `openswe/remote_runtime/`, which serves the reviewer's tools over MCP at `/remote-runtime/mcp` and its run hooks at `/remote-runtime/hooks/{hook}`, behind a run token that dispatch signs.
+With `MDA_RUNTIME_URL` set, threads of people who turn on **Run on Managed Deep Agents** (the `run_on_mda` user preference; threads no person starts follow the workspace setting of that name) run the `agent` and `reviewer` graphs on Managed Deep Agents as one graph, `open-swe`, from the project in `mda/`; every other thread runs in-process as before. `openswe/remote_runtime/proxy.py` routes the Agent Server API of those threads there. MDA owns the model loop and checkpoints; the backend keeps the thread's sandbox. `openswe/remote_runtime/graph.py` builds the in-process graph for each MDA run and serves it at `/remote-runtime/hooks/{hook}`, behind a run token the proxy signs: its tools under their own names, and its middleware phase by phase. Behavior added as graph middleware or tools therefore reaches MDA runs without changes there.
 
 ## Conventions
 

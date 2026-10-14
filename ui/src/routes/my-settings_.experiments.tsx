@@ -42,6 +42,13 @@ function ExperimentsPage() {
           label="Prefer tools through the sandbox"
           description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint so it can filter their output. Applies to threads you start afterwards."
         />
+        {profile.data?.mda_available && (
+          <ProfileSwitchRow
+            field="run_on_mda"
+            label="Run on Managed Deep Agents"
+            description="Your agent and review threads run their model loop on the Managed Deep Agents deployment instead of this server. Applies to threads you start afterwards; existing threads stay where they are."
+          />
+        )}
         <ProfileSwitchRow
           field="experimental_act_as_approval"
           label="Approve PRs opened as you"
