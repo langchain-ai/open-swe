@@ -194,7 +194,7 @@ async def proxy_dashboard_thread_commands(
     method = parsed.get("method")
     try:
         thread = await langgraph_client().threads.get(thread_id)
-    except Exception:  # noqa: BLE001
+    except NotFoundError:
         thread = None
 
     creating = False
