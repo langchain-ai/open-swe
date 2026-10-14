@@ -15,9 +15,10 @@ export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
   validateSearch: (
     search: Record<string, unknown>
-  ): { reviewLink?: boolean } => ({
-    reviewLink: search.reviewLink === true || search.reviewLink === "true",
-  }),
+  ): { reviewLink?: boolean } =>
+    search.reviewLink === true || search.reviewLink === "true"
+      ? { reviewLink: true }
+      : {},
   // Runs on hover intent too: the shell's data and the highlighter warm up
   // before the click lands. Never awaited, so navigation is never held.
   loader: ({ context, params }) =>
