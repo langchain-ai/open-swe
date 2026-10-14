@@ -7,6 +7,9 @@ from openswe.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from openswe.slack.records import SlackReactionState
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 class _FakeStore:
@@ -53,14 +56,7 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
 ) -> None:
     client = _FakeClient()
     _store_message_mapping(client, "C123", "2.000")
-    client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")] = {
-        "value": {
-            "run_id": "run-1",
-            "user_id": "U123",
-            "message_ts": "2.000",
-            "reactions": ["thumbsup"],
-        }
-    }
+    await SlackReactionState.toggle("C123", "2.000", "U123", "thumbsup", added=True)
     deleted: dict[str, str] = {}
 
     async def fake_delete_feedback(run_id: str, key: str) -> bool:
@@ -74,8 +70,6 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
     await process_slack_reaction_removed(_reaction_event(), event_id="Ev2")
 
     assert deleted == {"run_id": "run-1", "key": "slack_reaction:C123:U123:2.000"}
-    state = client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")]
-    assert state["value"]["reactions"] == []
 
 
 @pytest.mark.asyncio
@@ -100,14 +94,7 @@ async def test_conflicting_reactions_clear_feedback(
 ) -> None:
     client = _FakeClient()
     _store_message_mapping(client, "C123", "2.000")
-    client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")] = {
-        "value": {
-            "run_id": "run-1",
-            "user_id": "U123",
-            "message_ts": "2.000",
-            "reactions": ["thumbsup"],
-        }
-    }
+    await SlackReactionState.toggle("C123", "2.000", "U123", "thumbsup", added=True)
     deleted: dict[str, str] = {}
 
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:

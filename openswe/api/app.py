@@ -61,6 +61,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
+    from openswe.slack.import_state import run_slack_state_import
     from openswe.thread_feedback import run_feedback_import
     from openswe.threads.blobs import run_blob_import
     from openswe.threads.pins import import_store_pins
@@ -161,6 +162,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     blob_import = asyncio.create_task(run_blob_import())
     plan_import = asyncio.create_task(run_plan_import())
     feedback_import = asyncio.create_task(run_feedback_import())
+    # Slack reaction, solo-thread, kickoff, DM origin, and view-suggestion state
+    # used to live in the LangGraph Store, a record per Slack thread or message.
+    slack_state_import = asyncio.create_task(run_slack_state_import())
     assessment_import = asyncio.create_task(run_assessment_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
@@ -205,6 +209,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         blob_import.cancel()
         plan_import.cancel()
         feedback_import.cancel()
+        slack_state_import.cancel()
         assessment_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()

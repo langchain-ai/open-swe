@@ -8,11 +8,10 @@ from langgraph_sdk.client import LangGraphClient
 from openswe.slack.client import slack_thread_mutation_lock
 from openswe.slack.http import SlackClient
 from openswe.slack.payloads import SlackMessage
-from openswe.utils.json_types import JsonObject
+from openswe.slack.records import SlackSoloThread
 
 logger = logging.getLogger(__name__)
 
-_NAMESPACE = "slack_solo_threads"
 _MAX_HISTORY_PAGES = 5
 # A mention's tracking runs after its webhook answers; a follow-up in the same
 # thread waits for it so it is judged against what the mention recorded.
@@ -62,35 +61,29 @@ async def allow_solo_thread_followup(
     explicit_mention: bool,
 ) -> bool:
     """Track human participation and fail closed when solo routing cannot be verified."""
-    namespace = (_NAMESPACE, channel_id)
     try:
         timestamp = float(message_ts)
         if not explicit_mention:
             if (pending := _mention_tracking.get((channel_id, thread_ts))) is not None:
                 await asyncio.shield(pending)
-            existing = await client.store.get_item(namespace, thread_ts)
-            if not existing:
+            if await SlackSoloThread.find(channel_id, thread_ts) is None:
                 return False
         async with (
             asyncio.timeout(2),
             slack_thread_mutation_lock(client, channel_id, thread_ts, purpose="solo-followups"),
         ):
-            item = await client.store.get_item(namespace, thread_ts)
-            value = item.get("value", {}) if item else {}
-            if value.get("blocked"):
+            record = await SlackSoloThread.find(channel_id, thread_ts)
+            if record is not None and record.blocked:
                 return False
-            owner = value.get("user_id")
-            if owner and owner != user_id:
-                await client.store.put_item(namespace, thread_ts, {"blocked": True})
+            if record is not None and record.user_id != user_id:
+                await SlackSoloThread.block(channel_id, thread_ts)
                 return False
-            last_seen = value.get("last_seen")
-            if not explicit_mention and (
-                not isinstance(last_seen, (int, float)) or timestamp < last_seen
-            ):
+            last_seen = None if record is None else record.last_seen
+            if not explicit_mention and (last_seen is None or timestamp < last_seen):
                 return False
             solo = await _thread_is_solo(channel_id, thread_ts, user_id)
             if solo is False:
-                await client.store.put_item(namespace, thread_ts, {"blocked": True})
+                await SlackSoloThread.block(channel_id, thread_ts)
                 return False
             if solo is None:
                 logger.warning(
@@ -98,13 +91,12 @@ async def allow_solo_thread_followup(
                     extra={"slack_channel_id": channel_id, "slack_thread_ts": thread_ts},
                 )
                 return False
-            updated: JsonObject = {
-                "user_id": user_id,
-                "last_seen": max(timestamp, last_seen)
-                if isinstance(last_seen, (int, float))
-                else timestamp,
-            }
-            await client.store.put_item(namespace, thread_ts, updated)
+            await SlackSoloThread(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                user_id=user_id,
+                last_seen=timestamp if last_seen is None else max(timestamp, last_seen),
+            ).save()
             return not explicit_mention
     except Exception:
         logger.warning(

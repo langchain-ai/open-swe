@@ -39,6 +39,7 @@ from openswe.slack.orphan import (
     move_thread_to_dashboard,
     slack_thread_detached,
 )
+from openswe.slack.records import SlackKickoff, SlackReplyFreshness
 from openswe.slack.run_feedback import feedback_block
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
@@ -182,7 +183,6 @@ async def slack_reply(
         if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
             try:
                 await _handle_kickoff(
-                    client,
                     str(channel_id),
                     str(thread_ts),
                     message_ts,
@@ -206,18 +206,9 @@ async def _stale_reply_guard(
     messages = state.get("messages")
     if not isinstance(messages, list):
         return None
-    client = get_langgraph_client()
-    namespace = ("slack_reply_freshness", run_id)
-    item = await client.store.get_item(namespace, "progress")
-    progress = item.get("value", {}) if item else {}
-    stored_seen = progress.get("seen", [])
-    seen = (
-        {ts for ts in stored_seen if isinstance(ts, str)}
-        if isinstance(stored_seen, list)
-        else set()
-    )
-    stored_conflicts = progress.get("conflicts", 0)
-    conflicts = stored_conflicts if isinstance(stored_conflicts, int) else 0
+    progress = await SlackReplyFreshness.find(run_id)
+    seen = set() if progress is None else set(progress.seen_ts)
+    conflicts = 0 if progress is None else progress.conflicts
     for message in messages:
         if not isinstance(message, BaseMessage):
             continue
@@ -243,13 +234,8 @@ async def _stale_reply_guard(
         isinstance(ts, str) and ts not in seen and ts > max(seen) for ts in timestamps
     ):
         return None
-    await client.store.put_item(
-        namespace,
-        "progress",
-        {
-            "seen": sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
-            "conflicts": conflicts + 1,
-        },
+    await SlackReplyFreshness.record_conflict(
+        run_id, sorted(seen | {ts for ts in timestamps if isinstance(ts, str)})
     )
     return {
         "success": False,
@@ -262,7 +248,6 @@ async def _stale_reply_guard(
 
 
 async def _handle_kickoff(
-    client: LangGraphClient,
     channel_id: str,
     thread_ts: str,
     update_ts: str,
@@ -270,16 +255,13 @@ async def _handle_kickoff(
     response_type: Literal["progress", "final"],
     eligible: bool,
 ) -> None:
-    namespace = ("slack_kickoff", channel_id)
-    item = await client.store.get_item(namespace, thread_ts)
-    value = item.get("value") if isinstance(item, dict) else None
-    if isinstance(value, dict) and value.get("removed") is True:
+    kickoff = await SlackKickoff.find(channel_id, thread_ts)
+    if kickoff is None:
+        if eligible and response_type == "progress" and update_ts != thread_ts:
+            await SlackKickoff.record(channel_id, thread_ts, update_ts)
         return
-    kickoff_ts = value.get("kickoff_ts") if isinstance(value, dict) else None
-    if not kickoff_ts and eligible and response_type == "progress" and update_ts != thread_ts:
-        await client.store.put_item(namespace, thread_ts, {"kickoff_ts": update_ts})
-        return
-    if not isinstance(kickoff_ts, str) or not kickoff_ts or kickoff_ts == update_ts:
+    kickoff_ts = kickoff.kickoff_ts
+    if kickoff_ts is None or kickoff_ts == update_ts:
         return
     try:
         async with SlackClient.bot() as slack:
@@ -294,7 +276,7 @@ async def _handle_kickoff(
             },
         )
         return
-    await client.store.put_item(namespace, thread_ts, {"removed": True})
+    await SlackKickoff.record(channel_id, thread_ts, None)
 
 
 async def _by_the_way_reply(

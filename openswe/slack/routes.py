@@ -940,7 +940,6 @@ async def slack_interactivity(
         if not (interaction.channel_id and interaction.container.view_id and interaction.action_id):
             return {"options": []}
         options = await common.get_block_suggestions(
-            get_langgraph_client(),
             interaction.channel_id,
             interaction.container.view_id,
             interaction.action_id,
