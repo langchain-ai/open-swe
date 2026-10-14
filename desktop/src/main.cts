@@ -166,9 +166,19 @@ function setUpdateState(
 let lastUpdateCheck = 0;
 let updateCheck: ReturnType<typeof autoUpdater.checkForUpdates> | null = null;
 
+async function checkAndDownloadLatest() {
+  const result = await autoUpdater.checkForUpdates();
+  const version = result?.updateInfo.version;
+  if (!result?.isUpdateAvailable || version === updateState.version)
+    return result;
+  setUpdateState("downloading", version);
+  void autoUpdater.downloadUpdate().catch(() => undefined);
+  return result;
+}
+
 function checkForUpdates() {
   lastUpdateCheck = Date.now();
-  updateCheck ??= autoUpdater.checkForUpdates().finally(() => {
+  updateCheck ??= checkAndDownloadLatest().finally(() => {
     updateCheck = null;
   });
   return updateCheck;
@@ -176,7 +186,8 @@ function checkForUpdates() {
 
 function checkForUpdatesInBackground() {
   if (
-    updateState.status !== "idle" ||
+    updateState.status === "downloading" ||
+    updateState.status === "installing" ||
     Date.now() - lastUpdateCheck < 60 * 60 * 1000
   )
     return;
@@ -204,12 +215,9 @@ function failDesktopUpdate(error: unknown) {
 
 function configureAutoUpdater() {
   if (!app.isPackaged) return;
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
-  autoUpdater.on("update-available", (info) =>
-    setUpdateState("downloading", info.version),
-  );
   if (process.platform === "darwin") {
     nativeAutoUpdater.on("update-downloaded", () =>
       setUpdateState("ready", updateState.version),
@@ -230,9 +238,9 @@ function configureAutoUpdater() {
 
 async function checkForDesktopUpdates() {
   try {
-    if (updateState.status === "ready" || updateState.status === "installing")
-      return;
+    if (updateState.status === "installing") return;
     const result = await checkForUpdates();
+    if (updateState.status === "ready") return;
     if (result?.isUpdateAvailable) {
       await dialog.showMessageBox({
         type: "info",
