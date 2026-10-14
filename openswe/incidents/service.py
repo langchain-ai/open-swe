@@ -111,12 +111,19 @@ def note(target: Incident | IncidentReportRecord, kind: str, text: str) -> None:
         target.activity = target.activity[-100:]
 
 
-async def save(record: Incident) -> None:
+def actor_login(actor: dict[str, Any]) -> str | None:
+    """The GitHub login of the person behind ``actor``; ``None`` for a system or unlinked actor."""
+    login = actor.get("github_login")
+    return login if isinstance(login, str) and login else None
+
+
+async def save(record: Incident, *, by: str | None = None) -> None:
+    """Save ``record``; ``by`` is the GitHub login of the person whose action changed it."""
     from openswe.incidents import documents
 
     record.updated_at = now_iso()
-    await INCIDENTS.put(record.id, record)
-    await documents.preserve_metadata(record)
+    await INCIDENTS.put(record.id, record, by=by)
+    await documents.preserve_metadata(record, by=by)
 
 
 async def get_policy() -> IncidentPolicy:
@@ -281,7 +288,7 @@ async def update_settings(
     candidate.enabled_at = (
         time.time() if candidate.enabled and not current.enabled else current.enabled_at
     )
-    await POLICIES.put(candidate)
+    await POLICIES.put(candidate, by=actor_login(actor))
     logger.info(
         "Incident settings updated", extra={"actor": actor.get("id"), "version": candidate.version}
     )
@@ -431,7 +438,8 @@ async def submit_command(
     policy = await get_policy()
     # Claim the request before acting so a retried HTTP request cannot repeat the action.
     if not await COMMANDS.claim(
-        CommandReceipt(id=claim_id, incident_id=id, action=action, content_hash=content_hash)
+        CommandReceipt(id=claim_id, incident_id=id, action=action, content_hash=content_hash),
+        by=actor_login(actor),
     ):
         return {"command_id": request_id, "status": "duplicate"}
     try:

@@ -34,7 +34,7 @@ async def require_access(incident_id: IncidentId) -> Incident:
     return record
 
 
-async def preserve_metadata(record: Incident) -> None:
+async def preserve_metadata(record: Incident, *, by: str | None = None) -> None:
     previous = await HISTORY.get(record.id)
     await HISTORY.put(
         record.id,
@@ -48,6 +48,7 @@ async def preserve_metadata(record: Incident) -> None:
             created_at=record.created_at,
             updated_at=now_iso(),
         ),
+        by=by,
     )
 
 

@@ -7,6 +7,8 @@ to one row. ``incident``, ``incident_report``, ``incident_history`` and
 ``incident_command`` holds responder command receipts, unique on ``claim_id``;
 ``copied_from_store`` marks one the Store import copied, which the import
 deletes again if a replica of the previous release deletes it from the Store.
+``created_by`` and ``updated_by`` name the person whose action wrote the row,
+and stay NULL for the agent's own and system writes.
 """
 
 from alembic import op
@@ -23,7 +25,10 @@ def upgrade() -> None:
             id uuid PRIMARY KEY,
             version integer NOT NULL,
             policy jsonb NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("CREATE UNIQUE INDEX incident_policy_singleton ON incident_policy ((true))")
@@ -36,7 +41,10 @@ def upgrade() -> None:
             thread_id text NOT NULL,
             status text NOT NULL,
             incident jsonb NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("CREATE UNIQUE INDEX incident_incident_id ON incident (incident_id)")
@@ -46,7 +54,10 @@ def upgrade() -> None:
             id uuid PRIMARY KEY,
             incident_id text NOT NULL,
             report jsonb NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("CREATE UNIQUE INDEX incident_report_incident_id ON incident_report (incident_id)")
@@ -55,7 +66,10 @@ def upgrade() -> None:
             id uuid PRIMARY KEY,
             incident_id text NOT NULL,
             history jsonb NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("CREATE UNIQUE INDEX incident_history_incident_id ON incident_history (incident_id)")
@@ -64,7 +78,10 @@ def upgrade() -> None:
             id uuid PRIMARY KEY,
             incident_id text NOT NULL,
             markdown text NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute(
@@ -78,7 +95,10 @@ def upgrade() -> None:
             action text NOT NULL,
             content_hash text NOT NULL,
             copied_from_store boolean NOT NULL DEFAULT false,
-            created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("CREATE UNIQUE INDEX incident_command_claim_id ON incident_command (claim_id)")

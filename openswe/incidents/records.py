@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import ForeignKey, ScalarSelect, delete, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,6 +26,7 @@ from openswe.incidents.models import (
     IncidentReportRecord,
 )
 from openswe.ui_invalidations import Topic
+from openswe.users.records import user_id_for_login
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,14 @@ class IncidentPolicyRow(Base):
     version: Mapped[int]
     policy: Mapped[JsonObject] = mapped_column(JSONB)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 class IncidentRow(Base):
@@ -53,7 +61,14 @@ class IncidentRow(Base):
     status: Mapped[str]
     incident: Mapped[JsonObject] = mapped_column(JSONB)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 class IncidentReportRow(Base):
@@ -62,7 +77,14 @@ class IncidentReportRow(Base):
     incident_id: Mapped[str]
     report: Mapped[JsonObject] = mapped_column(JSONB)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 class IncidentHistoryRow(Base):
@@ -71,7 +93,14 @@ class IncidentHistoryRow(Base):
     incident_id: Mapped[str]
     history: Mapped[JsonObject] = mapped_column(JSONB)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 class IncidentPostmortemRow(Base):
@@ -80,7 +109,14 @@ class IncidentPostmortemRow(Base):
     incident_id: Mapped[str]
     markdown: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 class IncidentCommandRow(Base):
@@ -93,6 +129,18 @@ class IncidentCommandRow(Base):
     copied_from_store: Mapped[bool] = mapped_column(default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+
+def _person(login: str | None) -> ScalarSelect[UUID] | None:
+    """The ``users.id`` of the person with GitHub ``login``; ``None`` for a system write."""
+    return user_id_for_login(login) if login else None
 
 
 def _readable[RecordT: BaseModel](
@@ -120,18 +168,27 @@ class IncidentPolicies:
             value = await session.scalar(select(IncidentPolicyRow.policy))
         return None if value is None else IncidentPolicy.model_validate(value)
 
-    async def put(self, policy: IncidentPolicy) -> IncidentPolicy:
+    async def put(self, policy: IncidentPolicy, *, by: str | None = None) -> IncidentPolicy:
+        """Save the policy; ``by`` is the GitHub login of the person saving it."""
         value = policy.model_dump(mode="json")
+        person = _person(by)
         async with postgres.session() as session:
             await session.execute(
                 insert(IncidentPolicyRow)
-                .values(id=uuid7(), version=policy.version, policy=value)
+                .values(
+                    id=uuid7(),
+                    version=policy.version,
+                    policy=value,
+                    created_by=person,
+                    updated_by=person,
+                )
                 .on_conflict_do_update(
                     index_elements=[_ONE_POLICY],
                     set_={
                         "version": policy.version,
                         "policy": value,
                         "updated_at": func.clock_timestamp(),
+                        "updated_by": person,
                     },
                 )
             )
@@ -153,18 +210,21 @@ class Incidents:
             )
         return None if value is None else Incident.model_validate(value)
 
-    async def put(self, id: IncidentId, record: Incident) -> Incident:
+    async def put(self, id: IncidentId, record: Incident, *, by: str | None = None) -> Incident:
+        """Save the incident; ``by`` is the GitHub login of the person whose action changed it."""
+        person = _person(by)
         columns = {
             "workspace_id": record.workspace_id,
             "channel_id": record.channel_id,
             "thread_id": record.thread_id,
             "status": record.status,
             "incident": record.model_dump(mode="json"),
+            "updated_by": person,
         }
         async with postgres.session() as session:
             await session.execute(
                 insert(IncidentRow)
-                .values(id=uuid7(), incident_id=id, **columns)
+                .values(id=uuid7(), incident_id=id, created_by=person, **columns)
                 .on_conflict_do_update(
                     index_elements=[IncidentRow.incident_id],
                     set_={**columns, "updated_at": func.clock_timestamp()},
@@ -222,7 +282,11 @@ class IncidentReports:
                 .values(id=uuid7(), incident_id=incident_id, report=value)
                 .on_conflict_do_update(
                     index_elements=[IncidentReportRow.incident_id],
-                    set_={"report": value, "updated_at": func.clock_timestamp()},
+                    set_={
+                        "report": value,
+                        "updated_at": func.clock_timestamp(),
+                        "updated_by": None,
+                    },
                 )
             )
             await Topic.INCIDENTS.invalidate(session, key=incident_id)
@@ -247,15 +311,25 @@ class IncidentHistories:
             )
         return None if value is None else IncidentHistory.model_validate(value)
 
-    async def put(self, id: IncidentId, history: IncidentHistory) -> IncidentHistory:
+    async def put(
+        self, id: IncidentId, history: IncidentHistory, *, by: str | None = None
+    ) -> IncidentHistory:
+        """Save the history; ``by`` is the GitHub login of the person whose action changed it."""
         value = history.model_dump(mode="json")
+        person = _person(by)
         async with postgres.session() as session:
             await session.execute(
                 insert(IncidentHistoryRow)
-                .values(id=uuid7(), incident_id=id, history=value)
+                .values(
+                    id=uuid7(), incident_id=id, history=value, created_by=person, updated_by=person
+                )
                 .on_conflict_do_update(
                     index_elements=[IncidentHistoryRow.incident_id],
-                    set_={"history": value, "updated_at": func.clock_timestamp()},
+                    set_={
+                        "history": value,
+                        "updated_at": func.clock_timestamp(),
+                        "updated_by": person,
+                    },
                 )
             )
             await Topic.INCIDENTS.invalidate(session, key=id)
@@ -292,7 +366,11 @@ class IncidentPostmortems:
                 .values(id=uuid7(), incident_id=incident_id, markdown=markdown)
                 .on_conflict_do_update(
                     index_elements=[IncidentPostmortemRow.incident_id],
-                    set_={"markdown": markdown, "updated_at": func.clock_timestamp()},
+                    set_={
+                        "markdown": markdown,
+                        "updated_at": func.clock_timestamp(),
+                        "updated_by": None,
+                    },
                 )
             )
             await Topic.INCIDENTS.invalidate(session, key=incident_id)
@@ -324,8 +402,14 @@ class CommandReceipts:
             created_at=(row.created_at or datetime.now(UTC)).isoformat(),
         )
 
-    async def claim(self, receipt: CommandReceipt, *, store_copy: bool = False) -> bool:
-        """Write ``receipt`` unless its claim id is taken; whether this call wrote it."""
+    async def claim(
+        self, receipt: CommandReceipt, *, by: str | None = None, store_copy: bool = False
+    ) -> bool:
+        """Write ``receipt`` unless its claim id is taken; whether this call wrote it.
+
+        ``by`` is the GitHub login of the responder who sent the command.
+        """
+        person = _person(by)
         async with postgres.session() as session:
             claimed = await session.scalar(
                 insert(IncidentCommandRow)
@@ -336,6 +420,8 @@ class CommandReceipts:
                     action=receipt.action,
                     content_hash=receipt.content_hash,
                     copied_from_store=store_copy,
+                    created_by=person,
+                    updated_by=person,
                 )
                 .on_conflict_do_nothing(index_elements=[IncidentCommandRow.claim_id])
                 .returning(IncidentCommandRow.id)

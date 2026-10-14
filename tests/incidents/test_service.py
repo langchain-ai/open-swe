@@ -4,10 +4,20 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
+from openswe.database import postgres
 from openswe.incidents import service, turns
-from openswe.incidents.models import Incident, IncidentPolicy, IncidentReport, IncidentReportRecord
+from openswe.incidents.models import (
+    CommandReceipt,
+    Incident,
+    IncidentPolicy,
+    IncidentReport,
+    IncidentReportRecord,
+)
+from openswe.incidents.records import IncidentCommandRow, IncidentPolicyRow
 from openswe.slack.channels import SlackChannel
+from openswe.users import User
 
 CHANNEL = {
     "id": "C1",
@@ -71,6 +81,27 @@ async def test_identity_cannot_change_with_registered_incidents(configured, monk
     assert (await service.update_settings({"enabled": True}, 0, {"id": "github:admin"}))[
         "status"
     ] == "applied"
+
+
+async def test_settings_and_commands_record_the_person_who_wrote_them(configured, monkeypatch):
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "admin")
+    admin = await User.sign_in("github", "1", login="admin")
+    _auth(monkeypatch, "T1")
+    monkeypatch.setenv("SLACK_APP_ID", "A1")
+    await service.update_settings(
+        {"enabled": True}, 0, {"id": "github:admin", "github_login": "admin"}
+    )
+    receipt = CommandReceipt(id="claim", incident_id="i1", action="ask", content_hash="h")
+    assert await service.COMMANDS.claim(receipt, by="admin")
+
+    async with postgres.session() as session:
+        policy = await session.execute(
+            select(IncidentPolicyRow.created_by, IncidentPolicyRow.updated_by)
+        )
+        command = await session.scalar(select(IncidentCommandRow.created_by))
+    # The fixture's policy was a system write; the admin only updated it.
+    assert policy.tuples().one() == (None, admin.id)
+    assert command == admin.id
 
 
 async def test_list_filters_by_activity_and_hides_unreadable_channels(configured, monkeypatch):
