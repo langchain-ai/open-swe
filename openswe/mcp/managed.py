@@ -467,16 +467,25 @@ async def gateway_status(
 
     ``with_connected`` also names the services already connected, for settings pages.
     """
-    detail = await _gateway_detail(login, gateway)
-    listing = await _listing(login, gateway)
-    connected: list[ConnectedService] = []
-    if with_connected:
+
+    async def servers() -> dict[str, _Server]:
         try:
-            servers = await _servers(login)
+            return await _servers(login)
         except ManagedToolsError:
             logger.warning("Managed tools server names unavailable", exc_info=True)
-            servers = {}
-        connected = _connected_services(_sources(detail), servers, listing)
+            return {}
+
+    # Independent LangSmith reads; the tools/list fan-out dominates, so run them together.
+    if with_connected:
+        detail, listing, names = await asyncio.gather(
+            _gateway_detail(login, gateway), _listing(login, gateway), servers()
+        )
+        connected = _connected_services(_sources(detail), names, listing)
+    else:
+        detail, listing = await asyncio.gather(
+            _gateway_detail(login, gateway), _listing(login, gateway)
+        )
+        connected = []
     return GatewayStatus(
         gateway=_gateway(detail),
         ready=not listing.missing,

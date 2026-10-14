@@ -5,6 +5,7 @@ import { Button } from "@langchain/macaw-components/Button"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { api } from "@/lib/api"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import type {
   ManagedToolsConnectCard,
   ManagedToolsConnectedService,
@@ -14,6 +15,13 @@ import type {
 import { ConnectLangSmithButton } from "./ConnectionsSection"
 
 export const MANAGED_TOOLS_KEY = ["myManagedTools"]
+
+/** The caller's managed tools; re-read whenever an admin saves settings, including the gateway. */
+export const managedToolsQuery = {
+  queryKey: MANAGED_TOOLS_KEY,
+  queryFn: api.getMyManagedTools,
+  meta: { invalidatedBy: [invalidationTopic("workspaces")] },
+}
 
 /** Opens LMT's consent page in a popup and re-checks the gateways when the person returns. */
 export function useConnectPopup(card?: ManagedToolsConnectCard) {
@@ -186,10 +194,7 @@ function GatewayStatus({
 
 /** The managed tools gateway an admin picked for this instance, and what this person still needs. */
 export function ManagedToolsSection() {
-  const view = useQuery({
-    queryKey: MANAGED_TOOLS_KEY,
-    queryFn: api.getMyManagedTools,
-  })
+  const view = useQuery(managedToolsQuery)
   const popup = useConnectPopup()
 
   if (!view.data?.configured && !view.isLoading) return null

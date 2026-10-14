@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { Select } from "@langchain/macaw-components/Select"
 
 import { SettingsSection } from "@/components/AppShell"
@@ -7,18 +7,13 @@ import {
   useScopedSettings,
 } from "@/features/settings/lib/settingsScope"
 import { api } from "@/lib/api"
-import { MANAGED_TOOLS_KEY } from "./ManagedToolsSection"
 import { TierRow } from "./WorkspaceSettingsSections"
 
 const NONE = "none"
 
 /** Instance admins pick the LangSmith Managed Tools gateway every private thread loads. */
 export function ManagedToolsGatewaySection() {
-  const qc = useQueryClient()
-  // Everyone's Connections page lists the picked gateway's services, so re-read it.
-  const settings = useScopedSettings(INSTANCE_SCOPE, () => {
-    void qc.invalidateQueries({ queryKey: MANAGED_TOOLS_KEY })
-  })
+  const settings = useScopedSettings(INSTANCE_SCOPE)
   const gateways = useQuery({
     queryKey: ["managedToolsGateways"],
     queryFn: api.listManagedToolsGateways,
