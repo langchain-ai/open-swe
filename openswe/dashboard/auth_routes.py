@@ -47,7 +47,6 @@ from openswe.dashboard.profiles import (
     upsert_access_token,
     upsert_access_token_from_github_response,
 )
-from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.database import postgres
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
 from openswe.users import User
@@ -265,7 +264,6 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
             "Rebound a stale session to its user",
             extra={"github_login": session["sub"], "user_id": str(user.id)},
         )
-    preferences = await get_user_preferences(session["sub"])
     return {
         "login": session["sub"],
         "email": session.get("email") or (user.email or None if user else None),
@@ -273,7 +271,6 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         "user_id": str(user.id) if user else session.get("user_id"),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),
-        "follow_up_behavior": preferences["follow_up_behavior"],
         # Whether new threads are stamped `transcript: v2` (`openswe/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.
         "transcript_recording": postgres.configured(),

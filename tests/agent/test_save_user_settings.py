@@ -301,7 +301,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "default_workspace": "mine",
                 "default_visibility": "private",
                 "local_tracing_project": "tracing",
-                "follow_up_behavior": "steer",
             },
             "instructions": "",
         }

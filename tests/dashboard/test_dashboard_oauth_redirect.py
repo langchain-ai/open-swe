@@ -44,11 +44,6 @@ def test_me_reauthenticates_only_a_confirmed_missing_account(
             side_effect=RuntimeError("database unavailable") if unavailable else None,
         ),
     )
-    monkeypatch.setattr(
-        auth_routes,
-        "get_user_preferences",
-        AsyncMock(return_value={"follow_up_behavior": "queue"}),
-    )
     app = FastAPI()
     app.include_router(routes.router)
     with TestClient(app) as client:

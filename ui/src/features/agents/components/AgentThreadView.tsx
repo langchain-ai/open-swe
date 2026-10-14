@@ -68,10 +68,7 @@ import {
   visiblePendingMessages,
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
-import type {
-  RestoredDraft,
-  SubmitOptions,
-} from "@/features/agents/components/composer/ChatComposer"
+import type { RestoredDraft } from "@/features/agents/components/composer/ChatComposer"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
@@ -292,23 +289,13 @@ export function AgentThreadView({
     [login]
   )
 
-  const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const submitMessage = useCallback(
-    async (
-      content: string,
-      images: Array<ImageChunk>,
-      options?: SubmitOptions
-    ) => {
+    async (content: string, images: Array<ImageChunk>) => {
       scrollControlRef.current?.scrollToBottom()
-      // While a run is live the message either waits for it as a queued run of
-      // its own, or goes straight in and steers it. The preference sets the
-      // default; ⌘↵ flips it for one message.
-      const queue =
-        (followUpBehavior === "queue") !== (options?.alternate === true)
       const messageId = crypto.randomUUID()
       const carriesAutoSelection = autoIntent.claim(
         messageId,
-        content.trim() !== "/offload" && (!isStreaming || queue)
+        content.trim() !== "/offload" && !isStreaming
       )
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
@@ -321,7 +308,6 @@ export function AgentThreadView({
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
-          enqueue: isStreaming && queue,
           ...(moving ? { handoff: moving } : {}),
           ...(carriesAutoSelection
             ? { onStartError: restoreAutoSelection }
@@ -340,7 +326,6 @@ export function AgentThreadView({
       activeSelection,
       autoIntent,
       ensureLocalBridge,
-      followUpBehavior,
       isStreaming,
       prepareHandoff,
       queryClient,
@@ -350,16 +335,11 @@ export function AgentThreadView({
 
   // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
   const submitWithExcerpts = useCallback(
-    async (
-      content: string,
-      images: Array<ImageChunk>,
-      options?: SubmitOptions
-    ) => {
+    async (content: string, images: Array<ImageChunk>) => {
       const excerpts = reviewChat?.excerpts ?? []
       await submitMessage(
         excerpts.length ? serializeExcerpts(content, excerpts) : content,
-        images,
-        options
+        images
       )
       if (excerpts.length) reviewChat?.clearExcerpts?.()
     },
@@ -994,7 +974,6 @@ export function AgentThreadView({
                 onStop={stopRun}
                 onSubmit={submitWithExcerpts}
                 onEmptySubmit={steerNextQueuedMessage}
-                followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
                 models={models}

@@ -46,7 +46,6 @@ import type {
   DesktopWorkspaceMode,
 } from "@/desktop"
 import type {
-  FollowUpBehavior,
   ModelOption,
   Skill,
   WorkspaceOption,
@@ -95,12 +94,6 @@ const SLASH_COMMANDS: Array<SlashCommandSpec> = [
   },
 ]
 
-/** How a submission should be treated: as the configured default, or the opposite. */
-export interface SubmitOptions {
-  /** Set by ⌘↵ / Ctrl+Enter: do the opposite of the configured follow-up behavior. */
-  alternate: boolean
-}
-
 /** Text and attachments handed back to the composer, e.g. a cancelled queued message. */
 export interface RestoredDraft {
   /** Changes on every restore so the same content can come back twice. */
@@ -121,18 +114,12 @@ export interface ChatComposerProps {
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
   onStop?: () => void | Promise<void>
-  onSubmit?: (
-    value: string,
-    images: Array<ImageChunk>,
-    options?: SubmitOptions
-  ) => void | Promise<void>
+  onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
   /**
    * Enter on an empty composer while a run is live. The thread view uses it to
    * send the next queued message now.
    */
   onEmptySubmit?: () => void
-  /** What a message sent while a run is live does; drives copy only. */
-  followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
   droppedFiles?: { key: number; files: Array<File> } | null
@@ -273,7 +260,6 @@ export const ChatComposer = memo(function ChatComposer({
   onStop,
   onSubmit,
   onEmptySubmit,
-  followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
   models = [],
@@ -444,7 +430,7 @@ export const ChatComposer = memo(function ChatComposer({
   }, [applyPrompt, restoreDraft, value])
 
   const handleSubmit = useCallback(
-    async (options?: SubmitOptions) => {
+    async () => {
       if (submittingRef.current || disabled) return
       // The editor is the source of truth for what is on screen; a keystroke that
       // has not yet round-tripped through state would otherwise be dropped.
@@ -468,7 +454,7 @@ export const ChatComposer = memo(function ChatComposer({
       setPendingImages([])
       setComposerError(null)
       try {
-        await onSubmit?.(trimmed, images, options)
+        await onSubmit?.(trimmed, images)
       } catch {
         // Caller surfaces send errors (e.g. via react-query mutation state).
       } finally {
@@ -556,7 +542,7 @@ export const ChatComposer = memo(function ChatComposer({
 
       if (key === "Enter" && !event.shiftKey) {
         if (canSubmit) {
-          void handleSubmit({ alternate: event.metaKey || event.ctrlKey })
+          void handleSubmit()
         } else if (
           composerEmpty &&
           busy &&
@@ -874,11 +860,7 @@ export const ChatComposer = memo(function ChatComposer({
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
           placeholder={
-            busy
-              ? followUpBehavior === "steer"
-                ? "Send a message to steer the run..."
-                : "Send a message to queue next..."
-              : placeholder
+            busy ? "Send a message to steer the run..." : placeholder
           }
           skillNames={skillNames}
           value={value}
@@ -939,9 +921,7 @@ export const ChatComposer = memo(function ChatComposer({
             activeRun={activeRun}
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
-            runningLabel={
-              followUpBehavior === "steer" ? "Steer agent" : "Queue message"
-            }
+            runningLabel="Steer agent"
             onStop={onStop}
             stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}
