@@ -42,6 +42,7 @@ from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
+from openswe.slack.intent import kitchen_message_intent
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
@@ -643,6 +644,7 @@ async def process_slack_mention(
         and not request.code_channel
         and not request.concierge_mode
         and not request.message_update
+        and not request.kitchen_channel
     )
     # Showing the status shouldn't hold up the run, but it has to land before the
     # run's own status updates or a clear, or it would overwrite them.
@@ -952,6 +954,13 @@ async def _process_slack_mention_impl(
         )
     elif current_message is not None and attachments and not current_message.get("attachments"):
         current_message["attachments"] = attachments
+
+    kitchen_intent = await kitchen_message_intent(
+        request, thread_messages, bot_username=common.SLACK_BOT_USERNAME
+    )
+    if kitchen_intent == "ignore":
+        return False
+    defer_thinking_status = request.kitchen_channel and kitchen_intent != "respond"
 
     context_messages = (
         sorted(thread_messages, key=lambda message: common.parse_slack_ts(message.get("ts")))
@@ -1268,6 +1277,7 @@ async def _process_slack_mention_impl(
         "user_email": user_email,
         "source": "slack",
         "slack_kickoff_eligible": False,
+        "slack_defer_thinking_status": defer_thinking_status,
     }
     if review_guide:
         # The thread keeps the last run's configurable, which may be a click's.
@@ -1518,5 +1528,6 @@ async def _process_slack_mention_impl(
             run_id=run_id,
             channel_id=channel_id,
             thread_ts=thread_ts,
+            defer_until_tool=defer_thinking_status,
         )
     return bool(isinstance(run_id, str) and run_id)
