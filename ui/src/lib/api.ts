@@ -501,6 +501,22 @@ export interface AdminUser {
   is_admin: boolean
 }
 
+export interface AnnouncementSummary {
+  id: string
+  text: string
+  author: string
+  created_at: string
+  finished_at: string | null
+  recipients: number
+  sent: number
+  failed: number
+}
+
+export interface AnnouncementsView {
+  recipients: number
+  items: Array<AnnouncementSummary>
+}
+
 export interface AdminUsersPage {
   items: Array<AdminUser>
   total: number
@@ -1795,6 +1811,12 @@ export const api = {
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
     ),
+  listAnnouncements: () => request<AnnouncementsView>("/admin/announcements"),
+  sendAnnouncement: (text: string, test: boolean) =>
+    request<{ test: boolean; recipients: number }>("/admin/announcements", {
+      method: "POST",
+      body: JSON.stringify({ text, test }),
+    }),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   searchPullRequests: (query: string, offset = 0) =>

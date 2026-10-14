@@ -240,6 +240,7 @@ from openswe.tools import (
     save_user_skill,
     schedule_thread_wakeup,
     search_pull_requests,
+    send_announcement,
     slack_add_reaction,
     slack_attach_html,
     slack_breakout_thread,
@@ -737,6 +738,7 @@ ADMIN_TOOLS = (
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,
+    send_announcement,
 )
 
 
