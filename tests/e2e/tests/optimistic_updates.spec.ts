@@ -212,8 +212,10 @@ const THREAD_ID = "76000000-0000-4000-8000-000000000001";
 const THREAD_TITLE = "E2E Optimistic seeded thread";
 
 async function removeFixtureThread(request: APIRequestContext) {
-  const pin = await request.delete("/store/items", {
-    data: { namespace: ["thread_pins", SAME_USER.login], key: THREAD_ID },
+  const login = await request.post("/control/login", { data: SAME_USER });
+  expect(login.ok(), await login.text()).toBeTruthy();
+  const pin = await request.delete(`/dashboard/api/threads/${THREAD_ID}/pin`, {
+    headers: SAME_ORIGIN_HEADERS,
   });
   expect([200, 204, 404]).toContain(pin.status());
   const thread = await request.delete(`/threads/${THREAD_ID}`);

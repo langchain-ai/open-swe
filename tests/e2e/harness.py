@@ -115,13 +115,14 @@ async def control_reset() -> JSONResponse:
     await _cancel_inflight_runs()
     await _reset_durable_pr_state()
     from langgraph_api.cache import cache_set
+    from sqlalchemy import delete
 
-    from openswe.store import delete_value, search_all_entries
-    from openswe.threads.pins import THREAD_PINS_NAMESPACE
+    from openswe.database import postgres
+    from openswe.threads.pins import THREAD_PINS
+    from openswe.users.records import UserRecord
 
-    for entry in await search_all_entries([THREAD_PINS_NAMESPACE]):
-        if entry.namespace is not None:
-            await delete_value(entry.namespace, entry.key)
+    async with postgres.session() as session:
+        await session.execute(delete(UserRecord).where(UserRecord.kind == THREAD_PINS.kind))
     for owner, repo in ((OWNER, REPO), (SECOND_OWNER, SECOND_REPO)):
         await cache_set(f"__lg_swr__:repo-settings:{owner}/{repo}".lower(), None)
     return JSONResponse({"ok": True})

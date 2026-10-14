@@ -58,11 +58,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
+    from openswe.thread_feedback import run_feedback_import
     from openswe.threads.blobs import run_blob_import
+    from openswe.threads.pins import import_store_pins
+    from openswe.threads.plan_store import run_plan_import
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
-    from openswe.users.import_concierge_mode import import_concierge_mode
     from openswe.users.import_records import import_user_records
     from openswe.users.import_store import import_user_mappings
     from openswe.utils.model import validate_local_dev_llm_config
@@ -75,28 +77,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await database.migrate()
     try:
         # People used to be Store records keyed by GitHub login; this moves them
-        # into the users table and is a no-op once it has.
-        imported_users = await import_user_mappings()
+        # into the users table.
+        await run_store_import("user_mappings", import_user_mappings)
     except Exception:  # noqa: BLE001
         # Startup continues: anyone still in the Store cannot vote or be
         # resolved from Slack until an import succeeds, and nothing else breaks.
         logger.exception("Importing user mappings from the LangGraph Store failed")
-    else:
-        logger.info(
-            "Imported user mappings from the LangGraph Store",
-            extra={"imported_users": imported_users},
-        )
-    try:
-        # Concierge mode used to be a Store profile flag; this moves it into
-        # users.preferences and is a no-op once it has.
-        await import_concierge_mode()
-    except Exception:  # noqa: BLE001
-        # Startup continues: opted-in people get a thread per DM message until
-        # an import succeeds.
-        logger.exception("Importing concierge mode from the LangGraph Store failed")
     try:
         # Profiles, preferences, instructions, and tokens used to be Store
-        # records keyed by GitHub login; this moves them into user_record.
+        # records keyed by GitHub login; this moves them into user_record, and
+        # concierge opt-ins into users.preferences.
         await run_store_import("user_records", import_user_records)
     except Exception:  # noqa: BLE001
         # Startup continues: people whose records are still in the Store see
@@ -123,6 +113,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # import succeeds.
         logger.exception("Importing skills from the LangGraph Store failed")
     try:
+        # Pinned threads used to live in the LangGraph Store, keyed by login.
+        await run_store_import("thread_pins", import_store_pins)
+    except Exception:  # noqa: BLE001
+        # Startup continues: pins still in the Store are missing from the
+        # sidebar until an import succeeds.
+        logger.exception("Importing thread pins from the LangGraph Store failed")
+    try:
         # Review settings, assessment feedback, and baby-sit watches used to be
         # Store records; this moves them into PostgreSQL.
         await run_store_import("review_records", import_review_records)
@@ -137,6 +134,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception:  # noqa: BLE001
         logger.exception("Deleting review-style analyzer crons failed")
     blob_import = asyncio.create_task(run_blob_import())
+    plan_import = asyncio.create_task(run_plan_import())
+    feedback_import = asyncio.create_task(run_feedback_import())
     assessment_import = asyncio.create_task(run_assessment_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
@@ -180,6 +179,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             yield
     finally:
         blob_import.cancel()
+        plan_import.cancel()
+        feedback_import.cancel()
         assessment_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()

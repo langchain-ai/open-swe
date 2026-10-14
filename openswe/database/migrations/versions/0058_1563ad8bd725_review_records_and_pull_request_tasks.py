@@ -11,7 +11,7 @@ baby-sit watch.
 from alembic import op
 
 revision = "1563ad8bd725"
-down_revision = ["7d34d8e5b6a3", "9ec28aa0b2a8", "b438344a06b7", "da651a8f67cc"]
+down_revision = ["7d34d8e5b6a3", "df7c28a904d8"]
 branch_labels = None
 depends_on = None
 

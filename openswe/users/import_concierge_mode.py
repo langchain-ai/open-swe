@@ -1,17 +1,19 @@
 """Move the legacy ``dm_session_enabled`` profile flag into ``users.preferences``.
 
 Concierge mode used to be ``dm_session_enabled`` on the person's ``["profiles"]``
-Store record. Each startup copies every opted-in profile onto its ``users`` row
-and then drops the flag from the record, so the import is idempotent and a
-later release can delete this module. A choice already saved in Postgres wins,
-and a profile whose login has no ``users`` row yet keeps its flag for the next
-startup instead of being dropped.
+Store record. Each pass copies every opted-in profile onto its ``users`` row
+and then drops the flag from the record, so the import is idempotent. It runs
+at the start of :func:`openswe.users.import_records.import_user_records`, before
+the profiles themselves move, and is deleted along with it.
+A choice already saved in Postgres wins, and a profile whose login has no
+``users`` row yet keeps its flag for the next pass instead of being dropped.
 """
 
 import logging
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from openswe.database.store_imports import StoreImport
 from openswe.store import put_value, search_all_values
 from openswe.users.models import User
 from openswe.users.preferences import UserPreferencesPatch
@@ -28,8 +30,8 @@ class _LegacyProfile(BaseModel):
     login: str
 
 
-async def import_concierge_mode() -> int:
-    """Copy every legacy opt-in into ``users.preferences``; returns how many were imported."""
+async def import_concierge_mode() -> StoreImport:
+    """Copy every legacy opt-in into ``users.preferences``; opt-ins left behind count as waiting."""
     records = await search_all_values(PROFILES_NAMESPACE, filter={LEGACY_FLAG: True})
     imported = 0
     pending = 0
@@ -61,4 +63,4 @@ async def import_concierge_mode() -> int:
             "Legacy concierge opt-ins processed",
             extra={"imported_users": imported, "pending_users": pending},
         )
-    return imported
+    return StoreImport(imported, pending)
