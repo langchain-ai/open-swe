@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import AsyncMock
 from urllib.parse import urlencode
 
 import pytest
@@ -271,4 +271,4 @@ async def test_code_channel_external_select_returns_registered_suggestions(
     result = await slack_routes.slack_interactivity(_request(payload), BackgroundTasks())
 
     assert result == {"options": options}
-    get_suggestions.assert_awaited_once_with(ANY, "C-code", "V-plan", "repository", "open")
+    get_suggestions.assert_awaited_once_with("C-code", "V-plan", "repository", "open")

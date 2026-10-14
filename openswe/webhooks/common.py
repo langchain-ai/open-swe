@@ -96,16 +96,12 @@ from openswe.slack.client import (
     get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
-    lookup_slack_run_mapping,  # noqa: F401
-    lookup_slack_thread_id,  # noqa: F401
     parse_slack_ts,  # noqa: F401
     post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
-    resolve_slack_thread_id,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
-    store_slack_run_mapping,  # noqa: F401
     strip_bot_mention,  # noqa: F401
     update_slack_message,
     verify_slack_signature,
@@ -130,6 +126,12 @@ from openswe.slack.feedback import (
     process_slack_reaction_removed,
 )
 from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.records import (  # noqa: F401
+    lookup_slack_run_mapping,
+    lookup_slack_thread_id,
+    resolve_slack_thread_id,
+    store_slack_run_mapping,
+)
 from openswe.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread, ensure_titled_thread
