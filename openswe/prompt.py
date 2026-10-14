@@ -4,6 +4,7 @@ from pathlib import Path
 
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
+from openswe.input_messages import Fields
 from openswe.prompts import prompt
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -55,10 +56,8 @@ def _render_source_guidance(
     else:
         name = "generic"
     if name in {"slack", "schedule"}:
-        guidance = prompt(f"system/source-{name}", breakout=slack_breakout, slack=slack_context)
-    else:
-        guidance = prompt(f"system/source-{name}")
-    return f"<open_swe_source_context>\n{guidance}\n</open_swe_source_context>"
+        return prompt(f"system/source-{name}", breakout=slack_breakout, slack=slack_context)
+    return prompt(f"system/source-{name}")
 
 
 def _render_repository_scope_section() -> str:
@@ -102,38 +101,32 @@ def _render_collaboration_section() -> str:
     )
 
 
-def _working_environment_prompt(source: str, *, local_checkout: bool) -> str:
-    if source == "desktop":
+def _working_environment_prompt(*, desktop: bool, local_checkout: bool) -> str:
+    if desktop:
         return "system/working-environment-desktop"
     if local_checkout:
         return "system/working-environment-local"
     return "system/working-environment"
 
 
+# Keep this byte-identical across a thread's runs so the provider's prompt cache keeps
+# the conversation prefix; anything that varies per run belongs in construct_turn_context.
 def construct_system_prompt(
     working_dir: str,
     dashboard_base_url: str = "",
     artifact_url: str | None = None,
     linear_project_id: str = "",
     linear_issue_number: str = "",
-    default_repo: dict[str, str] | None = None,
     repo_custom_instructions: str | None = None,
     workspace_name: str | None = None,
     workspace_instructions: str | None = None,
     admin_workspaces: bool = False,
-    sole_writer: bool = False,
-    source: str = "dashboard",
-    slack_context: bool = False,
-    slack_ask: bool = False,
-    slack_breakout: bool = False,
-    slack_by_the_way: bool = False,
-    slack_follow_up_suggestions: bool = False,
+    desktop: bool = False,
     sandbox_file_downloads: bool = False,
     prefer_tools_in_sandbox: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
     local_checkout_client: BridgeClient = "cli",
-    recent_thread_context: str | None = None,
     workspace_repos: list[str] | None = None,
 ) -> str:
     """Render the agent's system prompt.
@@ -150,18 +143,12 @@ def construct_system_prompt(
         working_dir=working_dir,
         local_checkout=local_checkout,
         worktree_handoff=local_checkout and local_checkout_client == "desktop",
-        desktop=source == "desktop",
+        desktop=desktop,
         admin_workspaces=admin_workspaces,
-        sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
         sandbox_file_downloads=sandbox_file_downloads,
-        default_repo=(
-            f"{default_repo['owner']}/{default_repo['name']}"
-            if default_repo and default_repo.get("owner") and default_repo.get("name")
-            else ""
-        ),
         working_environment_section=prompt(
-            _working_environment_prompt(source, local_checkout=local_checkout),
+            _working_environment_prompt(desktop=desktop, local_checkout=local_checkout),
             working_dir=working_dir,
             desktop=local_checkout_client == "desktop",
             prefer_tools_in_sandbox=prefer_tools_in_sandbox,
@@ -172,26 +159,48 @@ def construct_system_prompt(
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
             artifact_url=artifact_url or "(artifact link unavailable)",
         ),
-        source_guidance_section=prompt(
-            "system/source-context",
-            source_guidance=_render_source_guidance(
-                source, slack_context, slack_ask, slack_breakout, slack_by_the_way
-            )
-            + (
-                "\n" + prompt("system/slack-follow-up-suggestions")
-                if slack_context and slack_follow_up_suggestions
-                else ""
-            ),
-        ),
         default_prompt_section=_load_default_prompt(),
-        repository_scope_section=(
-            _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
-        ),
+        repository_scope_section="" if desktop else _render_repository_scope_section(),
         collaboration_section=_render_collaboration_section(),
         external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
-        recent_thread_context_section=recent_thread_context or "",
         workspace_section=_render_workspace_section(
             workspace_name, workspace_instructions, workspace_repos
         ),
+    )
+
+
+def construct_turn_context(
+    source: str,
+    *,
+    slack_context: bool = False,
+    slack_ask: bool = False,
+    slack_breakout: bool = False,
+    slack_by_the_way: bool = False,
+    slack_follow_up_suggestions: bool = False,
+    sole_writer: bool = False,
+    default_repo: dict[str, str] | None = None,
+    recent_thread_context: str | None = None,
+) -> str:
+    """Render the run-specific context block that follows the turn's inbound message."""
+    instructions = prompt(
+        "system/run-context",
+        source_guidance=_render_source_guidance(
+            source, slack_context, slack_ask, slack_breakout, slack_by_the_way
+        )
+        + (
+            "\n" + prompt("system/slack-follow-up-suggestions")
+            if slack_context and slack_follow_up_suggestions
+            else ""
+        ),
+        default_repo=(
+            f"{default_repo['owner']}/{default_repo['name']}"
+            if default_repo and default_repo.get("owner") and default_repo.get("name")
+            else ""
+        ),
+        sole_writer=sole_writer,
+        recent_thread_context=recent_thread_context or "",
+    )
+    return Fields({"instructions": instructions}).element(
+        "dynamic-context", {"kind": "run", "id": f"source:{source}"}
     )

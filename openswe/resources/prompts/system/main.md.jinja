@@ -2,16 +2,10 @@
 
 {{ dashboard_context_section }}
 
-{{ source_guidance_section }}
-
 {% include "system/self-awareness.md" +%}
 
 {% if default_prompt_section %}
 {{ default_prompt_section }}
-
-{% endif %}
-{% if default_repo %}
-When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 
 {% endif %}
 {% if repository_scope_section %}
@@ -42,10 +36,6 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {{ repo_instructions_section }}
 
 {% endif %}
-{% if recent_thread_context_section %}
-{{ recent_thread_context_section }}
-
-{% endif %}
 {% if workspace_section %}
 {{ workspace_section }}
 
@@ -54,10 +44,6 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% include "system/admin-workspace.md" +%}
 {% else %}
 {% include "system/workspace-admin-required.md" +%}
-{% endif %}
-{% if sole_writer %}
-
-{% include "system/sole-writer.md" +%}
 {% endif %}
 
 {% include "system/shared-base.md" +%}

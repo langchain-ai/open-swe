@@ -8,11 +8,13 @@ lookup hit / null-name / failure / cache paths.
 import json
 from typing import Any, cast
 from unittest.mock import MagicMock
+from xml.etree import ElementTree
 
 import pytest
 from langgraph.runtime import Runtime
 
 import openswe.server as server
+from openswe import prompt
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.utils import ttl_cache
 
@@ -218,3 +220,43 @@ async def test_public_scope_resolves_profile_via_installation_token(
         "https://api.github.com/user",
     ]
     assert prepare_harness["recorded"]["github_user_id"] == 99
+
+
+async def test_source_switch_keeps_system_prompt_and_moves_run_context_to_messages(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
+    monkeypatch.setattr(server, "construct_system_prompt", prompt.construct_system_prompt)
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    github = {"configurable": {"thread_id": "thread-1", "source": "github"}}
+    runs = [
+        _middleware(_slack_config()),
+        _middleware(github),
+        _middleware({"configurable": {"thread_id": "thread-1", "source": "dashboard"}}),
+        _middleware(_slack_config(background_task_completion=True)),
+        _middleware(_slack_config()),
+        _middleware(_slack_config()),
+    ]
+    messages: list[Any] = []
+    system_prompts: set[str] = set()
+    run_ids: list[str | None] = []
+    for middleware in runs:
+        result = await middleware._prepare(
+            cast(PrepareRunState, {"messages": list(messages)}), cast(Runtime[Any], MagicMock())
+        )
+        system_prompts.add(cast(str, result["rendered_system_prompt"]))
+        added = cast(list[Any], result.get("messages", []))
+        messages.extend(added)
+        run_ids.append(ElementTree.fromstring(added[0]["content"]).get("id") if added else None)
+
+    assert len(system_prompts) == 1
+    assert "Repository Modification Scope" in system_prompts.pop()
+    assert run_ids == [
+        "source:slack",
+        "source:github",
+        "source:dashboard",
+        "source:background_task",
+        "source:slack",
+        None,
+    ]
