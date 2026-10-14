@@ -98,6 +98,18 @@ const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
     schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
   }
 
+const THIS_MAC_META = { icon: LaptopRegularIcon, label: "Runs on this Mac" }
+
+function runsOnThisMac(item: SidebarThreadItem) {
+  return item.location === "local" || runsOnAMac(item.thread)
+}
+
+function sourceMeta(item: SidebarThreadItem) {
+  if (item.source && item.source !== "dashboard")
+    return SOURCE_META[item.source]
+  return runsOnThisMac(item) ? THIS_MAC_META : null
+}
+
 type PrState = NonNullable<AgentThread["pr"]>["state"]
 
 const PR_STATE_META: Record<
@@ -370,8 +382,7 @@ export function SidebarThreadRow({
   const rowIsActive =
     (isActive && (!activeSubagent || subagentsCollapsed)) ||
     (Boolean(activeWorkerId) && !workersExpanded)
-  const source =
-    item.source && item.source !== "dashboard" ? SOURCE_META[item.source] : null
+  const source = sourceMeta(item)
   const SourceIcon = source?.icon
   // Strictly an unread marker, not a "finished" one: any thread the user has
   // not opened since its latest run shows the dot. The focused thread is being
@@ -788,7 +799,7 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const onAMac = item.location === "local" || runsOnAMac(item.thread)
+  const onAMac = runsOnThisMac(item)
   const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
 
