@@ -1,0 +1,41 @@
+"""The MCP server's OAuth state moved out of the LangGraph Store.
+
+``mcp_oauth_entry`` holds the OAuth proxy's key-value entries (client
+registrations, transactions, upstream tokens), each sealed with
+``TOKEN_ENCRYPTION_KEY``. The proxy keys them by its own ids, not by person.
+``expires_at`` is copied out of the sealed entry so reads and the sweep of
+expired rows need not decrypt; ``copied_from_store`` marks rows the Store
+import wrote and any other write clears.
+"""
+
+from alembic import op
+
+revision = "47544c5c96d8"
+down_revision = ["2cd871a2607d", "fcab215aad3e", "bdc6cc9ba2a9"]
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.execute("""
+        CREATE TABLE mcp_oauth_entry (
+            id uuid PRIMARY KEY,
+            collection text NOT NULL,
+            key text NOT NULL,
+            sealed_entry text NOT NULL,
+            expires_at timestamptz,
+            copied_from_store boolean NOT NULL DEFAULT false,
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+        )
+    """)
+    op.execute(
+        "CREATE UNIQUE INDEX mcp_oauth_entry_collection_key ON mcp_oauth_entry (collection, key)"
+    )
+    op.execute("""
+        CREATE INDEX mcp_oauth_entry_expires_at ON mcp_oauth_entry (expires_at)
+        WHERE expires_at IS NOT NULL
+    """)
+
+
+def downgrade() -> None:
+    raise NotImplementedError
