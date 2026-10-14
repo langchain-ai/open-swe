@@ -196,6 +196,123 @@
         "title": "AllowedSlackBotEntry",
         "type": "object"
       },
+      "AnnouncementCreate": {
+        "properties": {
+          "test": {
+            "default": false,
+            "title": "Test",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 3000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AnnouncementCreate",
+        "type": "object"
+      },
+      "AnnouncementSent": {
+        "properties": {
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "test": {
+            "title": "Test",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "test",
+          "recipients"
+        ],
+        "title": "AnnouncementSent",
+        "type": "object"
+      },
+      "AnnouncementSummary": {
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "author",
+          "created_at",
+          "finished_at",
+          "recipients",
+          "sent",
+          "failed"
+        ],
+        "title": "AnnouncementSummary",
+        "type": "object"
+      },
+      "AnnouncementsView": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AnnouncementSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recipients",
+          "items"
+        ],
+        "title": "AnnouncementsView",
+        "type": "object"
+      },
       "ApiKeyCreate": {
         "properties": {
           "description": {
@@ -8102,6 +8219,79 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/dashboard/api/admin/announcements": {
+      "get": {
+        "operationId": "api_list_announcements_dashboard_api_admin_announcements_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Announcements",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      },
+      "post": {
+        "description": "DM the announcement to everyone, or with ``test`` to the admin alone.",
+        "operationId": "api_send_announcement_dashboard_api_admin_announcements_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnouncementCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementSent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Send Announcement",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      }
+    },
     "/dashboard/api/admin/api-keys": {
       "get": {
         "operationId": "api_list_api_keys_dashboard_api_admin_api_keys_get",
