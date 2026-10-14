@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import {
   LaptopRegularIcon,
   MagnifyingGlassRegularIcon,
@@ -156,6 +157,7 @@ export function AppCommandPalette({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const repoName = useRepoName()
   const navigate = useNavigate()
   const chat = useChatRoutes()
   const [query, setQuery] = useState("")
@@ -200,7 +202,7 @@ export function AppCommandPalette({
             page.pull_requests.map((pr): PullRequestResult => ({
               id: `pr:${pr.repo}#${pr.number}`,
               kind: "pull-request",
-              label: pr.title || `${pr.repo} #${pr.number}`,
+              label: pr.title || `${repoName(pr.repo)} #${pr.number}`,
               pr,
             }))
           ) ?? [])
@@ -213,6 +215,7 @@ export function AppCommandPalette({
       query,
       open,
       pullRequests.data,
+      repoName,
     ]
   )
   const resultGroups = useMemo(() => {
@@ -343,7 +346,7 @@ export function AppCommandPalette({
                             {result.label}
                             {result.kind === "pull-request" && (
                               <span className="ml-space-2 text-xs text-secondary">
-                                {result.pr.repo} #{result.pr.number} ·{" "}
+                                {repoName(result.pr.repo)} #{result.pr.number} ·{" "}
                                 {result.pr.state}
                               </span>
                             )}

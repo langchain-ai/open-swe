@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { Button } from "@langchain/macaw-components/Button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -24,6 +25,7 @@ import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
 export function ReviewPage({ pr }: { pr: PullRequestRef }) {
+  const repoName = useRepoName()
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
   const chatThreadId = useReviewChat(pr).data?.thread_id
@@ -56,7 +58,8 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   }, [headSha, queryClient, pr])
 
   const title = pageTitle(
-    detail.data?.pr.title ?? `${pr.owner}/${pr.repo} #${pr.number}`
+    detail.data?.pr.title ??
+      `${repoName(`${pr.owner}/${pr.repo}`)} #${pr.number}`
   )
   useEffect(() => {
     document.title = title
@@ -148,13 +151,14 @@ function PullRequestUnavailable({
   pr: PullRequestRef
   message: string
 }) {
+  const repoName = useRepoName()
   return (
     <div
       role="alert"
       className="mx-auto flex max-w-md flex-1 flex-col items-start justify-center gap-space-3 px-space-5"
     >
       <p className="text-lg font-semibold text-primary">
-        Can&apos;t open {pr.owner}/{pr.repo}#{pr.number}
+        Can&apos;t open {repoName(`${pr.owner}/${pr.repo}`)}#{pr.number}
       </p>
       <p className="text-sm text-secondary">
         It doesn&apos;t exist, or your GitHub account can&apos;t see it. GitHub

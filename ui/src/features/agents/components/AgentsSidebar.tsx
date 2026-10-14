@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -194,6 +195,7 @@ export function AgentsSidebar({
   activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
+  const repoName = useRepoName()
   const navigate = useNavigate()
   const newThreadShortcut = useShortcutLabel("mod+n")
   const chat = useChatRoutes()
@@ -426,7 +428,7 @@ export function AgentsSidebar({
         ...keyedCloudRepos.map(({ repo, key }) => {
           return {
             key,
-            label: repo.name,
+            label: repoName(repo.repoFullName),
             repoFullName: repo.repoFullName,
             updatedAt: repo.updatedAt,
             activeThread:
@@ -465,7 +467,7 @@ export function AgentsSidebar({
   // server-side repo) fall under the default workspace.
   const repoWorkspaceOptions = keyedCloudRepos.map(({ repo, key }) => ({
     key,
-    label: repo.name,
+    label: repoName(repo.repoFullName),
     workspace: repo.workspace,
   }))
   const workspaceGroups: Array<SidebarWorkspaceGroup<HydratedRepoGroup>> =

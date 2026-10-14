@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
 import { Badge } from "@langchain/macaw-components/Badge"
@@ -50,6 +51,7 @@ export function RepoSelector({
   disabled = false,
   allowArchived = false,
 }: RepoSelectorProps) {
+  const repoName = useRepoName()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [showArchived, setShowArchived] = useState(false)
@@ -85,7 +87,9 @@ export function RepoSelector({
           >
             <FolderIcon size={14} weight="regular" className="shrink-0" />
             <span className="flex-1 truncate text-left">
-              {selectedRepo ? (selectedLabel ?? selectedRepo) : placeholder}
+              {selectedRepo
+                ? repoName(selectedLabel ?? selectedRepo)
+                : placeholder}
             </span>
             <CaretDownIcon
               size={12}
@@ -169,7 +173,7 @@ export function RepoSelector({
                   <button
                     key={repo.full_name}
                     type="button"
-                    title={repo.full_name}
+                    title={repoName(repo.full_name)}
                     onClick={() => {
                       onRepoChange(repo.full_name)
                       setOpen(false)
@@ -181,7 +185,7 @@ export function RepoSelector({
                     )}
                   >
                     <span className="min-w-0 flex-1 break-words">
-                      {repo.full_name}
+                      {repoName(repo.full_name)}
                     </span>
                     {repo.private !== undefined && (
                       <Badge

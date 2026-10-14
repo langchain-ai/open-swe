@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -25,6 +26,7 @@ const APPROVAL_MODES: Array<{ value: ReviewApprovalMode; label: string }> = [
 ]
 
 export function ReviewStylesPanel() {
+  const repoName = useRepoName()
   const session = useSession()
   const qc = useQueryClient()
   const [addRepo, setAddRepo] = useState("")
@@ -195,7 +197,7 @@ export function ReviewStylesPanel() {
                     )}
                     onClick={() => setSelected(s.full_name)}
                   >
-                    <span className="truncate">{s.full_name}</span>
+                    <span className="truncate">{repoName(s.full_name)}</span>
                   </button>
                 </li>
               ))}
@@ -214,7 +216,7 @@ export function ReviewStylesPanel() {
         ) : (
           <>
             <p className="text-sm font-medium text-primary">
-              {active.full_name}
+              {repoName(active.full_name)}
             </p>
             <div className="flex flex-wrap gap-space-2">
               <Button
@@ -240,7 +242,7 @@ export function ReviewStylesPanel() {
                 onClick={() => {
                   if (
                     !window.confirm(
-                      `Remove ${active.full_name} from review style prompts? This cannot be undone.`
+                      `Remove ${repoName(active.full_name)} from review style prompts? This cannot be undone.`
                     )
                   ) {
                     return

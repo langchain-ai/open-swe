@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { ArrowUpIcon, PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { useCallback, useEffect } from "react"
 import {
@@ -54,6 +55,7 @@ function Attachment() {
 }
 
 export function Composer({ initialRepo }: { initialRepo?: string | null }) {
+  const repoName = useRepoName()
   const aui = useAui()
   const running = useAuiState((state) => state.thread.isRunning)
   const disabled = useAuiState((state) => state.thread.isDisabled)
@@ -166,6 +168,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                   { value: "", label: "No repository" },
                   ...(repos.data?.repositories.map((repo) => ({
                     value: repo.full_name,
+                    label: repoName(repo.full_name),
                   })) ?? []),
                 ]}
                 triggerClassName="max-w-48"

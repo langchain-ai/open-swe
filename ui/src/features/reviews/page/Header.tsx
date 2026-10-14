@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { ArrowLeftIcon, ArrowUpIcon } from "@langchain/macaw-components/icons"
 import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
@@ -66,6 +67,7 @@ export function Header({
   compactRail: boolean
   navigatorShown: boolean
 }) {
+  const repoName = useRepoName()
   const detailQuery = useQuery(reviewQueries.detail(pr))
   const detail = detailQuery.data
   const diff = useQuery(reviewQueries.diff(pr)).data
@@ -162,7 +164,7 @@ export function Header({
                 weight="regular"
                 className="mr-space-1 inline align-[-3px] text-icon-secondary max-sm:hidden"
               />
-              {detail?.pr.title ?? `${pr.owner}/${pr.repo}`}
+              {detail?.pr.title ?? repoName(`${pr.owner}/${pr.repo}`)}
               <span className="font-normal text-secondary"> #{pr.number}</span>
             </a>
           </h1>
@@ -183,7 +185,7 @@ export function Header({
                 rel="noreferrer"
                 className="shrink-0 hover:text-primary hover:underline max-lg:hidden"
               >
-                {pr.owner}/{pr.repo}
+                {repoName(`${pr.owner}/${pr.repo}`)}
               </a>
               <span aria-hidden className="max-lg:hidden">
                 ·

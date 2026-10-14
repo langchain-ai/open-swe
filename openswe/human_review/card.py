@@ -6,6 +6,7 @@ signed up to review it on GitHub and where each of them stands.
 
 import json
 
+from openswe.github.repo_names import display_repo_name
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
 from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
 from openswe.users import User
@@ -29,7 +30,7 @@ def _button_value(action: str, request: HumanReviewRequest) -> str:
 
 def _label(request: HumanReviewRequest) -> str:
     pr = request.pull_request
-    return f"{pr.owner}/{pr.repo}#{pr.number}"
+    return f"{display_repo_name(f'{pr.owner}/{pr.repo}')}#{pr.number}"
 
 
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
