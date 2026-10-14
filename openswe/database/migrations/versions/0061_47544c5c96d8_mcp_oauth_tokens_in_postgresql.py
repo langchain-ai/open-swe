@@ -2,7 +2,8 @@
 
 ``mcp_oauth_entry`` holds the OAuth proxy's key-value entries (client
 registrations, transactions, upstream tokens), each sealed with
-``TOKEN_ENCRYPTION_KEY``. The proxy keys them by its own ids, not by person.
+``TOKEN_ENCRYPTION_KEY``. The proxy keys them by its own ids and no person is
+behind its writes, so ``created_by`` and ``updated_by`` stay NULL.
 ``expires_at`` is copied out of the sealed entry so reads and the sweep of
 expired rows need not decrypt; ``copied_from_store`` marks rows the Store
 import wrote and any other write clears.
@@ -25,7 +26,10 @@ def upgrade() -> None:
             sealed_entry text NOT NULL,
             expires_at timestamptz,
             copied_from_store boolean NOT NULL DEFAULT false,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute(

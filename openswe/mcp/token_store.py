@@ -13,7 +13,7 @@ from uuid import UUID, uuid7
 
 from key_value.aio.errors import DeserializationError
 from key_value.aio.stores.base import BaseStore, ManagedEntry
-from sqlalchemy import ColumnElement, and_, delete, func, or_, select
+from sqlalchemy import ColumnElement, ForeignKey, and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,7 +38,14 @@ class MCPOAuthEntryRow(Base):
     expires_at: Mapped[datetime | None]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 def _live() -> ColumnElement[bool]:
@@ -117,6 +124,7 @@ class SealedStore(BaseStore):
                         "expires_at": expires_at,
                         "copied_from_store": store_copy,
                         "updated_at": func.clock_timestamp(),
+                        "updated_by": None,
                     },
                 )
             )
