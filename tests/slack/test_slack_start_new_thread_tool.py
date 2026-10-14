@@ -1,5 +1,6 @@
 import importlib
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -12,6 +13,7 @@ from openswe.credential_scope import (
     private_credential_login,
 )
 from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.slack import client as slack_client
 from openswe.slack import solo_threads
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
@@ -118,10 +120,107 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: _FakeClient({}))
     monkeypatch.setattr(slack_breakout_tool, "get_slack_permalink", AsyncMock(return_value=None))
     monkeypatch.setattr(
+        slack_breakout_tool, "fetch_slack_thread_messages", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
         slack_breakout_tool,
         "cached_workspace_settings",
         AsyncMock(return_value=WorkspaceSettings({"fable_enabled": False})),
     )
+
+
+@pytest.mark.parametrize("failure", [None, "fetch", "parse", "sandbox", "download", "upload"])
+async def test_breakout_stages_source_thread_files_best_effort(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str | None
+) -> None:
+    sandbox_path = "/workspace/.open-swe/slack-files/recording.mov"
+    parent_file = tmp_path / "parent-thread" / sandbox_path.lstrip("/")
+    parent_file.parent.mkdir(parents=True)
+    parent_file.write_bytes(b"movie content")
+    source_thread = {"channel_id": "C_MOVED", "thread_ts": "1700000001.000001"}
+    fetch = AsyncMock(
+        return_value=[
+            {
+                "files": [
+                    {
+                        "name": "recording.mov",
+                        "mimetype": "video/quicktime",
+                        "url_private": "https://files.slack.com/recording.mov",
+                    },
+                    {
+                        "name": "screenshot.png",
+                        "mimetype": "image/png",
+                        "url_private": "https://files.slack.com/screenshot.png",
+                    },
+                ]
+            }
+        ]
+    )
+    if failure == "fetch":
+        fetch.side_effect = RuntimeError("Slack unavailable")
+    elif failure == "parse":
+        fetch.return_value = [None]
+
+    async def sandbox(thread_id: str, *, workspace_slug: str | None) -> SimpleNamespace:
+        assert thread_id != "parent-thread"
+        assert workspace_slug == "engineering"
+        if failure == "sandbox":
+            raise RuntimeError("Sandbox unavailable")
+
+        async def upload(files: list[tuple[str, bytes]]) -> list[dict[str, None]]:
+            if failure == "upload":
+                raise RuntimeError("Sandbox upload failed")
+            for path, content in files:
+                target = tmp_path / thread_id / path.lstrip("/")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+            return [{"error": None} for _ in files]
+
+        return SimpleNamespace(aupload_files=upload)
+
+    download = AsyncMock(return_value=parent_file.read_bytes())
+    if failure == "download":
+        download.side_effect = slack_client.SlackFileDownloadError("download_failed")
+    dispatch = AsyncMock(return_value={"run_id": "run-123"})
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
+    monkeypatch.setattr(
+        slack_breakout_tool, "get_active_slack_thread", AsyncMock(return_value=source_thread)
+    )
+    monkeypatch.setattr(slack_breakout_tool, "fetch_slack_thread_messages", fetch)
+    monkeypatch.setattr(slack_client, "download_slack_file", download)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.ensure_sandbox_for_thread", sandbox)
+    monkeypatch.setattr(
+        slack_breakout_tool,
+        "post_slack_top_level_message_with_ts",
+        AsyncMock(return_value="1700000002.0"),
+    )
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_thread_reply_with_ts", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "allow_solo_thread_followup", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "mark_broken_out", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
+    monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", dispatch)
+
+    result = await slack_breakout_tool.slack_breakout_thread(
+        "Investigate recording", "Investigate the attached recording.", channel_id="C2"
+    )
+
+    assert result["success"] is True
+    thread_id = result["thread_id"]
+    assert isinstance(thread_id, str)
+    content = dispatch.call_args.args[1]
+    fetch.assert_awaited_once_with("C_MOVED", "1700000001.000001")
+    staged_file = tmp_path / thread_id / sandbox_path.lstrip("/")
+    if failure is None:
+        assert "## Slack File Attachments" in content
+        assert sandbox_path in content
+        assert staged_file.read_bytes() == b"movie content"
+        assert not (staged_file.parent / "screenshot.png").exists()
+    else:
+        assert "## Slack File Attachments" not in content
+        assert sandbox_path not in content
+        assert not staged_file.exists()
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import uuid
 from typing import Any
@@ -20,11 +21,17 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     append_slack_web_link_footer,
     bind_slack_thread_id,
+    fetch_slack_thread_messages,
     get_active_slack_thread,
     get_slack_permalink,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
+)
+from openswe.slack.files import (
+    download_slack_files_to_sandbox,
+    slack_file_entries,
+    slack_files_section,
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.request import SlackRequest
@@ -42,6 +49,7 @@ _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
 _VISIBLE_INSTRUCTIONS_MAX_CHARS = 2800
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+logger = logging.getLogger(__name__)
 
 
 def _failure_hint(slack_error: str | None) -> str:
@@ -137,6 +145,7 @@ async def _run_prompt(
     repo: dict[str, str] | None,
     original_slack_thread: dict[str, Any],
     thread_id: str,
+    files_section: str = "",
 ) -> str:
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "(no repository specified)"
     channel_id = original_slack_thread.get("channel_id", "")
@@ -149,6 +158,7 @@ async def _run_prompt(
         thread_ts=thread_ts,
         run_links=await _run_links_section(thread_id),
         instructions=instructions,
+        files_section=files_section,
     )
 
 
@@ -484,9 +494,28 @@ async def slack_breakout_thread(
     )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 
+    files_section = ""
+    try:
+        if isinstance(current_thread_ts, str) and current_thread_ts:
+            source_messages = await fetch_slack_thread_messages(source_channel, current_thread_ts)
+            staged_files = await download_slack_files_to_sandbox(
+                slack_file_entries(source_messages),
+                thread_id,
+                workspace_slug=destination.workspace,
+            )
+            files_section = slack_files_section(staged_files)
+    except Exception:
+        logger.warning(
+            "Could not stage breakout Slack attachments",
+            extra={"agent_thread_id": thread_id, "channel_id": source_channel},
+            exc_info=True,
+        )
+
     run = await dispatch_agent_run(
         thread_id,
-        await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
+        await _run_prompt(
+            clean_title, clean_instructions, repo, current_slack_thread, thread_id, files_section
+        ),
         new_configurable,
         source="slack",
         thread_title=None,
