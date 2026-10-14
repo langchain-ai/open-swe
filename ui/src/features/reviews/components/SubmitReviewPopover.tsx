@@ -234,13 +234,14 @@ export function SubmitReviewPopover({
                 variant="xs"
                 className="break-words text-error-secondary"
               >
-                {submit.error instanceof ApiError && submit.error.status === 404
-                  ? "The review request returned Not Found. Check that you can access this pull request on GitHub."
+                {submit.error instanceof ApiError && submit.error.status < 500
+                  ? `Review submission was rejected: ${submit.error.message}`
                   : `We couldn't confirm your review was submitted: ${submit.error.message}`}
               </Text>
               <Text as="p" variant="xs" className="text-secondary">
-                Your draft is preserved. Check GitHub before submitting again;
-                the review may already have been posted.
+                {submit.error instanceof ApiError && submit.error.status < 500
+                  ? `Your draft is preserved.${submit.error.status === 404 ? " Check that you can access this pull request on GitHub." : " Address the error before submitting again."}`
+                  : "Your draft is preserved. Check GitHub before submitting again; the review may already have been posted."}
               </Text>
               <Link
                 variant="xs"
