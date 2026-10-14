@@ -895,21 +895,31 @@ async def _send_message(
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
+    caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
+    if not isinstance(caller_thread_id, str) or not caller_thread_id:
+        return _failure("A source thread is required to relay a message")
     command = {
         "id": 1,
         "method": "run.start",
         "params": {
-            "input": {"messages": [{"type": "human", "content": message}]},
+            "input": {
+                "messages": [
+                    {
+                        "type": "human",
+                        "content": message,
+                        "additional_kwargs": {"relayed_from_thread_id": caller_thread_id},
+                    }
+                ]
+            },
             "config": {"configurable": configurable},
         },
     }
-    caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
         email=actor.email,
-        relayed_from=caller_thread_id if isinstance(caller_thread_id, str) else None,
+        relayed_from=caller_thread_id,
     )
     try:
         reply = _CommandReply.model_validate_json(content or b"{}")

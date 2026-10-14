@@ -1,12 +1,4 @@
-"""Ask a participant before Open SWE opens a PR as them in a shared thread.
-
-In a thread with more than one participant anyone can steer the run, so the
-person the PR opens as gets the final say, once per thread. They get a DM card
-and the tool waits briefly for their answer; an answer that comes later wakes
-the thread with a follow-up run. "Always allow" skips the card, and a thread with a single
-participant never asks. Only people who turned on the
-``experimental_act_as_approval`` feature flag are asked.
-"""
+"""Require the author's consent for delegated PR actions, once per thread."""
 
 import asyncio
 import logging
@@ -18,6 +10,7 @@ from openswe.act_as.records import ActAsRequest, Decision, ThreadActAs
 from openswe.act_as.slack import card_blocks
 from openswe.credential_scope import pr_author_login
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.slack.blocks import block_payload, escape
 from openswe.slack.cards import origin_footer
 from openswe.slack.client import (
@@ -58,8 +51,8 @@ def _refusal(login: str, refusal: Refusal, token_kind: str) -> ActAsRefusal:
     return {
         "success": False,
         "error": (
-            "This thread has more than one participant, so the person the PR opens as must "
-            f"approve it. {reason} PR created: no."
+            "The PR author must approve Open SWE acting on their behalf. "
+            f"{reason} PR action performed: no."
         ),
         "act_as": refusal,
         "act_as_login": login,
@@ -77,19 +70,30 @@ async def require_consent(
     head: str,
     base: str,
     title: str,
+    action: Literal["open", "close", "merge"] = "open",
+    relayed: bool = False,
 ) -> ActAsRefusal | None:
-    """``None`` when the PR may open as its author; otherwise why not."""
-    if token_kind != "user" or not thread_id:
+    """Return a refusal unless the author has authorized the delegated PR action."""
+    if action == "open" and token_kind != "user":
         return None
+    if not thread_id:
+        return _refusal(author or "the PR author", "unreachable", token_kind)
     thread = await ThreadActAs.load(thread_id)
-    if not thread.is_shared():
-        return None
-    login = await pr_author_login(author)
+    login = await pr_author_login(author) if action == "open" else author
     if not login:
+        return _refusal("the PR author", "unreachable", token_kind)
+    cfg = RunConfig.from_runtime()
+    if (
+        action == "open"
+        and not thread.is_shared()
+        and not cfg.relayed_from_thread
+        and not relayed
+        and login.lower() == (cfg.github_login or "").lower()
+    ):
         return None
     person = await User.for_login("github", login)
-    if person is None or not person.typed_preferences.experimental_act_as_approval:
-        return None
+    if person is None:
+        return _refusal(login, "unreachable", token_kind)
     if person.typed_preferences.act_as_always_allowed:
         return None
     decision = thread.decision_for(login)
@@ -121,7 +125,7 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
     thread_link = f"<{thread_url}|this thread>" if thread_url else "a shared thread"
     repo = escape(f"{request.owner}/{request.repo}")
     message = (
-        f":raised_hand: Open SWE wants to open a PR as you in {thread_link}.\n\n"
+        f":raised_hand: Open SWE wants to open, close, or merge PRs on your behalf in {thread_link}.\n\n"
         f"*{escape(request.title)}*\n"
         f"`{repo}` — `{escape(request.head)}` → `{escape(request.base)}`\n\n"
         "Approve, always allow, or deny."

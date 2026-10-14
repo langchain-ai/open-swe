@@ -27,7 +27,7 @@ Decision = Literal["approved", "denied"]
 
 
 class ActAsRequest(BaseModel):
-    """Open SWE asking one person to let it open PRs as them in one thread."""
+    """Open SWE asking to open, close, or merge PRs for one person in one thread."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -44,7 +44,9 @@ class ActAsRequest(BaseModel):
 
     @staticmethod
     def fingerprint_for(thread_id: str, login: str) -> str:
-        return hashlib.sha256(f"{thread_id}|{login.lower()}".encode()).hexdigest()[:16]
+        """Bind consent to the current scope, not legacy approval to open PRs only."""
+        scope = f"{thread_id}|{login.lower()}|open-close-merge"
+        return hashlib.sha256(scope.encode()).hexdigest()[:16]
 
 
 class ActAsDecision(BaseModel):

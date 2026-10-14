@@ -1,6 +1,6 @@
-{{ login }} {{ "approved" if approved else "denied" }} Open SWE opening PRs as them in this thread, after `open_pull_request` stopped waiting for their answer.
+{{ login }} {{ "approved" if approved else "denied" }} Open SWE opening, closing, or merging PRs on their behalf in this thread, after the PR action stopped waiting for their answer.
 {% if approved %}
-Call `open_pull_request` again now to open the pull request it was blocked on.
+Retry the PR action that was blocked on their consent.
 {% else %}
-Do not open the pull request as them. Tell the thread it was denied; re-attribute only through the approval flow `open_pull_request` describes.
+Do not act on their behalf. Tell the thread it was denied; re-attribute only through the approval flow `open_pull_request` describes.
 {% endif %}

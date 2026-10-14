@@ -113,6 +113,7 @@ from openswe.middleware import (
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
     ModelSelectionMiddleware,
+    PullRequestActionGuardMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -638,8 +639,8 @@ def _subagent_guard_middleware(local_run: bool) -> list[AgentMiddleware[Any, Any
     Local desktop runs skip the PR-creation guard the same way the parent does.
     """
     if local_run:
-        return []
-    return [PullRequestCreationGuardMiddleware()]
+        return [PullRequestActionGuardMiddleware()]
+    return [PullRequestCreationGuardMiddleware(), PullRequestActionGuardMiddleware()]
 
 
 def _is_subagent_excluded_tool(name: str) -> bool:
@@ -2193,6 +2194,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         max_delay=10.0,
                     ),
                     *([] if local_run else [PullRequestCreationGuardMiddleware()]),
+                    PullRequestActionGuardMiddleware(),
                     WorkflowPushGuardMiddleware(),
                     *([task_coordination] if task_coordination else []),
                     *(

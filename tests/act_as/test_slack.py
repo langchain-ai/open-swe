@@ -112,7 +112,7 @@ async def test_the_persons_answer_is_recorded_and_announced(stack, action, statu
     stack.ephemeral.assert_awaited_once_with(
         "C1",
         "U-ALICE",
-        f"`alice` {status} Open SWE opening PRs as them in this thread.",
+        f"`alice` {status} Open SWE opening, closing, or merging PRs on their behalf in this thread.",
         thread_ts="1.0",
     )
     user_id, channel_id, note = stack.concierge.await_args.args

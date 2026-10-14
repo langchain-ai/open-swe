@@ -99,7 +99,7 @@ def _expand_nested_shell_tokens(tokens: list[str], depth: int = 0) -> list[str]:
     return expanded
 
 
-def _shell_tokens(command: str) -> list[str]:
+def shell_tokens(command: str) -> list[str]:
     return _expand_nested_shell_tokens(_split_shell_tokens(command))
 
 
@@ -229,7 +229,7 @@ def _contains_direct_pull_create(tokens: list[str]) -> bool:
 
 
 def is_pr_creation_fallback_command(command: str) -> bool:
-    tokens = _shell_tokens(command)
+    tokens = shell_tokens(command)
     return (
         _SHELL_EXPANSION_DEPTH_LIMIT_TOKEN in tokens
         or _contains_gh_pr_create(tokens)
