@@ -45,11 +45,7 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import type {
-  ModelOption,
-  Skill,
-  WorkspaceOption,
-} from "@/lib/api"
+import type { ModelOption, Skill, WorkspaceOption } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
@@ -429,41 +425,38 @@ export const ChatComposer = memo(function ChatComposer({
     editorRef.current?.focusAtEnd()
   }, [applyPrompt, restoreDraft, value])
 
-  const handleSubmit = useCallback(
-    async () => {
-      if (submittingRef.current || disabled) return
-      // The editor is the source of truth for what is on screen; a keystroke that
-      // has not yet round-tripped through state would otherwise be dropped.
-      const snapshot = editorRef.current?.readSnapshot()
-      const trimmed = (snapshot?.value ?? value).trim()
-      if (trimmed.length === 0 && pendingImages.length === 0) return
+  const handleSubmit = useCallback(async () => {
+    if (submittingRef.current || disabled) return
+    // The editor is the source of truth for what is on screen; a keystroke that
+    // has not yet round-tripped through state would otherwise be dropped.
+    const snapshot = editorRef.current?.readSnapshot()
+    const trimmed = (snapshot?.value ?? value).trim()
+    if (trimmed.length === 0 && pendingImages.length === 0) return
 
-      if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
-        setComposerError(
-          pendingImages.length
-            ? "Offloading does not accept attachments."
-            : "Offloading requires an idle, existing conversation."
-        )
-        return
-      }
+    if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
+      setComposerError(
+        pendingImages.length
+          ? "Offloading does not accept attachments."
+          : "Offloading requires an idle, existing conversation."
+      )
+      return
+    }
 
-      const images = pendingImages
-      submittingRef.current = true
-      setIsSubmitting(true)
-      applyPrompt("", 0)
-      setPendingImages([])
-      setComposerError(null)
-      try {
-        await onSubmit?.(trimmed, images)
-      } catch {
-        // Caller surfaces send errors (e.g. via react-query mutation state).
-      } finally {
-        submittingRef.current = false
-        setIsSubmitting(false)
-      }
-    },
-    [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload]
-  )
+    const images = pendingImages
+    submittingRef.current = true
+    setIsSubmitting(true)
+    applyPrompt("", 0)
+    setPendingImages([])
+    setComposerError(null)
+    try {
+      await onSubmit?.(trimmed, images)
+    } catch {
+      // Caller surfaces send errors (e.g. via react-query mutation state).
+    } finally {
+      submittingRef.current = false
+      setIsSubmitting(false)
+    }
+  }, [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload])
 
   const selectCommandItem = useCallback(
     (item: ComposerCommandItem) => {

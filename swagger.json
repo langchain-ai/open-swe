@@ -6956,21 +6956,6 @@
             ],
             "title": "Default Workspace"
           },
-          "follow_up_behavior": {
-            "anyOf": [
-              {
-                "enum": [
-                  "queue",
-                  "steer"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Follow Up Behavior"
-          },
           "local_tracing_project": {
             "anyOf": [
               {
