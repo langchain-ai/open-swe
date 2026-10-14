@@ -55,10 +55,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 function render() {
-  return renderHook(
-    () => useAgentThreadStream("one"),
-    { wrapper }
-  )
+  return renderHook(() => useAgentThreadStream("one"), { wrapper })
 }
 
 function lastStream(): StreamOptions {

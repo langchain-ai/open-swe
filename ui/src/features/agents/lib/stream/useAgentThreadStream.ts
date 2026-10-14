@@ -13,11 +13,7 @@ import { RunTracker } from "@/lib/perf/streaming"
 import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from "./connection"
 import { useReconnectNotice } from "./useReconnectNotice"
 import { createRunAcceptanceTracker } from "./runAcceptance"
-import type {
-  AgentStream,
-  RoutedModel,
-  StreamConnection,
-} from "./connection"
+import type { AgentStream, RoutedModel, StreamConnection } from "./connection"
 
 const AGENT_ASSISTANT_ID = "agent"
 

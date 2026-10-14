@@ -633,10 +633,7 @@ function configureDesktopIpc() {
     );
     updateInstallTimer.unref();
     try {
-      await Promise.all([
-        closeAllTerminals(),
-        localBridges?.closeAll(),
-      ]);
+      await Promise.all([closeAllTerminals(), localBridges?.closeAll()]);
       if (!quitting) return false;
       autoUpdater.quitAndInstall(false, true);
       return true;
@@ -1843,11 +1840,10 @@ if (!hasSingleInstanceLock) {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    void Promise.all([
-      closeAllTerminals(),
-      localBridges?.closeAll(),
-    ]).finally(() => {
-      app.quit();
-    });
+    void Promise.all([closeAllTerminals(), localBridges?.closeAll()]).finally(
+      () => {
+        app.quit();
+      },
+    );
   });
 }
