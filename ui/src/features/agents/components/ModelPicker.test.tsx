@@ -55,27 +55,21 @@ function openPicker(
   return { onSelectionChange, panel: screen.getByTestId("model-picker-panel") }
 }
 
-function openModelPane() {
-  fireEvent.click(screen.getByRole("option", { name: "GPT-5.6 Sol" }))
-}
-
 describe("ModelPicker", () => {
   it("reaches Auto and models with the keyboard while routing automatically", () => {
-    const { onSelectionChange, panel } = openPicker({ selection: null })
+    const { onSelectionChange } = openPicker({ selection: null })
 
-    fireEvent.keyDown(panel, { key: "ArrowRight" })
-    fireEvent.keyDown(panel, { key: "ArrowDown" })
-    fireEvent.keyDown(panel, { key: "Enter" })
+    fireEvent.keyDown(screen.getByLabelText("Search models"), {
+      key: "ArrowDown",
+    })
+    fireEvent.keyDown(screen.getByLabelText("Search models"), { key: "Enter" })
     expect(onSelectionChange).toHaveBeenLastCalledWith({
       modelId: "openai:gpt-5.6-sol",
       effort: "xhigh",
     })
 
     fireEvent.click(screen.getByRole("button", { expanded: false }))
-    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
-      key: "ArrowRight",
-    })
-    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
+    fireEvent.keyDown(screen.getByLabelText("Search models"), {
       key: "Enter",
     })
     expect(onSelectionChange).toHaveBeenLastCalledWith(null)
@@ -122,7 +116,7 @@ describe("ModelPicker", () => {
     expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
   })
 
-  it("shows the selected model's context, reasoning and model row", () => {
+  it("shows the selected model's context, reasoning and model list", () => {
     const { panel } = openPicker()
 
     expect(panel.textContent).toContain("Context")
@@ -132,8 +126,7 @@ describe("ModelPicker", () => {
         .getAllByRole("option")
         .map((option) => option.textContent)
     ).toEqual(["None", "Low", "Medium", "High", "Extra High"])
-    expect(screen.getByRole("option", { name: "GPT-5.6 Sol" })).toBeTruthy()
-    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
+    expect(screen.getByRole("listbox", { name: "Models" })).toBeTruthy()
   })
 
   it("omits the context section for models without a context window", () => {
@@ -164,7 +157,6 @@ describe("ModelPicker", () => {
 
   it("lists every model with its effort and filters on search", () => {
     openPicker()
-    openModelPane()
 
     const models = screen.getByRole("listbox", { name: "Models" })
     expect(
@@ -191,7 +183,6 @@ describe("ModelPicker", () => {
 
   it("selects a model row with that model's default effort", () => {
     const { onSelectionChange } = openPicker()
-    openModelPane()
 
     fireEvent.click(screen.getByRole("option", { name: "Kimi K3 High" }))
 
@@ -204,35 +195,12 @@ describe("ModelPicker", () => {
 
   it("disables models without image support when images are attached", () => {
     const { onSelectionChange } = openPicker({ requireImageSupport: true })
-    openModelPane()
 
     const kimi = screen.getByRole("option", { name: "Kimi K3 High" })
     expect(kimi).toHaveProperty("disabled", true)
 
     fireEvent.click(kimi)
     expect(onSelectionChange).not.toHaveBeenCalled()
-  })
-
-  it("opens the model pane with ArrowRight and returns with ArrowLeft", () => {
-    const { panel } = openPicker()
-
-    fireEvent.keyDown(panel, { key: "ArrowRight" })
-    expect(screen.getByRole("listbox", { name: "Models" })).toBeTruthy()
-
-    fireEvent.keyDown(panel, { key: "ArrowLeft" })
-    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
-  })
-
-  it("moves reasoning focus with the arrow keys and applies it on Enter", () => {
-    const { onSelectionChange, panel } = openPicker()
-
-    fireEvent.keyDown(panel, { key: "ArrowUp" })
-    fireEvent.keyDown(panel, { key: "Enter" })
-
-    expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "openai:gpt-5.6-sol",
-      effort: "medium",
-    })
   })
 
   it("closes on Escape", () => {
@@ -243,15 +211,5 @@ describe("ModelPicker", () => {
     })
 
     expect(screen.queryByTestId("model-picker-panel")).toBeNull()
-  })
-
-  it("returns to the main pane when Escape closes the model pane", () => {
-    const { panel } = openPicker()
-    openModelPane()
-
-    fireEvent.keyDown(panel, { key: "Escape" })
-
-    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
-    expect(screen.getByTestId("model-picker-panel")).toBeTruthy()
   })
 })

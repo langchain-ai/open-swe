@@ -1,6 +1,5 @@
 import {
   CaretDownIcon,
-  CaretRightIcon,
   CheckIcon,
   MagnifyingGlassRegularIcon,
 } from "@langchain/macaw-components/icons"
@@ -8,7 +7,6 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -45,8 +43,6 @@ export interface ModelPickerProps {
   /** Route/model the Auto router picked for the current run. */
   routed?: { route?: string; modelId?: string | null } | null
 }
-
-type Pane = "main" | "models"
 
 const AUTO_ID = "__auto__"
 
@@ -118,11 +114,6 @@ function OptionRow({
   )
 }
 
-/**
- * Model picker in the Cursor layout: the main pane configures the currently
- * selected model (context, reasoning) and ends in a `Model >` row that opens the
- * searchable model list as a submenu pinned to that row.
- */
 export function ModelPicker({
   models,
   selection,
@@ -153,12 +144,6 @@ export function ModelPicker({
   )
   const [query, setQuery] = useState("")
   const [focusedModelId, setFocusedModelId] = useState<string | null>(null)
-  const [pane, setPane] = useState<Pane>("main")
-  const [mainIndex, setMainIndex] = useState(0)
-  const [modelPaneTop, setModelPaneTop] = useState(0)
-  const mainPaneRef = useRef<HTMLDivElement>(null)
-  const modelRowRef = useRef<HTMLDivElement>(null)
-  const modelPaneRef = useRef<HTMLDivElement>(null)
 
   const pickerDisabled = disabled || models.length === 0 || !onSelectionChange
 
@@ -168,7 +153,6 @@ export function ModelPicker({
   const currentEffort = selectedModel
     ? effortForModel(selectedModel, selection)
     : null
-  const modelRowIndex = efforts.length
 
   const filteredModels = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -195,47 +179,17 @@ export function ModelPicker({
 
   // Seeded once per open; later edits come from pointer/keyboard interaction.
   const seedOnOpen = useEffectEvent(() => {
-    setPane("main")
     setQuery("")
     setFocusedModelId(null)
-    const index = currentEffort ? efforts.indexOf(currentEffort) : -1
-    setMainIndex(index === -1 ? 0 : index)
   })
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
     if (open) seedOnOpen()
   }, [open])
 
-  // The main pane owns the keyboard handler, so it needs DOM focus whenever it
-  // is showing (the model pane hands focus to its search input instead).
-  useEffect(() => {
-    if (open && pane === "main") mainPaneRef.current?.focus()
-  }, [open, pane])
-
-  // Hang the model list off the `Model >` row — its selected entry lines up with
-  // that row — instead of letting it tower over the whole main pane.
-  useLayoutEffect(() => {
-    if (pane !== "models") return
-    const row = modelRowRef.current
-    const modelPane = modelPaneRef.current
-    if (!row || !modelPane) return
-    const paneRect = modelPane.getBoundingClientRect()
-    if (paneRect.height === 0) return
-    const selected = modelPane.querySelector('[aria-selected="true"]')
-    const anchor = (selected ?? modelPane).getBoundingClientRect()
-    const desired =
-      row.getBoundingClientRect().bottom - (anchor.bottom - paneRect.top)
-    const clamped = Math.max(
-      8,
-      Math.min(desired, window.innerHeight - paneRect.height - 8)
-    )
-    setModelPaneTop((top) => top + clamped - paneRect.top)
-  }, [pane])
-
   const close = useCallback(() => {
     setOpen(false)
     setQuery("")
-    setPane("main")
   }, [setOpen])
 
   const modelDisabled = useCallback(
@@ -243,14 +197,11 @@ export function ModelPicker({
     [requireImageSupport]
   )
 
-  const applyEffort = useCallback(
-    (effort: string) => {
-      if (!selectedModel) return
-      onSelectionChange?.({ modelId: selectedModel.id, effort })
-      close()
-    },
-    [close, onSelectionChange, selectedModel]
-  )
+  const applyEffort = (effort: string) => {
+    if (!selectedModel) return
+    onSelectionChange?.({ modelId: selectedModel.id, effort })
+    close()
+  }
 
   const selectModel = useCallback(
     (model: ModelOption) => {
@@ -281,70 +232,29 @@ export function ModelPicker({
     [filteredModels, selectAuto, selectModel]
   )
 
-  const openModelPane = useCallback(() => {
-    setPane("models")
-    setFocusedModelId(selectedEntryId)
-  }, [selectedEntryId])
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.preventDefault()
-      if (pane === "models") {
-        setPane("main")
-        setMainIndex(modelRowIndex)
-        return
-      }
       close()
-      return
-    }
-
-    if (pane === "models") {
-      if (e.key === "ArrowLeft" && query.length === 0) {
-        e.preventDefault()
-        setPane("main")
-        setMainIndex(modelRowIndex)
-        return
-      }
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault()
-        if (entryIds.length === 0) return
-        const step = e.key === "ArrowDown" ? 1 : -1
-        const current = entryIds.indexOf(focusedEntryId ?? "")
-        const nextIndex = Math.min(
-          Math.max(current + step, 0),
-          entryIds.length - 1
-        )
-        setFocusedModelId(entryIds[nextIndex] ?? null)
-        return
-      }
-      if (e.key === "Enter" && focusedEntryId) {
-        e.preventDefault()
-        selectEntry(focusedEntryId)
-      }
-      return
-    }
-
-    if (e.key === "ArrowRight") {
-      e.preventDefault()
-      openModelPane()
       return
     }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault()
+      const availableIds = entryIds.filter((id) => {
+        const model = models.find((entry) => entry.id === id)
+        return !model || !modelDisabled(model)
+      })
       const step = e.key === "ArrowDown" ? 1 : -1
-      setMainIndex((index) =>
-        Math.min(Math.max(index + step, 0), modelRowIndex)
+      const current = availableIds.indexOf(focusedEntryId ?? "")
+      const nextIndex = Math.min(
+        Math.max(current + step, 0),
+        availableIds.length - 1
       )
-      return
+      setFocusedModelId(availableIds[nextIndex] ?? null)
     }
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && focusedEntryId) {
       e.preventDefault()
-      if (mainIndex === modelRowIndex) {
-        openModelPane()
-        return
-      }
-      const effort = efforts[mainIndex]
-      if (effort) applyEffort(effort)
+      selectEntry(focusedEntryId)
     }
   }
 
@@ -382,19 +292,64 @@ export function ModelPicker({
           </button>
         </PopoverTrigger>
         <PopoverContent
-          ref={mainPaneRef}
           data-testid="model-picker-panel"
           side="top"
           align="start"
           sideOffset={4}
-          onKeyDown={handleKeyDown}
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onEscapeKeyDown={(event) => {
-            // Escape steps back out of the model pane before it closes.
-            if (pane === "models") event.preventDefault()
-          }}
-          className={cn(PANE, "relative w-56 py-space-1 [filter:none]")}
+          className={cn(PANE, "w-60 overflow-hidden py-space-1")}
         >
+          <div onKeyDown={handleKeyDown}>
+            <Input
+              autoFocus
+              variant="plain"
+              size="md"
+              leftIcon={MagnifyingGlassRegularIcon}
+              value={query}
+              onChange={setQuery}
+              placeholder="Search models"
+              aria-label="Search models"
+              inputContainerClassName="border-b border-default"
+            />
+            <div
+              role="listbox"
+              aria-label="Models"
+              className="max-h-72 overflow-y-auto py-space-1"
+            >
+              {showAuto && (
+                <OptionRow
+                  label="Auto"
+                  selected={!selectedModel}
+                  focused={focusedEntryId === AUTO_ID}
+                  onMouseEnter={() => setFocusedModelId(AUTO_ID)}
+                  onClick={selectAuto}
+                />
+              )}
+              {filteredModels.length === 0 ? (
+                <p className="px-space-3 py-space-1 text-xs text-tertiary">
+                  No matches
+                </p>
+              ) : (
+                filteredModels.map((model) => (
+                  <OptionRow
+                    key={model.id}
+                    selected={selectedModel?.id === model.id}
+                    focused={focusedEntryId === model.id}
+                    disabled={modelDisabled(model)}
+                    onMouseEnter={() => setFocusedModelId(model.id)}
+                    onClick={() => selectModel(model)}
+                    label={
+                      <>
+                        {model.label}{" "}
+                        <span className="text-tertiary">
+                          {formatEffort(effortForModel(model, selection))}
+                        </span>
+                      </>
+                    }
+                  />
+                ))
+              )}
+            </div>
+          </div>
           {selectedModel ? (
             <>
               {contextWindow != null && (
@@ -416,16 +371,11 @@ export function ModelPicker({
                 aria-label="Reasoning effort"
                 className="max-h-60 overflow-y-auto"
               >
-                {efforts.map((effort, index) => (
+                {efforts.map((effort) => (
                   <OptionRow
                     key={effort}
                     label={formatEffort(effort)}
                     selected={currentEffort === effort}
-                    focused={pane === "main" && mainIndex === index}
-                    onMouseEnter={() => {
-                      setPane("main")
-                      setMainIndex(index)
-                    }}
                     onClick={() => applyEffort(effort)}
                   />
                 ))}
@@ -435,87 +385,6 @@ export function ModelPicker({
             <p className="px-space-3 py-space-1 text-xs text-tertiary">
               Model and reasoning are chosen when the thread starts.
             </p>
-          )}
-          <div
-            ref={modelRowRef}
-            className="mt-space-1 border-t border-default pt-space-1"
-          >
-            <SectionHeading>Model</SectionHeading>
-            <OptionRow
-              label={selectedModel?.label ?? "Auto"}
-              selected={false}
-              focused={pane === "models" || mainIndex === modelRowIndex}
-              trailing={
-                <CaretRightIcon
-                  size={14}
-                  weight="regular"
-                  className="shrink-0 text-icon-tertiary"
-                />
-              }
-              onMouseEnter={openModelPane}
-              onClick={openModelPane}
-            />
-          </div>
-          {pane === "models" && (
-            <div
-              ref={modelPaneRef}
-              style={{ top: modelPaneTop }}
-              className={cn(
-                PANE,
-                "absolute left-full ml-space-1 flex w-60 flex-col overflow-hidden"
-              )}
-            >
-              <Input
-                autoFocus
-                variant="plain"
-                size="md"
-                leftIcon={MagnifyingGlassRegularIcon}
-                value={query}
-                onChange={setQuery}
-                placeholder="Search models"
-                aria-label="Search models"
-                inputContainerClassName="border-b border-default"
-              />
-              <div
-                role="listbox"
-                aria-label="Models"
-                className="max-h-72 overflow-y-auto py-space-1"
-              >
-                {showAuto && (
-                  <OptionRow
-                    label="Auto"
-                    selected={!selectedModel}
-                    focused={focusedEntryId === AUTO_ID}
-                    onMouseEnter={() => setFocusedModelId(AUTO_ID)}
-                    onClick={selectAuto}
-                  />
-                )}
-                {filteredModels.length === 0 ? (
-                  <p className="px-space-3 py-space-1 text-xs text-tertiary">
-                    No matches
-                  </p>
-                ) : (
-                  filteredModels.map((model) => (
-                    <OptionRow
-                      key={model.id}
-                      selected={selectedModel?.id === model.id}
-                      focused={focusedEntryId === model.id}
-                      disabled={modelDisabled(model)}
-                      onMouseEnter={() => setFocusedModelId(model.id)}
-                      onClick={() => selectModel(model)}
-                      label={
-                        <>
-                          {model.label}{" "}
-                          <span className="text-tertiary">
-                            {formatEffort(effortForModel(model, selection))}
-                          </span>
-                        </>
-                      }
-                    />
-                  ))
-                )}
-              </div>
-            </div>
           )}
         </PopoverContent>
       </Popover>
