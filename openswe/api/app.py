@@ -23,6 +23,7 @@ from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.remote_runtime import server as remote_runtime_server
 from openswe.remote_runtime.proxy import MdaThreadProxy
+from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
@@ -58,11 +59,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.mcp.import_oauth_entries import import_store_mcp_oauth_entries
     from openswe.mcp.import_records import import_store_mcp_connections
     from openswe.review.assessment_feedback import run_assessment_import
+    from openswe.review.import_eval_runs import import_store_reviewer_eval
     from openswe.review.import_records import import_review_records
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
+    from openswe.slack.import_allowed_bots import import_store_allowed_slack_bots
     from openswe.slack.import_records import run_slack_imports
     from openswe.thread_feedback import run_feedback_import
     from openswe.threads.blobs import run_blob_import
@@ -173,6 +176,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # import succeeds.
         logger.exception("Importing agent instructions from the LangGraph Store failed")
     try:
+        # Admin-allowed Slack bots used to live in the LangGraph Store.
+        await run_store_import("allowed_slack_bots", import_store_allowed_slack_bots)
+    except Exception:  # noqa: BLE001
+        # Startup continues: bots still in the Store cannot start threads until
+        # an import succeeds.
+        logger.exception("Importing allowed Slack bots from the LangGraph Store failed")
+    try:
+        # The latest reviewer eval used to be a LangGraph Store record.
+        await run_store_import("reviewer_eval", import_store_reviewer_eval)
+    except Exception:  # noqa: BLE001
+        # Startup continues: the eval dashboard misses that eval until an
+        # import succeeds.
+        logger.exception("Importing the reviewer eval from the LangGraph Store failed")
+    try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()
     except Exception:  # noqa: BLE001
@@ -279,6 +296,7 @@ def create_app() -> FastAPI:
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
+    app.include_router(reviewer_eval_report_router)
     # Routed at the exact path so no redirect sits between a remote runtime and its hooks.
     app.router.routes.append(
         Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
