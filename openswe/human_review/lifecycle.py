@@ -180,15 +180,10 @@ class ReviewCard:
             channel = await SlackChannel.load(approval.slack_channel_id)
             if channel is None:
                 raise SlackRequestError("channel_not_found")
-            pr = approval.pull_request
             approval.slack_thread_ts = await channel.post(
-                prompt(
-                    "slack/expedited-review-requested",
-                    pr_url=pr.url,
-                    label=f"{pr.owner}/{pr.repo}#{pr.number}",
-                    title=escape(title),
-                )
+                text, blocks=block_payload(blocks), login=self.request.requester_login
             )
+            return approval.slack_thread_ts
         return await post_slack_thread_reply_with_ts(
             approval.slack_channel_id,
             approval.slack_thread_ts,
@@ -272,7 +267,10 @@ class ReviewCard:
         pr = self.request.pull_request
         if (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip():
             return []
-        return self.request.slack_channel_choices or await own_choices(self.request)
+        choices = self.request.slack_channel_choices or await own_choices(self.request)
+        if self.request.slack_message_ts == self.request.slack_thread_ts:
+            return [choice for choice in choices if choice["id"] != self.request.slack_channel_id]
+        return choices
 
     async def _review_states(self) -> dict[str, str]:
         pr = self.request.pull_request
@@ -523,6 +521,11 @@ class ReviewCard:
         if not request.has_card or location is None or not request.slack_message_ts:
             return False
         old_ts = request.slack_message_ts
+        if old_ts == request.slack_thread_ts:
+            request.slack_broadcast = broadcast
+            await request.save()
+            await self.refresh(outcome=outcome)
+            return True
         request.slack_broadcast = broadcast
         text, blocks = await self.render(outcome)
 
@@ -718,7 +721,11 @@ class ReviewCard:
     async def remove_superseded(self) -> None:
         """Delete older cards for this request's PR, so its thread only ever shows one."""
         for stale in await HumanReviewRequest.superseded_on_slack(self.request.pull_request_id):
-            if stale.id == self.request.id or not stale.has_card:
+            if (
+                stale.id == self.request.id
+                or not stale.has_card
+                or stale.slack_message_ts == stale.slack_thread_ts
+            ):
                 continue
             if not await delete_slack_message(stale.slack_channel_id, stale.slack_message_ts):
                 continue

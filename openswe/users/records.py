@@ -11,7 +11,7 @@ from uuid import UUID
 
 from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, and_, delete, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
@@ -49,6 +49,17 @@ def user_id_for_login(login: str) -> ScalarSelect[UUID]:
             UserIdentity.provider == "github",
             func.lower(UserIdentity.login) == login.strip().lower(),
         )
+        .order_by(UserIdentity.last_seen_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def github_login_of(user_id: InstrumentedAttribute[UUID | None]) -> ScalarSelect[str]:
+    """The GitHub login a row's ``user_id`` column signed in with last, correlated to that row."""
+    return (
+        select(UserIdentity.login)
+        .where(UserIdentity.user_id == user_id, UserIdentity.provider == "github")
         .order_by(UserIdentity.last_seen_at.desc())
         .limit(1)
         .scalar_subquery()

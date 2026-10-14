@@ -7,7 +7,7 @@ from openswe.input_messages import SystemIdentity
 from openswe.prompts import prompt
 from openswe.slack import webhook
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import resolve_slack_thread_id
+from openswe.slack.records import resolve_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common

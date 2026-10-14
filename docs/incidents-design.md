@@ -35,12 +35,15 @@ Every channel message, including bot alerts, is queued for the thread as a conte
 
 ## Records
 
-| Namespace | Writer | Content |
+Records live in PostgreSQL, through `openswe/incidents/records.py`.
+
+| Table or column | Writer | Content |
 |---|---|---|
-| `incidents/policies` | admin API | enablement, prefix, exclusions, model, model-call limit |
-| `incidents/incidents` | webhook handler, incidents API, completion hook | identity, thread id, status, reason, activity |
-| `incidents/reports` | `record_incident_report` | latest report, digest, run id, last posted digest/run/time, findings activity |
-| `incidents/summaries`, `incidents/history` | the report tool and the handler through `documents.py` | postmortem Markdown and curated metadata |
+| `incident_policy` | admin API | enablement, prefix, exclusions, model, model-call limit |
+| `incident.incident` | webhook handler, incidents API, completion hook | identity, thread id, status, reason, activity |
+| `incident.report` | `record_incident_report` | latest report, digest, run id, last posted digest/run/time, findings activity |
+| `incident.postmortem`, `incident.history` | the report tool and the handler through `documents.py` | postmortem Markdown and curated metadata |
+| `incident_command` | incidents API | responder command receipts, claimed before the command runs |
 
 Each record has one writer class so concurrent turns and controls cannot lose updates. The dashboard merges the two activity lists and reports `investigating` while the thread has a pending or running run.
 

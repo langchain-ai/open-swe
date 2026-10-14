@@ -16,11 +16,11 @@ from openswe.slack.client import (
     fetch_slack_thread_messages,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
-    resolve_slack_thread_id,
     slack_message_bot_id,
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SlackClient, SlackRequestError
+from openswe.slack.records import resolve_slack_thread_id
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.store import store_client
 from openswe.users import User
@@ -257,7 +257,7 @@ async def apply_control(
     else:
         raise ValueError(f"unknown incident control {action!r}")
     service.note(record, "control", text.split("\n", 1)[0])
-    await service.save(record)
+    await service.save(record, by=service.actor_login(actor))
     await _post(record, text, blocks=blocks)
     if action in {"resume", "reopen"} and await turns.queued_context_count(record.thread_id):
         await turns.schedule_automatic_turn(record, policy)

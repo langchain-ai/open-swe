@@ -34,12 +34,14 @@ def timestamp(value: object) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
-def store_copy_is_newer(stored: Mapping[str, object], current: datetime | None) -> bool:
-    """Whether a Store record was saved after the existing PostgreSQL copy last changed.
+def store_copy_is_newer(
+    stored: Mapping[str, object] | datetime | None, current: datetime | None
+) -> bool:
+    """Whether a Store record, or the time it was saved, is after the PostgreSQL copy last changed.
 
     A Store record whose time is unknown never wins.
     """
-    stored_at = timestamp(stored.get("updated_at"))
+    stored_at = stored if not isinstance(stored, Mapping) else timestamp(stored.get("updated_at"))
     return stored_at is not None and (current is None or stored_at > current)
 
 

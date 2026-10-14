@@ -6,8 +6,10 @@ from typing import Literal, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid7
 
+import httpx
 import pytest
 from fastapi import HTTPException
+from langgraph_sdk.errors import APIStatusError
 
 from openswe.dashboard import deps, profiles
 from openswe.dashboard.workspace_settings import (
@@ -614,6 +616,28 @@ async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) 
     )
 
     assert enriched["params"]["config"]["configurable"]["transcript_turn_id"] == str(recorded)
+
+
+@pytest.mark.parametrize("status_code", [403, 503])
+async def test_proxy_commands_preserves_thread_lookup_failure(
+    monkeypatch, status_code: int
+) -> None:
+    error = APIStatusError(
+        "thread lookup failed",
+        response=httpx.Response(
+            status_code, request=httpx.Request("GET", "http://api/threads/tid")
+        ),
+        body=None,
+    )
+    client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(side_effect=error)))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+
+    with pytest.raises(APIStatusError) as exc_info:
+        await thread_proxy.proxy_dashboard_thread_commands(
+            "tid", "octocat", b'{"method": "run.start"}'
+        )
+
+    assert exc_info.value is error
 
 
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:

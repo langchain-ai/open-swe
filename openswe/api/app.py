@@ -22,6 +22,8 @@ from openswe.linear.routes import router as linear_webhook_router
 from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.remote_runtime import server as remote_runtime_server
+from openswe.remote_runtime.proxy import MdaThreadProxy
+from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
@@ -38,7 +40,6 @@ logger = logging.getLogger(__name__)
 # cannot survive them landing on different loops.
 pin_single_event_loop()
 
-REMOTE_RUNTIME = remote_runtime_server.build_mount()
 AGENT_MCP = agent_mcp_server.build_mount()
 
 
@@ -54,13 +55,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.database.store_imports import run_store_import
+    from openswe.incidents.import_records import import_store_incidents
+    from openswe.mcp.import_oauth_entries import import_store_mcp_oauth_entries
     from openswe.mcp.import_records import import_store_mcp_connections
     from openswe.review.assessment_feedback import run_assessment_import
+    from openswe.review.import_eval_runs import import_store_reviewer_eval
     from openswe.review.import_records import import_review_records
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
+    from openswe.slack.import_allowed_bots import import_store_allowed_slack_bots
+    from openswe.slack.import_records import run_slack_imports
     from openswe.thread_feedback import run_feedback_import
     from openswe.threads.blobs import run_blob_import
     from openswe.threads.pins import import_store_pins
@@ -131,6 +137,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # the Store until an import succeeds.
         logger.exception("Importing MCP connections from the LangGraph Store failed")
     try:
+        # The MCP server's OAuth client registrations and tokens used to live in
+        # the LangGraph Store.
+        await run_store_import("mcp_oauth_entries", import_store_mcp_oauth_entries)
+    except Exception:  # noqa: BLE001
+        # Startup continues: MCP clients whose tokens are still in the Store
+        # sign in again.
+        logger.exception("Importing MCP OAuth entries from the LangGraph Store failed")
+    try:
+        # The Incidents policy, incidents, reports, history, postmortems, and
+        # command receipts used to live in the LangGraph Store.
+        await run_store_import("incidents", import_store_incidents)
+    except Exception:  # noqa: BLE001
+        # Startup continues: Incidents stays off, and incidents still in the
+        # Store go unseen, until an import succeeds.
+        logger.exception("Importing incidents from the LangGraph Store failed")
+    try:
         # Review settings, assessment feedback, and baby-sit watches used to be
         # Store records; this moves them into PostgreSQL.
         await run_store_import("review_records", import_review_records)
@@ -154,6 +176,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # import succeeds.
         logger.exception("Importing agent instructions from the LangGraph Store failed")
     try:
+        # Admin-allowed Slack bots used to live in the LangGraph Store.
+        await run_store_import("allowed_slack_bots", import_store_allowed_slack_bots)
+    except Exception:  # noqa: BLE001
+        # Startup continues: bots still in the Store cannot start threads until
+        # an import succeeds.
+        logger.exception("Importing allowed Slack bots from the LangGraph Store failed")
+    try:
+        # The latest reviewer eval used to be a LangGraph Store record.
+        await run_store_import("reviewer_eval", import_store_reviewer_eval)
+    except Exception:  # noqa: BLE001
+        # Startup continues: the eval dashboard misses that eval until an
+        # import succeeds.
+        logger.exception("Importing the reviewer eval from the LangGraph Store failed")
+    try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()
     except Exception:  # noqa: BLE001
@@ -162,6 +198,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     plan_import = asyncio.create_task(run_plan_import())
     feedback_import = asyncio.create_task(run_feedback_import())
     assessment_import = asyncio.create_task(run_assessment_import())
+    # Slack threads, runs, and messages used to live in the LangGraph Store, a
+    # record per Slack thread, run, and bot message; too many to wait for.
+    slack_import = asyncio.create_task(run_slack_imports())
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -198,7 +237,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Warming the agent build failed", exc_info=True)
     try:
         async with AsyncExitStack() as stack:
-            await stack.enter_async_context(REMOTE_RUNTIME.lifespan())
             if AGENT_MCP is not None:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
@@ -207,6 +245,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         plan_import.cancel()
         feedback_import.cancel()
         assessment_import.cancel()
+        slack_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()
@@ -241,6 +280,8 @@ def create_app() -> FastAPI:
         expose_headers=["X-Request-ID"],
     )
     app.add_middleware(AuditLogMiddleware)
+    # Ahead of the core /threads and /runs routes, which the custom app shadows.
+    app.add_middleware(MdaThreadProxy)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)
@@ -255,12 +296,10 @@ def create_app() -> FastAPI:
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
-    # Routed at the exact path so no redirect sits between a remote runtime and its tools.
+    app.include_router(reviewer_eval_report_router)
+    # Routed at the exact path so no redirect sits between a remote runtime and its hooks.
     app.router.routes.append(
-        Route(remote_runtime_server.PATH, REMOTE_RUNTIME.app, methods=["GET", "POST", "DELETE"])
-    )
-    app.router.routes.append(
-        Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
+        Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
     )
     if AGENT_MCP is not None:
         app.router.routes.extend(AGENT_MCP.root_routes)
