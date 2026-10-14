@@ -1,6 +1,6 @@
 name: Deploy Managed Deep Agents
 
-# Deploys mda/openswe to the open-swe-mda-* deployments the backends' MDA_RUNTIME_URL
+# Deploys mda/ to the open-swe-mda-* deployments the backends' MDA_RUNTIME_URL
 # points at. Staging and preview follow main; prod follows the promotion to prod.
 # A deployment is skipped when nothing it runs changed since its mda-deployed/<env>
 # tag, which a successful deploy moves, so a failed one is retried next time.
@@ -12,7 +12,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "mda/openswe/**"
+      - "mda/**"
       - ".github/workflows/deploy_mda.yml"
   workflow_dispatch:
     inputs:
@@ -67,11 +67,11 @@ jobs:
         env:
           DEPLOYED_TAG: mda-deployed/${{ matrix.environment }}
         run: |
-          if [[ ! -d mda/openswe ]]; then
-            echo "mda/openswe does not exist at this commit; nothing to deploy."
+          if [[ ! -f mda/agent.py ]]; then
+            echo "mda/agent.py does not exist at this commit; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
-            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda/openswe .github/workflows/deploy_mda.yml; then
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda .github/workflows/deploy_mda.yml; then
             echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           else
@@ -81,7 +81,7 @@ jobs:
         if: steps.changed.outputs.deploy == 'true'
       - name: Install the mda CLI
         if: steps.changed.outputs.deploy == 'true'
-        # Same version mda/openswe pins.
+        # Same version mda/ pins.
         run: uv tool install managed-deepagents==0.9.1
       - name: Deploy
         if: steps.changed.outputs.deploy == 'true'
@@ -97,8 +97,8 @@ jobs:
             *) echo "::error::Unknown environment $ENVIRONMENT"; exit 1 ;;
           esac
           # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
-          printf 'OPEN_SWE_BACKEND_URL=%s\n' "$backend" >mda/openswe/.env
-          mda deploy mda/openswe \
+          printf 'OPEN_SWE_BACKEND_URL=%s\n' "$backend" >mda/.env
+          mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
