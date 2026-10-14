@@ -295,7 +295,7 @@ async def api_connect_managed_tool(
         else:
             configured = await instance_gateway()
             if configured is None or gateway_id(gateway) != gateway_id(configured):
-                raise HTTPException(404, "This Open SWE does not use this gateway")
+                raise HTTPException(404, "This Open SWE does not use this tool kit")
             link = await connect_service(session["sub"], gateway, slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
