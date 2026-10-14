@@ -18,6 +18,7 @@ interface FilterableThread {
   id?: string
   source?: AgentSource
   threadCategory?: string
+  resolved?: boolean
   taskWorkers?: Array<FilterableThread>
 }
 
@@ -39,12 +40,13 @@ export function filterThreads<T extends FilterableThread>(
   activeThreadId?: string
 ): Array<T> {
   const matches = (thread: FilterableThread) =>
-    (Boolean(activeThreadId) && thread.id === activeThreadId) ||
-    ((filters.includeAutomations ||
-      !isAutomationThread(thread) ||
-      filters.sources.includes("schedule")) &&
-      (filters.sources.length === 0 ||
-        filters.sources.includes(threadSource(thread))))
+    (filters.includeResolved || !thread.resolved) &&
+    ((Boolean(activeThreadId) && thread.id === activeThreadId) ||
+      ((filters.includeAutomations ||
+        !isAutomationThread(thread) ||
+        filters.sources.includes("schedule")) &&
+        (filters.sources.length === 0 ||
+          filters.sources.includes(threadSource(thread)))))
   return threads.flatMap((thread) => {
     if (matches(thread)) return [thread]
     const taskWorkers = thread.taskWorkers?.filter(matches)
