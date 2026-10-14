@@ -8,8 +8,6 @@ calls back with it for the graph's tools and run hooks.
 from typing import Final, Literal, NotRequired, TypedDict
 from urllib.parse import urlsplit
 
-from langgraph_sdk import get_client
-from langgraph_sdk.client import LangGraphClient
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.config import ENV
@@ -54,14 +52,6 @@ def mda_runtime_url() -> str | None:
             "REMOTE_RUNTIME_TOKEN_SECRET is required to run graphs on Managed Deep Agents"
         )
     return url.rstrip("/")
-
-
-def remote_runtime_client() -> LangGraphClient | None:
-    """The client for the MDA deployment, or None when graphs run on this one."""
-    url = mda_runtime_url()
-    if url is None:
-        return None
-    return get_client(url=url, api_key=mda_runtime_api_key())
 
 
 def mda_runtime_api_key() -> str | None:

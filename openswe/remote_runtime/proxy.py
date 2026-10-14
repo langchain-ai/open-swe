@@ -106,6 +106,7 @@ class MdaRuntime:
         self._unclaimed = _Unclaimed()
         self._mda_threads: set[str] = set()
         self._http: httpx.AsyncClient | None = None
+        self._sdk: LangGraphClient | None = None
 
     @property
     def http(self) -> httpx.AsyncClient:
@@ -119,7 +120,11 @@ class MdaRuntime:
         return self._http
 
     def sdk(self) -> LangGraphClient:
-        return get_client(url=self.url, api_key=mda_runtime_api_key())
+        # One pool for every call: each `GET /threads/{id}` of a claimed thread asks MDA,
+        # and a new client pays a fresh TLS handshake for each.
+        if self._sdk is None:
+            self._sdk = get_client(url=self.url, api_key=mda_runtime_api_key())
+        return self._sdk
 
     @staticmethod
     def local() -> LangGraphClient:
