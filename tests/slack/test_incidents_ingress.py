@@ -10,7 +10,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from openswe.incidents import channels
+from openswe.incidents import channels, service
+from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.slack import routes
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common
@@ -143,12 +144,13 @@ def test_unregistered_event_falls_through_to_ordinary_slack(client, handler, mon
     context.assert_awaited_once_with("ordinary", use_cache=False)
 
 
-def test_signed_channel_creation_enrolls_once_and_dedupes_retries(client, fake_store, monkeypatch):
-    fake_store.seed(
-        ("incidents", "policies"),
-        "default",
-        {"enabled": True, "workspace_id": "T1", "slack_app_id": "A1", "channel_prefix": "inc-"},
+def test_signed_channel_creation_enrolls_once_and_dedupes_retries(client, monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "get_policy",
+        AsyncMock(return_value=IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")),
     )
+    monkeypatch.setattr(service.INCIDENTS, "get", AsyncMock(return_value=None))
     claimed: set[str] = set()
 
     async def claim(event_id: str, channel_id: str = "", event_ts: str = "") -> bool:
@@ -178,11 +180,12 @@ def test_signed_channel_creation_enrolls_once_and_dedupes_retries(client, fake_s
 
 
 @pytest.mark.parametrize("field", ["team_id", "api_app_id"])
-def test_signed_wrong_installation_cannot_enroll(client, fake_store, monkeypatch, field):
-    fake_store.seed(
-        ("incidents", "policies"),
-        "default",
-        {"enabled": True, "workspace_id": "T1", "slack_app_id": "A1"},
+def test_signed_wrong_installation_cannot_enroll(client, monkeypatch, field):
+    monkeypatch.setattr(service.INCIDENTS, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        service,
+        "get_policy",
+        AsyncMock(return_value=IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")),
     )
     enroll = AsyncMock()
     monkeypatch.setattr(channels, "enroll_channel", enroll)
@@ -196,19 +199,21 @@ def test_signed_wrong_installation_cannot_enroll(client, fake_store, monkeypatch
     enroll.assert_not_awaited()
 
 
-def test_disabled_registered_channel_still_cannot_launch_coding(client, fake_store, monkeypatch):
-    from openswe.incidents import service
-
-    fake_store.seed(
-        ("incidents", "policies"),
-        "default",
-        {"enabled": False, "workspace_id": "T1", "slack_app_id": "A1"},
+def test_disabled_registered_channel_still_cannot_launch_coding(client, monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "get_policy",
+        AsyncMock(return_value=IncidentPolicy(workspace_id="T1", slack_app_id="A1")),
     )
     incident_id = service.incident_id("T1", "C1")
-    fake_store.seed(
-        ("incidents", "incidents"),
-        incident_id,
-        {"id": incident_id, "workspace_id": "T1", "channel_id": "C1", "thread_id": "i1"},
+    monkeypatch.setattr(
+        service.INCIDENTS,
+        "get",
+        AsyncMock(
+            return_value=Incident(
+                id=incident_id, workspace_id="T1", channel_id="C1", thread_id="i1"
+            )
+        ),
     )
     monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(

@@ -72,9 +72,7 @@ async def test_reports_replace_one_summary_and_keep_other_incidents(record):
     assert "Error rate increased" not in latest["markdown"]
     assert latest["markdown"].count("Recovered") == 1
     assert "Other incident" in (await current(second))["markdown"]
-    from openswe.store import search_all_values
-
-    assert len(await search_all_values(documents.SUMMARIES)) == 2
+    assert len(await documents.SUMMARIES.search_all()) == 2
     assert "Raw sensitive evidence excerpt" not in latest["markdown"]
     assert "[1]: <https://slack.com/archives/C1/p1>" in latest["markdown"]
 
@@ -101,8 +99,8 @@ async def test_document_reads_distinguish_outages_from_revocation(record, info, 
     assert error.value.status_code == status
 
 
-async def test_store_outage_is_not_an_empty_summary(record, monkeypatch):
-    monkeypatch.setattr(documents, "get_value", AsyncMock(side_effect=RuntimeError("offline")))
+async def test_database_outage_is_not_an_empty_summary(record, monkeypatch):
+    monkeypatch.setattr(documents.SUMMARIES, "get", AsyncMock(side_effect=RuntimeError("offline")))
     with pytest.raises(RuntimeError, match="offline"):
         await current(record)
 

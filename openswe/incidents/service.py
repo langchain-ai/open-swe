@@ -20,24 +20,23 @@ from openswe.incidents.models import (
     IncidentPolicy,
     IncidentReportRecord,
 )
+from openswe.incidents.persistence import IncidentRepository
 from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackClient
-from openswe.store import TypedStore, now_iso
+from openswe.store import now_iso
 from openswe.ui_invalidations import Topic
 from openswe.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
-POLICIES = TypedStore(
-    ["incidents", "policies"], IncidentPolicy, invalidates=Topic.INCIDENT_SETTINGS
+POLICIES = IncidentRepository("policies", IncidentPolicy, invalidates=Topic.INCIDENT_SETTINGS)
+INCIDENTS = IncidentRepository[Incident, IncidentId](
+    "incidents", Incident, invalidates=Topic.INCIDENTS
 )
-INCIDENTS = TypedStore[Incident, IncidentId](
-    ["incidents", "incidents"], Incident, invalidates=Topic.INCIDENTS
+REPORTS = IncidentRepository[IncidentReportRecord, IncidentId](
+    "reports", IncidentReportRecord, invalidates=Topic.INCIDENTS
 )
-REPORTS = TypedStore[IncidentReportRecord, IncidentId](
-    ["incidents", "reports"], IncidentReportRecord, invalidates=Topic.INCIDENTS
-)
-COMMANDS = TypedStore(["incidents", "commands"], CommandReceipt)
+COMMANDS = IncidentRepository("commands", CommandReceipt)
 ACTIVE_STATUSES = frozenset({"watching", "needs_attention"})
 _VIEWS = {"active": ACTIVE_STATUSES, "inactive": frozenset({"paused", "completed"})}
 REQUIRED_SLACK_SCOPES = frozenset(
