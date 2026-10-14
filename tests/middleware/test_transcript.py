@@ -228,7 +228,13 @@ async def test_a_run_continued_in_another_process_keeps_its_turn(
     queued = HumanMessage(content="also this", id="human-2")
     history = [asked, replied, queued]
     middleware = mw.TranscriptMiddleware()
-    await middleware.aresume_run({"messages": history}, None)
+
+    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="file body", tool_call_id="resumed-call")
+
+    await middleware.awrap_tool_call(
+        _tool_request("resumed-call", {"messages": history}), tool_handler
+    )
 
     async def model_handler(request: ModelRequest) -> ModelResponse:
         return ModelResponse(result=[AIMessage(content="done", id="ai-2")])
@@ -237,6 +243,7 @@ async def test_a_run_continued_in_another_process_keeps_its_turn(
     await middleware.aafter_agent({"messages": history}, None)
 
     assert engine.types.count("turn.started") == 1
+    assert engine.types.count("tool.completed") == 1
     assert [c.command_id for c in engine.commands if c.command_id.startswith("human:")] == [
         "human:human-2"
     ]

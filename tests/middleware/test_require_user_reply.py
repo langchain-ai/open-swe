@@ -324,3 +324,17 @@ class TestRequireUserReplyMiddleware:
             "reply_surface": WEB_REPLY_SURFACE,
             "reply_nudges": 0,
         }
+
+    async def test_resumed_turn_initializes_a_missing_reply_surface(self) -> None:
+        middleware = _middleware()
+        state: AgentState = {"messages": [HumanMessage(content="hello"), AIMessage(content="hi")]}
+        updates = await middleware.abefore_model(state, _runtime())
+        assert updates is not None
+        state.update(updates)
+        _assert_nudged(await middleware.aafter_model(state, _runtime()), 1)
+        assert (
+            await middleware.abefore_model(
+                _state(reply_surface=WEB_REPLY_SURFACE, reply_nudges=1), _runtime()
+            )
+            is None
+        )
