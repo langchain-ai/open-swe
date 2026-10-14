@@ -271,8 +271,8 @@ async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> Managed
 
 async def _card(thread_id: str, card_id: str, login: str, gateway: str) -> ConnectCard:
     """The connect card the agent offered this person in their thread."""
-    card = await ConnectCard.load(thread_id, card_id)
-    if card is None or not card.owned_by(login, gateway):
+    card = await ConnectCard.load(thread_id, card_id, login, gateway)
+    if card is None:
         raise HTTPException(404, "Unknown connect card")
     return card
 

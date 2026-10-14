@@ -99,6 +99,22 @@ class UserRecords:
                 .on_conflict_do_nothing()
             )
 
+    async def written_at(self, login: str, key: str = "") -> datetime | None:
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(UserRecord.updated_at).where(self._where(login, key))
+            )
+
+    async def items(self, login: str) -> dict[str, JsonObject]:
+        """The person's records of this kind by key."""
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(UserRecord.key, UserRecord.value).where(
+                    UserRecord.user_id == user_id_for_login(login), UserRecord.kind == self.kind
+                )
+            )
+            return dict(rows.tuples().all())
+
     async def keys(self, login: str) -> list[str]:
         """The person's keys of this kind, oldest write first."""
         async with postgres.session() as session:
