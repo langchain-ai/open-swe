@@ -76,6 +76,7 @@ _TOOL_MODULES = {
     "slack_post_message": "openswe.slack.tools.channels",
     "slack_read_channel_messages": "openswe.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
+    "slack_read_public_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_reply": "openswe.slack.tools.reply",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
     "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
@@ -161,6 +162,7 @@ __all__ = [
     "slack_post_message",
     "slack_read_channel_messages",
     "slack_read_thread_messages",
+    "slack_read_public_thread_messages",
     "slack_reply",
     "slack_breakout_thread",
     "slack_start_review_channel",
@@ -187,7 +189,10 @@ if TYPE_CHECKING:
     from openswe.slack.tools.move_thread import slack_move_thread
     from openswe.slack.tools.no_reply_needed import slack_no_reply_needed
     from openswe.slack.tools.read_channel_messages import slack_read_channel_messages
-    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
+    from openswe.slack.tools.read_thread_messages import (
+        slack_read_public_thread_messages,
+        slack_read_thread_messages,
+    )
     from openswe.slack.tools.reply import slack_reply
     from openswe.slack.tools.request_pr_review import request_pr_review
     from openswe.slack.tools.start_new_thread import slack_breakout_thread

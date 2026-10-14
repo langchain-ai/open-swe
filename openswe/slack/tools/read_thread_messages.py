@@ -1,5 +1,4 @@
-from typing import Any
-
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     SLACK_THREAD_MAX_MESSAGES,
     fetch_slack_thread_messages,
@@ -7,10 +6,13 @@ from openswe.slack.client import (
     get_slack_user_names,
     slack_message_bot_id,
 )
+from openswe.slack.tools.read_channel_messages import PUBLIC_CHANNEL_REQUIRED
+from openswe.tools.access import Policy, access
 from openswe.tools.sandbox_preference import sandbox_only
+from openswe.utils.json_types import JsonObject
 
 
-async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str, Any]:
+async def fetch_and_format_thread(channel_id: str, message_ts: str) -> JsonObject:
     """Fetch thread messages and resolve author names."""
     messages = await fetch_slack_thread_messages(channel_id, message_ts)
     if not messages:
@@ -41,7 +43,7 @@ async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str,
 
 
 @sandbox_only
-async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
+async def slack_read_thread_messages(channel_id: str, message_ts: str) -> JsonObject:
     """Implement the `slack_read_thread_messages` tool."""
     if not channel_id or not channel_id.strip():
         return {"success": False, "error": "channel_id is required"}
@@ -57,3 +59,16 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
         }
 
     return result
+
+
+@access(Policy(trusted="private"))
+async def slack_read_public_thread_messages(channel_id: str, message_ts: str) -> JsonObject:
+    """Read a thread only after verifying its channel is public."""
+    if not channel_id or not channel_id.strip():
+        return {"success": False, "error": "channel_id is required"}
+    if not message_ts or not message_ts.strip():
+        return {"success": False, "error": "message_ts is required"}
+    channel = await SlackChannel.load(channel_id.strip())
+    if channel is None or not channel.public:
+        return {"success": False, "error": PUBLIC_CHANNEL_REQUIRED}
+    return await slack_read_thread_messages(channel.id, message_ts.strip())

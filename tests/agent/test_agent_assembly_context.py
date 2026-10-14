@@ -614,8 +614,9 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("private_thread", [True, False])
+@pytest.mark.parametrize("source", ["slack", "dashboard"])
 async def test_channel_reads_need_a_private_thread(
-    private_thread: bool, saved_thread_scope: dict[str, str]
+    private_thread: bool, source: str, saved_thread_scope: dict[str, str]
 ) -> None:
     saved_thread_scope["visibility"] = "private" if private_thread else "public"
     config = _base_config()
@@ -623,8 +624,12 @@ async def test_channel_reads_need_a_private_thread(
     assert isinstance(configurable, dict)
     configurable.update(
         {
-            "source": "slack",
-            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+            "source": source,
+            "slack_thread": (
+                {"channel_id": "C123", "thread_ts": "1700000000.000100"}
+                if source == "slack"
+                else None
+            ),
         }
     )
 
@@ -636,12 +641,13 @@ async def test_channel_reads_need_a_private_thread(
 
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert ("slack_read_channel_messages" in tool_names) is private_thread
-    # A thread-bound Slack read is unaffected either way.
-    assert "slack_read_thread_messages" in tool_names
+    assert ("slack_read_public_thread_messages" in tool_names) is private_thread
+    assert ("slack_read_thread_messages" in tool_names) is (source == "slack")
 
     gp = next(item for item in subagents if item["name"] == "general-purpose")
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     assert ("slack_read_channel_messages" in subagent_names) is private_thread
+    assert ("slack_read_public_thread_messages" in subagent_names) is private_thread
 
 
 @pytest.fixture

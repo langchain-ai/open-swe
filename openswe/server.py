@@ -249,6 +249,7 @@ from openswe.tools import (
     slack_no_reply_needed,
     slack_post_message,
     slack_read_channel_messages,
+    slack_read_public_thread_messages,
     slack_read_thread_messages,
     slack_reply,
     slack_start_review_channel,
@@ -371,7 +372,9 @@ def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
 
 # Reading a Slack channel takes an explicit channel id and nothing from the run's
 # source context, so it survives every gate the thread-bound Slack tools do not.
-SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_messages"})
+SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset(
+    {"slack_read_channel_messages", "slack_read_public_thread_messages"}
+)
 
 
 def _tool_description_values() -> dict[str, dict[str, object]]:
@@ -1828,6 +1831,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_no_reply_needed,
         slack_post_message,
         slack_read_channel_messages,
+        slack_read_public_thread_messages,
         slack_read_thread_messages,
         slack_reply,
         slack_breakout_thread,
