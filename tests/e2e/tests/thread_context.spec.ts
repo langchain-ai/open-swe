@@ -61,6 +61,12 @@ function contentText(message: StateMessage): string {
     .join("\n");
 }
 
+function contextBlocks(turn: Turn, kind: "person" | "run"): string[] {
+  return turn.run.filter((content) =>
+    content.startsWith(`<dynamic-context kind="${kind}"`),
+  );
+}
+
 // One thread, read back through the same endpoints a browser uses, turn by
 // turn. `dispatch` is what the ingress handed the run as its input; `run` is
 // what the run itself appended on top.
@@ -157,7 +163,7 @@ function renderDump(turns: Turn[]): string {
     if (turn.run.length === 0)
       parts.push(
         turn.ran
-          ? "(everyone here is already described; nothing re-sent)\n"
+          ? "(thread context is unchanged; nothing re-sent)\n"
           : "(no run started)\n",
       );
     for (const content of turn.run)
@@ -180,7 +186,10 @@ function normalize(dump: string, threadId: string): string {
   )) {
     named.set(id, `user:<${name.toLowerCase()}>`);
   }
-  let normalized = dump.split(threadId).join("<thread-id>");
+  let normalized = dump
+    .split(threadId)
+    .join("<thread-id>")
+    .replace(/[ \t]+$/gm, "");
   for (const [id, alias] of named)
     normalized = normalized.split(id).join(alias);
   const timestamps = new Map<string, string>();
@@ -251,7 +260,7 @@ test("records every message the model is handed as people come and go", async ({
       "an empty thread; Alice has a linked GitHub account and is a workspace admin",
     when: "she mentions the bot: add a greet() helper",
     outcome:
-      "dispatch introduces the channel, carrying everything that stays true of the thread, then the run adds the one block that describes her",
+      "dispatch introduces the channel, then the run describes Alice and adds Slack guidance with Single-Writer state",
     ran: true,
   });
   expect(first.dispatch.join("\n")).not.toContain(
@@ -264,14 +273,20 @@ test("records every message the model is handed as people come and go", async ({
   expect(first.dispatch[0]).toContain("topic: Demo channel topic");
   expect(first.dispatch[0]).toContain("default_repo: fakeorg/demo");
   expect(first.dispatch[0]).toContain("web_url: ");
-  expect(first.run).toHaveLength(1);
-  expect(first.run[0]).toContain("display_name: Alice");
-  expect(first.run[0]).toContain(
+  const firstPeople = contextBlocks(first, "person");
+  expect(firstPeople).toHaveLength(1);
+  expect(firstPeople[0]).toContain("display_name: Alice");
+  expect(firstPeople[0]).toContain(
     "commit_email: alice@users.noreply.github.com",
   );
-  expect(first.run[0]).toContain("open_swe_account: linked");
-  expect(first.run[0]).toContain("workspace_admin: yes");
-  expect(first.run[0]).toContain("new_prs: as drafts");
+  expect(firstPeople[0]).toContain("open_swe_account: linked");
+  expect(firstPeople[0]).toContain("workspace_admin: yes");
+  expect(firstPeople[0]).toContain("new_prs: as drafts");
+  const firstContext = contextBlocks(first, "run");
+  expect(firstContext).toHaveLength(1);
+  expect(firstContext[0]).toContain('id="source:slack"');
+  expect(firstContext[0]).toContain("Single-Writer Thread");
+  expect(first.run).toHaveLength(2);
 
   await sendSlack(page, {
     text: "<@U0BOT> also add a docstring",
@@ -284,7 +299,7 @@ test("records every message the model is handed as people come and go", async ({
     given: "turn 1 has run to completion",
     when: "Alice replies in the same Slack thread: also add a docstring",
     outcome:
-      "her envelope alone — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed",
+      "her envelope alone — the channel, Alice and the run context are unchanged, and prior messages are already in the thread",
     ran: true,
   });
   expect(second.run).toHaveLength(0);
@@ -304,13 +319,19 @@ test("records every message the model is handed as people come and go", async ({
     given: "Bob has a linked account too, but is not a workspace admin",
     when: "Bob replies: make it return bytes",
     outcome:
-      "the run adds his block; Alice's is not re-sent, and dispatch does not describe her either",
+      "the run describes Bob and refreshes Slack guidance without Single-Writer state; Alice's block is not re-sent",
     ran: true,
   });
   expect(third.dispatch).toHaveLength(1);
-  expect(third.run).toHaveLength(1);
-  expect(third.run[0]).toContain("display_name: Bob");
-  expect(third.run[0]).toContain("workspace_admin: no");
+  const thirdPeople = contextBlocks(third, "person");
+  expect(thirdPeople).toHaveLength(1);
+  expect(thirdPeople[0]).toContain("display_name: Bob");
+  expect(thirdPeople[0]).toContain("workspace_admin: no");
+  const thirdContext = contextBlocks(third, "run");
+  expect(thirdContext).toHaveLength(1);
+  expect(thirdContext[0]).toContain('id="source:slack"');
+  expect(thirdContext[0]).not.toContain("Single-Writer Thread");
+  expect(third.run).toHaveLength(2);
 
   await loginAs(page, SAME_USER);
   await page.goto(`/agents/${thread.threadId}`);
@@ -321,10 +342,15 @@ test("records every message the model is handed as people come and go", async ({
     given: "the thread has Alice and Bob",
     when: "Alice types in the dashboard: ship it",
     outcome:
-      "the same user: id on a web envelope, and nothing else — what she is does not depend on where she typed",
+      "the same user: id on a web envelope, no repeated person blocks, and fresh dashboard run guidance",
     ran: true,
   });
-  expect(fourth.run).toHaveLength(0);
+  expect(contextBlocks(fourth, "person")).toHaveLength(0);
+  const fourthContext = contextBlocks(fourth, "run");
+  expect(fourthContext).toHaveLength(1);
+  expect(fourthContext[0]).toContain('id="source:dashboard"');
+  expect(fourthContext[0]).toContain("dashboard/Web UI");
+  expect(fourth.run).toHaveLength(1);
   expect(fourth.dispatch.join("\n")).toContain('surface="web"');
 
   await loginAs(page, OTHER_USER);
@@ -343,13 +369,17 @@ test("records every message the model is handed as people come and go", async ({
     title: "Turn 5: Bob sets standing instructions, then asks for the PR",
     given: "Bob saved personal instructions between turns",
     when: "Bob replies: open the PR",
-    outcome: "only Bob's block is re-sent, now carrying his instructions",
+    outcome:
+      "Bob's block is re-sent with his instructions, and Slack run guidance is restored after the dashboard turn",
     ran: true,
   });
-  expect(fifth.run).toHaveLength(1);
-  expect(fifth.run[0]).toContain("display_name: Bob");
-  expect(fifth.run[0]).toContain("standing_instructions:");
-  expect(fifth.run[0]).toContain("Never use ripgrep.");
+  const fifthPeople = contextBlocks(fifth, "person");
+  expect(fifthPeople).toHaveLength(1);
+  expect(fifthPeople[0]).toContain("display_name: Bob");
+  expect(fifthPeople[0]).toContain("standing_instructions:");
+  expect(fifthPeople[0]).toContain("Never use ripgrep.");
+  expect(contextBlocks(fifth, "run")).toEqual(thirdContext);
+  expect(fifth.run).toHaveLength(2);
 
   // Open SWE commits and opens pull requests as the person who asked, so a
   // Slack account it cannot resolve to a GitHub one never reaches the model at
