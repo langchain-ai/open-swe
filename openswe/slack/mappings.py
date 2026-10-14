@@ -14,7 +14,7 @@ from datetime import datetime
 from uuid import UUID, uuid4, uuid7
 
 from langgraph_sdk.client import LangGraphClient
-from sqlalchemy import ColumnElement, delete, func, select
+from sqlalchemy import ColumnElement, ForeignKey, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -37,7 +37,14 @@ class SlackThreadMapping(Base):
     detach_nonce: Mapped[str | None] = mapped_column(default=None)
     copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 class SlackRunMapping(Base):
@@ -56,7 +63,14 @@ class SlackRunMapping(Base):
     started_at: Mapped[datetime | None] = mapped_column(default=None)
     copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 class SlackMessageMapping(Base):
@@ -72,7 +86,14 @@ class SlackMessageMapping(Base):
     agent_thread_id: Mapped[str | None] = mapped_column(default=None)
     copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 RUN_FIELDS = (

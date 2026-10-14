@@ -5,7 +5,8 @@ the nonce a detached one is resolved with next. ``slack_run_mapping`` holds the
 runs started for each Slack thread, the latest ``started_at`` being the thread's
 current run, and ``slack_message_mapping`` the run behind each bot message.
 ``copied_from_store`` marks a row the Store import wrote that no write has
-replaced since.
+replaced since. The bot's own bookkeeping writes these rows, so ``created_by``
+and ``updated_by`` are set only when a person's action caused the write.
 """
 
 from alembic import op
@@ -25,7 +26,10 @@ def upgrade() -> None:
             thread_id text,
             detach_nonce text,
             copied_from_store boolean NOT NULL DEFAULT false,
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL,
             CHECK (thread_id IS NOT NULL OR detach_nonce IS NOT NULL)
         )
     """)
@@ -45,7 +49,10 @@ def upgrade() -> None:
             agent_thread_id text,
             started_at timestamptz,
             copied_from_store boolean NOT NULL DEFAULT false,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("""
@@ -65,7 +72,10 @@ def upgrade() -> None:
             triggering_user_id text,
             agent_thread_id text,
             copied_from_store boolean NOT NULL DEFAULT false,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
     op.execute("""
