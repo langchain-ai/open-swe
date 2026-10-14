@@ -74,14 +74,14 @@ describe("SidebarUserMenu", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000)
     })
-    expect(screen.getByRole("status").textContent).toContain(
+    expect(screen.getAllByRole("status")[0]?.textContent).toContain(
       "Session link copied. Include it in your message to the team."
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }))
     fireEvent.click(screen.getByRole("button", { name: /octocat/i }))
     fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
-    expect(screen.getByRole("status").textContent).toBe("")
+    expect(screen.getAllByRole("status")[0]?.textContent).toBe("")
   })
 
   it("shows a failure state when clipboard access is denied", async () => {
