@@ -292,8 +292,7 @@ async def schedule_automatic_turn(record: Incident, policy: IncidentPolicy) -> b
 
 async def handle_run_completion(thread_id: str, run_id: str | None, status: str) -> dict[str, str]:
     """Follow up a finished incident run: reschedule stranded context or note a failure."""
-    records = await service.INCIDENTS.search(filter={"thread_id": thread_id})
-    record = records[0] if records else None
+    record = await service.INCIDENTS.for_thread(thread_id)
     if record is None:
         return {"status": "ignored", "reason": "unknown incident thread"}
     await Topic.INCIDENTS.invalidate(key=record.id)
