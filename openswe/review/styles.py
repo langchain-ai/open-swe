@@ -5,7 +5,7 @@ in the dashboard.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -18,15 +18,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.database.store_imports import StoreImport
 from openswe.github.repo_names import RepoFullName, normalize_repo_full_name
 from openswe.github.repositories import Repository
-from openswe.store import delete_value, search_all_entries
 from openswe.ui_invalidations import Topic
 
 logger = logging.getLogger(__name__)
-
-_STORE_NAMESPACE = ["review_styles"]
 
 # What a positive approval assessment does; a repository with no mode set is ``dry_run``.
 ApprovalMode = Literal["off", "dry_run", "approve"]
@@ -174,46 +170,6 @@ class ReviewStyles:
         if style is None:
             raise LookupError(f"review style for {full_name} vanished after it was written")
         return style
-
-    async def import_store(self) -> StoreImport:
-        """Move the Store's styles in; a repository that already has one keeps it."""
-        moved = 0
-        for entry in await search_all_entries(_STORE_NAMESPACE):
-            try:
-                style = ReviewStyle.model_validate(entry.value)
-                full_name = normalize_repo_full_name(style.full_name)
-            except ValueError:
-                logger.warning(
-                    "Dropping unreadable review style from the Store",
-                    extra={"store_key": entry.key},
-                    exc_info=True,
-                )
-            else:
-                async with postgres.session() as session:
-                    repository_id = await Repository.ensure_id(session, full_name)
-                    await session.execute(
-                        insert(ReviewStyleRow)
-                        .values(
-                            repository_id=repository_id,
-                            custom_prompt=style.custom_prompt,
-                            approval_mode=style.approval_mode,
-                            created_by=style.created_by,
-                            created_at=_parse_time(style.created_at),
-                            updated_at=_parse_time(style.updated_at),
-                        )
-                        .on_conflict_do_nothing()
-                    )
-            await delete_value(_STORE_NAMESPACE, entry.key)
-            moved += 1
-        return StoreImport(moved=moved)
-
-
-def _parse_time(value: str) -> datetime:
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return datetime.now(UTC)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 REVIEW_STYLES = ReviewStyles()

@@ -33,7 +33,7 @@ from openswe.review.eval_report import (
     REPORT_URL_ENV,
     ReviewerEvalReport,
 )
-from openswe.users.records import github_login_of, user_id_for_login
+from openswe.users.records import github_login_of
 from openswe.utils.build_info import backend_build_info
 from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.gateway import gateway_base_url
@@ -173,17 +173,15 @@ class ReviewerEvalRun(Base):
     completed_examples: Mapped[int | None] = mapped_column(default=None)
     total_examples: Mapped[int | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
-    copied_from_store: Mapped[bool] = mapped_column(default=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
     @classmethod
-    async def latest(cls, *, copied_from_store: bool = False) -> Self | None:
-        """The run started last; with ``copied_from_store``, the Store import's copy."""
-        query = select(cls).order_by(cls.created_at.desc(), cls.id.desc()).limit(1)
-        if copied_from_store:
-            query = query.where(cls.copied_from_store)
+    async def latest(cls) -> Self | None:
+        """The run started last."""
         async with postgres.session() as session:
-            return await session.scalar(query)
+            return await session.scalar(
+                select(cls).order_by(cls.created_at.desc(), cls.id.desc()).limit(1)
+            )
 
     @classmethod
     async def begin(
@@ -213,29 +211,6 @@ class ReviewerEvalRun(Base):
         if run is None:
             raise RuntimeError("the reviewer eval run was not recorded")
         return run, token
-
-    async def put_store_copy(self, replacing: UUID | None, creator_login: str | None) -> None:
-        """Save the run as the LangGraph Store import copied it, over its earlier copy if any.
-
-        ``creator_login`` is who the Store record says launched it, kept only when it
-        names a person; the copy itself is a write no person made.
-        """
-        values: dict[str, object] = {
-            column.key: getattr(self, column.key)
-            for column in ReviewerEvalRun.__table__.columns
-            if column.key not in {"id", "updated_at"}
-        }
-        values["created_by"] = user_id_for_login(creator_login) if creator_login else None
-        values["updated_by"] = None
-        async with postgres.session() as session:
-            await session.execute(
-                insert(ReviewerEvalRun)
-                .values(id=replacing or self.id, **values)
-                .on_conflict_do_update(
-                    index_elements=[ReviewerEvalRun.id],
-                    set_={**values, "updated_at": func.clock_timestamp()},
-                )
-            )
 
     async def _update(
         self, *conditions: ColumnElement[bool], updated_by: UUID | None, **values: object

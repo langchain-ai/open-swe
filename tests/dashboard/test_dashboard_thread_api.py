@@ -31,7 +31,7 @@ from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User, UserPreferences
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import FakeStore, patch_thread_module
+from tests.conftest import patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
@@ -72,9 +72,7 @@ async def test_create_session_starts_only_when_requested(monkeypatch, start: boo
         dispatch.assert_not_awaited()
 
 
-async def test_create_session_uses_saved_defaults(
-    monkeypatch, fake_store: FakeStore, registry_db
-) -> None:
+async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/oss"})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
@@ -145,7 +143,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
-    monkeypatch, fake_store: FakeStore, registry_db
+    monkeypatch, registry_db
 ) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})
@@ -174,7 +172,7 @@ async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
 
 
 async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
-    monkeypatch, fake_store: FakeStore, registry_db
+    monkeypatch, registry_db
 ) -> None:
     """A new thread's model default is the repo's workspace override, not the instance record."""
     created: dict[str, object] = {}

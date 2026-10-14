@@ -63,9 +63,7 @@ async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
     assert len(calls) == 1
 
 
-async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(
-    registry_db, fake_store, monkeypatch
-):
+async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(registry_db, monkeypatch):
     await save(allowed_tools=["search"])
     monkeypatch.setattr(
         runtime,

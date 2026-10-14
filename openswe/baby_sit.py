@@ -14,7 +14,6 @@ from sqlalchemy import Row, Select, func, literal, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
 from openswe.database import postgres
-from openswe.database.store_imports import StoreImport
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.ci import (
@@ -34,16 +33,15 @@ from openswe.human_review.requests import HumanReviewRequest
 from openswe.prompts import prompt
 from openswe.slack.client import GitHubPrRef, post_slack_thread_reply
 from openswe.source_context import SourceContext
-from openswe.store import delete_value, now_iso, search_all_entries
 from openswe.tasks.store import Task, TaskMembership
 from openswe.thread_ids import baby_sit_lock_thread_id
 from openswe.threads.creation import create_lock_thread
 from openswe.utils.json_types import JsonObject
+from openswe.utils.time import now_iso
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
-_STORE_NAMESPACE = ["baby_sit_watches"]
 _STATE_KEY = "baby_sit"
 WATCH_CRON_KIND = "baby_sit_watch"
 WATCH_SCHEDULE = "*/10 * * * *"
@@ -203,27 +201,6 @@ class BabySitWatches:
     async def delete(self, key: str) -> None:
         remaining = PullRequest.task_state.op("-")(_STATE_KEY)
         await self._update(key, {"task_state": func.nullif(remaining, literal({}, JSONB))})
-
-    async def import_store(self) -> StoreImport:
-        """Move the Store's watches in; a watch PostgreSQL already has wins."""
-        moved = 0
-        for entry in await search_all_entries(_STORE_NAMESPACE):
-            try:
-                watch = BabySitWatch.model_validate(entry.value)
-                if watch.thread_id and await self.get(watch.key) is None:
-                    await watch.join_task(title=watch.pr_url)
-                    await self.save(watch)
-            except ValueError:
-                # Unreadable, or its thread's workspace is gone: one stale watch
-                # must not keep every later one in the Store.
-                logger.warning(
-                    "Dropping a baby-sit watch the Store import cannot attach to a task",
-                    extra={"store_key": entry.key},
-                    exc_info=True,
-                )
-            await delete_value(_STORE_NAMESPACE, entry.key)
-            moved += 1
-        return StoreImport(moved=moved)
 
     @staticmethod
     def _select() -> Select[str, str, int, UUID | None, JsonObject | None, str | None]:

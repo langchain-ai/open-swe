@@ -31,10 +31,10 @@ async def record(registry_db, policy):
 
 
 @pytest.fixture
-def platform(fake_store, monkeypatch):
+def platform(monkeypatch):
     runs = SimpleNamespace(list=AsyncMock(return_value=[]), cancel_many=AsyncMock())
-    client = SimpleNamespace(runs=runs, store=fake_store)
-    monkeypatch.setattr(turns, "store_client", lambda: client)
+    client = SimpleNamespace(runs=runs)
+    monkeypatch.setattr(turns, "get_client", lambda: client)
     monkeypatch.setattr(turns, "create_durable_run", AsyncMock(return_value={"run_id": "r1"}))
     monkeypatch.setattr(turns, "queue_message_for_thread", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "post_slack_thread_reply_with_ts", AsyncMock(return_value="9.0"))

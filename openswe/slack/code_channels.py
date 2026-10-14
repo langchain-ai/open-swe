@@ -9,7 +9,6 @@ from urllib.parse import quote
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SLACK_BOT_TOKEN
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
-from openswe.slack.import_records import delete_store_view_suggestions
 from openswe.slack.records import SlackViewSuggestion
 
 logger = logging.getLogger(__name__)
@@ -314,7 +313,6 @@ async def get_block_suggestions(
 
 async def delete_block_suggestions(channel_id: str, view_id: str) -> None:
     await SlackViewSuggestion.discard(channel_id, view_id)
-    await delete_store_view_suggestions(channel_id, view_id)
 
 
 async def set_view(

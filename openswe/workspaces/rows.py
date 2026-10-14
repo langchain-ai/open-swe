@@ -99,8 +99,7 @@ def to_workspace(
 ) -> Workspace:
     """The record this row stores, with the bindings that route to it.
 
-    Validated on the way out, as every stored record was when workspaces lived
-    in the LangGraph Store: the columns are typed, but ``create_params`` and
+    Validated on the way out: the columns are typed, but ``create_params`` and
     ``refresh_steps`` hold whatever an older release wrote there.
     """
     from openswe.workspaces.store import Workspace
