@@ -15,7 +15,7 @@ the agent's own and system writes.
 from alembic import op
 
 revision = "0d10512c3176"
-down_revision = "47544c5c96d8"
+down_revision = "1cdf9e884dad"
 branch_labels = None
 depends_on = None
 
