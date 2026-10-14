@@ -66,17 +66,26 @@ async def note_for_concierge(slack_user_id: str, dm_channel_id: str, note: str) 
 
 async def open_dm(slack_user_id: str) -> str | None:
     try:
+        return await _open_dm_channel(slack_user_id)
+    except SlackRequestError as exc:
+        logger.warning(
+            "Slack DM could not be opened",
+            extra={"slack_user": slack_user_id, "slack_error": exc.code},
+        )
+        return None
+
+
+async def _open_dm_channel(slack_user_id: str) -> str:
+    try:
         async with SlackClient.bot() as client:
             response = await client.conversations_open(users=slack_user_id)
     except SLACK_REQUEST_ERRORS as exc:
-        logger.warning(
-            "Slack DM could not be opened",
-            extra={"slack_user": slack_user_id, "slack_error": slack_error(exc)},
-        )
-        return None
+        raise SlackRequestError(slack_error(exc)) from exc
     channel = response.get("channel")
     channel_id = channel.get("id") if isinstance(channel, dict) else None
-    return channel_id if isinstance(channel_id, str) and channel_id else None
+    if not isinstance(channel_id, str) or not channel_id:
+        raise SlackRequestError("missing_channel")
+    return channel_id
 
 
 class DmOrigin(BaseModel):
@@ -147,21 +156,30 @@ async def send_dm_with_location(
     """DM a person as the bot; in concierge mode the message joins their one DM conversation.
 
     With ``origin``, a reply to the DM can find the thread it was sent for, and that thread's
-    agent learns it was sent without starting a run.
+    agent learns it was sent without starting a run. ``None`` when Slack refused the DM.
     """
-    channel_id = await open_dm(slack_user_id)
-    if channel_id is None:
-        return None
     try:
-        message_ts = await post_slack_top_level_message_with_ts(
-            channel_id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
-        )
+        return await post_dm(slack_user_id, text, blocks=blocks, origin=origin)
     except SlackRequestError as exc:
         logger.warning(
-            "Slack DM could not be posted",
+            "Slack DM could not be sent",
             extra={"slack_user": slack_user_id, "slack_error": exc.code},
         )
         return None
+
+
+async def post_dm(
+    slack_user_id: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    origin: DmOrigin | None = None,
+) -> tuple[str, str]:
+    """:func:`send_dm_with_location`, raising ``SlackRequestError`` with Slack's reason."""
+    channel_id = await _open_dm_channel(slack_user_id)
+    message_ts = await post_slack_top_level_message_with_ts(
+        channel_id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
+    )
     if origin is not None:
         await origin.save_for(channel_id, message_ts)
         await note_for_thread_owner(
