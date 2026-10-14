@@ -1,11 +1,21 @@
+import json
+import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.fernet import Fernet
+from fastmcp.server.auth.oauth_proxy.models import (
+    ClientCode,
+    OAuthTransaction,
+    ProxyDCRClient,
+    UpstreamTokenSet,
+)
 from fastmcp.server.auth.providers.github import GitHubProvider
+from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.adapters.pydantic.base import BasePydanticAdapter
 from key_value.aio.stores.base import ManagedEntry
+from pydantic import AnyUrl, BaseModel
 from sqlalchemy import select, update
 
 from openswe.database import postgres, store_imports
@@ -91,8 +101,6 @@ async def test_entries_read_as_absent_once_expired_and_later_writes_sweep_them(
     await sealed_store.put("lapsing", {"token": "secret"}, collection=_COLLECTION, ttl=60)
     assert await _token("lapsing") == "secret"
     async with postgres.session() as session:
-        sealed = (await session.execute(select(MCPOAuthUpstreamTokenRow.sealed_entry))).scalar_one()
-        assert "secret" not in sealed
         await session.execute(
             update(MCPOAuthUpstreamTokenRow).values(
                 expires_at=datetime.now(UTC) - timedelta(seconds=1)
@@ -103,6 +111,84 @@ async def test_entries_read_as_absent_once_expired_and_later_writes_sweep_them(
     await sealed_store.put("other", {"token": "other"}, collection=_COLLECTION)
     async with postgres.session() as session:
         assert list(await session.scalars(select(MCPOAuthUpstreamTokenRow.key))) == ["other"]
+
+
+async def _saved_document[ModelT: BaseModel](
+    collection: str, key: str, model: ModelT
+) -> tuple[ModelT | None, str]:
+    """``model`` saved and read back through the proxy's adapter, and its row's ``entry`` as text."""
+    adapter = PydanticAdapter[ModelT](
+        key_value=SealedStore(), pydantic_model=type(model), default_collection=collection
+    )
+    await adapter.put(key, model, ttl=600)
+    table = TABLES[collection]
+    async with postgres.session() as session:
+        entry = (await session.execute(select(table.entry))).scalar_one()
+    return await adapter.get(key), json.dumps(entry)
+
+
+async def test_entries_keep_readable_metadata_and_no_plaintext_secret(store: FakeStore) -> None:
+    now = datetime.now(UTC).timestamp()
+    tokens = UpstreamTokenSet(
+        upstream_token_id="upstream-1",
+        access_token="gho_access_secret",
+        refresh_token="ghr_refresh_secret",
+        refresh_token_expires_at=None,
+        expires_at=now + 3600,
+        token_type="Bearer",
+        scope="repo",
+        client_id="client-1",
+        created_at=now,
+        raw_token_data={"access_token": "gho_access_secret", "id_token": "id_token_secret"},
+    )
+    code = ClientCode(
+        code="authorization_code_secret",
+        client_id="client-1",
+        redirect_uri="http://localhost:3000/callback",
+        code_challenge="challenge",
+        code_challenge_method="S256",
+        scopes=["repo"],
+        idp_tokens={"access_token": "gho_idp_secret"},
+        expires_at=now + 300,
+        created_at=now,
+    )
+    transaction = OAuthTransaction(
+        txn_id="txn-1",
+        client_id="client-1",
+        client_redirect_uri="http://localhost:3000/callback",
+        client_state="client_state_secret",
+        code_challenge="challenge",
+        code_challenge_method="S256",
+        scopes=["repo"],
+        created_at=now,
+        proxy_code_verifier="code_verifier_secret",
+        csrf_token="csrf_secret",
+        consent_token="consent_secret",
+    )
+    client = ProxyDCRClient(
+        client_id="client-1",
+        client_secret="client_secret_value",
+        redirect_uris=[AnyUrl("http://localhost:3000/callback")],
+    )
+
+    read, entry = await _saved_document("mcp-upstream-tokens", "upstream-1", tokens)
+    assert read == tokens
+    assert "upstream-1" in entry
+    assert not {"gho_access_secret", "ghr_refresh_secret", "id_token_secret"} & _words(entry)
+    read, entry = await _saved_document("mcp-authorization-codes", code.code, code)
+    assert read == code
+    assert not {"authorization_code_secret", "gho_idp_secret"} & _words(entry)
+    read, entry = await _saved_document("mcp-oauth-transactions", "txn-1", transaction)
+    assert read == transaction
+    secrets = {"client_state_secret", "code_verifier_secret", "csrf_secret", "consent_secret"}
+    assert not secrets & _words(entry)
+    read, entry = await _saved_document("mcp-oauth-proxy-clients", "client-1", client)
+    assert read == client
+    assert "client_secret_value" not in _words(entry)
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[\w-]+", text))
 
 
 async def test_store_import_copies_live_entries_then_retires_the_store_records(

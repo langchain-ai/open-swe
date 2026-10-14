@@ -58,7 +58,7 @@ async def import_store_mcp_oauth_entries() -> StoreImport:
 async def _import(store: SealedStore, collection: str, key: str, value: JsonObject) -> StoreImport:
     """Copy a Store entry saved after PostgreSQL's, and delete it once the copy has settled."""
     sealed = value.get("sealed")
-    if not isinstance(sealed, str) or (entry := store.open(sealed)) is None:
+    if not isinstance(sealed, str) or (entry := store.open_store_record(sealed)) is None:
         # A key missing on this replica also leaves entries unreadable, so none is deleted.
         logger.warning(
             "Leaving an unreadable MCP OAuth entry in the Store",
@@ -69,7 +69,7 @@ async def _import(store: SealedStore, collection: str, key: str, value: JsonObje
         return StoreImport()
     written_at = await store.written_at(collection, key)
     if written_at is None or (entry.created_at is not None and entry.created_at > written_at):
-        await store.put_sealed(collection, key, sealed, entry.expires_at, store_copy=True)
+        await store.save(collection, key, entry, store_copy=True)
         return StoreImport(moved=1)
     if not may_delete_store_copy(written_at):
         return StoreImport(waiting=1)

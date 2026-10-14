@@ -2,12 +2,13 @@
 
 One table per collection FastMCP's OAuth proxy keeps (client registrations,
 transactions, authorization codes, upstream tokens, refresh token metadata,
-JTI mappings, consent CSRF tokens), each entry sealed with
-``TOKEN_ENCRYPTION_KEY``. The proxy keys them by its own ids and no person is
-behind its writes, so ``created_by`` and ``updated_by`` stay NULL.
-``expires_at`` is copied out of the sealed entry so reads and the sweep of
-expired rows need not decrypt; ``copied_from_store`` marks rows the Store
-import wrote and any other write clears.
+JTI mappings, consent CSRF tokens). ``entry`` is the whole key-value entry as
+a document, its secret fields each sealed with ``TOKEN_ENCRYPTION_KEY``;
+``key`` is generated from it. ``expires_at`` repeats the entry's expiry as a
+plain column, since casting text to ``timestamptz`` is not immutable enough
+for a generated one. The proxy's writes have no person behind them, so
+``created_by`` and ``updated_by`` stay NULL; ``copied_from_store`` marks rows
+the Store import wrote and any other write clears.
 """
 
 from alembic import op
@@ -33,8 +34,8 @@ def upgrade() -> None:
         op.execute(f"""
             CREATE TABLE {table} (
                 id uuid PRIMARY KEY,
-                key text NOT NULL,
-                sealed_entry text NOT NULL,
+                entry jsonb NOT NULL,
+                key text NOT NULL GENERATED ALWAYS AS (entry->>'key') STORED,
                 expires_at timestamptz,
                 copied_from_store boolean NOT NULL DEFAULT false,
                 created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
