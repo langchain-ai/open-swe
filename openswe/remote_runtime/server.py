@@ -74,12 +74,30 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Remote runtime hook failed", extra={"hook": hook, "thread_id": run.thread_id}
         )
-        raise
+        await JSONResponse(
+            {"detail": f"The {hook} hook failed: {_failure_classes(exc)}"}, status_code=500
+        )(scope, receive, send)
+        return
     await JSONResponse(result)(scope, receive, send)
+
+
+def _failure_classes(exc: BaseException) -> str:
+    """The exception's class and its causes', e.g. ``RuntimeError <- ReadTimeout``.
+
+    Class names only: a message can carry a URL or credential the MDA run must not see.
+    """
+    names: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        names.append(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    return " <- ".join(names)
 
 
 async def _refuse(scope: Scope, receive: Receive, send: Send, detail: str, challenge: str) -> None:

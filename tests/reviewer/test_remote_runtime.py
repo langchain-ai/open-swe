@@ -1,9 +1,14 @@
+import json
 import time
+from collections.abc import Mapping
 
+import httpx2
 import jwt
 import pytest
+from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
+from openswe.remote_runtime import server
 from openswe.remote_runtime.server import RunTokenMiddleware
 from openswe.remote_runtime.tokens import (
     RemoteRun,
@@ -124,6 +129,40 @@ async def test_tool_server_refuses_calls_without_a_valid_run_token() -> None:
 
 async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
+
+
+async def test_failed_hook_names_its_failure_without_its_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def prepare(run: RemoteRun, hook: str, body: Mapping[str, JsonValue]) -> JsonValue:
+        try:
+            raise httpx2.ReadTimeout("")
+        except httpx2.ReadTimeout as exc:
+            raise RuntimeError("token ghs_secret leaked in a message") from exc
+
+    monkeypatch.setattr(server, "_graphs", lambda: {RUN.assistant_id: prepare})
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/remote-runtime/hooks/prepare",
+        "headers": [],
+        "path_params": {"hook": "prepare"},
+        "state": {"remote_run": RUN},
+    }
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b""}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await server.hook_endpoint(scope, receive, send)
+
+    assert sent[0]["status"] == 500
+    assert json.loads(sent[1]["body"]) == {
+        "detail": "The prepare hook failed: RuntimeError <- ReadTimeout"
+    }
 
 
 class _LocalThreads:

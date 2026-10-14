@@ -62,6 +62,12 @@ def classify_exception(exc: BaseException) -> str | None:
     return code_for_error_type(type(exc).__name__)
 
 
+def describe_exception(exc: BaseException) -> str:
+    """``Class: message``, or just the class when the message is blank (e.g. ``ReadTimeout``)."""
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 def error_tracking_fields(exc: BaseException) -> dict[str, Any]:
     """Datadog's standard ``error`` attributes for a log record.
 
@@ -98,7 +104,7 @@ def exception_fields(exc: BaseException) -> dict[str, Any]:
             fields["body"] = _bounded(body)
         cause = exc.__cause__ or exc.__context__
         if cause is not None:
-            fields["cause"] = f"{type(cause).__name__}: {cause}"
+            fields["cause"] = describe_exception(cause)
         return fields
     except Exception:  # noqa: BLE001
         return {"error_type": type(exc).__name__, "error_message": repr(exc)}
