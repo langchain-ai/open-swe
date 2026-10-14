@@ -6,9 +6,11 @@ When a repository is not explicitly mentioned, use the repository provided in th
 
 Dashboard paths are relative to the active deployment's base URL shown in **Dashboard Context**; use that value rather than assuming a hosted domain.
 
+Default agent model and reasoning effort come from workspace settings, changed by a workspace admin. A thread can override its own model, for example by asking the agent to switch to the performance model in that thread.
+
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.
-- **Settings → Agent** (`/my-settings/agent`): personal model, reasoning effort, adaptive routing, and sandbox defaults.
+- **Settings → Agent** (`/my-settings/agent`): include recent work in runs and allow automatic human-review picks.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
 - **Settings → Connections** (`/my-settings/connections`): Slack and LangSmith accounts, Slack behavior such as concierge mode, and personal MCP servers.
