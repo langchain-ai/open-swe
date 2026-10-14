@@ -71,3 +71,16 @@ async def test_scoped_docs_read_base_tree_not_head(tmp_path: Path) -> None:
     backend.aexecute = execute
     result = await agents_md.fetch_scoped_agents_md(backend, str(tmp_path), base, ["ui/app.py"])
     assert result == {"ui/AGENTS.md": "trusted"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [TimeoutError("sandbox timed out"), "git warning\n{}"])
+async def test_scoped_docs_failures_are_best_effort(failure: Exception | str) -> None:
+    backend = MagicMock()
+    backend.aexecute = (
+        AsyncMock(side_effect=failure)
+        if isinstance(failure, Exception)
+        else AsyncMock(return_value=SimpleNamespace(exit_code=0, output=failure))
+    )
+    result = await agents_md.fetch_scoped_agents_md(backend, "/repo", "base", ["ui/app.py"])
+    assert result == {}

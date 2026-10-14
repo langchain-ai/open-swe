@@ -121,7 +121,7 @@ async def fetch_agents_md(
 _READ_SCOPED_DOCS = """
 import json, subprocess, sys
 ref, paths, limit = json.loads(sys.argv[1])
-tree = subprocess.check_output(["git", "ls-tree", "-rz", ref])
+tree = subprocess.check_output(["git", "ls-tree", "-rz", ref], stderr=subprocess.PIPE)
 blobs = {}
 for entry in tree.split(b"\\0"):
     if not entry:
@@ -134,7 +134,7 @@ result = {}
 for path in paths:
     if path not in blobs:
         continue
-    content = subprocess.check_output(["git", "cat-file", "blob", blobs[path]])
+    content = subprocess.check_output(["git", "cat-file", "blob", blobs[path]], stderr=subprocess.PIPE)
     result[path] = content.decode("utf-8") if len(content) <= limit else None
 print(json.dumps(result))
 """
@@ -158,13 +158,22 @@ async def fetch_scoped_agents_md(
         f"cd {shlex.quote(repo_dir)} && "
         f"python3 -c {shlex.quote(_READ_SCOPED_DOCS)} {shlex.quote(args)}"
     )
-    response = await sandbox_backend.aexecute(command)
-    if response.exit_code != 0:
-        logger.warning(
-            "Failed to read scoped agent docs", extra={"ref": ref, "output": response.output}
-        )
+    try:
+        response = await sandbox_backend.aexecute(command)
+        if response.exit_code != 0:
+            logger.warning(
+                "Failed to read scoped agent docs", extra={"ref": ref, "output": response.output}
+            )
+            return {}
+        files = json.loads(response.output)
+        if not isinstance(files, dict) or not all(
+            isinstance(path, str) and (content is None or isinstance(content, str))
+            for path, content in files.items()
+        ):
+            raise ValueError("Scoped agent docs output must map paths to text or null")
+    except Exception:
+        logger.exception("Failed to load scoped agent docs", extra={"ref": ref})
         return {}
-    files = json.loads(response.output)
     result: dict[str, str] = {}
     for directory in directories:
         for name in _AGENT_DOC_FILENAMES:
