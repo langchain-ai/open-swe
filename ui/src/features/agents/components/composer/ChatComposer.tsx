@@ -45,7 +45,12 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import type { ModelOption, Skill, WorkspaceOption } from "@/lib/api"
+import type {
+  FollowUpBehavior,
+  ModelOption,
+  Skill,
+  WorkspaceOption,
+} from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
@@ -90,6 +95,12 @@ const SLASH_COMMANDS: Array<SlashCommandSpec> = [
   },
 ]
 
+/** How a submission should be treated: as the configured default, or the opposite. */
+export interface SubmitOptions {
+  /** Set by ⌘↵ / Ctrl+Enter: do the opposite of the configured follow-up behavior. */
+  alternate: boolean
+}
+
 /** Text and attachments handed back to the composer, e.g. a cancelled queued message. */
 export interface RestoredDraft {
   /** Changes on every restore so the same content can come back twice. */
@@ -110,12 +121,18 @@ export interface ChatComposerProps {
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
   onStop?: () => void | Promise<void>
-  onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
+  onSubmit?: (
+    value: string,
+    images: Array<ImageChunk>,
+    options?: SubmitOptions
+  ) => void | Promise<void>
   /**
    * Enter on an empty composer while a run is live. The thread view uses it to
    * send the next queued message now.
    */
   onEmptySubmit?: () => void
+  /** What a message sent while a run is live does; drives copy only. */
+  followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
   droppedFiles?: { key: number; files: Array<File> } | null
@@ -256,6 +273,7 @@ export const ChatComposer = memo(function ChatComposer({
   onStop,
   onSubmit,
   onEmptySubmit,
+  followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
   models = [],
@@ -425,38 +443,41 @@ export const ChatComposer = memo(function ChatComposer({
     editorRef.current?.focusAtEnd()
   }, [applyPrompt, restoreDraft, value])
 
-  const handleSubmit = useCallback(async () => {
-    if (submittingRef.current || disabled) return
-    // The editor is the source of truth for what is on screen; a keystroke that
-    // has not yet round-tripped through state would otherwise be dropped.
-    const snapshot = editorRef.current?.readSnapshot()
-    const trimmed = (snapshot?.value ?? value).trim()
-    if (trimmed.length === 0 && pendingImages.length === 0) return
+  const handleSubmit = useCallback(
+    async (options?: SubmitOptions) => {
+      if (submittingRef.current || disabled) return
+      // The editor is the source of truth for what is on screen; a keystroke that
+      // has not yet round-tripped through state would otherwise be dropped.
+      const snapshot = editorRef.current?.readSnapshot()
+      const trimmed = (snapshot?.value ?? value).trim()
+      if (trimmed.length === 0 && pendingImages.length === 0) return
 
-    if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
-      setComposerError(
-        pendingImages.length
-          ? "Offloading does not accept attachments."
-          : "Offloading requires an idle, existing conversation."
-      )
-      return
-    }
+      if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
+        setComposerError(
+          pendingImages.length
+            ? "Offloading does not accept attachments."
+            : "Offloading requires an idle, existing conversation."
+        )
+        return
+      }
 
-    const images = pendingImages
-    submittingRef.current = true
-    setIsSubmitting(true)
-    applyPrompt("", 0)
-    setPendingImages([])
-    setComposerError(null)
-    try {
-      await onSubmit?.(trimmed, images)
-    } catch {
-      // Caller surfaces send errors (e.g. via react-query mutation state).
-    } finally {
-      submittingRef.current = false
-      setIsSubmitting(false)
-    }
-  }, [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload])
+      const images = pendingImages
+      submittingRef.current = true
+      setIsSubmitting(true)
+      applyPrompt("", 0)
+      setPendingImages([])
+      setComposerError(null)
+      try {
+        await onSubmit?.(trimmed, images, options)
+      } catch {
+        // Caller surfaces send errors (e.g. via react-query mutation state).
+      } finally {
+        submittingRef.current = false
+        setIsSubmitting(false)
+      }
+    },
+    [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload]
+  )
 
   const selectCommandItem = useCallback(
     (item: ComposerCommandItem) => {
@@ -535,7 +556,7 @@ export const ChatComposer = memo(function ChatComposer({
 
       if (key === "Enter" && !event.shiftKey) {
         if (canSubmit) {
-          void handleSubmit()
+          void handleSubmit({ alternate: event.metaKey || event.ctrlKey })
         } else if (
           composerEmpty &&
           busy &&
@@ -853,7 +874,11 @@ export const ChatComposer = memo(function ChatComposer({
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
           placeholder={
-            busy ? "Send a message to steer the run..." : placeholder
+            busy
+              ? followUpBehavior === "steer"
+                ? "Send a message to steer the run..."
+                : "Send a message to queue next..."
+              : placeholder
           }
           skillNames={skillNames}
           value={value}
@@ -914,7 +939,9 @@ export const ChatComposer = memo(function ChatComposer({
             activeRun={activeRun}
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
-            runningLabel="Steer agent"
+            runningLabel={
+              followUpBehavior === "steer" ? "Steer agent" : "Queue message"
+            }
             onStop={onStop}
             stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}

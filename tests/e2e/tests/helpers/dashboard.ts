@@ -30,6 +30,16 @@ export async function loginAs(
   expect(res.ok()).toBeTruthy();
 }
 
+export async function optIntoQueue(page: Page) {
+  const saved = await page.request.get("/dashboard/api/me/preferences");
+  expect(saved.ok()).toBeTruthy();
+  const res = await page.request.put("/dashboard/api/me/preferences", {
+    data: { ...(await saved.json()), follow_up_behavior: "queue" },
+    headers: SAME_ORIGIN_HEADERS,
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
 // The composer is a rich-text editor, not a <textarea>: it carries the prompt
 // as `aria-placeholder` plus a visible overlay, so `getByPlaceholder` (which
 // only matches the `placeholder` attribute) can't see it. Assert on both hooks

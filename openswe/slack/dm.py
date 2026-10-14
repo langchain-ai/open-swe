@@ -11,21 +11,20 @@ owner enabled ever reaches a run with it.
 import logging
 from typing import Any, Self
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from openswe.prompts import prompt
 from openswe.slack.client import get_slack_permalink, post_slack_top_level_message_with_ts
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
-from openswe.slack.mappings import lookup_slack_thread_id
 from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.records import SlackMessage, lookup_slack_thread_id
 from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
-from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
+from openswe.utils.thread_ops import queue_message_for_thread
 
 logger = logging.getLogger(__name__)
 
 CONCIERGE_TS = "0"
-_DM_ORIGIN_NAMESPACE = "slack_dm_origin"
 
 
 def is_dm_channel(channel_context: SlackChannelContext | None) -> bool:
@@ -98,8 +97,8 @@ class DmOrigin(BaseModel):
 
     async def save_for(self, dm_channel_id: str, message_ts: str) -> None:
         try:
-            await langgraph_client().store.put_item(
-                (_DM_ORIGIN_NAMESPACE, dm_channel_id), message_ts, self.model_dump()
+            await SlackMessage.save_origin(
+                dm_channel_id, message_ts, self.channel_id, self.thread_ts, self.subject
             )
         except Exception:
             logger.warning(
@@ -111,20 +110,14 @@ class DmOrigin(BaseModel):
     @classmethod
     async def of(cls, dm_channel_id: str, message_ts: str) -> Self | None:
         """The thread a bot DM was sent on behalf of; ``None`` for any other message."""
-        item = await langgraph_client().store.get_item(
-            (_DM_ORIGIN_NAMESPACE, dm_channel_id), message_ts
+        message = await SlackMessage.origin(dm_channel_id, message_ts)
+        if message is None or message.origin_channel_id is None:
+            return None
+        return cls(
+            channel_id=message.origin_channel_id,
+            thread_ts=message.origin_thread_ts or "",
+            subject=message.origin_subject or "",
         )
-        if item is None:
-            return None
-        try:
-            return cls.model_validate(item["value"])
-        except ValidationError:
-            logger.warning(
-                "Ignoring an unreadable DM origin",
-                extra={"slack_channel": dm_channel_id, "slack_message_ts": message_ts},
-                exc_info=True,
-            )
-            return None
 
 
 async def _record_in_concierge_thread(

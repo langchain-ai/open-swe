@@ -46,7 +46,7 @@ def _record_completed() -> None:
 def get_completed_count() -> int:
     """Number of examples that have finished so far in this process.
 
-    Read by ``store_reporter`` to publish progress to the dashboard.
+    Read by ``status_reporter`` to publish progress to the dashboard.
     """
     with _COMPLETED_LOCK:
         return _COMPLETED

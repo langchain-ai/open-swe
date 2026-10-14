@@ -37,7 +37,7 @@ from openswe.slack.code_channels import (
     set_session_status,
 )
 from openswe.slack.http import SlackRequestError
-from openswe.slack.mappings import bind_slack_thread_id
+from openswe.slack.records import bind_slack_thread_id
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url

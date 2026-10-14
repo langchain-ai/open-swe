@@ -210,7 +210,7 @@ async def load_incident_session(config: Mapping[str, Any]) -> IncidentSession:
     thread_id = cfg.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         raise PermissionError("Incident runs require a thread")
-    if cfg.get("github_login") or cfg.get("user_email") or cfg.get("local_run"):
+    if cfg.get("github_login") or cfg.get("user_email"):
         raise PermissionError("Incident runs cannot carry personal execution identity")
     thread = await langgraph_sdk.get_client().threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None

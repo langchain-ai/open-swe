@@ -3,7 +3,7 @@
 import logging
 
 from openswe.run_config import RunConfig
-from openswe.slack.mappings import lookup_slack_thread_id
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.utils.thread_ops import queue_message_for_thread
 
 logger = logging.getLogger(__name__)

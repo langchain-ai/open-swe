@@ -6,6 +6,8 @@ import {
   dismissOnboardingIfShown,
   expectTranscriptVisible,
   loginAs,
+  openRunningThreadViaSlackLink,
+  optIntoQueue,
   openThreadViaSlackLink,
   threadIdFromUrl,
   threadState,
@@ -298,6 +300,46 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ]);
   });
 
+  test("keeps follow-ups visible across the queued-to-transcript handoff", async ({
+    page,
+  }, testInfo) => {
+    await loginAs(page, SAME_USER);
+    await optIntoQueue(page);
+    await openRunningThreadViaSlackLink(page);
+    const threadId = threadIdFromUrl(page);
+
+    const queuedText = "Please queue this follow-up while you finish the PR.";
+    const busyComposer = composerFor(page, /Send a message to queue next/);
+    await expect(async () => {
+      await page.reload();
+      await expect(busyComposer.prompt).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60000 });
+    await typeIntoComposer(page, queuedText);
+
+    const queuedMessage = page
+      .getByTestId("queued-message")
+      .filter({ hasText: queuedText });
+    await expect(queuedMessage).toBeVisible();
+    await page.reload();
+    await expect(queuedMessage).toBeVisible();
+    const screenshotPath = testInfo.outputPath("queued-messages-dashboard.png");
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach("queued-messages-dashboard", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+
+    const serverRefresh = await page.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return (
+        response.request().method() === "GET" &&
+        path === `/dashboard/api/threads/${threadId}`
+      );
+    });
+    expect(serverRefresh.ok()).toBeTruthy();
+    await expect(page.getByText(queuedText).first()).toBeVisible();
+  });
+
   // The dashboard proxy rewrites a run's input into the structured envelope. If
   // that rewrite drops the client-minted message id, the SDK's optimistic copy
   // never reconciles with the server's echo and the same text renders twice —
@@ -532,6 +574,98 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     );
     expect.soft(observations.messageDisappeared).toBe(false);
     expect.soft(observations.newChatReturned).toBe(false);
+  });
+
+  // Stopping a run must not strand what the user queued behind it: the queue
+  // goes back into the composer, where the user decides what to do with it.
+  test("returns a queued follow-up to the composer when the user stops the active run", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await optIntoQueue(page);
+    await openRunningThreadViaSlackLink(page);
+
+    const queuedText = "Please pick this up once the current run stops.";
+    const busyComposer = composerFor(page, /Send a message to queue next/);
+    await expect(async () => {
+      await page.reload();
+      await expect(busyComposer.prompt).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60000 });
+    await typeIntoComposer(page, queuedText);
+    await expect(
+      page
+        .getByTestId("queued-message")
+        .filter({ hasText: queuedText })
+        .and(page.locator("[data-queued-pending='false']")),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Stop run" }).click();
+
+    await expect(page.getByTestId("queued-message")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("composer-editor")).toContainText(
+      queuedText,
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toHaveCount(0);
+  });
+
+  test("restores a queued follow-up after stopping a browser-started run and answers when resent", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+    await optIntoQueue(page);
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
+
+    // Long enough a hold that queueing and stopping both land mid-run.
+    await typeIntoComposer(
+      page,
+      "E2E_BUSY_HOLD:15 please add a greet() helper and open a PR",
+    );
+    await expect(page).toHaveURL(/\/agents\/[0-9a-f-]{36}$/, {
+      timeout: 30_000,
+    });
+
+    const queuedText = "Please pick this up once the current run stops.";
+    // The run is past its Slack acknowledgement and inside the hold.
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+    await typeIntoComposer(page, queuedText);
+    await expect(
+      page
+        .getByTestId("queued-message")
+        .filter({ hasText: queuedText })
+        .and(page.locator("[data-queued-pending='false']")),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Stop run" }).click();
+
+    await expect(page.getByTestId("queued-message")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("composer-editor")).toContainText(
+      queuedText,
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toHaveCount(0);
+
+    await page
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
+
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByText(/anything else you'd like changed/),
+    ).toBeVisible({ timeout: 30_000 });
   });
 
   test("stops a Slack-started run from the web app", async ({ page }) => {

@@ -6,7 +6,6 @@ import {
 } from "@tanstack/react-query"
 import { useState } from "react"
 import { Button } from "@langchain/macaw-components/Button"
-import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
 import { Switch } from "@langchain/macaw-components/Switch"
 
@@ -22,7 +21,11 @@ import { agentsApi } from "@/features/agents/lib/api"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { api } from "@/lib/api"
-import type { ThreadVisibility, UserPreferences } from "@/lib/api"
+import type {
+  FollowUpBehavior,
+  ThreadVisibility,
+  UserPreferences,
+} from "@/lib/api"
 import { useTheme } from "@/lib/theme"
 import { ConfirmDialog } from "./ConfirmDialog"
 
@@ -35,6 +38,11 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
   { value: "private", label: "Private · only me" },
   { value: "public", label: "Workspace" },
+]
+
+const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
+  { value: "queue", label: "Queue" },
+  { value: "steer", label: "Steer" },
 ]
 
 // Select values are non-empty strings, so "no default" needs a sentinel that
@@ -179,6 +187,22 @@ export function GeneralSettings() {
           }
         />
         <SettingsRow
+          label="Follow-up behavior"
+          description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
+          control={
+            <Select
+              aria-label="Follow-up behavior"
+              options={FOLLOW_UP_BEHAVIORS}
+              value={preferences.data?.follow_up_behavior ?? "steer"}
+              onChange={(v) =>
+                v && savePreferences.mutate({ follow_up_behavior: v })
+              }
+              disabled={preferences.isLoading}
+              triggerClassName="w-40"
+            />
+          }
+        />
+        <SettingsRow
           label="Collapse subagent threads"
           description="Keep nested subagent threads folded in the sidebar until you expand them."
           control={
@@ -212,30 +236,6 @@ export function GeneralSettings() {
         />
       </SettingsSection>
 
-      {typeof window !== "undefined" && window.openSweDesktop && (
-        <SettingsSection title="Desktop App">
-          <SettingsRow
-            label="Local tracing project"
-            description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
-            control={
-              <LocalTracingProjectInput
-                // Remount once preferences load so the field shows the saved value.
-                key={`${preferences.isSuccess}`}
-                saved={preferences.data?.local_tracing_project ?? ""}
-                placeholder={
-                  preferences.data?.default_local_tracing_project ??
-                  "Shared cloud project"
-                }
-                disabled={preferences.isLoading}
-                onSave={(value) =>
-                  savePreferences.mutate({ local_tracing_project: value })
-                }
-              />
-            }
-          />
-        </SettingsSection>
-      )}
-
       <SettingsSection title="Data">
         <SettingsRow
           label="Archive all threads"
@@ -268,31 +268,5 @@ export function GeneralSettings() {
         onConfirm={() => archiveThreads.mutate()}
       />
     </>
-  )
-}
-
-function LocalTracingProjectInput({
-  saved,
-  placeholder,
-  disabled,
-  onSave,
-}: {
-  saved: string
-  placeholder: string
-  disabled: boolean
-  onSave: (value: string | null) => void
-}) {
-  const [draft, setDraft] = useState(saved)
-  return (
-    <Input
-      aria-label="Local tracing project"
-      size="md"
-      className="w-56"
-      placeholder={placeholder}
-      value={draft}
-      onChange={setDraft}
-      disabled={disabled}
-      onBlur={() => onSave(draft.trim() || null)}
-    />
   )
 }

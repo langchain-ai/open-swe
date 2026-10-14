@@ -16,7 +16,7 @@ from openswe.slack.client import (
     with_slack_session_cost,
 )
 from openswe.slack.http import SlackRequestError
-from openswe.slack.mappings import lookup_slack_run_message_mapping
+from openswe.slack.records import lookup_slack_run_message_mapping
 from openswe.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from openswe.utils.thread_ops import langgraph_client
 

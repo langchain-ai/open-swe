@@ -60,9 +60,7 @@ export function useSidebarPullRequests(
 
   // Cache-only subscriptions: `enabled: false` issues no request but still
   // re-renders when the thread view's own status query writes a result.
-  const cloudIds = items
-    .filter((item) => item.location === "cloud" && item.prRef)
-    .map((item) => item.id)
+  const cloudIds = items.filter((item) => item.prRef).map((item) => item.id)
   const perThread = useQueries({
     queries: cloudIds.map((threadId) => ({
       queryKey: agentThreadKeys.pullRequestStatus(threadId),

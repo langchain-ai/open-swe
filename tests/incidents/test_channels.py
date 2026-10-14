@@ -25,10 +25,8 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def configured(fake_store, monkeypatch):
-    await service.POLICIES.put(
-        "default", IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
-    )
+async def configured(registry_db, monkeypatch):
+    await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1"))
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(channels.User, "login_for_slack", AsyncMock(return_value="sre"))
@@ -202,7 +200,6 @@ async def test_resume_reschedules_when_context_is_waiting(enrolled):
 
 async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
     await service.POLICIES.put(
-        "default",
         IncidentPolicy(
             enabled=True, workspace_id="T1", slack_app_id="A1", excluded_channel_ids=["C1"]
         ),

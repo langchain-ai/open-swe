@@ -9,6 +9,7 @@ from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack import webhook as slack_webhooks
+from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     format_slack_messages_for_prompt,
@@ -815,13 +816,13 @@ async def test_bot_started_thread_stays_marked_after_a_person_replies(bot_run):
     assert threads.metadata["triggering_bot"] == "T123:B123"
 
 
-@pytest.mark.parametrize("block", ["removed", "other-owner", "private", "other-bot", "store-error"])
-async def test_bot_authorization_is_checked_before_execution(
-    monkeypatch, bot_run, fake_store, block
-):
+@pytest.mark.parametrize(
+    "block", ["removed", "other-owner", "private", "other-bot", "lookup-error"]
+)
+async def test_bot_authorization_is_checked_before_execution(monkeypatch, bot_run, block):
     request, threads, captured = bot_run
     if block == "removed":
-        await fake_store.delete_item(["allowed_slack_bots"], "T123:B123")
+        await AllowedSlackBot.remove("T123", "B123")
     elif block == "other-owner":
         threads.metadata = {"owner_type": "user", "owner_login": "alice", "visibility": "public"}
     elif block in {"private", "other-bot"}:
@@ -832,7 +833,7 @@ async def test_bot_authorization_is_checked_before_execution(
         else:
             threads.metadata["source_context"]["slack_thread"]["triggering_bot_id"] = "BOTHER"
     else:
-        monkeypatch.setattr(fake_store, "get_item", AsyncMock(side_effect=RuntimeError("offline")))
+        monkeypatch.setattr(AllowedSlackBot, "get", AsyncMock(side_effect=RuntimeError("offline")))
     await slack_webhooks.process_slack_mention(request, None)
     assert "run_create" not in captured
 
