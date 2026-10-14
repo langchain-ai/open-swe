@@ -7,7 +7,6 @@ from time import time_ns
 from typing import Literal, TypedDict, cast
 
 from fastapi import APIRouter, Response
-from langgraph_sdk.client import LangGraphClient
 
 from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
@@ -137,10 +136,7 @@ async def _queue_code_channel_turn(
     )
 
     async def dispatch() -> WebhookResponse:
-        client = get_langgraph_client()
-        thread_id = await common.lookup_slack_thread_id(
-            client, channel_id, common.CODE_CHANNEL_SESSION_TS
-        )
+        thread_id = await common.lookup_slack_thread_id(channel_id, common.CODE_CHANNEL_SESSION_TS)
         if not thread_id:
             return ignored("Code channel is not associated")
         if not await common.claim_slack_event(event_id, channel_id, event_ts):
@@ -185,11 +181,8 @@ async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
     Nothing is being asked, so this must not start a run of its own; the queue
     is drained before the next model call, whatever triggers it.
     """
-    client = get_langgraph_client()
     try:
-        thread_id = await common.lookup_slack_thread_id(
-            client, channel_id, common.CODE_CHANNEL_SESSION_TS
-        )
+        thread_id = await common.lookup_slack_thread_id(channel_id, common.CODE_CHANNEL_SESSION_TS)
     except common.SlackThreadMappingError:
         return
     if not thread_id or not text.strip():
@@ -210,36 +203,30 @@ async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
 
 
 async def _lookup_delivered_message_update(
-    langgraph_client: LangGraphClient,
-    channel_id: str,
-    thread_ts: str,
-    message_ts: str,
-    user_id: str,
-) -> tuple[str | None, JsonObject | None]:
+    channel_id: str, thread_ts: str, message_ts: str, user_id: str
+) -> str | None:
+    """The thread of a delivered message its sender edited, once both are recorded."""
     for delay in (*_MESSAGE_UPDATE_RETRY_DELAYS, None):
-        thread_id = await common.lookup_slack_thread_id(langgraph_client, channel_id, thread_ts)
-        delivered_message = await common.lookup_slack_run_mapping(
-            langgraph_client, channel_id, message_ts
-        )
+        thread_id = await common.lookup_slack_thread_id(channel_id, thread_ts)
+        delivered_message = await common.lookup_slack_run_mapping(channel_id, message_ts)
         if thread_id and delivered_message:
             if (
-                delivered_message.get("thread_ts") != thread_ts
-                or delivered_message.get("triggering_user_id") != user_id
-                or delivered_message.get("agent_thread_id") != thread_id
+                delivered_message.thread_ts != thread_ts
+                or delivered_message.triggering_user_id != user_id
+                or delivered_message.agent_thread_id != thread_id
             ):
-                return None, None
+                return None
             if await common.thread_exists(thread_id):
-                return thread_id, delivered_message
+                return thread_id
         if delay is None:
             break
         await asyncio.sleep(delay)
-    return None, None
+    return None
 
 
 async def _process_slack_message_update(request: SlackRequest) -> None:
     try:
-        thread_id, delivered_message = await _lookup_delivered_message_update(
-            get_langgraph_client(),
+        thread_id = await _lookup_delivered_message_update(
             request.channel_id,
             request.thread_ts,
             request.original_message_ts,
@@ -255,7 +242,7 @@ async def _process_slack_message_update(request: SlackRequest) -> None:
             },
         )
         return
-    if not thread_id or not delivered_message:
+    if not thread_id:
         common.logger.info(
             "Ignoring undelivered Slack message update channel=%s message=%s",
             request.channel_id,
@@ -940,7 +927,6 @@ async def slack_interactivity(
         if not (interaction.channel_id and interaction.container.view_id and interaction.action_id):
             return {"options": []}
         options = await common.get_block_suggestions(
-            get_langgraph_client(),
             interaction.channel_id,
             interaction.container.view_id,
             interaction.action_id,
@@ -1031,9 +1017,7 @@ async def slack_interactivity(
             if not channel_id or not thread_ts or not button.fingerprint:
                 return ignored("Missing workflow approval context")
 
-            thread_id = await common.lookup_slack_thread_id(
-                get_langgraph_client(), channel_id, thread_ts
-            )
+            thread_id = await common.lookup_slack_thread_id(channel_id, thread_ts)
             if not thread_id:
                 return ignored("Slack thread is not associated")
             if button.action not in {"approve", "reject"}:
@@ -1114,9 +1098,7 @@ async def slack_interactivity(
         if not channel_id or not option_thread_ts or not action_ts or not user_id:
             return ignored("Missing Slack action context")
 
-        thread_id = await common.lookup_slack_thread_id(
-            get_langgraph_client(), channel_id, option_thread_ts
-        )
+        thread_id = await common.lookup_slack_thread_id(channel_id, option_thread_ts)
         if not thread_id:
             return ignored("Slack thread is not associated")
         # A review guide's "Next" is recorded by the server, never by the model, and

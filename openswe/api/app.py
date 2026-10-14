@@ -55,6 +55,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.database.store_imports import run_store_import
+    from openswe.mcp.import_oauth_entries import import_store_mcp_oauth_entries
     from openswe.mcp.import_records import import_store_mcp_connections
     from openswe.review.assessment_feedback import run_assessment_import
     from openswe.review.import_eval_runs import import_store_reviewer_eval
@@ -64,6 +65,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
     from openswe.slack.import_allowed_bots import import_store_allowed_slack_bots
+    from openswe.slack.import_records import run_slack_imports
     from openswe.thread_feedback import run_feedback_import
     from openswe.threads.blobs import run_blob_import
     from openswe.threads.pins import import_store_pins
@@ -134,6 +136,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # the Store until an import succeeds.
         logger.exception("Importing MCP connections from the LangGraph Store failed")
     try:
+        # The MCP server's OAuth client registrations and tokens used to live in
+        # the LangGraph Store.
+        await run_store_import("mcp_oauth_entries", import_store_mcp_oauth_entries)
+    except Exception:  # noqa: BLE001
+        # Startup continues: MCP clients whose tokens are still in the Store
+        # sign in again.
+        logger.exception("Importing MCP OAuth entries from the LangGraph Store failed")
+    try:
         # Review settings, assessment feedback, and baby-sit watches used to be
         # Store records; this moves them into PostgreSQL.
         await run_store_import("review_records", import_review_records)
@@ -179,6 +189,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     plan_import = asyncio.create_task(run_plan_import())
     feedback_import = asyncio.create_task(run_feedback_import())
     assessment_import = asyncio.create_task(run_assessment_import())
+    # Slack threads, runs, and messages used to live in the LangGraph Store, a
+    # record per Slack thread, run, and bot message; too many to wait for.
+    slack_import = asyncio.create_task(run_slack_imports())
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -223,6 +236,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         plan_import.cancel()
         feedback_import.cancel()
         assessment_import.cancel()
+        slack_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()

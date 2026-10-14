@@ -286,9 +286,7 @@ async def test_list_threads_resolves_slack_reply_link(
         "channel_id": "C123",
         "thread_ts": "1788425314.774339",
     }
-    awaited = lookup.await_args
-    assert awaited is not None
-    lookup.assert_awaited_once_with(awaited.args[0], "C123", "1788425314.774339")
+    lookup.assert_awaited_once_with("C123", "1788425314.774339")
     get_dashboard_thread.assert_awaited_once_with(
         "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )

@@ -11,12 +11,12 @@ from openswe.invocation import resolve_invocation_id
 from openswe.slack.client import (
     fetch_slack_thread_message_by_ts,
     format_slack_session_cost,
-    lookup_slack_run_message_mapping,
     update_slack_message,
     with_slack_pending_session_cost,
     with_slack_session_cost,
 )
 from openswe.slack.http import SlackRequestError
+from openswe.slack.records import lookup_slack_run_message_mapping
 from openswe.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from openswe.utils.thread_ops import langgraph_client
 
@@ -68,16 +68,14 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
 
 
 async def _mark_slack_reply_cost_pending(
-    payload: SessionCostRefresh, client: LangGraphClient, *, clear: bool = False
+    payload: SessionCostRefresh, *, clear: bool = False
 ) -> None:
     """Best-effort: flag the mapped final reply as awaiting its deferred cost."""
-    mapping = await lookup_slack_run_message_mapping(
-        client, payload["channel_id"], payload["run_id"]
+    mapping = await lookup_slack_run_message_mapping(payload["channel_id"], payload["run_id"])
+    message_ts = (
+        mapping.message_ts if mapping and mapping.thread_ts == payload["thread_ts"] else None
     )
-    if not mapping or mapping.get("thread_ts") != payload["thread_ts"]:
-        return
-    message_ts = mapping.get("message_ts")
-    if not isinstance(message_ts, str) or not message_ts:
+    if not message_ts:
         return
     message = await fetch_slack_thread_message_by_ts(
         payload["channel_id"], payload["thread_ts"], message_ts
@@ -99,11 +97,11 @@ async def _mark_slack_reply_cost_pending(
         logger.warning("Could not update pending cost label", extra={"slack_error": exc.code})
 
 
-async def _clear_pending_cost(state: Mapping[str, object], client: LangGraphClient) -> None:
+async def _clear_pending_cost(state: Mapping[str, object]) -> None:
     try:
         payload = _payload(state, 0)
         if payload is not None:
-            await _mark_slack_reply_cost_pending(payload, client, clear=True)
+            await _mark_slack_reply_cost_pending(payload, clear=True)
     except Exception:
         logger.warning("Could not clear pending cost label", exc_info=True)
 
@@ -135,7 +133,7 @@ async def schedule_session_cost_refresh(
         return False
     if attempt == 0:
         try:
-            await _mark_slack_reply_cost_pending(payload, client)
+            await _mark_slack_reply_cost_pending(payload)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Could not mark Slack reply cost pending",
@@ -161,19 +159,17 @@ def _blocks_contain(blocks: list[dict[str, Any]] | None, text: str) -> bool:
 
 
 async def _refresh_once(
-    state: Mapping[str, Any], client: LangGraphClient
+    state: Mapping[str, Any],
 ) -> tuple[Literal["updated", "pending", "unavailable"], str]:
     payload = _payload(state, 0)
     if payload is None:
         return "unavailable", "invalid payload"
 
-    mapping = await lookup_slack_run_message_mapping(
-        client, payload["channel_id"], payload["run_id"]
-    )
-    if not mapping or mapping.get("thread_ts") != payload["thread_ts"]:
+    mapping = await lookup_slack_run_message_mapping(payload["channel_id"], payload["run_id"])
+    if mapping is None or mapping.thread_ts != payload["thread_ts"]:
         return "unavailable", "run message mapping unavailable"
-    message_ts = mapping.get("message_ts")
-    if not isinstance(message_ts, str) or not message_ts:
+    message_ts = mapping.message_ts
+    if not message_ts:
         return "unavailable", "run has no Slack response"
 
     try:
@@ -231,17 +227,17 @@ async def run_session_cost_refresh(
         raw_attempt if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool) else -1
     )
     if attempt < 0 or attempt >= len(_RETRY_DELAYS_SECONDS):
-        await _clear_pending_cost(state, client)
+        await _clear_pending_cost(state)
         return {"status": "unavailable", "reason": "invalid attempt"}
 
     try:
-        status, reason = await _refresh_once(state, client)
+        status, reason = await _refresh_once(state)
     except Exception:  # noqa: BLE001
         logger.warning("Session-cost refresh attempt failed", exc_info=True)
         status, reason = "pending", "refresh attempt failed"
     if status != "pending":
         if status == "unavailable":
-            await _clear_pending_cost(state, client)
+            await _clear_pending_cost(state)
             logger.info(
                 "Session-cost refresh unavailable for run %s: %s", state.get("run_id"), reason
             )
@@ -249,11 +245,11 @@ async def run_session_cost_refresh(
     next_attempt = attempt + 1
     if next_attempt >= len(_RETRY_DELAYS_SECONDS):
         logger.info("Session-cost refresh exhausted for run %s: %s", state.get("run_id"), reason)
-        await _clear_pending_cost(state, client)
+        await _clear_pending_cost(state)
         return {"status": "exhausted", "reason": reason}
     scheduled = await schedule_session_cost_refresh(state, attempt=next_attempt, client=client)
     if not scheduled:
-        await _clear_pending_cost(state, client)
+        await _clear_pending_cost(state)
     return {
         "status": "retry_scheduled" if scheduled else "unavailable",
         "reason": reason,
