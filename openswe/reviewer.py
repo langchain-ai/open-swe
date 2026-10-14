@@ -1133,6 +1133,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 PrepareReviewerRunMiddleware(
                     thread_id=thread_id,
                     config=config,

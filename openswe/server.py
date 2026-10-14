@@ -2124,6 +2124,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             middleware=cast(
                 list[AgentMiddleware[Any, Any, Any]],
                 [
+                    AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                     FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
                     AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                     ConversationOffloadingMiddleware(
