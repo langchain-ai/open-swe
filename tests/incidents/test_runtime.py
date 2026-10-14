@@ -85,9 +85,7 @@ async def test_incident_threads_must_be_system_owned_and_public(incident, change
         await runtime.load_incident_session(config())
 
 
-@pytest.mark.parametrize(
-    "identity", [{"github_login": "octocat"}, {"user_email": "o@x.dev"}, {"local_run": True}]
-)
+@pytest.mark.parametrize("identity", [{"github_login": "octocat"}, {"user_email": "o@x.dev"}])
 async def test_incident_runs_cannot_carry_personal_identity(incident, identity):
     with pytest.raises(PermissionError, match="personal"):
         await runtime.load_incident_session(config(**identity))

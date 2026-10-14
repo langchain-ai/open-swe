@@ -101,9 +101,7 @@ async def _dispatch_input(
     content: ContentBlocks, source: str, configurable: dict[str, Any]
 ) -> RunInput:
     surface: Surface = (
-        source
-        if source in {"slack", "linear", "github", "web", "desktop", "eval"}
-        else "automation"
+        source if source in {"slack", "linear", "github", "web", "eval"} else "automation"
     )  # type: ignore[assignment]
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
@@ -319,7 +317,7 @@ async def _run_user_id(
     if cfg.background_task_completion:
         return None
     try:
-        if (source or cfg.source) in {"dashboard", "web", "desktop"} and cfg.github_login:
+        if (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
         elif cfg.slack_thread and cfg.slack_thread.triggering_user_id:
             user = await User.for_identity("slack", cfg.slack_thread.triggering_user_id)
