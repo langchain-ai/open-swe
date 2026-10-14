@@ -11,8 +11,8 @@ from openswe.slack.code_channels import is_code_channel
 from openswe.slack.dm import is_dm_channel
 from openswe.slack.events import claim_slack_event
 from openswe.slack.failures import SlackRequestError, run_slack_task
-from openswe.slack.mappings import resolve_slack_thread_id
 from openswe.slack.payloads import SlackChannelContext, SlackEvent
+from openswe.slack.records import resolve_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import restore_slack_thinking_status
 from openswe.utils.thread_ops import langgraph_client

@@ -125,13 +125,13 @@ from openswe.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
-from openswe.slack.mappings import (  # noqa: F401
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.records import (  # noqa: F401
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
     resolve_slack_thread_id,
     store_slack_run_mapping,
 )
-from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread, ensure_titled_thread

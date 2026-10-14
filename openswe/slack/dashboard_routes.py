@@ -21,7 +21,7 @@ from openswe.slack.channel_options import SlackChannelDirectory, list_slack_chan
 from openswe.slack.client import get_slack_user_names
 from openswe.slack.connect import router as connect_router
 from openswe.slack.dm import CONCIERGE_TS, open_dm
-from openswe.slack.mappings import lookup_slack_thread_id
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.threads.summary import assert_thread_readable
 from openswe.users import User
 from openswe.utils.json_types import thread_metadata

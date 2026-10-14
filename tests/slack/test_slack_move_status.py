@@ -10,7 +10,7 @@ from openswe import event_claims
 from openswe.slack import move as slack_move
 from openswe.slack import thinking as slack_thinking
 from openswe.slack.channels import SlackChannel
-from openswe.slack.mappings import lookup_slack_thread_id
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.tools import move_thread
 from openswe.source_context import SlackThreadRef
 

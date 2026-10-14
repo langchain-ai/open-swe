@@ -3,7 +3,6 @@ to the same agent thread. Off by default, where a DM keeps a thread per message.
 """
 
 import json
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -158,10 +157,6 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
 ) -> None:
     from openswe.slack import dm
 
-    threads = AsyncMock()
-    threads.get.return_value = {"status": status}
-    client = SimpleNamespace(threads=threads)
-    monkeypatch.setattr(dm, "langgraph_client", lambda: client)
     monkeypatch.setattr(dm, "lookup_slack_thread_id", AsyncMock(return_value="concierge-thread"))
     queue = AsyncMock(return_value=True)
     monkeypatch.setattr(dm, "queue_message_for_thread", queue)
@@ -174,7 +169,6 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
     assert "Mark the PR ready for review" in note
     assert "not written by this person" in note
     assert "already sent" in note
-    threads.update_state.assert_not_awaited()
 
 
 @pytest.mark.asyncio

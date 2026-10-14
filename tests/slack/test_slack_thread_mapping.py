@@ -8,7 +8,7 @@ import pytest
 from openswe import event_claims
 from openswe.slack import client as slack_client
 from openswe.slack.client import SlackThreadMappingError, slack_thread_mutation_lock
-from openswe.slack.mappings import (
+from openswe.slack.records import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     lookup_slack_run_mapping,
