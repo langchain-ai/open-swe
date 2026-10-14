@@ -13,6 +13,8 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGenerationChunk
 from langgraph.prebuilt.tool_node import ToolCallRequest
+from openswe_transcript import stream
+from openswe_transcript.wire import mark_streamed
 
 from openswe.input_messages import build_input_messages
 from openswe.middleware import transcript as mw
@@ -427,14 +429,9 @@ async def test_streamed_fragments_keep_one_message_id(monkeypatch: pytest.Monkey
     """
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
     manager = AsyncCallbackManager(handlers=[])
-    monkeypatch.setattr(
-        mw,
-        "get_config",
-        lambda: {
-            "configurable": {"thread_id": THREAD_ID, "run_id": RUN_ID},
-            "callbacks": manager,
-        },
-    )
+    config = {"configurable": {"thread_id": THREAD_ID, "run_id": RUN_ID}, "callbacks": manager}
+    monkeypatch.setattr(mw, "get_config", lambda: config)
+    monkeypatch.setattr(stream, "get_config", lambda: config)
     middleware = mw.TranscriptMiddleware()
     await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
 
@@ -477,6 +474,46 @@ async def test_streamed_fragments_keep_one_message_id(monkeypatch: pytest.Monkey
         command for command in engine.commands if command.event.type == "tool.started"
     )
     assert tool_started.event.message_id == next(iter(used_ids))
+
+
+async def test_a_reply_streamed_elsewhere_completes_under_the_id_it_streamed_under(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run on another runtime streams its reply there and names the message on it.
+
+    Its tool calls reach whichever replica takes them, so the tool call has to
+    find that id on the message, not in this process's memory.
+    """
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+    ai = AIMessage(
+        content="Hello there",
+        id="resp_final",
+        tool_calls=[{"name": "read_file", "args": {}, "id": "call-1"}],
+    )
+    mark_streamed(ai, "streamed-remotely")
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[ai])
+
+    await middleware.awrap_model_call(_model_request([]), model_handler)
+    mw._runs.clear()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+
+    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="ok", tool_call_id="call-1")
+
+    await middleware.awrap_tool_call(_tool_request("call-1", {"messages": [ai]}), tool_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    completed = next(c for c in engine.commands if c.event.type == "message.completed")
+    started = next(c for c in engine.commands if c.event.type == "tool.started")
+    assert (completed.command_id, completed.event.message_id) == (
+        "message:streamed-remotely:completed",
+        "streamed-remotely",
+    )
+    assert started.event.message_id == "streamed-remotely"
 
 
 async def test_a_cancelled_subagent_tool_leaves_the_parent_running(

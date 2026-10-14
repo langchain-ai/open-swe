@@ -151,6 +151,30 @@ async def recorded_turn_id(thread_id: str, command_id: str) -> UUID | None:
         return result.scalar_one_or_none()
 
 
+@dataclass(frozen=True)
+class RunTurn:
+    turn_id: UUID
+    open: bool
+
+
+async def run_turn(thread_id: str, run_id: str) -> RunTurn | None:
+    """The newest turn ``run_id`` reported starting, or ``None`` when it reported none."""
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT turn_id, state FROM thread_turn
+                WHERE thread_id = :thread_id AND run_id = :run_id
+                ORDER BY requested_at DESC, turn_id DESC
+                LIMIT 1
+                """
+            ),
+            {"thread_id": thread_id, "run_id": run_id},
+        )
+        row = result.mappings().one_or_none()
+    return None if row is None else RunTurn(row["turn_id"], row["state"] in _OPEN_STATES)
+
+
 async def _open_turn(thread_id: str, run_id: str | None) -> UUID | None:
     """The turn this run is still executing.
 
@@ -161,22 +185,11 @@ async def _open_turn(thread_id: str, run_id: str | None) -> UUID | None:
     settlement with no ``run_id`` (a whole-thread cancel) takes the newest open
     turn regardless.
     """
+    if run_id is not None:
+        owned = await run_turn(thread_id, run_id)
+        if owned is not None:
+            return owned.turn_id if owned.open else None
     async with postgres.read_only_transaction() as conn:
-        if run_id is not None:
-            owned = await conn.execute(
-                text(
-                    """
-                    SELECT turn_id, state FROM thread_turn
-                    WHERE thread_id = :thread_id AND run_id = :run_id
-                    ORDER BY requested_at DESC, turn_id DESC
-                    LIMIT 1
-                    """
-                ),
-                {"thread_id": thread_id, "run_id": run_id},
-            )
-            row = owned.mappings().one_or_none()
-            if row is not None:
-                return row["turn_id"] if row["state"] in _OPEN_STATES else None
         result = await conn.execute(
             text(
                 """

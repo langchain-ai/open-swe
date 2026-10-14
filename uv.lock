@@ -2509,6 +2509,7 @@ dependencies = [
     { name = "markdown-it-py" },
     { name = "markdownify" },
     { name = "openai" },
+    { name = "openswe-transcript" },
     { name = "pillow" },
     { name = "pygments" },
     { name = "pyjwt" },
@@ -2582,6 +2583,7 @@ requires-dist = [
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
     { name = "openai", specifier = ">=3.10.0,<4.0.0" },
+    { name = "openswe-transcript", editable = "libs/openswe-transcript" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pygments", specifier = ">=2.21.0" },
     { name = "pyjwt", specifier = ">=2.13.0" },
@@ -2624,6 +2626,27 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/2b/32/0c9bd3e4e847cd6117b64dbef4cf810faa9cdbd6689323b811569cc8a1b8/openapi_pydantic-0.6.0.tar.gz", hash = "sha256:11f3ac6ad41521fc156381ec587246b0c0ecea523bd9565ed74d3e7fac9d91cd", size = 1667049, upload-time = "2026-10-02T12:20:00.508Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/31/57/9d3eb823a03c33e9d4c810e6a3276e3a6dc820a7fdc0961db2c04e613817/openapi_pydantic-0.6.0-py3-none-any.whl", hash = "sha256:8bd6d548a250da37db96f461bcd52b3468e8834ad7d6db14b00a6b2ebbd163a3", size = 96931, upload-time = "2026-10-02T12:19:58.917Z" },
+]
+
+[[package]]
+name = "openswe-transcript"
+version = "0.1.0"
+source = { editable = "libs/openswe-transcript" }
+dependencies = [
+    { name = "httpx2" },
+    { name = "langchain" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
+    { name = "langchain", specifier = ">=1.4.3" },
+    { name = "langchain-core", specifier = ">=1.6.2" },
+    { name = "langgraph", specifier = ">=1.2.11" },
+    { name = "pydantic", specifier = ">=2.11" },
 ]
 
 [[package]]

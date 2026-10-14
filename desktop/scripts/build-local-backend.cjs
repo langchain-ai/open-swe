@@ -49,6 +49,8 @@ try {
     "--locked",
     "--no-dev",
     "--no-emit-project",
+    // Path dependencies (libs/) are installed into the bundled runtime, not linked to this checkout.
+    "--no-editable",
     "--no-hashes",
     "--output-file",
     requirements,

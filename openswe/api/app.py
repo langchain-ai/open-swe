@@ -8,6 +8,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from openswe_transcript import wire as transcript_wire
 from starlette.routing import Route
 
 from openswe.api.github_errors import add_github_error_handlers
@@ -22,6 +23,7 @@ from openswe.linear.routes import router as linear_webhook_router
 from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.remote_runtime import server as remote_runtime_server
+from openswe.remote_runtime import transcript as remote_runtime_transcript
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
@@ -261,6 +263,9 @@ def create_app() -> FastAPI:
     )
     app.router.routes.append(
         Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
+    )
+    app.router.routes.append(
+        Route(transcript_wire.PATH, remote_runtime_transcript.TRANSCRIPT, methods=["POST"])
     )
     if AGENT_MCP is not None:
         app.router.routes.extend(AGENT_MCP.root_routes)

@@ -81,7 +81,8 @@ def _catalog(run: RemoteRun) -> Catalog:
     return catalog
 
 
-def _scope_run(scope: Scope) -> RemoteRun:
+def verified_run(scope: Scope) -> RemoteRun:
+    """The run ``RunTokenMiddleware`` verified the request's token for."""
     run = scope.get("state", {}).get(_RUN_STATE_KEY)
     if not isinstance(run, RemoteRun):
         raise PermissionError("The call carried no verified run")
@@ -89,7 +90,7 @@ def _scope_run(scope: Scope) -> RemoteRun:
 
 
 def _verified_run() -> tuple[RemoteRun, Catalog]:
-    run = _scope_run(get_http_request().scope)
+    run = verified_run(get_http_request().scope)
     return run, _catalog(run)
 
 
@@ -133,7 +134,7 @@ def build_server() -> FastMCP:
 
 
 async def _hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
-    run = _scope_run(scope)
+    run = verified_run(scope)
     hook = scope["path_params"]["hook"]
     try:
         result = await _catalog(run).hook(run, hook)

@@ -119,12 +119,19 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	uv run ty check openswe tests
+	uv run ty check openswe tests libs/openswe-transcript/openswe_transcript
 
 # The MDA reviewer resolves imports against its own environment alone, so one
-# reaching for the backend (`openswe`) or a database driver fails here.
+# reaching for the backend (`openswe`) or a database driver fails here. So does
+# the shared transcript package, which those runtimes install on Python 3.13.
 mda-boundary:
 	cd mda/reviewer && uv sync --locked && uv run --with ty==0.0.84 ty check --python .venv --ignore all --error unresolved-import
+	@scratch=$$(mktemp -d) && trap 'rm -rf "$$scratch"' EXIT && \
+		uv venv --quiet --python 3.13 "$$scratch/venv" && \
+		uv pip install --quiet --python "$$scratch/venv" ./libs/openswe-transcript && \
+		cp -R libs/openswe-transcript/openswe_transcript "$$scratch/" && \
+		cd "$$scratch" && uvx --quiet --from ty==0.0.84 ty check --python venv --python-version 3.13 \
+			--ignore all --error unresolved-import --error unresolved-attribute openswe_transcript
 
 ######################
 # HELP

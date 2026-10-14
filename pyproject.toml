@@ -41,6 +41,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "langchain-typesafe==0.0.1a3",
     "langchain-quickjs==0.3.8",
+    "openswe-transcript",
 ]
 
 [project.optional-dependencies]
@@ -66,6 +67,10 @@ sandbox-providers = [
     "langchain-runloop>=0.0.7",
     "langchain-e2b==0.0.6",
 ]
+
+[tool.uv.sources]
+# Shared with the agent runtimes hosted elsewhere, which install it the same way.
+openswe-transcript = { path = "libs/openswe-transcript", editable = true }
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
@@ -129,7 +134,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ty.src]
-include = ["openswe", "tests"]
+include = ["openswe", "tests", "libs/openswe-transcript/openswe_transcript"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [
