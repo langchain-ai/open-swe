@@ -4,7 +4,7 @@ This document records the design and operating constraints of expedited Slack re
 
 ## Summary
 
-The agent posts a tiny PR's full diff in the Slack thread. For a draft, the PR's
+The agent posts a small PR's full diff in the Slack thread. For a draft, the PR's
 author first marks it ready from an author-only Slack DM. Then one person other than the author
 approves, and the click submits that person's GitHub review at once. Once checks and
 reviews are clean, the agent calls a merge tool that merges. The approval survives a
@@ -29,9 +29,9 @@ are already in the Slack thread.
 - The agent calls `expedite_pr_approval` with the PR URL whenever it decides to; the
   backend decides eligibility and posts the card in that call. Nothing is posted in
   the background.
-- Eligible: 1–20 changed lines, every file with a text diff. Binaries and anything
+- Eligible: 1–150 changed lines, every file with a text diff. Binaries and anything
   GitHub cannot show a patch for are refused, because the card could not show the
-  voters what they are approving. 20 is what the agent is told; 25 is what is
+  voters what they are approving. 150 is what the agent is told; 160 is what is
   enforced, since bouncing a change that lands a few lines over costs more than the
   slack costs the voters.
 - Test files sit outside both gates: they do not count toward the limit and they may

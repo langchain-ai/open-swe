@@ -3,6 +3,7 @@ import pytest
 from openswe.expedited_review.eligibility import (
     ACCEPTED_CHANGED_LINES,
     MAX_CHANGED_LINES,
+    MAX_LISTED_FILES,
     ChangedFile,
     EligibleDiff,
     Exclusion,
@@ -50,6 +51,13 @@ def test_line_cap_is_inclusive_and_carries_leeway_past_the_advertised_limit() ->
     assert f"limit is {MAX_CHANGED_LINES}" in past_leeway.reason
 
 
+def test_only_githubs_file_listing_ceiling_bounds_the_file_count() -> None:
+    many = [_file(f"tests/test_{index}.py") for index in range(MAX_LISTED_FILES - 1)]
+
+    assert isinstance(assess_eligibility([_file("a.py"), *many[1:]]), EligibleDiff)
+    assert isinstance(assess_eligibility([_file("a.py"), *many]), Ineligible)
+
+
 def test_files_without_a_text_patch_are_refused() -> None:
     verdict = assess_eligibility([_file("logo.png", patch=None)])
 
@@ -71,9 +79,12 @@ def test_a_move_into_the_tests_tree_is_not_exempt() -> None:
 
 
 def test_excluded_hunks_leave_the_card_until_their_content_changes() -> None:
+    hidden = ACCEPTED_CHANGED_LINES + 9
     small = "@@ -1,1 +1,2 @@\n a\n+b"
-    big = "@@ -10,1 +11,30 @@\n x\n" + "\n".join(f"+gen{i}" for i in range(29))
-    file = ChangedFile(filename="src/app.py", additions=30, deletions=0, patch=f"{small}\n{big}")
+    big = f"@@ -10,1 +11,{hidden + 1} @@\n x\n" + "\n".join(f"+gen{i}" for i in range(hidden))
+    file = ChangedFile(
+        filename="src/app.py", additions=hidden + 1, deletions=0, patch=f"{small}\n{big}"
+    )
     exclusions = Exclusion(
         path="src/app.py", hunks=[11], guideline="Generated", reason="r"
     ).resolve([file])
@@ -81,16 +92,16 @@ def test_excluded_hunks_leave_the_card_until_their_content_changes() -> None:
     assert isinstance(assess_eligibility([file]), Ineligible)
     verdict = assess_eligibility([file], exclusions)
     assert isinstance(verdict, EligibleDiff)
-    assert (verdict.changed_lines, verdict.excluded_lines) == (1, 29)
+    assert (verdict.changed_lines, verdict.excluded_lines) == (1, hidden)
     assert ExpeditedDiff([file], exclusions).shown[0].patch == small
 
-    edited = file.model_copy(update={"patch": f"{small}\n{big}\n+sneaky", "additions": 31})
+    edited = file.model_copy(update={"patch": f"{small}\n{big}\n+sneaky", "additions": hidden + 2})
     assert isinstance(assess_eligibility([edited], exclusions), Ineligible)
 
-    unparsed = file.model_copy(update={"additions": 40})
+    unparsed = file.model_copy(update={"additions": hidden + 11})
     verdict = assess_eligibility([unparsed], exclusions)
     assert isinstance(verdict, Ineligible)
-    assert "30 of the pull request's 40" in verdict.reason
+    assert f"{hidden + 1} of the pull request's {hidden + 11}" in verdict.reason
 
 
 def test_one_exclusion_hides_only_the_hunk_it_named_among_identical_bodies() -> None:

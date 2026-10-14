@@ -21,7 +21,7 @@ from openswe.expedited_review.channels import (
     sendable_channel,
     still_internal,
 )
-from openswe.expedited_review.diff_image import render_diff_png
+from openswe.expedited_review.diff_html import render_diff_html
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
@@ -54,7 +54,6 @@ from openswe.slack.client import (
     remove_slack_reaction,
     update_slack_message,
     upload_slack_thread_file,
-    wait_for_slack_file,
 )
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
@@ -110,38 +109,42 @@ class ReviewCard:
             )
             return None
 
-    async def _diff_image_id(self, files: list[ChangedFile]) -> str | None:
-        """A hosted-but-unposted PNG of the diff, which the card renders inline."""
-        shown = ExpeditedDiff(files, self.request.excluded_hunks).shown
+    async def _attach_diff_page(self, title: str, files: list[ChangedFile]) -> str | None:
+        """Post the whole diff as an interactive HTML page in the card's thread; best effort.
+
+        Returns the file's ID, or ``None`` when the card has to carry the text diff itself.
+        """
+        approval = self.request
+        shown = ExpeditedDiff(files, approval.excluded_hunks).shown
         if not shown:
             return None
-        approval_id = str(self.request.id)
+        pr = approval.pull_request
+        label = f"{pr.owner}/{pr.repo}#{pr.number}"
         try:
-            png = await asyncio.to_thread(render_diff_png, shown)
+            page = await asyncio.to_thread(
+                render_diff_html, shown, label=label, title=title, url=pr.url
+            )
         except Exception:
             logger.warning(
-                "Failed to render expedited review diff image; posting the text diff",
-                extra={"approval_id": approval_id},
+                "Failed to render expedited review diff page",
+                extra={"approval_id": str(approval.id)},
                 exc_info=True,
             )
             return None
         try:
-            file_id = await upload_slack_thread_file(
-                None, None, f"diff-{self.request.head_sha[:12]}.png", png, title="Diff"
+            return await upload_slack_thread_file(
+                approval.slack_channel_id,
+                approval.slack_thread_ts,
+                f"diff-{approval.head_sha[:12]}.html",
+                page,
+                title=f"Diff of {label}",
             )
         except SlackRequestError as exc:
             logger.warning(
-                "Failed to upload expedited review diff image",
-                extra={"approval_id": approval_id, "slack_error": exc.code},
+                "Failed to post expedited review diff page",
+                extra={"approval_id": str(approval.id), "slack_error": exc.code},
             )
             return None
-        if not await wait_for_slack_file(file_id):
-            logger.warning(
-                "Slack did not finish processing the expedited review diff image",
-                extra={"approval_id": approval_id, "slack_file_id": file_id},
-            )
-            return None
-        return file_id
 
     async def _warn_target(self, card: tuple[str, list[Block]]) -> tuple[str, list[Block]]:
         pr = self.request.pull_request
@@ -164,18 +167,6 @@ class ReviewCard:
             raise SlackRequestError("draft card is author-only")
         if not approval.slack_channel_id:
             raise SlackRequestError("no Slack channel")
-        approval.slack_diff_file_id = await self._diff_image_id(files) or ""
-        if not approval.slack_channel_choices:
-            approval.slack_channel_choices = await channel_choices(approval)
-        text, blocks = expedited_card.open_card(
-            approval,
-            title=title,
-            author=await approval.author_mention(),
-            files=files,
-            diff_image_id=approval.slack_diff_file_id or None,
-            choices=await self._channel_choices(),
-        )
-        text, blocks = await self._warn_target((text, blocks))
         if not approval.slack_thread_ts:
             channel = await SlackChannel.load(approval.slack_channel_id)
             if channel is None:
@@ -189,6 +180,18 @@ class ReviewCard:
                     title=escape(title),
                 )
             )
+        approval.slack_diff_file_id = await self._attach_diff_page(title, files) or ""
+        if not approval.slack_channel_choices:
+            approval.slack_channel_choices = await channel_choices(approval)
+        text, blocks = expedited_card.open_card(
+            approval,
+            title=title,
+            author=await approval.author_mention(),
+            files=files,
+            diff_page=bool(approval.slack_diff_file_id),
+            choices=await self._channel_choices(),
+        )
+        text, blocks = await self._warn_target((text, blocks))
         return await post_slack_thread_reply_with_ts(
             approval.slack_channel_id,
             approval.slack_thread_ts,
@@ -218,14 +221,8 @@ class ReviewCard:
         files = await self._files()
         if files is None:
             return "Could not read the diff for the author-only card; try again."
-        approval.slack_diff_file_id = await self._diff_image_id(files) or ""
-        await approval.save()
         text, blocks = expedited_card.readiness_prompt(
-            approval,
-            title=pr.title,
-            author=await approval.author_mention(),
-            files=files,
-            diff_image_id=approval.slack_diff_file_id or None,
+            approval, title=pr.title, author=await approval.author_mention(), files=files
         )
         text, blocks = await self._warn_target((text, blocks))
         origin = approval.dm_origin
@@ -334,7 +331,7 @@ class ReviewCard:
         if request.kind == "standard":
             return await self._render_standard(outcome)
         files = await self._files() or []
-        diff_image_id = request.slack_diff_file_id or None
+        diff_page = bool(request.slack_diff_file_id)
         author = await request.author_mention()
         if outcome is None:
             return expedited_card.open_card(
@@ -342,7 +339,7 @@ class ReviewCard:
                 title=pr.title,
                 author=author,
                 files=files,
-                diff_image_id=diff_image_id,
+                diff_page=diff_page,
                 choices=[] if copy else await self._channel_choices(),
                 thread_url=(
                     await get_slack_permalink(request.slack_channel_id, request.slack_thread_ts)
@@ -357,7 +354,7 @@ class ReviewCard:
             author=author,
             files=files,
             outcome=outcome,
-            diff_image_id=diff_image_id,
+            diff_page=diff_page,
         )
 
     async def refresh_author_dm(self, outcome: str | None) -> bool:

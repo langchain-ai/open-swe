@@ -7,7 +7,11 @@ import httpx2
 import pytest
 
 from openswe.expedited_review import merge
-from openswe.expedited_review.eligibility import ChangedFile, diff_fingerprint
+from openswe.expedited_review.eligibility import (
+    ACCEPTED_CHANGED_LINES,
+    ChangedFile,
+    diff_fingerprint,
+)
 from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
 from openswe.github import http as github_http
 from openswe.github import squash_message
@@ -282,7 +286,11 @@ async def test_a_diff_grown_past_the_limit_discards_the_votes_and_their_reviews(
 ) -> None:
     approval = await _reviewed(await _approved(open_approval, "U_GRACE", "U_LINUS"), github)
     github.files = [
-        ChangedFile(filename="src/app.py", additions=40, patch="+" * 40),
+        ChangedFile(
+            filename="src/app.py",
+            additions=ACCEPTED_CHANGED_LINES + 1,
+            patch="+" * (ACCEPTED_CHANGED_LINES + 1),
+        ),
         _TEST,
     ]
     github.readiness = _readiness("def456")

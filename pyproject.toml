@@ -34,7 +34,6 @@ dependencies = [
     "sqlalchemy[asyncio]==2.1.1",
     "asyncpg==0.31.0",
     "langgraph-checkpoint-sqlite>=3.1.1",
-    "pillow>=12.1.0",
     "Pygments>=2.21.0",
     "githubkit[auth-app]==0.16.1",
     "githubkit-schemas[2022-11-28]==26.9.29",

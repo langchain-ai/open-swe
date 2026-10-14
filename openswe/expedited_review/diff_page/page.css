@@ -1,0 +1,249 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f8fa;
+  --panel: #fff;
+  --text: #1f2328;
+  --muted: #59636e;
+  --line: #d1d9e0;
+  --accent: #0969da;
+  --add: #dafbe1;
+  --add-mark: #aceebb;
+  --remove: #ffebe9;
+  --remove-mark: #ffcecb;
+  --hunk: #ddf4ff;
+  --add-sign: #1a7f37;
+  --remove-sign: #cf222e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0d1117;
+    --panel: #151b23;
+    --text: #e6edf3;
+    --muted: #9198a1;
+    --line: #3d444d;
+    --accent: #4493f8;
+    --add: #12261e;
+    --add-mark: #245b35;
+    --remove: #25171c;
+    --remove-mark: #743039;
+    --hunk: #121d2f;
+    --add-sign: #3fb950;
+    --remove-sign: #f85149;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --panel: #151b23;
+  --text: #e6edf3;
+  --muted: #9198a1;
+  --line: #3d444d;
+  --accent: #4493f8;
+  --add: #12261e;
+  --add-mark: #245b35;
+  --remove: #25171c;
+  --remove-mark: #743039;
+  --hunk: #121d2f;
+  --add-sign: #3fb950;
+  --remove-sign: #f85149;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Helvetica,
+    Arial,
+    sans-serif;
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+h1 {
+  margin: 0;
+  font-size: 16px;
+  text-wrap: balance;
+}
+.meta,
+.stat {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+button,
+input {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+button {
+  cursor: pointer;
+}
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+input {
+  min-width: 200px;
+  flex: 1;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 16px;
+  padding: 16px;
+}
+nav {
+  position: sticky;
+  top: 120px;
+  align-self: start;
+  display: grid;
+  gap: 2px;
+  max-height: 80vh;
+  overflow: auto;
+}
+nav button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  background: none;
+  text-align: left;
+  overflow-wrap: anywhere;
+  padding: 4px 6px;
+}
+nav button:hover {
+  background: var(--panel);
+}
+main {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+details {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font:
+    600 13px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.scroll {
+  overflow-x: auto;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font:
+    12px/20px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+}
+td {
+  padding: 0 8px;
+  vertical-align: top;
+}
+.num {
+  width: 1%;
+  min-width: 40px;
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+}
+.sign {
+  width: 1%;
+  user-select: none;
+}
+.code {
+  white-space: pre;
+}
+body.wrap .code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+tr.add {
+  background: var(--add);
+}
+tr.add .sign {
+  color: var(--add-sign);
+}
+tr.remove {
+  background: var(--remove);
+}
+tr.remove .sign {
+  color: var(--remove-sign);
+}
+tr.hunk,
+tr.meta {
+  background: var(--hunk);
+  color: var(--muted);
+}
+tr.add mark {
+  background: var(--add-mark);
+  color: inherit;
+}
+tr.remove mark {
+  background: var(--remove-mark);
+  color: inherit;
+}
+body.changes-only tr.context {
+  display: none;
+}
+.hidden {
+  display: none;
+}
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  nav {
+    position: static;
+    max-height: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
