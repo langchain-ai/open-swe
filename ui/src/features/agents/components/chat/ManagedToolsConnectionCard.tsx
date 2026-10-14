@@ -6,12 +6,11 @@ import { PlugsConnectedIcon } from "@phosphor-icons/react/dist/ssr/PlugsConnecte
 
 import { ConnectLangSmithButton } from "@/features/settings/components/ConnectionsSection"
 import {
-  MANAGED_TOOLS_KEY,
   MissingRow,
+  managedToolsQuery,
   useConnectPopup,
 } from "@/features/settings/components/ManagedToolsSection"
 import type { ManagedToolsCardOffer } from "@/features/agents/lib/managedToolsCard"
-import { api } from "@/lib/api"
 
 /** The connect card `connect_managed_tools` offered; the thread continues once its services connect. */
 export function ManagedToolsConnectionCard({
@@ -23,8 +22,7 @@ export function ManagedToolsConnectionCard({
 }) {
   const { threadId } = useParams({ strict: false })
   const view = useQuery({
-    queryKey: MANAGED_TOOLS_KEY,
-    queryFn: api.getMyManagedTools,
+    ...managedToolsQuery,
     refetchOnWindowFocus: "always",
   })
   const popup = useConnectPopup(threadId ? { threadId, cardId } : undefined)
@@ -69,7 +67,7 @@ export function ManagedToolsConnectionCard({
           <p className="text-secondary">
             Connect {missing.length === 1 ? "this" : "these"} to your account.{" "}
             {live?.all_required
-              ? "LangSmith offers this gateway's tools once all of them are connected. "
+              ? "LangSmith offers this tool kit's tools once all of them are connected. "
               : ""}
             {then}
           </p>

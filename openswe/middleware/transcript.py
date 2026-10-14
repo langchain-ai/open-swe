@@ -76,6 +76,7 @@ from openswe.transcript.events import (
     TurnStarted,
 )
 from openswe.transcript.fragments import fragment_command, message_completed_command_id
+from openswe.transcript.turns import recorded_message_ids, run_turn
 
 logger = logging.getLogger(__name__)
 
@@ -555,6 +556,56 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         )
         run_state.enqueue(*commands)
         self._record_human_messages(run_state, input_events)
+
+    async def aresume_run(self, state: AgentState, runtime: Runtime) -> None:
+        """Rejoin the run's turn in a process that did not start it.
+
+        A run hosted on Managed Deep Agents calls back into any replica, so the
+        turn it started elsewhere, and what that turn already recorded, come
+        from PostgreSQL.
+        """
+        del runtime
+        try:
+            await self._resume_run(state)
+        except Exception:
+            logger.warning("Transcript run resume failed", exc_info=True)
+
+    async def _resume_run(self, state: AgentState) -> None:
+        ids = _run_ids()
+        if ids is None or current_namespace() or _run_key(ids.thread_id, ids.run_id) in _runs:
+            return
+        owned = await run_turn(ids.thread_id, ids.run_id) if postgres.configured() else None
+        if owned is None:
+            await self._start_run(state)
+            return
+        run_state = RunState(
+            thread_id=ids.thread_id, run_id=ids.run_id, turn_id=owned.turn_id, enabled=owned.open
+        )
+        if owned.open:
+            humans = [
+                message.id
+                for message in cast(Sequence[BaseMessage], state.get("messages") or [])
+                if isinstance(message, HumanMessage) and isinstance(message.id, str) and message.id
+            ]
+            run_state.seen_human_ids.update(await recorded_message_ids(ids.thread_id, humans))
+            run_state.queue = asyncio.Queue()
+            run_state.writer = asyncio.create_task(_writer_loop(run_state))
+        _runs[_run_key(ids.thread_id, ids.run_id)] = run_state
+
+    async def aflush_run(self, runtime: Runtime) -> None:
+        """Write what the run queued so far, before another process continues it."""
+        del runtime
+        run_state = _lookup_state()
+        if not run_state.enabled or run_state.queue is None or current_namespace():
+            return
+        try:
+            await asyncio.wait_for(run_state.queue.join(), timeout=30)
+        except TimeoutError:
+            logger.warning(
+                "Transcript flush timed out",
+                exc_info=True,
+                extra={"transcript_thread_id": run_state.thread_id},
+            )
 
     async def awrap_model_call(
         self,

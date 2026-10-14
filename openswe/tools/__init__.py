@@ -65,6 +65,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
+    "send_announcement": ".send_announcement",
     "search_repo_code": "openswe.github.tools.search_repo_code",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
@@ -150,6 +151,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_pull_requests",
+    "send_announcement",
     "search_repo_code",
     "start_thread",
     "slack_add_reaction",
@@ -241,6 +243,7 @@ if TYPE_CHECKING:
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from openswe.tools.search_pull_requests import search_pull_requests
+    from openswe.tools.send_announcement import send_announcement
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
     from openswe.tools.switch_to_performance_model import switch_to_performance_model

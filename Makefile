@@ -121,11 +121,11 @@ format-check:
 typecheck:
 	uv run ty check openswe tests libs/openswe-transcript/openswe_transcript
 
-# The MDA reviewer resolves imports against its own environment alone, so one
+# The MDA project resolves imports against its own environment alone, so one
 # reaching for the backend (`openswe`) or a database driver fails here. So does
 # the shared transcript package, which those runtimes install on Python 3.13.
 mda-boundary:
-	cd mda/reviewer && uv sync --locked && uv run --with ty==0.0.84 ty check --python .venv --ignore all --error unresolved-import
+	cd mda && uv sync --locked && uv run --with ty==0.0.84 ty check --python .venv --ignore all --error unresolved-import
 	@scratch=$$(mktemp -d) && trap 'rm -rf "$$scratch"' EXIT && \
 		uv venv --quiet --python 3.13 "$$scratch/venv" && \
 		uv pip install --quiet --python "$$scratch/venv" ./libs/openswe-transcript && \
@@ -155,7 +155,7 @@ help:
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run ty on openswe/ and tests/'
-	@echo 'mda-boundary                 - check mda/reviewer imports only its own dependencies'
+	@echo 'mda-boundary                 - check mda imports only its own dependencies'
 	@echo 'test                         - run unit tests'
 	@echo 'integration_tests            - run integration tests'
 	@echo '----'

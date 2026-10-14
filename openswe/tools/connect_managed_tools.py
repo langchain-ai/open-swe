@@ -86,7 +86,7 @@ def _nothing_to_connect(status: GatewayStatus, services: list[str]) -> tuple[str
     asked = ", ".join(services)
     return (
         f"None of {asked} is waiting to be connected: each is connected already (its tools "
-        f"load on the person's next message) or is not in this gateway. Unconnected: {names}",
+        f"load on the person's next message) or is not in this tool kit. Unconnected: {names}",
         f"{asked} isn't waiting to be connected in the *{status.gateway.name}* managed tools; "
         f"it's either connected already or not one of them. Not connected yet: {names}.",
     )

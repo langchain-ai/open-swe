@@ -8,6 +8,7 @@ other is deduplicated by its receipt.
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
@@ -173,6 +174,25 @@ async def run_turn(thread_id: str, run_id: str) -> RunTurn | None:
         )
         row = result.mappings().one_or_none()
     return None if row is None else RunTurn(row["turn_id"], row["state"] in _OPEN_STATES)
+
+
+async def recorded_message_ids(thread_id: str, message_ids: Sequence[str]) -> set[str]:
+    """Which of ``message_ids`` the thread's transcript already holds."""
+    if not message_ids:
+        return set()
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT DISTINCT payload->>'message_id' FROM thread_event
+                WHERE thread_id = :thread_id
+                  AND event_type IN ('turn.requested', 'message.completed')
+                  AND payload->>'message_id' = ANY(:message_ids)
+                """
+            ),
+            {"thread_id": thread_id, "message_ids": list(message_ids)},
+        )
+        return {value for value in result.scalars() if isinstance(value, str)}
 
 
 async def _open_turn(thread_id: str, run_id: str | None) -> UUID | None:

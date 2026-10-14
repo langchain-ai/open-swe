@@ -72,6 +72,7 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
 }
 
 from langgraph_sdk import get_client  # noqa: E402
+from langgraph_sdk.errors import NotFoundError  # noqa: E402
 
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
@@ -134,9 +135,14 @@ async def _cancel_inflight_runs() -> None:
     # Per run, not cancel_many(status=...): the inmem runtime never delivers a status-only interrupt to a running run.
     for thread in await client.threads.search(status="busy", limit=1000):
         thread_id = thread["thread_id"]
-        for status in ("pending", "running"):
-            for run in await client.runs.list(thread_id, status=status, limit=100):
-                await client.runs.cancel(thread_id, run["run_id"], wait=True)
+        try:
+            for status in ("pending", "running"):
+                for run in await client.runs.list(thread_id, status=status, limit=100):
+                    await client.runs.cancel(thread_id, run["run_id"], wait=True)
+        except NotFoundError:
+            # Deleted since the search, so nothing of it is left running. Raising
+            # here aborted the reset before it cleared the durable PR state.
+            continue
 
 
 @app.post("/control/reset-default-workspace")

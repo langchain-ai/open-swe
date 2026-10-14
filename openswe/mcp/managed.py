@@ -83,7 +83,7 @@ class GatewayCredentialsRequired(ManagedToolsError):
     """LMT's 428: a gateway that offers no tools until every listed service is connected."""
 
     def __init__(self, missing: list[MissingCredential], links: dict[str, ConsentLink]) -> None:
-        super().__init__("Connect every service in this gateway before using its tools")
+        super().__init__("Connect every service in this tool kit before using its tools")
         self.missing = missing
         self.links = links
 
@@ -159,7 +159,7 @@ def gateway_id(value: str) -> str:
     try:
         return str(UUID(value))
     except ValueError:
-        raise ManagedToolsError("Unknown managed tools gateway") from None
+        raise ManagedToolsError("Unknown tool kit") from None
 
 
 async def _headers(login: str) -> dict[str, str]:
@@ -217,9 +217,9 @@ def _failure(response: httpx2.Response) -> ManagedToolsError:
             body = None
         return _credentials_required(body)
     if response.status_code in {401, 403}:
-        return ManagedToolsError("LangSmith refused access to this gateway")
+        return ManagedToolsError("LangSmith refused access to this tool kit")
     if response.status_code == 404:
-        return ManagedToolsError("The managed tools gateway no longer exists")
+        return ManagedToolsError("The tool kit no longer exists")
     return ManagedToolsError(f"Managed tools failed (HTTP {response.status_code}); retry later")
 
 
@@ -437,7 +437,7 @@ async def _with_session[T](
     except Exception as exc:
         if (found := _wrapped(exc, ManagedToolsError)) is not None:
             raise found from None
-        raise ManagedToolsError("Could not reach the managed tools gateway; retry later") from None
+        raise ManagedToolsError("Could not reach the tool kit; retry later") from None
 
 
 async def _listing(login: str, gateway: str) -> _Listing:
@@ -467,16 +467,25 @@ async def gateway_status(
 
     ``with_connected`` also names the services already connected, for settings pages.
     """
-    detail = await _gateway_detail(login, gateway)
-    listing = await _listing(login, gateway)
-    connected: list[ConnectedService] = []
-    if with_connected:
+
+    async def servers() -> dict[str, _Server]:
         try:
-            servers = await _servers(login)
+            return await _servers(login)
         except ManagedToolsError:
             logger.warning("Managed tools server names unavailable", exc_info=True)
-            servers = {}
-        connected = _connected_services(_sources(detail), servers, listing)
+            return {}
+
+    # Independent LangSmith reads; the tools/list fan-out dominates, so run them together.
+    if with_connected:
+        detail, listing, names = await asyncio.gather(
+            _gateway_detail(login, gateway), _listing(login, gateway), servers()
+        )
+        connected = _connected_services(_sources(detail), names, listing)
+    else:
+        detail, listing = await asyncio.gather(
+            _gateway_detail(login, gateway), _listing(login, gateway)
+        )
+        connected = []
     return GatewayStatus(
         gateway=_gateway(detail),
         ready=not listing.missing,
