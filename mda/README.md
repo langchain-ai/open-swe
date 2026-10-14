@@ -8,9 +8,10 @@ The model loop and its checkpoints run here. Everything else is the in-process O
 - **Phases:** `BackendRunMiddleware` hands each phase of the loop to the graph's own middleware on the backend:
   - `prepare`: before the run (preparation, transcript turn, skills, reply bookkeeping);
   - `before_model`: follow-up queue, event matches, proxy refresh, task coordination, model routing, a requested conversation offload, plus the system prompt and model for the call;
-  - `model_result`: the transcript and usage see each response;
+  - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;
   - `after_model`: reply nudges, which can send the loop back to the model;
   - `after_agent`: usage, transcript, step-limit notice, review-check settle.
+- **Subagents:** MDA runs `task` and its subagents. `RuntimeToolsMiddleware` reports each call to a tool MDA runs itself through `tool_started` and `tool_result`, so the transcript records the `task` call. Every call made from inside a subagent names the `task` call it runs in (`namespace`), and subagents hand their replies to `model_result` too. Their tool calls and replies therefore land under the `task` call, as in-process. Subagents start from the task alone: deepagents' `fork` mode would hand them this agent's middleware, `BackendRunMiddleware` included.
 - **State:** graph state those hooks write that MDA does not know rides in `open_swe_state` and goes back with every call. Custom stream events they emit are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
 

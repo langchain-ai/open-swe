@@ -16,6 +16,11 @@ own middleware, which the MDA run hands each phase of its loop to:
 - ``after_agent`` runs ``after_agent`` hooks: usage, transcript, step-limit notice,
   review-check settle
 - ``call`` runs one tool through the graph's tools node
+- ``tool_started`` and ``tool_result`` let the transcript record a tool MDA runs
+  itself, such as ``task``, whose subagent runs on MDA
+
+A call made from inside a subagent names the namespace of its ``task`` calls, so
+its tool calls and replies land under the subagent, as they do in-process.
 
 The graph's model-call shaping (caching, retries, fallback, summarization, call
 limits, provider sanitizers) is MDA's own. Graph state the hooks write that MDA
@@ -43,6 +48,7 @@ from langchain_core.messages import (
     AIMessage,
     AnyMessage,
     BaseMessage,
+    ToolCall,
     ToolMessage,
     convert_to_messages,
     messages_from_dict,
@@ -56,7 +62,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
-from openswe.middleware.transcript import TranscriptMiddleware
+from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -113,12 +119,20 @@ class HookBody(BaseModel):
     run_id: str | None = None
     messages: list[dict[str, JsonValue]] = []
     state: dict[str, JsonValue] = {}
+    # The ``task`` calls the run's subagent is nested in; empty for the agent itself.
+    namespace: list[str] = []
 
 
 class CallBody(HookBody):
     name: str
     arguments: dict[str, JsonValue] = {}
     tool_call_id: str
+
+
+class ToolResultBody(HookBody):
+    """The result of a tool call MDA ran itself, as a tool message."""
+
+    result: dict[str, JsonValue]
 
 
 def dump_messages(messages: Sequence[BaseMessage]) -> list[JsonValue]:
@@ -199,6 +213,15 @@ class CarriedAcrossProcesses(Protocol):
     async def aflush_run(self, runtime: Runtime) -> None: ...
 
 
+@runtime_checkable
+class RecordsRemoteTools(Protocol):
+    """Middleware that records the tool calls MDA runs itself, which never reach the tools node."""
+
+    async def atool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None: ...
+
+    async def atool_finished(self, result: ToolMessage) -> None: ...
+
+
 class RunSession:
     """One run's in-process graph: its tools node, middleware and models."""
 
@@ -230,6 +253,17 @@ class RunSession:
     async def flush(self, runtime: Runtime) -> None:
         for middleware in self._carried():
             await middleware.aflush_run(runtime)
+
+    def _tool_recorders(self) -> list[RecordsRemoteTools]:
+        return [m for m in self.surface.middleware if isinstance(m, RecordsRemoteTools)]
+
+    async def tool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
+        for middleware in self._tool_recorders():
+            await middleware.atool_started(tool_call, messages)
+
+    async def tool_finished(self, result: ToolMessage) -> None:
+        for middleware in self._tool_recorders():
+            await middleware.atool_finished(result)
 
     @property
     def models(self) -> SurfaceModels:
@@ -495,6 +529,10 @@ class RemoteGraph:
                 self.end(run, body.run_id)
         if hook == "model_result":
             return await self._model_result(session, raw, body)
+        if hook == "tool_started":
+            return await self._tool_started(session, CallBody.model_validate(raw))
+        if hook == "tool_result":
+            return await self._tool_result(session, ToolResultBody.model_validate(raw))
         raise UnknownHookError(hook)
 
     async def _phase(self, session: RunSession, phase: Phase, body: HookBody) -> JsonValue:
@@ -530,12 +568,41 @@ class RemoteGraph:
 
         async def observe(runtime: Runtime) -> list[BaseMessage]:
             await session.join(state, runtime)
-            observed = await session.observe(state, messages, runtime)
+            with within_namespace(body.namespace):
+                observed = await session.observe(state, messages, runtime)
             await session.flush(runtime)
             return observed
 
         observed = await in_graph_context(session.config, observe)
         return {"response": dump_messages(observed)}
+
+    async def _tool_started(self, session: RunSession, body: CallBody) -> JsonValue:
+        state = session.state(body)
+        tool_call = ToolCall(name=body.name, args=dict(body.arguments), id=body.tool_call_id)
+
+        async def record(runtime: Runtime) -> None:
+            await session.join(state, runtime)
+            with within_namespace(body.namespace):
+                await session.tool_started(tool_call, messages_from_dict(body.messages))
+            await session.flush(runtime)
+
+        await in_graph_context(session.config, record)
+        return {}
+
+    async def _tool_result(self, session: RunSession, body: ToolResultBody) -> JsonValue:
+        state = session.state(body)
+        [result] = messages_from_dict([body.result])
+        if not isinstance(result, ToolMessage):
+            raise ValueError("A tool result must be a tool message")
+
+        async def record(runtime: Runtime) -> None:
+            await session.join(state, runtime)
+            with within_namespace(body.namespace):
+                await session.tool_finished(result)
+            await session.flush(runtime)
+
+        await in_graph_context(session.config, record)
+        return {}
 
     async def _call(self, run: RemoteRun, body: CallBody) -> JsonValue:
         session = await self.session(run, body.run_id)
@@ -551,13 +618,14 @@ class RemoteGraph:
         state = session.state(body)
         await in_graph_context(session.config, partial(session.join, state))
         try:
-            result = await session.surface.run(
-                session.config,
-                state,
-                body.name,
-                body.arguments,
-                call_id=body.tool_call_id,
-            )
+            with within_namespace(body.namespace):
+                result = await session.surface.run(
+                    session.config,
+                    state,
+                    body.name,
+                    body.arguments,
+                    call_id=body.tool_call_id,
+                )
         except Exception as exc:
             # The graph's tool-error middleware turns tool failures into results;
             # what is left is a call that never reached a tool, such as bad arguments.
