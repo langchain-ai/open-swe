@@ -11,8 +11,8 @@ replaces it, and one such a replica deleted (a redeemed code, a revoked token)
 takes the copy with it unless this release has saved the entry since. An
 entry's save time is the ``created_at`` sealed inside it, which the key-value
 store sets on every put; an entry without one never replaces a copy. Expired
-entries are not copied; the Store's TTL sweeps them. Each collection goes to
-its own table; entries of a collection with no table stay in the Store.
+entries are not copied; the Store's TTL sweeps them. Entries of a collection
+with no spec stay in the Store.
 """
 
 import logging
@@ -23,7 +23,12 @@ from openswe.database.store_imports import (
     StoreImport,
     may_delete_store_copy,
 )
-from openswe.mcp.token_store import STORE_NAMESPACE, TABLES, SealedStore, delete_store_copies
+from openswe.mcp.token_store import (
+    COLLECTIONS,
+    STORE_NAMESPACE,
+    SealedStore,
+    delete_store_copies,
+)
 from openswe.store import delete_value, search_all_entries
 from openswe.utils.json_types import JsonObject
 
@@ -37,7 +42,7 @@ async def import_store_mcp_oauth_entries() -> StoreImport:
     present: set[tuple[str, str]] = set()
     for entry in await search_all_entries(STORE_NAMESPACE):
         match entry.namespace:
-            case [_, collection] if collection in TABLES:
+            case [_, collection] if collection in COLLECTIONS:
                 present.add((collection, entry.key))
                 result += await _import(store, collection, entry.key, entry.value)
             case _:

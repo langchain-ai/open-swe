@@ -24,9 +24,9 @@ from openswe.encryption import encrypt_token
 from openswe.mcp import import_oauth_entries
 from openswe.mcp.import_oauth_entries import import_store_mcp_oauth_entries
 from openswe.mcp.token_store import (
+    COLLECTIONS,
     STORE_NAMESPACE,
-    TABLES,
-    MCPOAuthUpstreamTokenRow,
+    MCPOAuthEntryRow,
     SealedStore,
     UnknownOAuthCollection,
 )
@@ -36,7 +36,7 @@ from tests.conftest import FakeStore
 _COLLECTION = "mcp-upstream-tokens"
 
 
-async def test_every_collection_the_oauth_proxy_uses_has_a_table() -> None:
+async def test_every_collection_the_oauth_proxy_uses_has_a_spec() -> None:
     proxy = GitHubProvider(
         client_id="client",
         client_secret="secret",
@@ -48,7 +48,7 @@ async def test_every_collection_the_oauth_proxy_uses_has_a_table() -> None:
         for adapter in vars(proxy).values()
         if isinstance(adapter, BasePydanticAdapter)
     }
-    assert used == set(TABLES)
+    assert used == set(COLLECTIONS)
     with pytest.raises(UnknownOAuthCollection):
         await SealedStore().get("key", collection="mcp-added-by-an-upgrade")
 
@@ -102,15 +102,13 @@ async def test_entries_read_as_absent_once_expired_and_later_writes_sweep_them(
     assert await _token("lapsing") == "secret"
     async with postgres.session() as session:
         await session.execute(
-            update(MCPOAuthUpstreamTokenRow).values(
-                expires_at=datetime.now(UTC) - timedelta(seconds=1)
-            )
+            update(MCPOAuthEntryRow).values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
         )
 
     assert await _token("lapsing") is None
     await sealed_store.put("other", {"token": "other"}, collection=_COLLECTION)
     async with postgres.session() as session:
-        assert list(await session.scalars(select(MCPOAuthUpstreamTokenRow.key))) == ["other"]
+        assert list(await session.scalars(select(MCPOAuthEntryRow.key))) == ["other"]
 
 
 async def _saved_document[ModelT: BaseModel](
@@ -121,9 +119,12 @@ async def _saved_document[ModelT: BaseModel](
         key_value=SealedStore(), pydantic_model=type(model), default_collection=collection
     )
     await adapter.put(key, model, ttl=600)
-    table = TABLES[collection]
     async with postgres.session() as session:
-        entry = (await session.execute(select(table.entry))).scalar_one()
+        entry = (
+            await session.execute(
+                select(MCPOAuthEntryRow.entry).where(MCPOAuthEntryRow.collection == collection)
+            )
+        ).scalar_one()
     return await adapter.get(key), json.dumps(entry)
 
 

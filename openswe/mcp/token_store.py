@@ -1,25 +1,25 @@
 """Where the MCP server's OAuth proxy keeps client registrations and tokens.
 
-Every replica answers any OAuth step, so the state lives in PostgreSQL, one
-table per collection the proxy uses. Each row's ``entry`` is the whole
-key-value entry as a readable document; every field of the stored model that
-its table does not list as plaintext is sealed with ``TOKEN_ENCRYPTION_KEY``,
-so a field a FastMCP upgrade adds is sealed until someone reviews it. An entry
-reads as absent once it expires, and each write sweeps a few expired rows from
-its table.
+Every replica answers any OAuth step, so the state lives in PostgreSQL. Each
+row's ``entry`` is the whole key-value entry as a readable document; every
+field of the stored model that its collection does not list as plaintext is
+sealed with ``TOKEN_ENCRYPTION_KEY``, so a field a FastMCP upgrade adds is
+sealed until someone reviews it. An entry reads as absent once it expires, and
+each write sweeps a few expired rows.
 """
 
 import hashlib
 import json
 import logging
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from datetime import datetime
-from typing import ClassVar, Final, override
+from typing import Final, override
 from uuid import UUID, uuid7
 
 from key_value.aio.errors import DeserializationError
 from key_value.aio.stores.base import BaseStore, ManagedEntry
-from sqlalchemy import ColumnElement, Computed, ForeignKey, delete, func, or_, select
+from sqlalchemy import ColumnElement, Computed, ForeignKey, and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,20 +36,15 @@ STORE_NAMESPACE: Final = ("mcp_server_oauth",)
 _SWEEP_LIMIT: Final = 100
 
 
-class MCPOAuthRow(Base):
-    """One entry of a collection; each collection has a table of its own."""
-
-    __abstract__ = True
-
-    collection: ClassVar[str]
-    # The stored model's fields kept readable; every other one is sealed.
-    plaintext: ClassVar[frozenset[str]]
-    # Whether the entry's key is itself a credential, kept only as its SHA-256.
-    hashes_key: ClassVar[bool] = False
+class MCPOAuthEntryRow(Base):
+    __tablename__ = "mcp_oauth_entry"
 
     entry: Mapped[JsonObject] = mapped_column(JSONB)
     expires_at: Mapped[datetime | None]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    collection: Mapped[str] = mapped_column(
+        Computed("entry->>'collection'", persisted=True), init=False
+    )
     key: Mapped[str] = mapped_column(Computed("entry->>'key'", persisted=True), init=False)
     copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -62,21 +57,35 @@ class MCPOAuthRow(Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
 
-    @classmethod
-    def stored_key(cls, key: str) -> str:
-        return hashlib.sha256(key.encode()).hexdigest() if cls.hashes_key else key
 
-    @classmethod
-    def seal(cls, value: JsonObject) -> JsonObject:
+@dataclass(frozen=True)
+class OAuthCollection:
+    """How one collection's entries are stored."""
+
+    name: str
+    # The stored model's fields kept readable; every other one is sealed.
+    plaintext: frozenset[str]
+    # Whether the entry's key is itself a credential, kept only as its SHA-256.
+    hashes_key: bool = False
+
+    def stored_key(self, key: str) -> str:
+        return hashlib.sha256(key.encode()).hexdigest() if self.hashes_key else key
+
+    def row(self, key: str) -> ColumnElement[bool]:
+        return and_(
+            MCPOAuthEntryRow.collection == self.name,
+            MCPOAuthEntryRow.key == self.stored_key(key),
+        )
+
+    def seal(self, value: JsonObject) -> JsonObject:
         return {
             name: field
-            if name in cls.plaintext or field is None
+            if name in self.plaintext or field is None
             else {"sealed": encrypt_token(json.dumps(field))}
             for name, field in value.items()
         }
 
-    @classmethod
-    def open(cls, value: JsonObject) -> JsonObject | None:
+    def open(self, value: JsonObject) -> JsonObject | None:
         """``value`` with its sealed fields opened, or ``None`` if one does not open."""
         opened: JsonObject = {}
         for name, field in value.items():
@@ -86,144 +95,120 @@ class MCPOAuthRow(Base):
                     if not text:
                         return None
                     opened[name] = json.loads(text)
-                case _ if name in cls.plaintext or field is None:
+                case _ if name in self.plaintext or field is None:
                     opened[name] = field
                 case _:
                     logger.warning(
                         "MCP OAuth entry has an unsealed secret field",
-                        extra={"oauth_collection": cls.collection, "oauth_field": name},
+                        extra={"oauth_collection": self.name, "oauth_field": name},
                     )
                     return None
         return opened
 
 
-class MCPOAuthClientRow(MCPOAuthRow):
-    __tablename__ = "mcp_oauth_client"
-    collection = "mcp-oauth-proxy-clients"
-    plaintext = frozenset(
-        {
-            "client_id",
-            "client_name",
-            "client_uri",
-            "logo_uri",
-            "tos_uri",
-            "policy_uri",
-            "jwks_uri",
-            "redirect_uris",
-            "allowed_redirect_uri_patterns",
-            "grant_types",
-            "response_types",
-            "scope",
-            "token_endpoint_auth_method",
-            "application_type",
-            "client_id_issued_at",
-            "client_secret_expires_at",
-            "issuer",
-            "software_id",
-            "software_version",
-            "cimd_fetched_at",
-        }
-    )
-
-
-class MCPOAuthTransactionRow(MCPOAuthRow):
-    __tablename__ = "mcp_oauth_transaction"
-    collection = "mcp-oauth-transactions"
-    plaintext = frozenset(
-        {
-            "txn_id",
-            "client_id",
-            "client_redirect_uri",
-            "code_challenge",
-            "code_challenge_method",
-            "scopes",
-            "created_at",
-            "resource",
-            "csrf_expires_at",
-        }
-    )
-
-
-class MCPOAuthAuthorizationCodeRow(MCPOAuthRow):
-    __tablename__ = "mcp_oauth_authorization_code"
-    collection = "mcp-authorization-codes"
-    plaintext = frozenset(
-        {
-            "client_id",
-            "redirect_uri",
-            "code_challenge",
-            "code_challenge_method",
-            "scopes",
-            "expires_at",
-            "created_at",
-        }
-    )
-    # The proxy keys a code by the code itself.
-    hashes_key = True
-
-
-class MCPOAuthUpstreamTokenRow(MCPOAuthRow):
-    __tablename__ = "mcp_oauth_upstream_token"
-    collection = "mcp-upstream-tokens"
-    plaintext = frozenset(
-        {
-            "upstream_token_id",
-            "refresh_token_expires_at",
-            "expires_at",
-            "token_type",
-            "scope",
-            "client_id",
-            "created_at",
-        }
-    )
-
-
-class MCPOAuthRefreshTokenRow(MCPOAuthRow):
-    __tablename__ = "mcp_oauth_refresh_token"
-    collection = "mcp-refresh-tokens"
-    plaintext = frozenset({"client_id", "scopes", "expires_at", "created_at"})
-
-
-class MCPOAuthJTIMappingRow(MCPOAuthRow):
-    __tablename__ = "mcp_oauth_jti_mapping"
-    collection = "mcp-jti-mappings"
-    plaintext = frozenset({"jti", "upstream_token_id", "created_at"})
-
-
-class MCPOAuthConsentCSRFTokenRow(MCPOAuthRow):
-    __tablename__ = "mcp_oauth_consent_csrf_token"
-    collection = "mcp-consent-csrf-tokens"
-    plaintext = frozenset({"txn_id", "expires_at"})
-
-
-# The collections FastMCP's OAuth proxy keeps its state in.
-TABLES: Final[Mapping[str, type[MCPOAuthRow]]] = {
-    table.collection: table
-    for table in (
-        MCPOAuthClientRow,
-        MCPOAuthTransactionRow,
-        MCPOAuthAuthorizationCodeRow,
-        MCPOAuthUpstreamTokenRow,
-        MCPOAuthRefreshTokenRow,
-        MCPOAuthJTIMappingRow,
-        MCPOAuthConsentCSRFTokenRow,
+# The collections FastMCP's OAuth proxy keeps its state in; the table's check
+# constraint lists the same names.
+COLLECTIONS: Final[Mapping[str, OAuthCollection]] = {
+    collection.name: collection
+    for collection in (
+        OAuthCollection(
+            "mcp-oauth-proxy-clients",
+            frozenset(
+                {
+                    "client_id",
+                    "client_name",
+                    "client_uri",
+                    "logo_uri",
+                    "tos_uri",
+                    "policy_uri",
+                    "jwks_uri",
+                    "redirect_uris",
+                    "allowed_redirect_uri_patterns",
+                    "grant_types",
+                    "response_types",
+                    "scope",
+                    "token_endpoint_auth_method",
+                    "application_type",
+                    "client_id_issued_at",
+                    "client_secret_expires_at",
+                    "issuer",
+                    "software_id",
+                    "software_version",
+                    "cimd_fetched_at",
+                }
+            ),
+        ),
+        OAuthCollection(
+            "mcp-oauth-transactions",
+            frozenset(
+                {
+                    "txn_id",
+                    "client_id",
+                    "client_redirect_uri",
+                    "code_challenge",
+                    "code_challenge_method",
+                    "scopes",
+                    "created_at",
+                    "resource",
+                    "csrf_expires_at",
+                }
+            ),
+        ),
+        # The proxy keys a code by the code itself.
+        OAuthCollection(
+            "mcp-authorization-codes",
+            frozenset(
+                {
+                    "client_id",
+                    "redirect_uri",
+                    "code_challenge",
+                    "code_challenge_method",
+                    "scopes",
+                    "expires_at",
+                    "created_at",
+                }
+            ),
+            hashes_key=True,
+        ),
+        OAuthCollection(
+            "mcp-upstream-tokens",
+            frozenset(
+                {
+                    "upstream_token_id",
+                    "refresh_token_expires_at",
+                    "expires_at",
+                    "token_type",
+                    "scope",
+                    "client_id",
+                    "created_at",
+                }
+            ),
+        ),
+        OAuthCollection(
+            "mcp-refresh-tokens", frozenset({"client_id", "scopes", "expires_at", "created_at"})
+        ),
+        OAuthCollection("mcp-jti-mappings", frozenset({"jti", "upstream_token_id", "created_at"})),
+        OAuthCollection("mcp-consent-csrf-tokens", frozenset({"txn_id", "expires_at"})),
     )
 }
 
 
 class UnknownOAuthCollection(LookupError):
-    """A collection with no table, such as one a FastMCP upgrade added."""
+    """A collection with no spec, such as one a FastMCP upgrade added."""
 
 
-def table_for(collection: str) -> type[MCPOAuthRow]:
+def collection_for(name: str) -> OAuthCollection:
     try:
-        return TABLES[collection]
+        return COLLECTIONS[name]
     except KeyError:
-        raise UnknownOAuthCollection(collection) from None
+        raise UnknownOAuthCollection(name) from None
 
 
-def _live(table: type[MCPOAuthRow]) -> ColumnElement[bool]:
-    return or_(table.expires_at.is_(None), table.expires_at > func.clock_timestamp())
+def _live() -> ColumnElement[bool]:
+    return or_(
+        MCPOAuthEntryRow.expires_at.is_(None),
+        MCPOAuthEntryRow.expires_at > func.clock_timestamp(),
+    )
 
 
 class SealedStore(BaseStore):
@@ -243,15 +228,15 @@ class SealedStore(BaseStore):
 
     @override
     async def _get_managed_entry(self, *, collection: str, key: str) -> ManagedEntry | None:
-        table = table_for(collection)
+        spec = collection_for(collection)
         async with postgres.session() as session:
             document = await session.scalar(
-                select(table.entry).where(table.key == table.stored_key(key), _live(table))
+                select(MCPOAuthEntryRow.entry).where(spec.row(key), _live())
             )
         if document is None:
             return None
         value = document.get("value")
-        opened = table.open(value) if isinstance(value, dict) else None
+        opened = spec.open(value) if isinstance(value, dict) else None
         # An entry that no longer opens reads as absent, so the client signs in again.
         if opened is None:
             return None
@@ -267,20 +252,20 @@ class SealedStore(BaseStore):
     async def save(
         self, collection: str, key: str, managed_entry: ManagedEntry, *, store_copy: bool = False
     ) -> None:
-        table = table_for(collection)
+        spec = collection_for(collection)
         document = self._serialization_adapter.dump_dict(
-            managed_entry, key=table.stored_key(key), collection=collection
+            managed_entry, key=spec.stored_key(key), collection=spec.name
         )
-        document["value"] = table.seal(managed_entry.value_as_dict)
+        document["value"] = spec.seal(managed_entry.value_as_dict)
         async with postgres.session() as session:
             expired = (
-                select(table.id)
-                .where(table.expires_at <= func.clock_timestamp())
+                select(MCPOAuthEntryRow.id)
+                .where(MCPOAuthEntryRow.expires_at <= func.clock_timestamp())
                 .limit(_SWEEP_LIMIT)
                 .with_for_update(skip_locked=True)
             )
-            await session.execute(delete(table).where(table.id.in_(expired)))
-            upsert = insert(table).values(
+            await session.execute(delete(MCPOAuthEntryRow).where(MCPOAuthEntryRow.id.in_(expired)))
+            upsert = insert(MCPOAuthEntryRow).values(
                 id=uuid7(),
                 entry=document,
                 expires_at=managed_entry.expires_at,
@@ -288,7 +273,7 @@ class SealedStore(BaseStore):
             )
             await session.execute(
                 upsert.on_conflict_do_update(
-                    index_elements=[table.key],
+                    index_elements=[MCPOAuthEntryRow.collection, MCPOAuthEntryRow.key],
                     set_={
                         "entry": document,
                         "expires_at": managed_entry.expires_at,
@@ -301,21 +286,19 @@ class SealedStore(BaseStore):
 
     @override
     async def _delete_managed_entry(self, *, key: str, collection: str) -> bool:
-        table = table_for(collection)
+        spec = collection_for(collection)
         await _delete_store_copy(collection, key)
         async with postgres.session() as session:
             existed = await session.scalar(
-                delete(table).where(table.key == table.stored_key(key)).returning(_live(table))
+                delete(MCPOAuthEntryRow).where(spec.row(key)).returning(_live())
             )
         return bool(existed)
 
     async def written_at(self, collection: str, key: str) -> datetime | None:
         """When PostgreSQL last wrote the entry, which the Store import compares against."""
-        table = table_for(collection)
+        spec = collection_for(collection)
         async with postgres.session() as session:
-            return await session.scalar(
-                select(table.updated_at).where(table.key == table.stored_key(key))
-            )
+            return await session.scalar(select(MCPOAuthEntryRow.updated_at).where(spec.row(key)))
 
 
 async def _delete_store_copy(collection: str, key: str) -> None:
@@ -329,21 +312,23 @@ async def delete_store_copies(present: Collection[tuple[str, str]], copied_after
 
     A replica of the previous release deletes an entry only from the Store.
     """
-    deleted = 0
+    kept = {
+        (collection, COLLECTIONS[collection].stored_key(key))
+        for collection, key in present
+        if collection in COLLECTIONS
+    }
     async with postgres.session() as session:
-        for collection, table in TABLES.items():
-            kept = {table.stored_key(key) for name, key in present if name == collection}
-            copies = await session.execute(
-                select(table.id, table.key).where(
-                    table.copied_from_store, table.updated_at > copied_after
-                )
+        copies = await session.execute(
+            select(MCPOAuthEntryRow.id, MCPOAuthEntryRow.collection, MCPOAuthEntryRow.key).where(
+                MCPOAuthEntryRow.copied_from_store, MCPOAuthEntryRow.updated_at > copied_after
             )
-            gone = [row_id for row_id, key in copies if key not in kept]
-            if gone:
-                removed = await session.scalars(
-                    delete(table)
-                    .where(table.id.in_(gone), table.copied_from_store)
-                    .returning(table.id)
-                )
-                deleted += len(removed.all())
-    return deleted
+        )
+        gone = [row_id for row_id, collection, key in copies if (collection, key) not in kept]
+        if not gone:
+            return 0
+        deleted = await session.scalars(
+            delete(MCPOAuthEntryRow)
+            .where(MCPOAuthEntryRow.id.in_(gone), MCPOAuthEntryRow.copied_from_store)
+            .returning(MCPOAuthEntryRow.id)
+        )
+        return len(deleted.all())
