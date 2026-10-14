@@ -37,16 +37,11 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
-    outputs:
-      previous_sha: ${{ steps.previous.outputs.sha }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.typecheck.outputs.sha }}
           fetch-depth: 0
-      - name: Record what prod pointed at
-        id: previous
-        run: echo "sha=$(git rev-parse origin/prod)" >> "$GITHUB_OUTPUT"
       - name: Force-push the typechecked commit to prod and summarize released PRs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -90,7 +85,6 @@ jobs:
     with:
       environment: prod
       ref: ${{ needs.typecheck.outputs.sha }}
-      base_ref: ${{ needs.promote.outputs.previous_sha }}
     secrets: inherit
 
   release-desktop-nightly:

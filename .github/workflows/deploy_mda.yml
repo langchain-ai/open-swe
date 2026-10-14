@@ -2,6 +2,8 @@ name: Deploy Managed Deep Agents
 
 # Deploys mda/openswe to the open-swe-mda-* deployments the backends' MDA_RUNTIME_URL
 # points at. Staging and preview follow main; prod follows the promotion to prod.
+# A deployment is skipped when nothing it runs changed since its mda-deployed/<env>
+# tag, which a successful deploy moves, so a failed one is retried next time.
 # Only commits already on main are deployed: `mda deploy` can run project code
 # while it holds the workspace deploy key, so the preview tree's labeled PRs never
 # reach this workflow.
@@ -28,19 +30,17 @@ on:
         description: Commit to deploy
         type: string
         required: true
-      base_ref:
-        description: Skip the deploy when mda/openswe is unchanged since this commit
-        type: string
-        required: false
-        default: ""
 
 permissions:
-  contents: read
+  # Moves the mda-deployed/<environment> tag to what each deployment runs.
+  contents: write
 
 jobs:
   deploy:
     name: Deploy open-swe-mda-${{ matrix.environment }}
-    if: github.repository == 'langchain-ai/open-swe'
+    if: >-
+      github.repository == 'langchain-ai/open-swe'
+      && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -56,14 +56,23 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Check whether mda/openswe changed
+      - name: Refuse commits that are not on main
+        run: |
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "::error::$(git rev-parse HEAD) is not on main; only main is deployed."
+            exit 1
+          }
+      - name: Check whether the deployment is behind
         id: changed
         env:
-          BASE_REF: ${{ inputs.base_ref }}
+          DEPLOYED_TAG: mda-deployed/${{ matrix.environment }}
         run: |
-          if [[ -n "$BASE_REF" ]] && git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null \
-            && git diff --quiet "$BASE_REF" HEAD -- mda/openswe; then
-            echo "mda/openswe is unchanged since $BASE_REF; nothing to deploy."
+          if [[ ! -d mda/openswe ]]; then
+            echo "mda/openswe does not exist at this commit; nothing to deploy."
+            echo "deploy=false" >>"$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda/openswe .github/workflows/deploy_mda.yml; then
+            echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           else
             echo "deploy=true" >>"$GITHUB_OUTPUT"
@@ -95,3 +104,12 @@ jobs:
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
             --context-strategy overwrite \
             --yes
+      - name: Record what the deployment runs
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          DEPLOYED_TAG: mda-deployed/${{ matrix.environment }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" \
+            "HEAD:refs/tags/${DEPLOYED_TAG}"
