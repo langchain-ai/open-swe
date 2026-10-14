@@ -5,6 +5,7 @@ const SECTION_STORAGE_PREFIX = "open-swe:last-section-location:"
 const FALLBACK_LOCATION = "/agents"
 
 export const SECTION_ROOTS = [
+  "/agents/inbox",
   "/agents/skills",
   "/agents/automations",
   "/agents/bots",

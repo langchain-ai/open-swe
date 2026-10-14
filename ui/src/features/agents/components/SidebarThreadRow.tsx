@@ -127,7 +127,7 @@ const PR_STATE_META: Record<
 }
 
 /** Codex-style compact age ("17m", "3h", "2d") — the tooltip has no room for prose. */
-function compactAge(timestamp: number): string {
+export function compactAge(timestamp: number): string {
   const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000))
   if (minutes < 1) return "now"
   if (minutes < 60) return `${minutes}m`
@@ -218,7 +218,7 @@ function SidebarRowTitle({
   )
 }
 
-function sidebarRowClassName({
+export function sidebarRowClassName({
   compact,
   active,
   paddingLeft,
@@ -574,16 +574,20 @@ export function SidebarThreadRow({
     archived,
   })
 
+  const linkProps = {
+    onKeyDown: openContextMenuFromKeyboard,
+    className: rowClassName,
+    "data-sidebar-thread": item.key,
+  }
   const review = item.reviewPage
   const link = review ? (
     <Link
       {...reviewPageRoute(review)}
+      {...linkProps}
       onClick={(event) => {
         noteReviewOpenedFromSidebar(review)
         handleNavigate(event)
       }}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
     >
       {rowContent}
     </Link>
@@ -591,9 +595,8 @@ export function SidebarThreadRow({
     <Link
       to={chat.thread}
       params={{ threadId: item.id }}
+      {...linkProps}
       onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
     >
       {rowContent}
     </Link>
@@ -601,9 +604,8 @@ export function SidebarThreadRow({
     <Link
       to="/agents/local/$sessionId"
       params={{ sessionId: item.id }}
+      {...linkProps}
       onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
     >
       {rowContent}
     </Link>

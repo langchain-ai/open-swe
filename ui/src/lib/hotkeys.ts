@@ -124,6 +124,8 @@ function shortcutKeyLabel(key: string): string {
     enter: "Enter",
     space: "Space",
     tab: "Tab",
+    arrowup: "↑",
+    arrowdown: "↓",
   }
   return labels[key] ?? (key.length === 1 ? key.toUpperCase() : key)
 }

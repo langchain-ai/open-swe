@@ -19,6 +19,7 @@ from openswe.dashboard.workspace_settings import router as workspace_settings_ro
 from openswe.github.dashboard_routes import router as repos_router
 from openswe.github.pull_request_dashboard_routes import router as pull_requests_router
 from openswe.human_review.routes import router as human_review_router
+from openswe.inbox.routes import router as inbox_router
 from openswe.incidents.document_routes import router as incident_documents_router
 from openswe.incidents.routes import router as incidents_router
 from openswe.mcp.routes import router as mcp_router
@@ -63,6 +64,7 @@ router.include_router(analytics_router)
 router.include_router(audit_logs_router)
 router.include_router(schedules_router)
 router.include_router(threads_router)
+router.include_router(inbox_router)
 router.include_router(transcript_router)
 router.include_router(api_keys_router)
 router.include_router(bridge_router)
