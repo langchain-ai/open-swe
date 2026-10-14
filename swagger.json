@@ -4112,6 +4112,17 @@
             ],
             "title": "Review Draft Prs"
           },
+          "run_on_mda": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run On Mda"
+          },
           "slack_onboarding_dismissed": {
             "default": false,
             "title": "Slack Onboarding Dismissed",
@@ -7851,6 +7862,17 @@
               }
             ],
             "title": "Review Trace Links"
+          },
+          "run_on_mda": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run On Mda"
           },
           "sandbox_openai_enabled": {
             "agent_feature_flag": true,

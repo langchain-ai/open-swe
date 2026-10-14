@@ -73,13 +73,13 @@ jobs:
         run: make typecheck
 
   mda-boundary:
-    name: MDA reviewer import boundary
+    name: MDA import boundary
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: Check the reviewer imports nothing from the backend
+      - name: Check the MDA project imports nothing from the backend
         run: make mda-boundary
 
   unit-tests:

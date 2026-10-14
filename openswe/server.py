@@ -181,7 +181,14 @@ from openswe.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
 )
 from openswe.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
-from openswe.sandboxes.tool_runtime import ToolSurface, save_tool_context
+from openswe.sandboxes.tool_runtime import (
+    FILESYSTEM_TOOL_NAMES,
+    ModelChoice,
+    SurfaceModels,
+    SurfaceSubagent,
+    ToolSurface,
+    save_tool_context,
+)
 from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
@@ -684,6 +691,26 @@ class _SubagentToolGuard(AgentMiddleware):
         return await handler(request)
 
 
+def fallback_model_choice(primary_model_id: str) -> ModelChoice | None:
+    """The cross-provider model a call on ``primary_model_id`` falls back to, if any."""
+    fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(
+        primary_model_id
+    )
+    if not fallback_model_id or fallback_model_id == primary_model_id:
+        return None
+    kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+    if fallback_model_id.startswith("openai:"):
+        kwargs["reasoning"] = DEFAULT_LLM_REASONING
+    return ModelChoice(fallback_model_id, kwargs)
+
+
+def _general_purpose_description() -> str:
+    return (
+        f"{GENERAL_PURPOSE_SUBAGENT['description']} "
+        f"{prompt('system/general-purpose-subagent-suffix')}"
+    )
+
+
 def _general_purpose_subagent(
     model: BaseChatModel,
     tools: Sequence[Any],
@@ -697,10 +724,7 @@ def _general_purpose_subagent(
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
-        "description": (
-            f"{GENERAL_PURPOSE_SUBAGENT['description']} "
-            f"{prompt('system/general-purpose-subagent-suffix')}"
-        ),
+        "description": _general_purpose_description(),
         "mode": "fork",
         "model": model,
         "tools": list(tools),
@@ -1721,19 +1745,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     )
 
     def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
-        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(
-            primary_model_id
-        )
-        if not fallback_model_id or fallback_model_id == primary_model_id:
+        fallback = fallback_model_choice(primary_model_id)
+        if fallback is None:
             return None
-        fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-        if fallback_model_id.startswith("openai:"):
-            fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
         logger.info(
             "Configured model fallback",
-            extra={"primary_model_id": primary_model_id, "fallback_model_id": fallback_model_id},
+            extra={"primary_model_id": primary_model_id, "fallback_model_id": fallback.model_id},
         )
-        return _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
+        return _make_model_or_defer(fallback.model_id, use_gateway=use_gateway, **fallback.kwargs)
 
     fallback_middleware = ModelFallbackMiddleware(make_fallback_model(model_id))
 
@@ -2089,6 +2108,117 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if credential_login is None and not local_run
         else None
     )
+    run_preparation = PrepareAgentRunMiddleware(
+        credential_login=credential_login,
+        thread_id=thread_id,
+        config=config,
+        profile_login=profile_login,
+        repo_instructions=repo_instructions,
+        model_id=model_id,
+        effort=profile_effort,
+        title_model=title_model,
+        source=source,
+        user_email=user_email,
+        linear_project_id=linear_project_id,
+        linear_issue_number=linear_issue_number,
+        draft_prs=sender_draft_prs,
+        recent_thread_context_enabled=(
+            sender_profile.get("recent_thread_context_enabled") is True if sender_profile else False
+        ),
+        admin_workspaces=admin_thread,
+        sole_writer=tool_access.sole,
+        model_selection=model_selection,
+        routing_defaults=routing_defaults,
+        requested_models=requested_models,
+        saved_requested_model=thread_settings.get("requested_model"),
+        bridge_client=bridge_client,
+        prefer_tools_in_sandbox=prefer_tools_in_sandbox,
+    )
+    subagent_tools = [
+        tool
+        for tool in static_tools
+        if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
+        and _registered_tool_name(tool) not in sandbox_only_tools
+    ]
+    middleware = cast(
+        list[AgentMiddleware[Any, Any, Any]],
+        [
+            FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
+            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
+            ConversationOffloadingMiddleware(
+                main_model, agent_backend, manual=cfg.offload_conversation is True
+            ),
+            run_preparation,
+            *(
+                [ReviewGuideMiddleware(thread_id=thread_id, approve_ts=cfg.review_guide_approve_ts)]
+                if guide is not None
+                else []
+            ),
+            TranscriptMiddleware(),
+            *([client_tools] if client_tools else []),
+            *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
+            *([workspace_skills] if workspace_skills else []),
+            ValidateImageReadsMiddleware(),
+            ModelCallLimitMiddleware(
+                run_limit=incident_session.policy.max_model_calls
+                if incident_session is not None
+                else MODEL_CALL_RECURSION_LIMIT,
+                exit_behavior="end",
+            ),
+            ToolErrorMiddleware(),
+            ExcludeToolsMiddleware(excluded=excluded_tools),
+            SubdirAgentsReadMiddleware(),
+            ToolRetryMiddleware(
+                max_retries=2,
+                tools=["task"],
+                retry_on=task_retry_on,
+                on_failure=task_on_failure,
+                initial_delay=1.0,
+                max_delay=10.0,
+            ),
+            *([] if local_run else [PullRequestCreationGuardMiddleware()]),
+            WorkflowPushGuardMiddleware(),
+            *([task_coordination] if task_coordination else []),
+            *(
+                []
+                if task_coordination and task_coordination.is_worker
+                else [refresh_github_proxy_before_model]
+            ),
+            *(
+                []
+                if stop_summary_mode
+                else [check_message_queue_before_model, deliver_event_matches_before_model]
+            ),
+            RequireUserReplyMiddleware(
+                _registered_tool_name(slack_reply),
+                _registered_tool_name(slack_no_reply_needed),
+                initial_surface=(
+                    _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
+                ),
+                replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
+            ),
+            *(
+                [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
+                if cli_result_required
+                else []
+            ),
+            notify_step_limit_reached,
+            record_run_usage,
+            model_selection,
+            fallback_middleware,
+            *([image_fallback] if image_fallback else []),
+            *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+            *([mcp_ptc] if mcp_ptc is not None else []),
+            SanitizeFireworksMessagesMiddleware(),
+            SanitizeOpenAIResponsesMiddleware(),
+            SanitizeThinkingBlocksMiddleware(),
+            StableToolResultOrderMiddleware(),
+            ModelErrorMiddleware(),
+            # Innermost, so the deadline covers the provider call itself and a
+            # timeout escalates outward to the fallback model.
+            ModelCallTimeoutMiddleware(),
+        ],
+    )
     async with aphase(thread_id, "factory.graph_assembly"):
         graph = create_deep_agent(
             model=main_model,
@@ -2097,12 +2227,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
-                    tools=[
-                        tool
-                        for tool in static_tools
-                        if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
-                        and _registered_tool_name(tool) not in sandbox_only_tools
-                    ],
+                    tools=subagent_tools,
                     workspace_skills=workspace_skills,
                     dynamic_tools=full_dynamic_tools,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
@@ -2121,123 +2246,43 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skills=skill_sources,
             backend=agent_backend,
             state_schema=DesktopAgentState if local_run else None,
-            middleware=cast(
-                list[AgentMiddleware[Any, Any, Any]],
-                [
-                    FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
-                    AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-                    ConversationOffloadingMiddleware(
-                        main_model, agent_backend, manual=cfg.offload_conversation is True
-                    ),
-                    PrepareAgentRunMiddleware(
-                        credential_login=credential_login,
-                        thread_id=thread_id,
-                        config=config,
-                        profile_login=profile_login,
-                        repo_instructions=repo_instructions,
-                        model_id=model_id,
-                        effort=profile_effort,
-                        title_model=title_model,
-                        source=source,
-                        user_email=user_email,
-                        linear_project_id=linear_project_id,
-                        linear_issue_number=linear_issue_number,
-                        draft_prs=sender_draft_prs,
-                        recent_thread_context_enabled=(
-                            sender_profile.get("recent_thread_context_enabled") is True
-                            if sender_profile
-                            else False
-                        ),
-                        admin_workspaces=admin_thread,
-                        sole_writer=tool_access.sole,
-                        model_selection=model_selection,
-                        routing_defaults=routing_defaults,
-                        requested_models=requested_models,
-                        saved_requested_model=thread_settings.get("requested_model"),
-                        bridge_client=bridge_client,
-                        prefer_tools_in_sandbox=prefer_tools_in_sandbox,
-                    ),
-                    *(
-                        [
-                            ReviewGuideMiddleware(
-                                thread_id=thread_id, approve_ts=cfg.review_guide_approve_ts
-                            )
-                        ]
-                        if guide is not None
-                        else []
-                    ),
-                    TranscriptMiddleware(),
-                    *([client_tools] if client_tools else []),
-                    *(
-                        [IncidentMiddleware(incident_session)]
-                        if incident_session is not None
-                        else []
-                    ),
-                    *([workspace_skills] if workspace_skills else []),
-                    ValidateImageReadsMiddleware(),
-                    ModelCallLimitMiddleware(
-                        run_limit=incident_session.policy.max_model_calls
-                        if incident_session is not None
-                        else MODEL_CALL_RECURSION_LIMIT,
-                        exit_behavior="end",
-                    ),
-                    ToolErrorMiddleware(),
-                    ExcludeToolsMiddleware(excluded=excluded_tools),
-                    SubdirAgentsReadMiddleware(),
-                    ToolRetryMiddleware(
-                        max_retries=2,
-                        tools=["task"],
-                        retry_on=task_retry_on,
-                        on_failure=task_on_failure,
-                        initial_delay=1.0,
-                        max_delay=10.0,
-                    ),
-                    *([] if local_run else [PullRequestCreationGuardMiddleware()]),
-                    WorkflowPushGuardMiddleware(),
-                    *([task_coordination] if task_coordination else []),
-                    *(
-                        []
-                        if task_coordination and task_coordination.is_worker
-                        else [refresh_github_proxy_before_model]
-                    ),
-                    *(
-                        []
-                        if stop_summary_mode
-                        else [check_message_queue_before_model, deliver_event_matches_before_model]
-                    ),
-                    RequireUserReplyMiddleware(
-                        _registered_tool_name(slack_reply),
-                        _registered_tool_name(slack_no_reply_needed),
-                        initial_surface=(
-                            _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
-                        ),
-                        replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
-                    ),
-                    *(
-                        [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
-                        if cli_result_required
-                        else []
-                    ),
-                    notify_step_limit_reached,
-                    record_run_usage,
-                    model_selection,
-                    fallback_middleware,
-                    *([image_fallback] if image_fallback else []),
-                    *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-                    *([mcp_ptc] if mcp_ptc is not None else []),
-                    SanitizeFireworksMessagesMiddleware(),
-                    SanitizeOpenAIResponsesMiddleware(),
-                    SanitizeThinkingBlocksMiddleware(),
-                    StableToolResultOrderMiddleware(),
-                    ModelErrorMiddleware(),
-                    # Innermost, so the deadline covers the provider call itself and a
-                    # timeout escalates outward to the fallback model.
-                    ModelCallTimeoutMiddleware(),
-                ],
-            ),
+            middleware=middleware,
         ).with_config(bindable_config(config))
     if tool_surface is not None:
         tool_surface.graph = graph
+        tool_surface.middleware = middleware
+        tool_surface.models = SurfaceModels(
+            main=ModelChoice(model_id, dict(model_kwargs)),
+            subagent=ModelChoice(subagent_model_id, dict(subagent_model_kwargs)),
+            use_gateway=bool(use_gateway),
+            routes={
+                route: ModelChoice(
+                    routed_model_id,
+                    dict(
+                        provider_model_kwargs(
+                            routed_model_id, effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                        )
+                    ),
+                )
+                for route, (routed_model_id, effort) in routing_defaults.items()
+                if adaptive_model_routing
+            },
+        )
+        tool_surface.subagents = [
+            SurfaceSubagent(
+                name=GENERAL_PURPOSE_SUBAGENT["name"],
+                description=_general_purpose_description(),
+                system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+                tools=(
+                    *FILESYSTEM_TOOL_NAMES,
+                    *(
+                        name
+                        for name in map(_registered_tool_name, subagent_tools)
+                        if not _is_subagent_excluded_tool(name)
+                    ),
+                ),
+            )
+        ]
         tool_surface.dynamic = full_dynamic_tools
         tool_surface.excluded = (
             STOP_SUMMARY_EXCLUDED_TOOLS

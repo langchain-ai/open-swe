@@ -313,6 +313,8 @@ export interface Profile {
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
+  run_on_mda?: boolean
+  mda_available?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -334,6 +336,7 @@ export interface ProfileUpdate {
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
+  run_on_mda?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -377,6 +380,8 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
+  /** Threads no person starts run on Managed Deep Agents, when it is configured. */
+  run_on_mda?: boolean
   /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
   managed_tools_gateway_id?: string | null
   org_guidelines?: string | null

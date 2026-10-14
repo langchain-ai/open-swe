@@ -22,6 +22,7 @@ from openswe.linear.routes import router as linear_webhook_router
 from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.remote_runtime import server as remote_runtime_server
+from openswe.remote_runtime.proxy import MdaThreadProxy
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
@@ -38,7 +39,6 @@ logger = logging.getLogger(__name__)
 # cannot survive them landing on different loops.
 pin_single_event_loop()
 
-REMOTE_RUNTIME = remote_runtime_server.build_mount()
 AGENT_MCP = agent_mcp_server.build_mount()
 
 
@@ -198,7 +198,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Warming the agent build failed", exc_info=True)
     try:
         async with AsyncExitStack() as stack:
-            await stack.enter_async_context(REMOTE_RUNTIME.lifespan())
             if AGENT_MCP is not None:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
@@ -241,6 +240,8 @@ def create_app() -> FastAPI:
         expose_headers=["X-Request-ID"],
     )
     app.add_middleware(AuditLogMiddleware)
+    # Ahead of the core /threads and /runs routes, which the custom app shadows.
+    app.add_middleware(MdaThreadProxy)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)
@@ -255,12 +256,9 @@ def create_app() -> FastAPI:
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
-    # Routed at the exact path so no redirect sits between a remote runtime and its tools.
+    # Routed at the exact path so no redirect sits between a remote runtime and its hooks.
     app.router.routes.append(
-        Route(remote_runtime_server.PATH, REMOTE_RUNTIME.app, methods=["GET", "POST", "DELETE"])
-    )
-    app.router.routes.append(
-        Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
+        Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
     )
     if AGENT_MCP is not None:
         app.router.routes.extend(AGENT_MCP.root_routes)
