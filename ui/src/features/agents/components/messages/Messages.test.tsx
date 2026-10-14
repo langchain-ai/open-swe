@@ -32,7 +32,11 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
   ),
 }))
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  window.history.replaceState(null, "", window.location.pathname)
+})
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>
@@ -41,6 +45,69 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("copies an encoded message permalink without changing the current location", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal("navigator", { clipboard: { writeText } })
+    render(
+      <Messages
+        threadId="thread-1"
+        isStreaming={false}
+        messages={[
+          {
+            id: "message /?#",
+            author: "user",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [{ kind: "text", text: "Link this message" }],
+          },
+        ]}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Copy message link" }))
+    expect(writeText).toHaveBeenCalledWith(
+      `${window.location.origin}/agents/thread-1#message-message%20%2F%3F%23`
+    )
+    expect(window.location.hash).toBe("")
+  })
+
+  it("loads earlier turns until the linked message is available", () => {
+    window.history.replaceState(null, "", "#message-old")
+    const onLoadEarlier = vi.fn()
+    const current = {
+      id: "new",
+      author: "user" as const,
+      timestamp: "2026-09-03T10:30:00.000Z",
+      chunks: [],
+    }
+    const { rerender } = render(
+      <Messages
+        threadId="thread-1"
+        isStreaming={false}
+        messages={[current]}
+        loadEarlier={{ loading: false, onLoadEarlier }}
+      />
+    )
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1)
+    rerender(
+      <Messages
+        threadId="thread-1"
+        isStreaming={false}
+        messages={[current]}
+        loadEarlier={{ loading: true, onLoadEarlier }}
+      />
+    )
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1)
+    rerender(
+      <Messages
+        threadId="thread-1"
+        isStreaming={false}
+        messages={[{ ...current, id: "old" }, current]}
+        loadEarlier={{ loading: false, onLoadEarlier }}
+      />
+    )
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1)
+    expect(document.getElementById("message-old")).toBeTruthy()
+    window.history.replaceState(null, "", window.location.pathname)
+  })
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,

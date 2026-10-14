@@ -113,6 +113,7 @@ export function AgentTurn({
   repoPath,
   activityLabel,
   costUsd,
+  actions,
   ...callbacks
 }: {
   message: Message
@@ -121,6 +122,7 @@ export function AgentTurn({
   repoPath?: string
   activityLabel?: string
   costUsd?: number
+  actions?: ReactNode
 } & ApprovalCallbacks) {
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
@@ -349,6 +351,7 @@ export function AgentTurn({
             className="opacity-0 transition-opacity duration-normal group-hover/turn:opacity-100 focus-visible:opacity-100"
           />
         )}
+        {actions}
         {!message.timestampIsFallback && (
           <MessageTimestamp
             timestamp={message.timestamp}

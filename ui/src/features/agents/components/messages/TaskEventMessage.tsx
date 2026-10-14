@@ -1,6 +1,7 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Link } from "@tanstack/react-router"
+import type { ReactNode } from "react"
 
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
 
@@ -21,10 +22,12 @@ export function TaskEventMessage({
   event,
   messageId,
   timestamp,
+  actions,
 }: {
   event: TaskEventMetadata
   messageId: string
   timestamp?: string
+  actions?: ReactNode
 }) {
   const label =
     event.sender_label ??
@@ -73,6 +76,7 @@ export function TaskEventMessage({
           )}
         </div>
       </ExpandableMessageChip>
+      {actions}
     </div>
   )
 }
