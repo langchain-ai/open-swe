@@ -274,6 +274,17 @@ def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
     return set(latest.values())
 
 
+def _visible_messages(state: Mapping[str, Any]) -> Sequence[object]:
+    messages = state.get("messages")
+    if not isinstance(messages, (list, tuple)):
+        return []
+    event = state.get(SUMMARIZATION_EVENT_KEY)
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+    if isinstance(cutoff, int) and cutoff >= 0:
+        return messages[cutoff:]
+    return messages
+
+
 def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     """Context hashes the model can still see, so the rest is reintroduced.
 
@@ -282,14 +293,17 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     state. Treating it as introduced is what leaves the model unable to resolve a
     sender it is still being shown messages from.
     """
-    messages = state.get("messages")
-    if not isinstance(messages, (list, tuple)):
-        return set()
-    event = state.get(SUMMARIZATION_EVENT_KEY)
-    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
-    if isinstance(cutoff, int) and cutoff >= 0:
-        messages = messages[cutoff:]
-    return dynamic_context_hashes_from_messages(messages)
+    return dynamic_context_hashes_from_messages(_visible_messages(state))
+
+
+def latest_visible_dynamic_context_hash(state: Mapping[str, Any], kind: str) -> str | None:
+    """Hash of the newest visible context block of ``kind``, which supersedes older ones."""
+    opening = f'<dynamic-context kind="{kind}"'
+    for message in reversed(_visible_messages(state)):
+        content = _message_content(message)
+        if any(text.startswith(opening) for text in _content_texts(content)):
+            return dynamic_context_hash(content)
+    return None
 
 
 @dataclass(frozen=True)

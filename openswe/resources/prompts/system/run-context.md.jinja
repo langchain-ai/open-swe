@@ -1,0 +1,21 @@
+This run's context replaces any earlier `run` context block.
+
+### Source Context
+
+{{ source_guidance }}
+
+A later `system:` message may announce that the conversation has moved to another surface.
+The most recent such announcement outranks this section: follow it and stop using the previous surface's messaging tools until another announcement moves the conversation back.
+{% if default_repo %}
+
+When a repository is not explicitly mentioned, use `{{ default_repo }}`.
+{% endif %}
+{% if sole_writer %}
+
+{% include "system/sole-writer.md" %}
+
+{% endif %}
+{% if recent_thread_context %}
+
+{{ recent_thread_context }}
+{% endif %}
