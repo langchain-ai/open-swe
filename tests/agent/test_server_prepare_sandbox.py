@@ -88,7 +88,7 @@ async def test_prepare_retries_desktop_sandbox_attach(monkeypatch: pytest.Monkey
 
     result = await _middleware()._prepare({"messages": []}, MagicMock())
 
-    assert result == {"work_dir": "/work", "rendered_system_prompt": "prompt"}
+    assert (result["work_dir"], result["rendered_system_prompt"]) == ("/work", "prompt")
     assert proxy.ready.await_count == 2
 
 

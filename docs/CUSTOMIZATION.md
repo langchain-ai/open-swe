@@ -618,7 +618,7 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py`. It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run. Edit a section's file to customize it:
+The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py`. It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the thread. It stays identical across a thread's runs so the model provider can cache it; what changes per run (source guidance, default repository, single-writer state, recent-thread context) is rendered from `run-context.md.jinja` by `construct_turn_context` and sent as a `<dynamic-context kind="run">` message after the run's inbound message. Edit a section's file to customize it:
 
 | File | What it controls |
 |---|---|

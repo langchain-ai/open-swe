@@ -95,7 +95,9 @@ from openswe.desktop import (
 )
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
+    RunMessage,
     dynamic_context_hash,
+    latest_visible_dynamic_context_hash,
     message_sender_id,
     person_introduction,
     visible_dynamic_context_hashes,
@@ -153,7 +155,7 @@ from openswe.model_request import (
     model_selection_trace,
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
-from openswe.prompt import construct_system_prompt
+from openswe.prompt import construct_system_prompt, construct_turn_context
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
@@ -1044,6 +1046,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         blocks = [person_introduction(p.as_person()) for p in ordered]
         return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
+    @staticmethod
+    def _turn_context_messages(state: PrepareRunState, content: str) -> list[RunMessage]:
+        """The run context block, sent only when it differs from the newest one visible."""
+        if dynamic_context_hash(content) == latest_visible_dynamic_context_hash(state, "run"):
+            return []
+        return [{"role": "user", "content": content}]
+
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, object]:
         decision = ModelSelectionDecision(requested_model=self._saved_requested_model)
         cfg = RunConfig.from_config(self._config)
@@ -1227,11 +1236,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 )
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+            turn_messages = self._turn_context_messages(state, construct_turn_context("desktop"))
             return {
                 "work_dir": work_dir,
+                **({"messages": turn_messages} if turn_messages else {}),
                 "rendered_system_prompt": construct_system_prompt(
                     working_dir=work_dir,
-                    source="desktop",
+                    desktop=True,
                 ),
             }
         async with aphase(self._thread_id, "prepare.github_token"):
@@ -1346,6 +1357,22 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 )
                 sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
+        turn_context = construct_turn_context(
+            "background_task" if cfg.background_task_completion else self._source,
+            slack_context=_slack_tools_enabled(cfg),
+            slack_ask=_slack_ask_mode(cfg),
+            slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
+            slack_breakout=cfg.slack_breakout is True,
+            slack_follow_up_suggestions=_slack_concierge_run(cfg)
+            or (await cached_workspace_settings(workspace_slug(cfg))).get(
+                "slack_follow_up_suggestions"
+            )
+            is True,
+            sole_writer=self._sole_writer,
+            default_repo=prompt_default_repo,
+            recent_thread_context=recent_thread_context,
+        )
+        run_messages = [*sender_messages, *self._turn_context_messages(state, turn_context)]
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -1401,7 +1428,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "requested_effort": requested_effort,
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
-            **({"messages": sender_messages} if sender_messages else {}),
+            **({"messages": run_messages} if run_messages else {}),
             **({"model_route": attribution_route} if attribution_route is not None else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
@@ -1409,29 +1436,16 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 artifact_url=dashboard_plan_url(self._thread_id),
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
-                default_repo=prompt_default_repo,
                 repo_custom_instructions=self._repo_instructions,
                 workspace_name=workspace.name if workspace else None,
                 workspace_instructions=workspace.instructions if workspace else None,
                 workspace_repos=workspace.repos if workspace else None,
                 admin_workspaces=self._admin_workspaces,
-                sole_writer=self._sole_writer,
-                source="background_task" if cfg.background_task_completion else self._source,
-                slack_context=_slack_tools_enabled(cfg),
-                slack_ask=_slack_ask_mode(cfg),
-                slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
-                slack_breakout=cfg.slack_breakout is True,
-                slack_follow_up_suggestions=_slack_concierge_run(cfg)
-                or (await cached_workspace_settings(workspace_slug(cfg))).get(
-                    "slack_follow_up_suggestions"
-                )
-                is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
                 prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
                 local_checkout_client=self._bridge_client or "cli",
-                recent_thread_context=recent_thread_context,
             ),
         }
 
