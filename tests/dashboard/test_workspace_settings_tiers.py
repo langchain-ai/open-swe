@@ -16,7 +16,7 @@ from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
 
 
-async def test_an_override_applies_to_its_workspace_only(fake_store: FakeStore) -> None:
+async def test_an_override_applies_to_its_workspace_only(registry_db) -> None:
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(org_guidelines="internal only", fable_enabled=True)
     )
@@ -30,7 +30,7 @@ async def test_an_override_applies_to_its_workspace_only(fake_store: FakeStore) 
     assert (await get_instance_settings())["org_guidelines"] == "internal only"
 
 
-async def test_clearing_an_override_restores_inheritance(fake_store: FakeStore) -> None:
+async def test_clearing_an_override_restores_inheritance(registry_db) -> None:
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(
             default_agent_model="anthropic:claude-opus-5-5",
@@ -51,7 +51,7 @@ async def test_clearing_an_override_restores_inheritance(fake_store: FakeStore) 
     assert view["effective"]["default_agent_reasoning_effort"] == "high"
 
 
-async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore) -> None:
+async def test_cached_reads_do_not_leak_across_workspaces(registry_db) -> None:
     """The settings cache is shared by every worker, so its keys must carry the workspace."""
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(org_guidelines="internal only", fable_enabled=True)
@@ -74,7 +74,7 @@ async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore)
     ] == "internal only"
 
 
-async def test_a_save_reaches_cached_reads_at_once(fake_store: FakeStore) -> None:
+async def test_a_save_reaches_cached_reads_at_once(registry_db) -> None:
     """Saves replace the cache generation, so no reader waits out the TTL."""
     assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
         "org_guidelines"
@@ -97,22 +97,22 @@ async def test_a_save_reaches_cached_reads_at_once(fake_store: FakeStore) -> Non
 
 
 async def test_a_failed_store_read_is_not_cached(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+    registry_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The defaults a failed read falls back to must not reach other replicas' reads."""
     await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="internal only"))
-    real_record = workspace_settings._instance_record
+    real_record = workspace_settings.instance_record
 
     async def unavailable() -> dict[str, object]:
         raise RuntimeError("store unavailable")
 
-    monkeypatch.setattr(workspace_settings, "_instance_record", unavailable)
+    monkeypatch.setattr(workspace_settings, "instance_record", unavailable)
     assert (await workspace_settings_cache.cached_instance_settings())["org_guidelines"] is None
     assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
         "org_guidelines"
     ] is None
 
-    monkeypatch.setattr(workspace_settings, "_instance_record", real_record)
+    monkeypatch.setattr(workspace_settings, "instance_record", real_record)
     assert (await workspace_settings_cache.cached_instance_settings())[
         "org_guidelines"
     ] == "internal only"

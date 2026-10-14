@@ -48,6 +48,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.analytics.worker import start_worker, stop_worker
     from openswe.bridge import listener as bridge_listener
     from openswe.dashboard.admin import configured_admins
+    from openswe.dashboard.import_agent_instructions import import_store_agent_instructions
+    from openswe.dashboard.import_settings import import_store_settings
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
@@ -137,6 +139,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # default review style, and their watched pull requests go unwatched
         # until an import succeeds.
         logger.exception("Importing review records from the LangGraph Store failed")
+    try:
+        # Instance and workspace settings used to live in the LangGraph Store.
+        await run_store_import("settings", import_store_settings)
+    except Exception:  # noqa: BLE001
+        # Startup continues: runs see the hardcoded defaults for any settings
+        # still in the Store until an import succeeds.
+        logger.exception("Importing settings from the LangGraph Store failed")
+    try:
+        # Per-repository agent instructions used to live in the LangGraph Store.
+        await run_store_import("agent_instructions", import_store_agent_instructions)
+    except Exception:  # noqa: BLE001
+        # Startup continues: runs skip instructions still in the Store until an
+        # import succeeds.
+        logger.exception("Importing agent instructions from the LangGraph Store failed")
     try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()

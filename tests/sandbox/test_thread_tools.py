@@ -23,7 +23,6 @@ from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
 from openswe.sandboxes.tool_data import ToolContext
 from openswe.sandboxes.tool_runtime import ToolSurface
-from tests.conftest import FakeStore
 
 TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
 
@@ -148,7 +147,7 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
 async def test_proxy_refresh_preserves_tools_and_custom_rules(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,
-    fake_store: FakeStore,
+    registry_db: None,
     enabled: bool,
 ) -> None:
     from openswe.dashboard.workspace_settings import (
