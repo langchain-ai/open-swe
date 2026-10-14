@@ -48,8 +48,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.analytics.worker import start_worker, stop_worker
     from openswe.bridge import listener as bridge_listener
     from openswe.dashboard.admin import configured_admins
-    from openswe.dashboard.import_agent_instructions import import_store_agent_instructions
-    from openswe.dashboard.import_settings import import_store_settings
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
@@ -61,15 +59,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
-    from openswe.thread_feedback import run_feedback_import
     from openswe.threads.blobs import run_blob_import
-    from openswe.threads.pins import import_store_pins
-    from openswe.threads.plan_store import run_plan_import
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
-    from openswe.users.import_records import import_user_records
-    from openswe.users.import_store import import_user_mappings
     from openswe.utils.model import validate_local_dev_llm_config
 
     pin_single_event_loop()
@@ -78,23 +71,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_local_dev_llm_config()
     database.require_configured()
     await database.migrate()
-    try:
-        # People used to be Store records keyed by GitHub login; this moves them
-        # into the users table.
-        await run_store_import("user_mappings", import_user_mappings)
-    except Exception:  # noqa: BLE001
-        # Startup continues: anyone still in the Store cannot vote or be
-        # resolved from Slack until an import succeeds, and nothing else breaks.
-        logger.exception("Importing user mappings from the LangGraph Store failed")
-    try:
-        # Profiles, preferences, instructions, and tokens used to be Store
-        # records keyed by GitHub login; this moves them into user_record, and
-        # concierge opt-ins into users.preferences.
-        await run_store_import("user_records", import_user_records)
-    except Exception:  # noqa: BLE001
-        # Startup continues: people whose records are still in the Store see
-        # default settings and reconnect until an import succeeds.
-        logger.exception("Importing per-person records from the LangGraph Store failed")
     try:
         # Automations used to live in the LangGraph Store; this copies them into
         # PostgreSQL and is a no-op once the Store namespaces are empty.
@@ -116,13 +92,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # import succeeds.
         logger.exception("Importing skills from the LangGraph Store failed")
     try:
-        # Pinned threads used to live in the LangGraph Store, keyed by login.
-        await run_store_import("thread_pins", import_store_pins)
-    except Exception:  # noqa: BLE001
-        # Startup continues: pins still in the Store are missing from the
-        # sidebar until an import succeeds.
-        logger.exception("Importing thread pins from the LangGraph Store failed")
-    try:
         # Instance, workspace, and personal MCP connections used to live in the
         # LangGraph Store.
         await run_store_import("mcp_connections", import_store_mcp_connections)
@@ -140,27 +109,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # until an import succeeds.
         logger.exception("Importing review records from the LangGraph Store failed")
     try:
-        # Instance and workspace settings used to live in the LangGraph Store.
-        await run_store_import("settings", import_store_settings)
-    except Exception:  # noqa: BLE001
-        # Startup continues: runs see the hardcoded defaults for any settings
-        # still in the Store until an import succeeds.
-        logger.exception("Importing settings from the LangGraph Store failed")
-    try:
-        # Per-repository agent instructions used to live in the LangGraph Store.
-        await run_store_import("agent_instructions", import_store_agent_instructions)
-    except Exception:  # noqa: BLE001
-        # Startup continues: runs skip instructions still in the Store until an
-        # import succeeds.
-        logger.exception("Importing agent instructions from the LangGraph Store failed")
-    try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()
     except Exception:  # noqa: BLE001
         logger.exception("Deleting review-style analyzer crons failed")
     blob_import = asyncio.create_task(run_blob_import())
-    plan_import = asyncio.create_task(run_plan_import())
-    feedback_import = asyncio.create_task(run_feedback_import())
     assessment_import = asyncio.create_task(run_assessment_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
@@ -204,8 +157,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             yield
     finally:
         blob_import.cancel()
-        plan_import.cancel()
-        feedback_import.cancel()
         assessment_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()

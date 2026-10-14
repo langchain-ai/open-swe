@@ -5,7 +5,6 @@ because logins are mutable. Writing a record for a login with no ``users`` row
 raises :class:`UnknownUser`: people come into being when they sign in.
 """
 
-import logging
 from datetime import datetime
 from uuid import UUID
 
@@ -15,12 +14,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.database.store_imports import StoreImport
-from openswe.store import Namespace, delete_value, search_all_entries
 from openswe.users.models import UserIdentity
 from openswe.utils.json_types import JsonObject
-
-logger = logging.getLogger(__name__)
 
 
 class UnknownUser(ValueError):
@@ -135,29 +130,3 @@ class UserRecords:
             return await session.scalar(
                 delete(UserRecord).where(self._where(login, key)).returning(UserRecord.value)
             )
-
-    async def import_store(self, namespace: Namespace) -> StoreImport:
-        """Move Store records, keyed by login, into this kind.
-
-        A record already in PostgreSQL wins, and one whose login has no ``users``
-        row stays in the Store for the next startup.
-        """
-        moved = waiting = 0
-        for entry in await search_all_entries(namespace):
-            item_namespace = entry.namespace or list(namespace)
-            if len(item_namespace) != len(namespace):
-                continue
-            login = entry.key
-            try:
-                if await self.get(login) is None:
-                    await self.put(login, entry.value)
-            except UnknownUser:
-                logger.warning(
-                    "Store record waits for its users row",
-                    extra={"record_kind": self.kind, "github_login": login},
-                )
-                waiting += 1
-                continue
-            await delete_value(item_namespace, entry.key)
-            moved += 1
-        return StoreImport(moved, waiting)

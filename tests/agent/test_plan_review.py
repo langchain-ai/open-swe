@@ -6,16 +6,8 @@ from fastapi import HTTPException
 
 from openswe.database import postgres
 from openswe.threads.plan_store import (
-    LEGACY_PLAN_COMMENTS_NAMESPACE,
-    LEGACY_PLAN_CONTENT_NAMESPACE,
-    LEGACY_PLAN_DISMISSED_NAMESPACE,
     ThreadPlan,
-    get_plan_content,
-    import_store_plans,
-    list_plan_comments,
-    plan_is_dismissed,
 )
-from tests.conftest import FakeStore
 
 
 async def _seed_plan(thread_id: str, value: dict[str, Any]) -> None:
@@ -213,33 +205,3 @@ async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
     assert (await plan_api.get_plan("t", author))["markdown"] == "# Updated"
     assert (await plan_api.get_plan_comments("t", author))["comments"] == [comment]
     write.assert_awaited_once_with("t", "# Updated", plan_file_path=path)
-
-
-async def test_store_import_keeps_newer_postgres_plans_and_is_idempotent(
-    registry_db: None, fake_store: FakeStore
-) -> None:
-    comment = {
-        "author": "Alice",
-        "author_login": "alice",
-        "body": "Looks good",
-        "anchor": None,
-        "created_at": "2026-09-01T00:00:00+00:00",
-    }
-    for thread_id in ("moved", "republished"):
-        fake_store.seed(
-            LEGACY_PLAN_CONTENT_NAMESPACE, thread_id, {"html": "<p>old</p>", "revision": "r1"}
-        )
-        fake_store.seed([*LEGACY_PLAN_COMMENTS_NAMESPACE, thread_id], "c1", {**comment, "id": "c1"})
-        fake_store.seed(LEGACY_PLAN_DISMISSED_NAMESPACE, thread_id, {"revision": "r1"})
-    await _seed_plan("republished", {"html": "<p>new</p>", "revision": "r2"})
-
-    await import_store_plans()
-    await import_store_plans()
-
-    assert await get_plan_content("moved") == {"html": "<p>old</p>", "revision": "r1"}
-    assert await list_plan_comments("moved") == [{**comment, "id": "c1"}]
-    assert await plan_is_dismissed("moved")
-    assert await get_plan_content("republished") == {"html": "<p>new</p>", "revision": "r2"}
-    assert await list_plan_comments("republished") == []
-    assert not await plan_is_dismissed("republished")
-    assert not any(fake_store.items.values())

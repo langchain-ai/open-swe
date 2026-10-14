@@ -148,9 +148,6 @@ class AgentInstructionsStore:
         return await self._stored(full_name)
 
     async def delete(self, full_name: str) -> None:
-        """Delete a repository's instructions, with any Store copy the import has not retired."""
-        from openswe.dashboard.import_agent_instructions import delete_legacy_agent_instructions
-
         key = full_name.lower()
         async with postgres.session() as session:
             await session.execute(
@@ -159,7 +156,6 @@ class AgentInstructionsStore:
                     == select(Repository.id).where(Repository.key == key).scalar_subquery()
                 )
             )
-        await delete_legacy_agent_instructions(key)
 
     async def _stored(self, full_name: str) -> AgentInstructions:
         record = await self.get(full_name)
