@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.app import get_github_app_installation_token
-from openswe.review.styles import normalize_repo_full_name
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
 

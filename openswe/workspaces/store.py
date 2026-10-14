@@ -56,8 +56,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.config import ENV
 from openswe.database import postgres
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
-from openswe.review.styles import normalize_repo_full_name
 from openswe.store import now_iso
 from openswe.ui_invalidations import Topic
 from openswe.workspaces.rows import (
