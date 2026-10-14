@@ -7,13 +7,11 @@ from fastapi import HTTPException
 from openswe.incidents import service
 from openswe.incidents.document_models import IncidentHistory
 from openswe.incidents.models import Incident, IncidentId, IncidentReport
-from openswe.store import TypedStore, get_value, now_iso, put_value
-from openswe.ui_invalidations import Topic
+from openswe.incidents.records import IncidentHistories, IncidentPostmortems
+from openswe.store import now_iso
 
-HISTORY = TypedStore[IncidentHistory, IncidentId](
-    ["incidents", "history"], IncidentHistory, invalidates=Topic.INCIDENTS
-)
-SUMMARIES = ["incidents", "summaries"]
+HISTORY = IncidentHistories()
+POSTMORTEMS = IncidentPostmortems()
 
 
 async def require_access(incident_id: IncidentId) -> Incident:
@@ -62,14 +60,9 @@ def _linked_markdown(markdown: str, evidence: list[dict[str, Any]]) -> str:
     return markdown + ("\n\n" + "\n".join(sources) if sources else "")
 
 
-async def _saved_markdown(record: Incident) -> str | None:
-    summary = await get_value(SUMMARIES, record.id)
-    return summary["markdown"] if summary else None
-
-
 async def document_context(incident_id: IncidentId) -> dict[str, Any]:
     record = await require_access(incident_id)
-    markdown = await _saved_markdown(record)
+    markdown = await POSTMORTEMS.get(record.id)
     return {
         "incident_id": incident_id,
         "postmortem": {"markdown": markdown} if markdown is not None else None,
@@ -112,20 +105,19 @@ async def update_from_report(record: Incident, report: IncidentReport) -> None:
     markdown = f"# {record.title or record.channel_name or 'Incident'}\n\n" + _findings(report)
     markdown = _linked_markdown(markdown, [item.model_dump() for item in report.evidence])
     await preserve_metadata(record)
-    await put_value(SUMMARIES, record.id, {"markdown": markdown})
-    await Topic.INCIDENTS.invalidate(key=record.id)
+    await POSTMORTEMS.put(record.id, markdown)
 
 
 async def search_history(
     q: str | None = None, *, limit: int = 25, cursor: str | None = None
 ) -> dict[str, Any]:
     items = []
-    for history in await HISTORY.search_all():
+    for history in await HISTORY.all():
         try:
             record = await require_access(history.id)
         except HTTPException:
             continue
-        markdown = await _saved_markdown(record)
+        markdown = await POSTMORTEMS.get(record.id)
         if (
             q
             and q.casefold()

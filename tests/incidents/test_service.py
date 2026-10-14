@@ -21,9 +21,8 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def configured(fake_store, monkeypatch):
+async def configured(registry_db, monkeypatch):
     await service.POLICIES.put(
-        "default",
         IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", enabled_at=100),
     )
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
@@ -31,7 +30,6 @@ async def configured(fake_store, monkeypatch):
     monkeypatch.setattr(
         service, "get_langsmith_trace_url", AsyncMock(return_value="https://smith/t")
     )
-    return fake_store
 
 
 def _auth(monkeypatch, team="T1", scopes=None):
