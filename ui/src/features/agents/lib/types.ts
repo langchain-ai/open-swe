@@ -250,7 +250,12 @@ export type LinearTriggerEvent = "issue.created" | "issue.labeled"
 /** One way an automation fires; `kind` names the provider, the rest are its filters. */
 export type AutomationTriggerConfig =
   | { kind: "schedule"; cron: string }
-  | { kind: "github"; repo: string; events: Array<GitHubTriggerEvent> }
+  | {
+      kind: "github"
+      repo: string
+      events: Array<GitHubTriggerEvent>
+      base_branches?: Array<string> | null
+    }
   | {
       kind: "slack"
       channel: string

@@ -16,7 +16,10 @@ Args:
         - ``{"kind": "github", "repo": "owner/repo", "events": [...]}`` runs on
           events in that repository, passed to the run as untrusted context:
           "issues.opened", "pull_request.opened", "pull_request.closed"
-          (merged or not), and "pull_request.merged".
+          (merged or not), and "pull_request.merged". Optional ``base_branches``
+          is a list of case-sensitive fnmatch patterns, e.g. ["main", "release/*"],
+          for PR base refs; omit or null for all branches.
+          Filtered PRs without a base ref do not fire; issue events ignore it.
         - ``{"kind": "slack", "channel": "C0123456789", "events": ["message.posted"]}``
           runs on new top-level messages in a Slack channel Open SWE is a
           member of, passed to the run as untrusted context. Optional filters:

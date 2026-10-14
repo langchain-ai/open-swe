@@ -1918,6 +1918,24 @@
       "GitHubTrigger": {
         "description": "Fires on events in one repository; its runs work in that repository.",
         "properties": {
+          "base_branches": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Case-sensitive fnmatch patterns for PR base branches; null allows all. Issue events ignore this filter; filtered PRs require a base ref.",
+            "title": "Base Branches"
+          },
           "events": {
             "items": {
               "enum": [

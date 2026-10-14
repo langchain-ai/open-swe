@@ -546,6 +546,74 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
     assert "Merged: yes" in merge_prompt
 
 
+@pytest.mark.parametrize(
+    ("event_type", "base_ref", "base_branches", "fires"),
+    [
+        ("pull_request", "codex/foo", ["main"], False),
+        ("pull_request", "main", ["main"], True),
+        ("pull_request", "codex/foo", None, True),
+        ("pull_request", "main", None, True),
+        ("pull_request", "release/1.0", ["main", "release/*"], True),
+        ("pull_request", "codex/foo", ["release/*"], False),
+        ("pull_request", "Main", ["main"], False),
+        ("pull_request", None, ["main"], False),
+        ("pull_request", None, None, True),
+        ("issues", None, ["main"], True),
+    ],
+)
+async def test_github_base_branch_filter_survives_create_and_update(
+    fake_client: _FakeClient,
+    auth: None,
+    event_type: str,
+    base_ref: str | None,
+    base_branches: list[str] | None,
+    fires: bool,
+) -> None:
+    automation = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Summarize the event",
+            triggers=[
+                GitHubTrigger(
+                    repo="langchain-ai/open-swe",
+                    events=["pull_request.merged", "issues.opened"],
+                    base_branches=["main"],
+                )
+            ],
+        ),
+    )
+    assert automation["triggers"][0]["base_branches"] == ["main"]
+    updated = await schedules.update_agent_schedule(
+        automation["id"],
+        "alice",
+        ScheduleUpdateBody(
+            triggers=[
+                GitHubTrigger(
+                    repo="langchain-ai/open-swe",
+                    events=["pull_request.merged", "issues.opened"],
+                    base_branches=base_branches,
+                )
+            ]
+        ),
+    )
+    assert updated["triggers"][0]["base_branches"] == base_branches
+    subject: dict[str, object] = {"number": 7, "title": "Add triggers", "merged": True}
+    if base_ref is not None:
+        subject["base"] = {"ref": base_ref}
+    payload: dict[str, object] = {
+        "action": "closed" if event_type == "pull_request" else "opened",
+        "repository": {
+            "owner": {"login": "langchain-ai"},
+            "name": "open-swe",
+            "private": True,
+        },
+        "pull_request" if event_type == "pull_request" else "issue": subject,
+    }
+    results = await schedules.launch_github_automations(event_type, payload, "delivery-1")
+    assert [result["schedule_id"] for result in results] == ([automation["id"]] if fires else [])
+
+
 async def test_launch_github_issue_automations_isolates_claim_failures(
     fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -956,6 +1024,7 @@ async def test_the_startup_import_moves_store_automations_into_postgres(
         "kind": "github",
         "repo": "langchain-ai/open-swe",
         "events": ["issues.opened"],
+        "base_branches": None,
     }
     # A record whose workspace is gone is dropped along with its cron.
     assert await schedules.get_agent_schedule(SCHED_GONE) is None
