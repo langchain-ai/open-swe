@@ -74,14 +74,14 @@ describe("SidebarUserMenu", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000)
     })
-    expect(screen.getByRole("status").textContent).toContain(
+    expect(screen.getAllByRole("status")[0]?.textContent).toContain(
       "Session link copied. Include it in your message to the team."
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }))
     fireEvent.click(screen.getByRole("button", { name: /octocat/i }))
     fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
-    expect(screen.getByRole("status").textContent).toBe("")
+    expect(screen.getAllByRole("status")[0]?.textContent).toBe("")
   })
 
   it("shows a failure state when clipboard access is denied", async () => {
@@ -113,6 +113,25 @@ describe("SidebarUserMenu", () => {
     expect(
       await screen.findByText(/Couldn't copy the session link/)
     ).toBeTruthy()
+  })
+
+  it("copies environment diagnostics without a session replay", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: mocks.writeText },
+    })
+    mocks.writeText.mockResolvedValue(undefined)
+
+    renderMenu()
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
+
+    expect(
+      await screen.findByText("Diagnostics copied to clipboard.")
+    ).toBeTruthy()
+    expect(mocks.writeText).toHaveBeenCalledWith(
+      expect.stringContaining('"report": "open-swe-environment-diagnostics"')
+    )
   })
 
   it("offers reporting without a session replay when RUM is unavailable", () => {

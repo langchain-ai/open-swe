@@ -21,6 +21,8 @@ import {
   DialogTitle,
 } from "@langchain/macaw-components/Dialog"
 
+import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
+import { buildEnvironmentDiagnostics } from "@/lib/environment-diagnostics"
 import type { SessionUser } from "@/lib/api"
 import type { Theme } from "@/lib/theme"
 import { api } from "@/lib/api"
@@ -57,6 +59,13 @@ export function SidebarUserMenu({
   const { theme, setTheme } = useTheme()
   const [open, setOpen] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
+  const [desktopVersion, setDesktopVersion] = useState<string>()
+
+  useEffect(() => {
+    if (reportOpen) {
+      void window.openSweDesktop?.getVersion().then(setDesktopVersion)
+    }
+  }, [reportOpen])
   const [datadogCopyStatus, setDatadogCopyStatus] = useState<
     "idle" | "copied" | "error"
   >("idle")
@@ -214,8 +223,8 @@ export function SidebarUserMenu({
           </DialogDescription>
           <p className="text-xs text-secondary">
             {datadogInitialized
-              ? "Copy your session link and include it in your message so the team can find your Datadog session replay. Nothing is sent automatically."
-              : "A session replay link is unavailable. You can still report the issue and include diagnostics from Settings → About."}
+              ? "Copy your session link and include it in your message so the team can find your session replay."
+              : "A session replay link is unavailable. You can still report the issue and copy diagnostics below."}
           </p>
           {datadogInitialized && (
             <div className="space-y-space-2">
@@ -236,6 +245,13 @@ export function SidebarUserMenu({
                     : null}
               </p>
             </div>
+          )}
+          {reportOpen && (
+            <CopyDiagnosticsButton
+              getDiagnostics={() =>
+                buildEnvironmentDiagnostics(user, desktopVersion)
+              }
+            />
           )}
           <DialogClose asChild>
             <Button variant="outlined" size="sm">
