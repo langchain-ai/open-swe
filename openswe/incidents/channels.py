@@ -257,7 +257,7 @@ async def apply_control(
     else:
         raise ValueError(f"unknown incident control {action!r}")
     service.note(record, "control", text.split("\n", 1)[0])
-    await service.save(record)
+    await service.save(record, by=service.actor_login(actor))
     await _post(record, text, blocks=blocks)
     if action in {"resume", "reopen"} and await turns.queued_context_count(record.thread_id):
         await turns.schedule_automatic_turn(record, policy)

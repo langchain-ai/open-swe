@@ -33,7 +33,7 @@ import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
+import { Link, useSearch } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import type { SVGProps } from "react"
 
@@ -47,7 +47,6 @@ import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
-import { useMarkLegacyLocalThreadViewed } from "@/features/agents/lib/legacyLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   markAgentThreadViewed,
@@ -61,7 +60,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
-import { reportError } from "@/lib/errorReporting"
 
 /** Phosphor has no Linear mark; this is Linear's own logo. */
 function LinearLogoIcon({
@@ -306,7 +304,6 @@ export function SidebarThreadRow({
   compact = false,
   indent = false,
   onNavigate,
-  onDeleteLocal,
   onTogglePin,
   onToggleArchived,
 }: {
@@ -320,19 +317,14 @@ export function SidebarThreadRow({
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
-  onDeleteLocal: (threadId?: string) => void
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
-  const navigate = useNavigate()
   const chat = useChatRoutes()
   const queryClient = useQueryClient()
-  const markLocalViewed = useMarkLegacyLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
-  const worktreeThread =
-    useLocalThread(item.id) ?? (item.location === "local" ? item.thread : null)
+  const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deletingLocal, setDeletingLocal] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
@@ -343,7 +335,7 @@ export function SidebarThreadRow({
       select: (search) => search.subagent,
     }) ?? null
 
-  const thread = item.location === "cloud" ? item.thread : null
+  const thread = item.thread
   const subagents = (item.subagents ?? []).filter(
     (subagent) => subagent.status !== "completed"
   )
@@ -379,16 +371,11 @@ export function SidebarThreadRow({
   // optimistic cache patch, which a list refetch can overwrite.
   const unread = !item.viewed && !isActive
   const isDeleting =
-    deletingLocal ||
-    (item.location === "cloud" &&
-      deleteThread.isPending &&
-      deleteThread.variables === item.id)
+    deleteThread.isPending && deleteThread.variables === item.id
 
   const markViewed = () => {
     if (item.reviewPage) markReviewViewed(queryClient, item.reviewPage, item.id)
-    else if (item.location === "cloud")
-      markAgentThreadViewed(queryClient, item.id)
-    else markLocalViewed(item.id)
+    else markAgentThreadViewed(queryClient, item.id)
   }
 
   // Covers every way a row becomes active — click, command palette, keyboard
@@ -398,27 +385,9 @@ export function SidebarThreadRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, item.viewed])
 
-  const onConfirmDelete = async () => {
+  const onConfirmDelete = () => {
     if (isDeleting) return
-    if (item.location === "cloud") {
-      deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
-      return
-    }
-    setDeletingLocal(true)
-    try {
-      const deleted =
-        (await window.openSweDesktop?.deleteLegacyLocalThread(item.id)) ?? false
-      if (!deleted) throw new Error("Local Open SWE thread not found")
-      onDeleteLocal(item.id)
-      setDeleteOpen(false)
-      if (isActive) {
-        onNavigate?.()
-        void navigate({ to: "/agents" })
-      }
-    } catch (error) {
-      reportError({ title: "Couldn't delete thread", error })
-    }
-    setDeletingLocal(false)
+    deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
   }
 
   const onArchiveClick = (event: React.MouseEvent) => {
@@ -501,7 +470,7 @@ export function SidebarThreadRow({
 
       <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
-        {thread?.automationActionPosted && (
+        {thread.automationActionPosted && (
           <SlackLogoIcon
             size={ICON_SIZE}
             weight="regular"
@@ -587,20 +556,10 @@ export function SidebarThreadRow({
     >
       {rowContent}
     </Link>
-  ) : item.location === "cloud" ? (
+  ) : (
     <Link
       to={chat.thread}
       params={{ threadId: item.id }}
-      onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
-    >
-      {rowContent}
-    </Link>
-  ) : (
-    <Link
-      to="/agents/local/$sessionId"
-      params={{ sessionId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
       className={rowClassName}
@@ -631,7 +590,6 @@ export function SidebarThreadRow({
           <ThreadMenuItems
             menu="context"
             thread={thread}
-            localThread={item.location === "local" ? item.thread : undefined}
             pinned={pinned}
             archived={archived}
             isDeleting={isDeleting}
@@ -676,11 +634,11 @@ export function SidebarThreadRow({
         onOpenChange={setDeleteOpen}
         threadTitle={item.title}
         isDeleting={isDeleting}
-        onConfirm={() => void onConfirmDelete()}
+        onConfirm={onConfirmDelete}
         detail={
           !worktreeThread
             ? undefined
-            : worktreeThread.ownedWorktrees?.length
+            : worktreeThread.ownedWorktrees.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
         }
@@ -788,7 +746,7 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const onAMac = item.location === "local" || runsOnAMac(item.thread)
+  const onAMac = runsOnAMac(item.thread)
   const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
 
@@ -798,7 +756,7 @@ function ThreadHoverCard({
         <span className="min-w-0 flex-1 text-xs font-medium text-primary">
           {item.title}
         </span>
-        {item.location === "cloud" && item.thread.visibility === "private" && (
+        {item.thread.visibility === "private" && (
           <LockIcon
             size={ICON_SIZE}
             weight="regular"

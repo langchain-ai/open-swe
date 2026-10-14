@@ -69,14 +69,11 @@ subscribeRequestTimings((timing) => {
 export class RunTracker {
   state: RunState | null = null
   threadId: string | null
-  private readonly transport: "cloud" | "local"
 
   constructor(options: {
-    transport: "cloud" | "local"
     /** `null` until a lazily created thread has an id; see `bindThread`. */
     threadId: string | null
   }) {
-    this.transport = options.transport
     this.threadId = options.threadId?.toLowerCase() ?? null
   }
 
@@ -85,7 +82,7 @@ export class RunTracker {
       this.state.span.abandon("superseded")
     }
     this.state = {
-      span: startSpan("agent_run", { transport: this.transport, ...extra }),
+      span: startSpan("agent_run", extra),
       events: 0,
       textDeltas: 0,
       lagSum: 0,

@@ -27,9 +27,9 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def incident(fake_store, monkeypatch):
+async def incident(registry_db, monkeypatch):
     policy = IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
-    await service.POLICIES.put("default", policy)
+    await service.POLICIES.put(policy)
     record = Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-ctx")
     await service.INCIDENTS.put(record.id, record)
     metadata = {
@@ -85,9 +85,7 @@ async def test_incident_threads_must_be_system_owned_and_public(incident, change
         await runtime.load_incident_session(config())
 
 
-@pytest.mark.parametrize(
-    "identity", [{"github_login": "octocat"}, {"user_email": "o@x.dev"}, {"local_run": True}]
-)
+@pytest.mark.parametrize("identity", [{"github_login": "octocat"}, {"user_email": "o@x.dev"}])
 async def test_incident_runs_cannot_carry_personal_identity(incident, identity):
     with pytest.raises(PermissionError, match="personal"):
         await runtime.load_incident_session(config(**identity))
@@ -111,7 +109,7 @@ async def test_paused_incidents_stop_automatic_turns_but_answer_questions(incide
     session = await runtime.load_incident_session(config(incident_request="status?"))
     assert session.explicit_request == "status?"
 
-    await service.POLICIES.put("default", IncidentPolicy(enabled=False, workspace_id="T1"))
+    await service.POLICIES.put(IncidentPolicy(enabled=False, workspace_id="T1"))
     with pytest.raises(PermissionError, match="disabled"):
         await runtime.IncidentMiddleware(session).awrap_model_call(request(), AsyncMock())
 

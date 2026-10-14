@@ -11,7 +11,7 @@ written since.
 from alembic import op
 
 revision = "e5e52ce891f4"
-down_revision = "1cdf9e884dad"
+down_revision = "0d10512c3176"
 branch_labels = None
 depends_on = None
 

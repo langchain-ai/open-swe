@@ -622,7 +622,7 @@ The system prompt is the template `openswe/resources/prompts/system/main.md.jinj
 
 | File | What it controls |
 |---|---|
-| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-desktop.md` and `working-environment-local.md` for desktop and bridged runs) |
+| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-local.md` for bridged runs) |
 | `repository-setup.md.jinja` | Cloning or syncing the repository, commit identity, and branch choice |
 | `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
 | `dependencies.md` | Installing, vetting, and managing project dependencies |

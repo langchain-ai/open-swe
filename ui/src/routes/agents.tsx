@@ -32,16 +32,11 @@ function AgentsLayout() {
     from: "/agents/$threadId",
     shouldThrow: false,
   })
-  const localMatch = useMatch({
-    from: "/agents/local/$sessionId",
-    shouldThrow: false,
-  })
   const reviewMatch = useMatch({
     from: "/agents/reviews/$owner/$repo/$number",
     shouldThrow: false,
   })
   const activeThreadId = threadMatch?.params.threadId
-  const activeLocalSessionId = localMatch?.params.sessionId
   // A review page's sidebar row is the user's review chat thread. The page
   // loads it; the layout only reads it, so off a review page it asks for nothing.
   const reviewChat = useQuery({
@@ -72,7 +67,6 @@ function AgentsLayout() {
     activeThreadId &&
     localThreads.data?.some((thread) => thread.id === activeThreadId)
   )
-  const runtimeThreadId = activeLocalSessionId ?? activeThreadId ?? null
   // Only a thread route has to wait for the profile: mounting the runtime the
   // profile does not select hydrates that thread's transcript a second time.
   const location = useRouterState({
@@ -82,7 +76,7 @@ function AgentsLayout() {
   const awaitingRuntimeChoice =
     Boolean(session.data) &&
     (profile.isPending || localThreads.isLoading) &&
-    (runtimeThreadId !== null ||
+    (activeThreadId !== undefined ||
       pathname === "/agents" ||
       pathname === "/agents/")
   useEffect(() => {
@@ -124,7 +118,6 @@ function AgentsLayout() {
     <AgentsShell
       user={session.data}
       activeThreadId={activeThreadId ?? activeReviewThreadId}
-      activeLocalSessionId={activeLocalSessionId}
     >
       {awaitingRuntimeChoice ? (
         <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
