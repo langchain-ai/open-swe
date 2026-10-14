@@ -68,6 +68,16 @@ const NO_ITEMS: Array<Item> = []
 // A diff row as painted: the line-number gutter sets the grid track, not the 18px code line.
 const DIFF_ROW_HEIGHT = 20
 
+// FileHeader draws its own rule.
+const REVIEW_DIFF_CSS = `[data-diffs-header]{border-bottom:0 !important}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}`
+
+// The step intro is a note above line 1, so lift it over the empty gutter to span the card.
+const HAS_STEP_INTRO = `:has(slot[name="annotation-additions-0"])`
+const STEP_INTRO_CSS = `[data-line-annotation]${HAS_STEP_INTRO}{z-index:4}[data-overflow=scroll] [data-annotation-content]${HAS_STEP_INTRO}{left:0;margin-left:calc(-1 * var(--diffs-column-number-width, 0px));width:var(--diffs-column-width, auto)}[data-overflow=wrap] [data-unified] [data-annotation-content]${HAS_STEP_INTRO}{margin-left:calc(100% - 100cqi);width:100cqi}`
+
+// Rows are pinned to the gutter's height so measured = laid out.
+const SCROLL_ROW_CSS = `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
+
 /** An item's version hashes everything it shows, so CodeView repaints only files that changed. */
 function useCodeViewItems(
   entries: ReadonlyArray<DiffEntry>,
@@ -215,12 +225,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     const base = buildDiffOptions(diffStyle, overflow, theme)
     return {
       ...base,
-      // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
-      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
-        overflow === "scroll"
-          ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
-          : ""
-      }`,
+      unsafeCSS: `${base.unsafeCSS}${REVIEW_DIFF_CSS}${STEP_INTRO_CSS}${overflow === "scroll" ? SCROLL_ROW_CSS : ""}`,
       disableFileHeader: false,
       stickyHeaders: true,
       // Exact heights: CodeView positions every file from them, so an estimate
@@ -545,7 +550,7 @@ function StepIntro({ entryId }: { entryId: string }) {
   const step = useEntry(entryId)?.step
   if (!step) return null
   return (
-    <NoteFrame className="pt-0 pb-space-2">
+    <div className="px-space-2 pb-space-2 font-sans">
       <div className="rounded-lg border border-brand-subtle bg-brand-subtle-gradient px-space-3 py-space-2">
         <p className="flex items-center gap-space-2 text-xxs font-medium text-brand-primary">
           <AgentMark className="size-3" />
@@ -560,6 +565,6 @@ function StepIntro({ entryId }: { entryId: string }) {
           </div>
         )}
       </div>
-    </NoteFrame>
+    </div>
   )
 }

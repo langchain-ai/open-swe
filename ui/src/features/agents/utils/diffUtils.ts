@@ -167,6 +167,25 @@ export const DIFF_UNSAFE_CSS = `
   color: var(--text-secondary) !important;
 }
 
+/* The library clips a unified separator instead of letting it shrink, so a long
+   hunk context would push it past the card's edge. */
+[data-unified] {
+  & [data-separator-content],
+  & [data-hunk-context] {
+    min-width: 0;
+  }
+
+  & [data-unmodified-lines] {
+    flex-shrink: 0;
+  }
+
+  & [data-hunk-context] {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
 /* A selected line propagates [data-selected-line] onto its annotation row and
    gutter, bleeding the selection background behind inline annotation content.
    Keep the code line highlighted, but hold the annotation row at the panel bg. */
