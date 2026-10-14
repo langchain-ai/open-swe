@@ -16,6 +16,11 @@ writes clear a bounded batch of expired ones. ``copied_from_store`` marks a row
 the Store import wrote that no write has replaced since. Bot bookkeeping writes
 these rows, so ``created_by`` and ``updated_by`` are unset.
 
+Every channel these rows name has a ``slack_channel`` row: writers add a stale
+stub for a channel the directory has not looked up yet, which fills in from
+Slack on first use. Nothing deletes directory rows, so the references keep the
+default ``ON DELETE NO ACTION``.
+
 The rows of ``slack_thread_mapping``, ``slack_run_mapping`` and
 ``slack_message_mapping`` move into the new tables with their ids, timestamps
 and marks, and those tables go. A rebound thread there could keep the nonce
@@ -34,7 +39,7 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE slack_thread (
             id uuid PRIMARY KEY,
-            channel_id text NOT NULL,
+            channel_id text NOT NULL REFERENCES slack_channel (id),
             thread_ts text NOT NULL,
             thread_id text,
             detach_nonce text,
@@ -64,7 +69,7 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE slack_run (
             id uuid PRIMARY KEY,
-            channel_id text NOT NULL,
+            channel_id text NOT NULL REFERENCES slack_channel (id),
             run_id text NOT NULL,
             thread_ts text NOT NULL,
             message_ts text,
@@ -97,13 +102,13 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE slack_message (
             id uuid PRIMARY KEY,
-            channel_id text NOT NULL,
+            channel_id text NOT NULL REFERENCES slack_channel (id),
             message_ts text NOT NULL,
             thread_ts text,
             run_id text,
             triggering_user_id text,
             agent_thread_id text,
-            origin_channel_id text,
+            origin_channel_id text REFERENCES slack_channel (id),
             origin_thread_ts text,
             origin_subject text,
             reactions jsonb NOT NULL DEFAULT '{}',
@@ -126,7 +131,7 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE slack_view_suggestion (
             id uuid PRIMARY KEY,
-            channel_id text NOT NULL,
+            channel_id text NOT NULL REFERENCES slack_channel (id),
             view_id text NOT NULL,
             actions jsonb NOT NULL,
             copied_from_store boolean NOT NULL DEFAULT false,
@@ -140,6 +145,16 @@ def upgrade() -> None:
         CREATE UNIQUE INDEX slack_view_suggestion_view ON slack_view_suggestion (channel_id, view_id)
     """)
 
+    op.execute("""
+        INSERT INTO slack_channel (id, fetched_at)
+        SELECT channel_id, 'epoch'::timestamptz
+        FROM (
+            SELECT channel_id FROM slack_thread_mapping
+            UNION SELECT channel_id FROM slack_run_mapping
+            UNION SELECT channel_id FROM slack_message_mapping
+        ) AS referenced
+        ON CONFLICT (id) DO NOTHING
+    """)
     op.execute("""
         INSERT INTO slack_thread (
             id, channel_id, thread_ts, thread_id, detach_nonce, copied_from_store,

@@ -55,6 +55,7 @@ from openswe.database.store_imports import (
     run_store_import,
     store_copy_is_newer,
 )
+from openswe.slack.channels import SlackChannel
 from openswe.slack.records import (
     KICKOFF_TTL,
     MESSAGE_FIELDS,
@@ -446,6 +447,15 @@ async def _import(
         }
         for batch in _batches(changed):
             async with postgres.session() as session:
+                await SlackChannel.ensure(
+                    session,
+                    *(
+                        channel
+                        for values in batch
+                        for name in ("channel_id", "origin_channel_id")
+                        if isinstance(channel := values.get(name), str)
+                    ),
+                )
                 await session.execute(
                     insert(row)
                     .values(batch)

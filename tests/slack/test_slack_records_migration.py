@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -113,6 +114,12 @@ async def test_upgrade_moves_mapping_rows_into_the_consolidated_tables(
             )
         ).one()
         assert tuple(message) == ("run-1", "1.0", "thread-1", {})
+        channels = (
+            await conn.execute(text("SELECT id, name, payload, fetched_at FROM slack_channel"))
+        ).all()
+        assert [tuple(channel) for channel in channels] == [
+            ("C1", "", {}, datetime.fromtimestamp(0, UTC))
+        ]
         remaining = await conn.scalar(
             text(
                 "SELECT count(*) FROM information_schema.tables WHERE table_schema = :schema "

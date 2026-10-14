@@ -39,6 +39,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SlackThreadMappingError, normalize_slack_location
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
@@ -60,7 +61,7 @@ class SlackThread(Base):
 
     __tablename__ = "slack_thread"
 
-    channel_id: Mapped[str]
+    channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
     thread_ts: Mapped[str]
     thread_id: Mapped[str | None] = mapped_column(default=None)
     detach_nonce: Mapped[str | None] = mapped_column(default=None)
@@ -104,6 +105,7 @@ class SlackThread(Base):
             id=uuid7(), channel_id=channel_id, thread_ts=thread_ts, **values
         )
         async with postgres.session() as session:
+            await SlackChannel.ensure(session, channel_id)
             await _clear_expired(
                 session, cls, cls.kickoff_expires_at, ("kickoff_ts", "kickoff_expires_at")
             )
@@ -155,7 +157,7 @@ class SlackRun(Base):
 
     __tablename__ = "slack_run"
 
-    channel_id: Mapped[str]
+    channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
     run_id: Mapped[str]
     thread_ts: Mapped[str]
     message_ts: Mapped[str | None] = mapped_column(default=None)
@@ -203,6 +205,7 @@ class SlackRun(Base):
             reply_expires_at=func.clock_timestamp() + REPLY_FRESHNESS_TTL,
         )
         async with postgres.session() as session:
+            await SlackChannel.ensure(session, channel_id)
             await _clear_expired(
                 session,
                 cls,
@@ -235,13 +238,15 @@ class SlackMessage(Base):
 
     __tablename__ = "slack_message"
 
-    channel_id: Mapped[str]
+    channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
     message_ts: Mapped[str]
     thread_ts: Mapped[str | None] = mapped_column(default=None)
     run_id: Mapped[str | None] = mapped_column(default=None)
     triggering_user_id: Mapped[str | None] = mapped_column(default=None)
     agent_thread_id: Mapped[str | None] = mapped_column(default=None)
-    origin_channel_id: Mapped[str | None] = mapped_column(default=None)
+    origin_channel_id: Mapped[str | None] = mapped_column(
+        ForeignKey("slack_channel.id"), default=None
+    )
     origin_thread_ts: Mapped[str | None] = mapped_column(default=None)
     origin_subject: Mapped[str | None] = mapped_column(default=None)
     # Each Slack user's feedback reactions on the message.
@@ -265,6 +270,7 @@ class SlackMessage(Base):
     ) -> set[str]:
         """Add or remove ``reaction`` and return the person's reactions after the change."""
         async with postgres.session() as session:
+            await SlackChannel.ensure(session, channel_id)
             reactions = await session.scalar(
                 _TOGGLE_REACTION,
                 {
@@ -303,6 +309,7 @@ class SlackMessage(Base):
             origin_subject=subject,
         )
         async with postgres.session() as session:
+            await SlackChannel.ensure(session, dm_channel_id, channel_id)
             await session.execute(
                 upsert.on_conflict_do_update(
                     index_elements=[cls.channel_id, cls.message_ts],
@@ -348,7 +355,7 @@ class SlackViewSuggestion(Base):
 
     __tablename__ = "slack_view_suggestion"
 
-    channel_id: Mapped[str]
+    channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
     view_id: Mapped[str]
     actions: Mapped[JsonObject] = mapped_column(JSONB)
     copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
@@ -379,6 +386,7 @@ class SlackViewSuggestion(Base):
             copied_from_store=self.copied_from_store,
         )
         async with postgres.session() as session:
+            await SlackChannel.ensure(session, self.channel_id)
             await session.execute(
                 upsert.on_conflict_do_update(
                     index_elements=[type(self).channel_id, type(self).view_id],
@@ -465,6 +473,7 @@ async def bind_slack_thread_id(channel_id: str, thread_ts: str, thread_id: str) 
         id=uuid7(), channel_id=channel, thread_ts=timestamp, thread_id=normalized_thread_id
     )
     async with postgres.session() as session:
+        await SlackChannel.ensure(session, channel)
         bound = await session.scalar(
             upsert.on_conflict_do_update(
                 index_elements=[SlackThread.channel_id, SlackThread.thread_ts],
@@ -552,6 +561,7 @@ async def delete_slack_thread_associations(
         )
         if expected_thread_id and mapped_thread_id and mapped_thread_id != expected_thread_id:
             return
+        await SlackChannel.ensure(session, channel)
         detach = insert(SlackThread).values(
             id=uuid7(), channel_id=channel, thread_ts=timestamp, detach_nonce=str(uuid4())
         )
@@ -669,6 +679,7 @@ async def store_slack_run_mapping(
     """Make ``run_id`` the Slack thread's current run, keeping the thread's trace reply."""
     try:
         async with postgres.session() as session:
+            await SlackChannel.ensure(session, channel_id)
             if not trace_message_ts and (
                 current := await _current_run(session, channel_id, thread_ts)
             ):
@@ -716,6 +727,7 @@ async def store_slack_message_run_mapping(
     """Map a bot message to the run that posted it, the thread's current run by default."""
     try:
         async with postgres.session() as session:
+            await SlackChannel.ensure(session, channel_id)
             current = await _current_run(session, channel_id, thread_ts)
             run = await _run(session, channel_id, run_id) if run_id else current
             resolved_run_id = run_id or (current.run_id if current else None)
