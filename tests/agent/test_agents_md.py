@@ -32,25 +32,19 @@ async def test_fetch_agents_md_oversized_agents_md_does_not_fall_back_to_claude_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("responses", "expected"),
+    ("blobs", "expected"),
     [
-        ([_make_response(200, "# AGENTS.md\nrules")], {"ui/AGENTS.md": "# AGENTS.md\nrules"}),
-        (
-            [_make_response(404), _make_response(200, "# CLAUDE.md\nrules")],
-            {"ui/CLAUDE.md": "# CLAUDE.md\nrules"},
-        ),
+        ({"f0": {"text": "agents"}, "f1": {"text": "claude"}}, {"ui/AGENTS.md": "agents"}),
+        ({"f0": None, "f1": {"text": "claude"}}, {"ui/CLAUDE.md": "claude"}),
     ],
 )
-async def test_fetch_scoped_agents_md_prefers_agents_md_then_claude_md(
-    responses: list[MagicMock], expected: dict[str, str]
+async def test_fetch_scoped_agents_md_prefers_agents_md_then_claude_md_in_one_query(
+    blobs: dict[str, object], expected: dict[str, str]
 ) -> None:
-    with patch("httpx2.AsyncClient") as mock_client_cls:
-        client = MagicMock()
-        client.get = AsyncMock(side_effect=responses)
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+    graphql = AsyncMock(return_value={"repository": blobs})
+    with patch("openswe.github.http.RepoClient.graphql", graphql):
         result = await agents_md.fetch_scoped_agents_md(
             "acme", "repo", "main", ["ui/app.py"], token="tok"
         )
     assert result == expected
-    assert client.get.await_count == len(responses)
+    graphql.assert_awaited_once()
