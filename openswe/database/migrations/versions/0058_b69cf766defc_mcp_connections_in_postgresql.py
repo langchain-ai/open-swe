@@ -9,7 +9,7 @@ Personal connections are ``user_record`` rows of kind ``mcp_connection``.
 from alembic import op
 
 revision = "b69cf766defc"
-down_revision = ["1563ad8bd725", "df7c28a904d8", "fcab215aad3e"]
+down_revision = ["7d34d8e5b6a3", "df7c28a904d8"]
 branch_labels = None
 depends_on = None
 
