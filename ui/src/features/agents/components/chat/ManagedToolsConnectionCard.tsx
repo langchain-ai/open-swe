@@ -67,7 +67,7 @@ export function ManagedToolsConnectionCard({
           <p className="text-secondary">
             Connect {missing.length === 1 ? "this" : "these"} to your account.{" "}
             {live?.all_required
-              ? "LangSmith offers this gateway's tools once all of them are connected. "
+              ? "LangSmith offers this tool kit's tools once all of them are connected. "
               : ""}
             {then}
           </p>

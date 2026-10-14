@@ -166,7 +166,7 @@ function GatewayStatus({
       {status.ready ? null : (
         <p className="px-space-3 pb-space-2 text-xs text-secondary">
           {status.all_required
-            ? "LangSmith offers this gateway's tools only after every service in it is connected to your account."
+            ? "LangSmith offers this tool kit's tools only after every service in it is connected to your account."
             : "Each service's tools load once you connect it to your account."}
         </p>
       )}
@@ -192,7 +192,7 @@ function GatewayStatus({
   )
 }
 
-/** The managed tools gateway an admin picked for this instance, and what this person still needs. */
+/** The tool kit an admin picked for this instance, and what this person still needs. */
 export function ManagedToolsSection() {
   const view = useQuery(managedToolsQuery)
   const popup = useConnectPopup()
@@ -201,7 +201,7 @@ export function ManagedToolsSection() {
   return (
     <SettingsSection
       title="Managed Tools"
-      description="Tools from the LangSmith Managed Tools gateway an admin picked for Open SWE. They load in your private threads and run with your own connections; provider tokens stay in LangSmith."
+      description="Tools from the LangSmith Managed Tools tool kit an admin picked for Open SWE. They load in your private threads and run with your own connections; provider tokens stay in LangSmith."
     >
       {view.isLoading ? (
         <p className="p-space-4 text-xs text-secondary">Loading…</p>
@@ -217,7 +217,7 @@ export function ManagedToolsSection() {
         />
       ) : view.data.gateways.length === 0 ? (
         <p className="p-space-4 text-xs text-secondary">
-          An admin has not picked a managed tools gateway yet.
+          An admin has not picked a tool kit yet.
         </p>
       ) : (
         <div className="space-y-space-3 p-space-4">
