@@ -1,6 +1,7 @@
+import { Card } from "@langchain/macaw-components/Card"
 import { useEffect, useState } from "react"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SettingsRow } from "@/components/AppShell"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { buildEnvironmentDiagnostics } from "@/lib/environment-diagnostics"
 import {
@@ -21,7 +22,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
   }, [])
 
   return (
-    <SettingsSection id="about" title="About">
+    <Card id="about" className="divide-y divide-default overflow-hidden p-0">
       {version ? (
         <SettingsRow
           label="Open SWE Desktop"
@@ -30,7 +31,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
           }
         />
       ) : null}
-      <div className="space-y-space-2 p-space-4 text-xs break-words text-secondary">
+      <div className="flex flex-col gap-space-2 p-space-4 text-xs break-words text-secondary">
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
         </p>
@@ -42,7 +43,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
           getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
         />
       </div>
-    </SettingsSection>
+    </Card>
   )
 }
 

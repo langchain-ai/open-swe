@@ -29,7 +29,7 @@ from openswe.github.pull_request_diff import (
 )
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.webhook import trigger_pr_review_from_ref
-from openswe.review.assessment_feedback import ASSESSMENTS
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -41,6 +41,7 @@ from openswe.review.findings import (
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
 from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from openswe.thread_ids import reviewer_thread_id
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import ThreadLike, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, thread_run_error
 from openswe.walkthrough.record import WalkthroughView
@@ -702,7 +703,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     )
     assessment_id = metadata.get("review_assessment_id")
     assessment = (
-        await ASSESSMENTS.get(str(assessment_id)) if isinstance(assessment_id, int) else None
+        await PublishedAssessment.get(assessment_id) if isinstance(assessment_id, int) else None
     )
 
     return {
@@ -1073,7 +1074,9 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
     token = await _require_app_token()
 
     current_url = url
-    async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_GITHUB_TIMEOUT, follow_redirects=False
+    ) as client:
         for _ in range(_MAX_IMAGE_REDIRECTS + 1):
             async with client.stream(
                 "GET", current_url, headers=_image_request_headers(current_url, token)

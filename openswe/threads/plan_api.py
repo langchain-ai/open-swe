@@ -104,7 +104,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "markdown": content.get("markdown", ""),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
-        "dismissed": bool(content) and await plan_is_dismissed(thread_id, content.get("revision")),
+        "dismissed": bool(content) and await plan_is_dismissed(thread_id),
         "user": {
             "id": login,
             "login": login,

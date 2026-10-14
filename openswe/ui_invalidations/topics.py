@@ -21,8 +21,8 @@ from openswe.github.pull_request_key import PullRequestKey
 from openswe.ui_invalidations import outbox
 
 if TYPE_CHECKING:
+    from openswe.github.repo_names import RepoFullName
     from openswe.incidents.models import IncidentId
-    from openswe.review.styles import RepoFullName
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,9 @@ class Topic(BaseTopic):
     THREAD_QUEUES: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
 
+    ANNOUNCEMENTS: ClassVar[Topic]
+    """Admin announcements and their delivery progress; admins only."""
+
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
 
@@ -114,6 +117,14 @@ class Topic(BaseTopic):
 
     async def authorize(self, session: Session, keys: set[str]) -> set[str]:
         return keys & {""}
+
+
+class AdminTopic(Topic):
+    """Data only admins may read, invalidated as a whole."""
+
+    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+        admin = is_admin(session.get("email"), login=session.get("sub"))
+        return keys & {""} if admin else set()
 
 
 class KeyedTopic[K: str](BaseTopic):
@@ -205,3 +216,4 @@ Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
+Topic.ANNOUNCEMENTS = AdminTopic("announcements")

@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 
 from openswe.analytics.routes import router as analytics_router
+from openswe.announcements.routes import router as announcements_router
 from openswe.api_keys.routes import router as api_keys_router
 from openswe.audit_logs.routes import router as audit_logs_router
 from openswe.bridge.routes import router as bridge_router
@@ -47,6 +48,7 @@ router.include_router(user_preferences_router)
 router.include_router(options_router)
 router.include_router(profiles_router)
 router.include_router(users_router)
+router.include_router(announcements_router)
 router.include_router(langsmith_router)
 router.include_router(slack_router)
 router.include_router(workspace_settings_router)

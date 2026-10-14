@@ -27,6 +27,7 @@ from openswe.transcript.events import (
 )
 from openswe.transcript.rebuild import rebuild_thread_projections
 from openswe.transcript.snapshot import load_events, load_snapshot
+from openswe.transcript.turns import RunTurn
 
 THREAD_ID = "thread-under-test"
 RUN_ID = "run-under-test"
@@ -197,6 +198,50 @@ async def test_only_mid_run_human_messages_are_recorded_once(
     ]
     assert [command.command_id for command in human_events] == ["human:human-queued"]
     assert human_events[0].event.role == "human"
+
+
+async def test_a_run_continued_in_another_process_keeps_its_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An MDA run's hooks can reach any replica; the turn and what it recorded carry over."""
+    engine = _install(monkeypatch, transcribed=True)
+    asked = HumanMessage(content="do the thing", id="human-1")
+    await mw.TranscriptMiddleware().abefore_agent({"messages": [asked]}, None)
+    await mw.TranscriptMiddleware().aflush_run(None)
+    [started] = [c for c in engine.commands if c.event.type == "turn.started"]
+    turn_id = started.turn_id
+    assert turn_id is not None
+
+    # Another process: nothing in memory, only what PostgreSQL recorded.
+    mw._runs.clear()
+
+    async def run_turn(thread_id: str, run_id: str) -> RunTurn:
+        assert (thread_id, run_id) == (THREAD_ID, RUN_ID)
+        return RunTurn(turn_id, open=True)
+
+    async def recorded_message_ids(thread_id: str, message_ids: Sequence[str]) -> set[str]:
+        return {"human-1"} & set(message_ids)
+
+    monkeypatch.setattr(mw, "run_turn", run_turn)
+    monkeypatch.setattr(mw, "recorded_message_ids", recorded_message_ids)
+    replied = AIMessage(content="on it", id="ai-1")
+    queued = HumanMessage(content="also this", id="human-2")
+    history = [asked, replied, queued]
+    middleware = mw.TranscriptMiddleware()
+    await middleware.aresume_run({"messages": history}, None)
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="done", id="ai-2")])
+
+    await middleware.awrap_model_call(_model_request(history), model_handler)
+    await middleware.aafter_agent({"messages": history}, None)
+
+    assert engine.types.count("turn.started") == 1
+    assert [c.command_id for c in engine.commands if c.command_id.startswith("human:")] == [
+        "human:human-2"
+    ]
+    assert {c.turn_id for c in engine.commands if c.turn_id is not None} == {turn_id}
+    assert engine.command_ids[-1] == f"turn:{turn_id}:completed"
 
 
 @pytest.mark.parametrize("supplied_turn", [False, True])

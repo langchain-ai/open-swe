@@ -193,7 +193,7 @@ async def test_one_approval_is_enough_without_reviewer_instructions(
             await scenario.clicks(bob, "accept")
             await scenario.reviews_on_github(bob)
             await scenario.wait(days=1)
-            scenario.expect(joined(bob, cause="accepted_pick"), edited(bob))
+            scenario.expect(joined(bob, cause="accepted_pick"), edited(bob), edited(bob))
 
 
 async def test_github_requiring_code_owner_review_asks_every_areas_owners(
@@ -224,6 +224,7 @@ async def test_github_requiring_code_owner_review_asks_every_areas_owners(
             await scenario.reviews_on_github(bob)
             scenario.expect(
                 joined(bob, cause="accepted_pick"),
+                edited(bob),
                 edited(bob),
                 picked(dana),
                 requested_on_github(dana),
@@ -262,6 +263,7 @@ async def test_reviews_follow_the_repositorys_stages_one_at_a_time(
             await scenario.reviews_on_github(bob)
             scenario.expect(
                 joined(bob, cause="accepted_pick"),
+                edited(bob),
                 edited(bob),
                 picked(carol),
                 requested_on_github(carol),

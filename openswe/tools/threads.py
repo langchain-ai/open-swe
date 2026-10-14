@@ -24,8 +24,9 @@ from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
-from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
+from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from openswe.slack.mappings import lookup_slack_thread_id
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
@@ -670,12 +671,10 @@ async def _authorized_locator(
         if not thread_id:
             return _failure("Could not resolve LangSmith trace to an Open SWE thread")
     elif slack_locator:
-        client = langgraph_client()
-        thread_id = await lookup_slack_thread_id(client, *slack_locator) or ""
+        thread_id = await lookup_slack_thread_id(*slack_locator) or ""
         if not thread_id:
             thread_id = (
-                await lookup_slack_thread_id(client, slack_locator[0], CODE_CHANNEL_SESSION_TS)
-                or ""
+                await lookup_slack_thread_id(slack_locator[0], CODE_CHANNEL_SESSION_TS) or ""
             )
         if not thread_id:
             return _failure("Could not resolve Slack link to an Open SWE thread")
@@ -891,6 +890,7 @@ async def _send_message(
 ) -> dict[str, Any]:
     # The dashboard's own send: a busy thread gets the message steered into its
     # open turn or queued as a follow-up run, both shown on the transcript at once.
+    # Marked as relayed so it never moves the recipient's conversation to Web.
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
@@ -902,11 +902,13 @@ async def _send_message(
             "config": {"configurable": configurable},
         },
     }
+    caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
         email=actor.email,
+        relayed_from=caller_thread_id if isinstance(caller_thread_id, str) else None,
     )
     try:
         reply = _CommandReply.model_validate_json(content or b"{}")

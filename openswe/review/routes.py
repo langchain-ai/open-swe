@@ -15,14 +15,13 @@ from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
 from openswe.review.approvals import fetch_approvals_md
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
-    feedback_store,
-    require_assessment_access,
-    save_feedback,
+    PublishedAssessment,
 )
 from openswe.review.chat import (
     ReviewChat,
@@ -66,7 +65,6 @@ from openswe.review.styles import (
     ReviewStyle,
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
-    normalize_repo_full_name,
 )
 from openswe.threads.handlers import mark_review_session_viewed
 from openswe.walkthrough.record import Walkthrough
@@ -220,8 +218,8 @@ async def get_assessment_feedback(
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback | None:
     login = str(session["sub"])
-    await require_assessment_access(owner, repo, pr_number, review_id, login)
-    return await feedback_store(review_id).get(login.lower())
+    assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
+    return await assessment.feedback_from(login)
 
 
 @router.put("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
@@ -234,7 +232,9 @@ async def submit_assessment_feedback(
     submission: FeedbackSubmission,
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback:
-    return await save_feedback(owner, repo, pr_number, review_id, str(session["sub"]), submission)
+    login = str(session["sub"])
+    assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
+    return await assessment.record_feedback(login, submission)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/preview")

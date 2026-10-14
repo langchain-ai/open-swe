@@ -29,10 +29,10 @@ from openswe.slack.client import (
     remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
-    store_slack_message_run_mapping,
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
+from openswe.slack.mappings import store_slack_message_run_mapping
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from openswe.slack.orphan import (
     dashboard_handoff_message,
@@ -162,7 +162,6 @@ async def slack_reply(
                     if is_code_channel_session(str(thread_ts))
                     else str(thread_id or "") or None
                 ),
-                langgraph_client=client,
                 run_id=run_id,
                 triggering_user_id=_triggering_user_id(cfg),
             )
@@ -563,7 +562,6 @@ async def _post_and_store_mapping(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
-    langgraph_client: Any | None = None,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
@@ -577,9 +575,7 @@ async def _post_and_store_mapping(
         agent_thread_id=agent_thread_id,
     )
     if message_ts:
-        resolved_client = langgraph_client or get_langgraph_client()
         await store_slack_message_run_mapping(
-            resolved_client,
             channel_id,
             thread_ts,
             message_ts,

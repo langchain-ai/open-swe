@@ -1,11 +1,16 @@
 import shutil
 import subprocess
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.review_guide.walk import Reader, Walk
+from openswe.walkthrough.checkout import HEAD_REF, PinnedCheckout
 from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import (
     FileHunks,
@@ -16,6 +21,7 @@ from openswe.walkthrough.plan import (
     RangeError,
     claim,
 )
+from openswe.walkthrough.planner import PlanWorkspace
 from openswe.walkthrough.render import render_chunk
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
@@ -245,3 +251,64 @@ def test_a_split_hunk_goes_to_two_chunks_and_each_part_keeps_its_new_lines_after
     assert {"def two():", "def three():"} <= texts[1]
     assert "def three():" not in texts[0]
     assert moved.unplanned(new_changes) == []
+
+
+@pytest.mark.asyncio
+async def test_replacing_chunks_merges_steps_and_releases_omitted_hunks(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"a.py": "a = 1\n", "b.py": "b = 2\n", "c.py": "c = 3\n"}, "add")
+    changes = _changes(repo, base, head)
+    plan = Plan.start(head, changes)
+    hunks = [FileHunks(path=name, hunks=["+1"]) for name in ["a.py", "b.py", "c.py"]]
+    _place(plan, changes, "First", hunks[0], hunks[2])
+    _place(plan, changes, "Second", hunks[1])
+    workspace = PlanWorkspace(AsyncMock(), AsyncMock(), head, changes, plan)
+    workspace.checkout.render.return_value = "merged code"
+
+    async def edit(change: Callable[[Plan], object]) -> None:
+        change(plan)
+
+    monkeypatch.setattr(workspace, "_edit", edit)
+    assert (
+        await workspace.plan_chunk(
+            title="Merged", show=hunks[:2], explanation="Combined", replace=[1, 2]
+        )
+        == 1
+    )
+    assert [chunk.title for chunk in plan.chunks] == ["Merged"]
+    assert {ref.path for ref in plan.chunks[0].lines} == {"a.py", "b.py"}
+    assert {line.path for line in plan.unplanned(changes)} == {"c.py"}
+    assert not plan.other
+
+    async def concurrent_edit(change: Callable[[Plan], object]) -> None:
+        plan.chunks[0].explanation = "Another planner revised this"
+        change(plan)
+
+    monkeypatch.setattr(workspace, "_edit", concurrent_edit)
+    with pytest.raises(RangeError, match="another planner changed"):
+        await workspace.plan_chunk(title="Stale", show=hunks[:2], explanation="Old", replace=[1])
+    assert plan.chunks[0].title == "Merged"
+
+
+class _ShellBackend:
+    async def aexecute(self, command: str, timeout: int | None = None) -> ExecuteResponse:  # noqa: ARG002
+        result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+        return ExecuteResponse(output=result.stdout + result.stderr, exit_code=result.returncode)
+
+
+async def test_head_files_read_together_keep_each_files_lines(repo: Path) -> None:
+    files = {
+        "plain.py": "a\nb\n",
+        "no_newline.txt": "last",
+        "blank_tail.md": "x\n\n",
+        "empty.txt": "",
+    }
+    head = _commit(repo, files, "files")
+    _git(repo, "update-ref", HEAD_REF, head)
+    checkout = PinnedCheckout(cast(SandboxBackendProtocol, _ShellBackend()), str(repo))
+
+    assert await checkout.head_files(list(files)) == {
+        path: content.splitlines() for path, content in files.items()
+    }

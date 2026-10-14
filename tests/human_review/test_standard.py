@@ -67,6 +67,42 @@ async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -
     )
 
 
+@pytest.mark.parametrize("updated", [True, False])
+async def test_completed_pick_marks_dm_stale_and_preserves_reviewer(updated: bool) -> None:
+    request = HumanReviewRequest(pull_request_id=User().id, head_sha="abc", kind="standard")
+    user = User(identities=[UserIdentity(provider="github", external_id="grace", login="Grace")])
+    pick = HumanReviewParticipant(
+        user_id=user.id,
+        decision="picked",
+        assigned_by_agent=True,
+        dm_channel_id="D1",
+        dm_ts="1.2",
+        dm_text="Accept this review",
+    )
+    pick.user = user
+    request.participants.append(pick)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch(
+            "openswe.human_review.pick_message.PickMessage.show", AsyncMock(return_value=updated)
+        ) as show,
+    ):
+        await ReviewPicks(request).complete({"grace"})
+        show.assert_awaited_once_with(
+            "Review submitted on GitHub. This assignment is no longer active."
+        )
+        assert request.participants == [pick]
+        assert pick.decision == ("review" if updated else "picked")
+        assert pick.dm_ts == ("" if updated else "1.2")
+        await ReviewPicks(request).complete({"grace"})
+        assert show.await_count == (1 if updated else 2)
+
+
 async def test_decline_only_withdraws_the_users_pending_pick() -> None:
     from openswe.human_review.standard import decline
 

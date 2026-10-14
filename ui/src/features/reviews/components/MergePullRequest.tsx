@@ -1,8 +1,8 @@
 import { CheckIcon } from "@langchain/macaw-components/icons"
-import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 import { SplitButton } from "@/components/SplitButton"
@@ -77,7 +77,7 @@ export function MergePullRequest({
             role="menuitemradio"
             aria-checked={option === method}
             onSelect={() => setChoice(option)}
-            className="w-72 items-start gap-space-2"
+            className="w-72 items-start"
           >
             <CheckIcon
               aria-hidden

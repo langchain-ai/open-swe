@@ -8,7 +8,7 @@ import {
 import { Text } from "@langchain/macaw-components/Text"
 import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
@@ -17,14 +17,19 @@ import { PullRequestActionButton } from "./PullRequestActionButton"
 
 /** Posts a review card in the repository's Slack review channel. */
 export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
+  const queryClient = useQueryClient()
+  const queryKey = ["human-review-availability", pr]
   const availability = useQuery({
-    queryKey: ["human-review-availability", pr],
+    queryKey,
     queryFn: () => api.humanReviewAvailability(pr),
     enabled: pr.reviewDecision !== "approved",
     staleTime: 60_000,
   })
   const [channel, setChannel] = useState<string | null>(null)
-  const needsChannel = availability.isSuccess && !availability.data.available
+  const active = availability.data?.active ?? false
+  const permalink = availability.data?.permalink ?? ""
+  const needsChannel =
+    availability.isSuccess && !availability.data.available && !active
   const blockers = availability.data?.blockers ?? []
   const reason = blockers.length
     ? `A review can't be requested yet: ${blockers.join("; ")}.`
@@ -35,11 +40,23 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     meta: {
       errorTitle: `Could not request a review of ${pullRequestKey(pr)}`,
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
+      await queryClient.cancelQueries({ queryKey })
+      queryClient.setQueryData<
+        Awaited<ReturnType<typeof api.humanReviewAvailability>>
+      >(queryKey, (previous) =>
+        previous
+          ? {
+              ...previous,
+              active: true,
+              permalink: result.permalink,
+              blockers: [],
+            }
+          : previous
+      )
+      if (result.reused) return
       toast.success(
-        result.reused
-          ? `${pullRequestKey(pr)} already has a review request in Slack`
-          : `Asked Slack to review ${pullRequestKey(pr)}`,
+        `Asked Slack to review ${pullRequestKey(pr)}`,
         result.permalink
           ? {
               action: {
@@ -58,8 +75,16 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     retry: false,
   })
   if (pr.reviewDecision === "approved") return null
+  if (availability.isError && !availability.data)
+    return (
+      <PullRequestActionButton
+        label="Retry review status"
+        disabled={availability.isFetching}
+        onClick={() => void availability.refetch()}
+      />
+    )
   const label =
-    requestReview.isPending || requestReview.isSuccess
+    requestReview.isPending || active
       ? "Review requested"
       : requestReview.isError
         ? "Retry review request"
@@ -87,9 +112,16 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           availability.isPending ||
           (needsChannel && !channel) ||
           requestReview.isPending ||
-          requestReview.isSuccess
+          (active && !permalink)
         }
-        onClick={() => requestReview.mutate()}
+        onClick={() => {
+          if (active) {
+            if (permalink)
+              window.open(permalink, "_blank", "noopener,noreferrer")
+          } else {
+            requestReview.mutate()
+          }
+        }}
       />
       {reason && (
         <Popover>

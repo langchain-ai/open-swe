@@ -8,7 +8,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from openswe.config import ENV
-from openswe.slack.client import lookup_slack_run_mapping
+from openswe.slack.mappings import lookup_slack_run_mapping
 from openswe.utils.langsmith import create_langsmith_feedback, delete_langsmith_feedback
 from openswe.utils.reviewer_outcomes import outcome_from_score as _outcome_from_score
 from openswe.utils.reviewer_outcomes import upsert_run_outcome
@@ -145,21 +145,18 @@ async def process_slack_reaction(
     if await _event_was_processed(langgraph_client, channel_id, event_id):
         return
 
-    mapping = await lookup_slack_run_mapping(langgraph_client, channel_id, message_ts)
-    if not mapping:
+    mapping = await lookup_slack_run_mapping(channel_id, message_ts)
+    if mapping is None:
         logger.debug(
             "No run mapping for Slack reaction on channel=%s message=%s",
             channel_id,
             message_ts,
         )
         return
-    run_id_value = mapping.get("run_id")
-    if not isinstance(run_id_value, str) or not run_id_value:
-        return
-    run_id = run_id_value
+    run_id = mapping.run_id
 
-    triggering_user_id = mapping.get("triggering_user_id")
-    if isinstance(triggering_user_id, str) and triggering_user_id and triggering_user_id != user_id:
+    triggering_user_id = mapping.triggering_user_id
+    if triggering_user_id and triggering_user_id != user_id:
         # Only the user who triggered the run may give feedback on it. Other
         # reactors are ignored to keep eval signal clean in shared channels.
         logger.debug(

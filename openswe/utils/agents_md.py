@@ -4,13 +4,14 @@ Used by the reviewer to deterministically load repo conventions into context
 without the model having to clone the repo and read the file itself.
 """
 
-import asyncio
 import logging
 import posixpath
 from collections.abc import Iterable
-from urllib.parse import quote
 
 import httpx2
+
+from openswe.github.http import GitHubClient
+from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,6 @@ _MAX_AGENTS_MD_BYTES = 64 * 1024
 # Filenames tried in order of preference. AGENTS.md is the cross-tool standard;
 # CLAUDE.md is the legacy Anthropic-specific filename still used by many repos.
 _AGENT_DOC_FILENAMES = ("AGENTS.md", "CLAUDE.md")
-_SCOPED_FETCH_CONCURRENCY = 8
 
 
 def applicable_agents_md_paths(changed_files: Iterable[str]) -> list[str]:
@@ -69,7 +69,7 @@ async def fetch_agents_md(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx2.AsyncClient(timeout=timeout) as client:
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
         for filename in _AGENT_DOC_FILENAMES:
             url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filename}"
             try:
@@ -127,69 +127,33 @@ async def fetch_scoped_agents_md(
 ) -> dict[str, str]:
     """Fetch applicable directory-scoped ``AGENTS.md`` files at ``ref``.
 
-    Each candidate is an ancestor of at least one changed file. Missing,
-    oversized, or unavailable files are skipped independently so one bad path
-    does not hide valid instructions in another changed subtree.
+    Each candidate is an ancestor of at least one changed file. All candidates are
+    read in batched GraphQL queries, since probing each directory over REST
+    exhausts the installation's rate limit on large pull requests.
     """
     if not owner or not repo or not ref:
         return {}
-    candidates = applicable_agents_md_paths(changed_files)
-    if not candidates:
+    directories = [posixpath.dirname(path) for path in applicable_agents_md_paths(changed_files)]
+    if not directories:
+        return {}
+    paths = [posixpath.join(d, name) for d in directories for name in _AGENT_DOC_FILENAMES]
+    try:
+        async with GitHubClient.connect(token=token, timeout=timeout) as github:
+            files = await github.repo(owner, repo).read_files(paths, ref)
+    except httpx2.HTTPError, ValueError:
+        logger.exception("Failed to fetch scoped agent docs from %s/%s@%s", owner, repo, ref)
         return {}
 
-    headers = {
-        "Accept": "application/vnd.github.raw",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    semaphore = asyncio.Semaphore(_SCOPED_FETCH_CONCURRENCY)
-    async with httpx2.AsyncClient(timeout=timeout) as client:
-
-        async def _fetch(candidate: str) -> tuple[str, str] | None:
-            directory = posixpath.dirname(candidate)
-            for filename in _AGENT_DOC_FILENAMES:
-                path = posixpath.join(directory, filename)
-                url_path = quote(path, safe="/")
-                url = f"https://api.github.com/repos/{owner}/{repo}/contents/{url_path}"
-                try:
-                    async with semaphore:
-                        response = await client.get(url, headers=headers, params={"ref": ref})
-                except httpx2.HTTPError:
-                    logger.exception("Failed to fetch %s from %s/%s@%s", path, owner, repo, ref)
-                    return None
-                if response.status_code == 404:
-                    continue
-                if response.status_code != 200:
-                    logger.warning(
-                        "Unexpected status %s fetching %s from %s/%s@%s",
-                        response.status_code,
-                        path,
-                        owner,
-                        repo,
-                        ref,
-                    )
-                    return None
-                content = response.text
-                if len(content.encode("utf-8")) > _MAX_AGENTS_MD_BYTES:
-                    logger.info(
-                        "%s in %s/%s@%s exceeds %d bytes; skipping inline",
-                        path,
-                        owner,
-                        repo,
-                        ref,
-                        _MAX_AGENTS_MD_BYTES,
-                    )
-                    return None
-                return path, content
-            return None
-
-        fetched = await asyncio.gather(*(_fetch(path) for path in candidates))
-
     result: dict[str, str] = {}
-    for item in fetched:
-        if item is not None:
-            path, content = item
-            result[path] = content
+    for directory in directories:
+        path = next(
+            (p for name in _AGENT_DOC_FILENAMES if (p := posixpath.join(directory, name)) in files),
+            None,
+        )
+        if path is None:
+            continue
+        if len(files[path].encode("utf-8")) > _MAX_AGENTS_MD_BYTES:
+            logger.info("%s in %s/%s@%s exceeds the size cap; skipping", path, owner, repo, ref)
+            continue
+        result[path] = files[path]
     return result

@@ -10,11 +10,20 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx2
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import DeleteResult, ExecuteResponse, SandboxBackendProtocol
+from deepagents.backends.protocol import (
+    DeleteResult,
+    ExecuteResponse,
+    FileInfo,
+    LsResult,
+    ReadResult,
+    SandboxBackendProtocol,
+    WriteResult,
+)
 from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
     ResourceNotFoundError,
+    SandboxClientError,
     SandboxConnectionError,
     SandboxServerReloadError,
 )
@@ -24,6 +33,7 @@ from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
 
 logger = logging.getLogger(__name__)
@@ -53,6 +63,11 @@ SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
 _KILL_TIMEOUT_SECONDS = 5.0
+# The most entries the sandbox file API returns for one listing.
+_LS_MAX_ENTRIES = 1000
+# Above this, a file API read would pull the whole file into the worker to return
+# one page; the base class's read script pages inside the sandbox instead.
+_FILE_API_READ_MAX_BYTES = 2 * 1024 * 1024
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -425,7 +440,9 @@ async def configure_sandbox_proxy(
         *preserved_rules,
     ]
     payload = {"proxy_config": proxy_config}
-    async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
+    ) as client:
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
         except httpx2.HTTPStatusError as exc:
@@ -462,7 +479,9 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
         msg = "LANGSMITH_API_KEY not set"
         raise ValueError(msg)
     url = f"{_get_sandbox_api_endpoint()}/boxes/{sandbox_id}/service-url"
-    async with httpx2.AsyncClient(timeout=SERVICE_URL_TIMEOUT_SECONDS) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=SERVICE_URL_TIMEOUT_SECONDS
+    ) as client:
         response = await client.post(
             url,
             json={"port": port, "access": "workspace"},
@@ -684,6 +703,53 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
+
+    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        """Read small files through the sandbox file API rather than a read script.
+
+        Every command opens its own exec WebSocket, while the file API reuses the
+        client's pooled HTTP connection. The file API returns the whole file, so
+        large files, and files the API cannot stat, go through the read script,
+        which pages inside the sandbox.
+        """
+        try:
+            stat = await self._aget_sandbox().stat(file_path)
+        except SandboxClientError:
+            logger.debug("Sandbox file API stat failed; using the read script", exc_info=True)
+            return await super().aread(file_path, offset, limit)
+        if stat.size_bytes > _FILE_API_READ_MAX_BYTES:
+            return await super().aread(file_path, offset, limit)
+        return await asyncio.to_thread(self.read, file_path, offset, limit)
+
+    async def als(self, path: str) -> LsResult:
+        """List through the sandbox file API, keeping the listing command for its edge cases.
+
+        The file API caps a listing and answers a file path with no entries, so a
+        capped, empty or failed listing is redone by the base class's command.
+        """
+        try:
+            listing = await self._aget_sandbox().ls(path, limit=_LS_MAX_ENTRIES)
+        except ResourceNotFoundError:
+            return LsResult(error=f"Path '{path}': path_not_found")
+        except SandboxClientError:
+            logger.debug(
+                "Sandbox file API listing failed; using the listing command", exc_info=True
+            )
+            return await super().als(path)
+        if listing.truncated or not listing.matches:
+            return await super().als(path)
+        return LsResult(entries=[FileInfo(path=m.path, is_dir=m.is_dir) for m in listing.matches])
+
+    async def awrite(self, file_path: str, content: str) -> WriteResult:
+        """Upload through the sandbox file API, which creates missing parent directories.
+
+        The base class first runs a ``mkdir -p`` preflight as its own command.
+        """
+        try:
+            await self._aget_sandbox().write(file_path, content.encode("utf-8"))
+        except SandboxClientError as e:
+            return WriteResult(error=f"Failed to write file '{file_path}': {e}")
+        return WriteResult(path=file_path)
 
     async def adelete(self, file_path: str) -> DeleteResult:
         quoted = shlex.quote(file_path)

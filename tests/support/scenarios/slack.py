@@ -24,8 +24,9 @@ from pydantic import JsonValue
 # that play's fakes and keep them after the play ends.
 from openswe.api.app import app
 from openswe.slack import client as slack_client
-from openswe.slack import dm, thread_owner
+from openswe.slack import dm, mappings, thread_owner
 from openswe.slack.channels import SlackChannel
+from openswe.slack.http import SlackClient
 from openswe.users import User, UserIdentity
 from openswe.users.records import UserRecords
 from openswe.utils import thread_ops
@@ -113,6 +114,16 @@ class Directory:
             # Nobody has saved settings, so every per-person record reads as absent.
             (UserRecords, "get", returning(None)),
         ]
+
+
+@dataclass(frozen=True)
+class _WebClient:
+    """The bot's Slack Web API client, for the calls Open SWE makes on it directly."""
+
+    slack: Slack
+
+    async def conversations_open(self, *, users: str) -> dict[str, JsonValue]:
+        return {"ok": True, "channel": {"id": f"D_{self.slack._login(users)}"}}
 
 
 class Slack:
@@ -354,6 +365,10 @@ class Slack:
     async def _no_lock(self, *_: object, **__: object) -> AsyncIterator[None]:
         yield None
 
+    @asynccontextmanager
+    async def _bot(self) -> AsyncIterator[_WebClient]:
+        yield _WebClient(self)
+
     def fakes(self) -> list[tuple[object, Fake]]:
         people = self.scenario.people
         return [
@@ -373,8 +388,8 @@ class Slack:
                 computing(lambda channel, ts: f"https://slack.test/{channel}/{ts}"),
             ),
             (
-                slack_client.lookup_slack_thread_id,
-                computing(lambda _client, channel, ts: self.thread_of(str(channel), str(ts))),
+                mappings.lookup_slack_thread_id,
+                computing(lambda channel, ts: self.thread_of(str(channel), str(ts))),
             ),
             (slack_client.get_active_slack_thread, returning(None)),
             (slack_client.add_slack_reaction, returning(True)),
@@ -387,6 +402,7 @@ class Slack:
     def attribute_fakes(self) -> list[tuple[object, str, object]]:
         return [
             (common, "SLACK_SIGNING_SECRET", _SIGNING_SECRET),
+            (SlackClient, "bot", self._bot),
             (
                 SlackChannel,
                 "load",

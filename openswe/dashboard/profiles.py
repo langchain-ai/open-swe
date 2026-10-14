@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
+from openswe.config import ENV
 from openswe.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
@@ -76,7 +77,6 @@ class ProfileUpdate(BaseModel):
     auto_human_review_enabled: bool = True
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
-    preserve_sandbox_memory: bool | None = None
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
     prefer_tools_in_sandbox: bool | None = None
@@ -93,6 +93,7 @@ class ProfileUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_act_as_approval: bool | None = None
+    run_on_mda: bool | None = None
     slack_onboarding_dismissed: bool = False
 
 
@@ -355,6 +356,11 @@ async def has_access_token_record(login: str) -> bool:
     return bool(await GITHUB_OAUTH_TOKENS.get(login))
 
 
+def _preferences_response(preferences: UserPreferences) -> dict[str, object]:
+    # Whether the run_on_mda switch does anything on this deployment.
+    return {**preferences.model_dump(), "mda_available": ENV.MDA_RUNTIME_URL.optional() is not None}
+
+
 router = APIRouter(tags=["profiles"])
 # Not openswe.dashboard.deps: that module imports repo_access, which imports this one.
 _SESSION_DEP = Depends(require_session)
@@ -367,7 +373,7 @@ async def get_my_profile(
     profile, preferences = await asyncio.gather(
         get_profile(session["sub"]), User.preferences_for_login(session["sub"])
     )
-    return {**normalize_profile_for_response(profile or {}), **preferences.model_dump()}
+    return {**normalize_profile_for_response(profile or {}), **_preferences_response(preferences)}
 
 
 @router.post("/profile/slack-onboarding-dismissal")
@@ -393,7 +399,6 @@ async def put_my_profile(
         login,
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
-            preserve_sandbox_memory=update.preserve_sandbox_memory,
             pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
             prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
@@ -403,20 +408,21 @@ async def put_my_profile(
             act_as_always_allowed=(
                 False if update.experimental_act_as_approval is not None else None
             ),
+            run_on_mda=update.run_on_mda,
         ),
     )
     if preferences is None and (
         update.concierge_mode
-        or update.preserve_sandbox_memory
         or update.pr_review_links
         or update.pr_failure_reactions
         or update.prefer_tools_in_sandbox
         or update.experimental_task_coordination
         or update.experimental_act_as_approval
+        or update.run_on_mda
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),
-        **(preferences or UserPreferences()).model_dump(),
+        **_preferences_response(preferences or UserPreferences()),
     }

@@ -46,7 +46,7 @@ from sqlalchemy import (
     select,
     tuple_,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR, insert
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -57,7 +57,7 @@ from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
-from openswe.utils.json_types import thread_metadata
+from openswe.utils.json_types import JsonObject, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,12 @@ class PullRequest(Base):
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     legacy_threads_discovered_at: Mapped[datetime | None] = mapped_column(init=False)
+    # The task working on this pull request, and what it keeps here, one key per
+    # kind of work (a baby-sit watch is ``baby_sit``).
+    task_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("task.id", ondelete="SET NULL"), default=None, init=False
+    )
+    task_state: Mapped[JsonObject | None] = mapped_column(JSONB, default=None, init=False)
     repository: Mapped[Repository] = relationship(init=False)
 
     @classmethod

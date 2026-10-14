@@ -196,6 +196,123 @@
         "title": "AllowedSlackBotEntry",
         "type": "object"
       },
+      "AnnouncementCreate": {
+        "properties": {
+          "test": {
+            "default": false,
+            "title": "Test",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 3000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AnnouncementCreate",
+        "type": "object"
+      },
+      "AnnouncementSent": {
+        "properties": {
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "test": {
+            "title": "Test",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "test",
+          "recipients"
+        ],
+        "title": "AnnouncementSent",
+        "type": "object"
+      },
+      "AnnouncementSummary": {
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "author",
+          "created_at",
+          "finished_at",
+          "recipients",
+          "sent",
+          "failed"
+        ],
+        "title": "AnnouncementSummary",
+        "type": "object"
+      },
+      "AnnouncementsView": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AnnouncementSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recipients",
+          "items"
+        ],
+        "title": "AnnouncementsView",
+        "type": "object"
+      },
       "ApiKeyCreate": {
         "properties": {
           "description": {
@@ -1122,6 +1239,25 @@
         "title": "CommentBody",
         "type": "object"
       },
+      "ConnectedService": {
+        "description": "A service in the gateway this person has connected.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "tool_count"
+        ],
+        "title": "ConnectedService",
+        "type": "object"
+      },
       "Conversation": {
         "properties": {
           "items": {
@@ -1849,8 +1985,20 @@
         "type": "object"
       },
       "GatewayStatus": {
-        "description": "What one person sees for a gateway: ready, or what to connect first.",
+        "description": "What one person sees for a gateway: every service connected, or what is left.",
         "properties": {
+          "all_required": {
+            "default": false,
+            "title": "All Required",
+            "type": "boolean"
+          },
+          "connected": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedService"
+            },
+            "title": "Connected",
+            "type": "array"
+          },
           "gateway": {
             "$ref": "#/components/schemas/Gateway"
           },
@@ -1875,18 +2023,10 @@
               }
             ],
             "title": "Tool Count"
-          },
-          "workspaces": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Workspaces",
-            "type": "array"
           }
         },
         "required": [
           "gateway",
-          "workspaces",
           "ready"
         ],
         "title": "GatewayStatus",
@@ -1962,6 +2102,10 @@
       },
       "HumanReviewAvailability": {
         "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
           "available": {
             "title": "Available",
             "type": "boolean"
@@ -1973,10 +2117,16 @@
             },
             "title": "Blockers",
             "type": "array"
+          },
+          "permalink": {
+            "default": "",
+            "title": "Permalink",
+            "type": "string"
           }
         },
         "required": [
-          "available"
+          "available",
+          "active"
         ],
         "title": "HumanReviewAvailability",
         "type": "object"
@@ -2640,7 +2790,7 @@
         "type": "object"
       },
       "ManagedToolsView": {
-        "description": "The managed tools gateways the caller's workspaces use, and what each still needs.",
+        "description": "The instance's managed tools gateway (none or one), and what the caller still needs.",
         "properties": {
           "configured": {
             "title": "Configured",
@@ -4063,17 +4213,6 @@
             ],
             "title": "Prefer Tools In Sandbox"
           },
-          "preserve_sandbox_memory": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preserve Sandbox Memory"
-          },
           "recent_thread_context_enabled": {
             "default": false,
             "title": "Recent Thread Context Enabled",
@@ -4089,6 +4228,17 @@
               }
             ],
             "title": "Review Draft Prs"
+          },
+          "run_on_mda": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run On Mda"
           },
           "slack_onboarding_dismissed": {
             "default": false,
@@ -7842,6 +7992,17 @@
             ],
             "title": "Review Trace Links"
           },
+          "run_on_mda": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run On Mda"
+          },
           "sandbox_openai_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -8092,6 +8253,79 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/dashboard/api/admin/announcements": {
+      "get": {
+        "operationId": "api_list_announcements_dashboard_api_admin_announcements_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Announcements",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      },
+      "post": {
+        "description": "DM the announcement to everyone, or with ``test`` to the admin alone.",
+        "operationId": "api_send_announcement_dashboard_api_admin_announcements_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnouncementCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementSent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Send Announcement",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      }
+    },
     "/dashboard/api/admin/api-keys": {
       "get": {
         "operationId": "api_list_api_keys_dashboard_api_admin_api_keys_get",
@@ -10424,7 +10658,7 @@
     },
     "/dashboard/api/managed-tools/gateways": {
       "get": {
-        "description": "Gateways an admin can pick for a workspace, read with the admin's own LangSmith login.",
+        "description": "Gateways an admin can pick for the instance, read with the admin's own LangSmith login.",
         "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
         "responses": {
           "200": {
@@ -17097,6 +17331,22 @@
         "description": "Start the Sign in with Slack flow to link the current GitHub account.",
         "operationId": "slack_login_dashboard_api_slack_login_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
           {
             "in": "query",
             "name": "desktop_handoff",

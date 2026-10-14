@@ -204,17 +204,18 @@ ENV.var(
     default="http://localhost:2024",
 )
 ENV.var(
-    "REVIEWER_RUNTIME_URL",
-    "Managed Deep Agents deployment that runs reviewer graphs; unset keeps them on LANGGRAPH_URL.",
+    "MDA_RUNTIME_URL",
+    "Managed Deep Agents deployment (mda/) that runs the agent and reviewer graphs "
+    "for people who turn on run_on_mda; unset keeps every run on LANGGRAPH_URL.",
 )
 ENV.var(
-    "REVIEWER_RUNTIME_API_KEY",
-    "LangSmith service key the backend uses to call REVIEWER_RUNTIME_URL.",
+    "MDA_RUNTIME_API_KEY",
+    "LangSmith key the backend uses to call MDA_RUNTIME_URL; defaults to LANGSMITH_API_KEY.",
     secret=True,
 )
 ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
-    "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/mcp; "
+    "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
     "comma-separated, the first signs and every one verifies.",
     secret=True,
 )

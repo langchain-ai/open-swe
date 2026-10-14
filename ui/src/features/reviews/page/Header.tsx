@@ -4,7 +4,6 @@ import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
@@ -22,6 +21,7 @@ import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
 import { cn, formatRelativeTime } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"

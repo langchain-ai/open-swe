@@ -8,6 +8,7 @@ from langgraph.graph.state import RunnableConfig
 from pydantic import BaseModel, ConfigDict
 
 from openswe.agent_cost import run_agent_cost_refresh
+from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from openswe.background_tasks import monitor_background_tasks
@@ -53,6 +54,7 @@ class SchedulerState(BaseModel):
     attempt: int | None = None
     request_id: str | None = None
     step: str | None = None
+    announcement_id: str | None = None
     result: dict[str, Any] | None = None
 
 
@@ -87,6 +89,10 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
             return {"result": {"status": "skipped"}}
         if task == "agent_cost":
             return {"result": await run_agent_cost_refresh(state.model_dump(exclude_none=True))}
+        if task == ANNOUNCEMENT_TASK:
+            if not state.announcement_id:
+                return {"result": {"status": "missing_announcement"}}
+            return {"result": await deliver_announcement(state.announcement_id)}
         if task == HUMAN_REVIEW_TASK:
             if not state.request_id or not state.step:
                 return {"result": {"status": "missing_request"}}

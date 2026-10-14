@@ -37,11 +37,13 @@ class StoreEntry(NamedTuple):
     real namespace is longer than the one it asked for; ``namespace`` is that
     real namespace, or ``None`` when the transport does not report it (the
     in-memory test double), which only ever matches by exact namespace.
+    ``updated_at`` is when the item was last saved, when the transport says.
     """
 
     namespace: list[str] | None
     value: dict[str, Any]
     key: str = ""
+    updated_at: datetime | None = None
 
 
 _DEFAULT_PAGE_SIZE = 100
@@ -78,6 +80,18 @@ def _unwrap(item: Any) -> dict[str, Any] | None:
 def _item_key(item: Any) -> str:
     key = item.get("key") if isinstance(item, dict) else getattr(item, "key", None)
     return key if isinstance(key, str) else ""
+
+
+def _item_updated_at(item: Any) -> datetime | None:
+    value = item.get("updated_at") if isinstance(item, dict) else getattr(item, "updated_at", None)
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _item_namespace(item: Any) -> list[str] | None:
@@ -176,7 +190,7 @@ async def search_all_entries(
         if not items:
             return entries
         entries.extend(
-            StoreEntry(_item_namespace(item), value, _item_key(item))
+            StoreEntry(_item_namespace(item), value, _item_key(item), _item_updated_at(item))
             for item in items
             if (value := _unwrap(item)) is not None
         )
@@ -190,7 +204,7 @@ async def search_entries(
 ) -> list[StoreEntry]:
     """The first page of :func:`search_all_entries`, for callers that drain as they go."""
     return [
-        StoreEntry(_item_namespace(item), value, _item_key(item))
+        StoreEntry(_item_namespace(item), value, _item_key(item), _item_updated_at(item))
         for item in await _search_items(namespace, None, limit, 0)
         if (value := _unwrap(item)) is not None
     ]

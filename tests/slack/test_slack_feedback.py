@@ -7,6 +7,9 @@ from openswe.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from openswe.slack.mappings import store_slack_run_mapping
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 class _FakeStore:
@@ -25,17 +28,12 @@ class _FakeClient:
         self.store = _FakeStore()
 
 
-def _store_message_mapping(
-    client: _FakeClient,
-    channel_id: str,
-    message_ts: str,
-    *,
-    triggering_user_id: str | None = "U123",
+async def _store_message_mapping(
+    channel_id: str, message_ts: str, *, triggering_user_id: str | None = "U123"
 ) -> None:
-    value: dict[str, Any] = {"run_id": "run-1", "thread_ts": "1.000"}
-    if triggering_user_id:
-        value["triggering_user_id"] = triggering_user_id
-    client.store.items[(("slack_run_map", channel_id), f"message:{message_ts}")] = {"value": value}
+    await store_slack_run_mapping(
+        channel_id, "1.000", "run-1", message_ts=message_ts, triggering_user_id=triggering_user_id
+    )
 
 
 def _reaction_event(reaction: str = "thumbsup") -> dict[str, Any]:
@@ -52,7 +50,7 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient()
-    _store_message_mapping(client, "C123", "2.000")
+    await _store_message_mapping("C123", "2.000")
     client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")] = {
         "value": {
             "run_id": "run-1",
@@ -83,7 +81,7 @@ async def test_reaction_from_non_triggering_user_is_ignored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient()
-    _store_message_mapping(client, "C123", "2.000", triggering_user_id="UTRIGGER")
+    await _store_message_mapping("C123", "2.000", triggering_user_id="UTRIGGER")
 
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("non-triggering user should not create feedback")
@@ -99,7 +97,7 @@ async def test_conflicting_reactions_clear_feedback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient()
-    _store_message_mapping(client, "C123", "2.000")
+    await _store_message_mapping("C123", "2.000")
     client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")] = {
         "value": {
             "run_id": "run-1",

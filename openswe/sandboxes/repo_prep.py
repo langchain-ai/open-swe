@@ -25,6 +25,11 @@ DEFAULT_SKILL_DIRS = (".agents/skills", ".claude/skills")
 
 TRUSTED_SKILLS_DIRNAME = ".review-skills"
 
+# A review reads the PR's trees, not its history's contents: a blobless clone
+# downloads commits and trees only and fetches blobs as checkout, diff or show
+# first touch them, which cuts a large repo's clone several-fold.
+BLOBLESS_CLONE_ARGS = "--filter=blob:none"
+
 
 def _prep_command(
     work_dir: str,
@@ -40,6 +45,7 @@ def _prep_command(
     q_full_name = shlex.quote(f"{repo_owner}/{repo_name}")
     q_repo_name = shlex.quote(repo_name)
     q_head = shlex.quote(head_sha) if head_sha else ""
+    clone_args = f"{BLOBLESS_CLONE_ARGS} --no-checkout" if q_head else BLOBLESS_CLONE_ARGS
 
     lines = [
         "set -e",
@@ -48,7 +54,8 @@ def _prep_command(
         # are what the checkout actually needs.
         f"  cd {q_repo_dir} && {{ git fetch --all --quiet || true; }}",
         "else",
-        f"  cd {q_work_dir} && gh repo clone {q_full_name} && cd {q_repo_name}",
+        # The head checkout below replaces the default branch's, so skip fetching its blobs.
+        f"  cd {q_work_dir} && gh repo clone {q_full_name} -- {clone_args} && cd {q_repo_name}",
         "fi",
     ]
     if base_sha:

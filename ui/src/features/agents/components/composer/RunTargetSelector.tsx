@@ -7,7 +7,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { Input } from "@langchain/macaw-components/Input"
@@ -31,6 +30,7 @@ import {
   ComposerMenuOption,
   ComposerTriggerIcon,
 } from "./ComposerControl"
+import { DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type {
   DesktopProject,
   DesktopProjectRef,
@@ -172,7 +172,7 @@ export function LocalRepoSelector({
           </ComposerMenuOption>
           {repos.length > 0 && (
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="gap-space-2 text-xs" size="sm">
+              <DropdownMenuSubTrigger className="text-xs" size="sm">
                 <TrashIcon
                   className="size-3.5 shrink-0 text-icon-secondary"
                   weight="regular"

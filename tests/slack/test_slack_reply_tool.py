@@ -21,6 +21,28 @@ def _patch_slack_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", AsyncMock())
 
 
+class _Store:
+    def __init__(self) -> None:
+        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
+
+    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
+        return self.items.get((tuple(namespace), key))
+
+    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
+        self.items[(tuple(namespace), key)] = {"value": value}
+
+
+class _Threads:
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        raise LookupError(thread_id)
+
+
+class _Client:
+    def __init__(self) -> None:
+        self.store = _Store()
+        self.threads = _Threads()
+
+
 def _config() -> dict[str, Any]:
     return {
         "configurable": {
@@ -37,8 +59,6 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
     monkeypatch: pytest.MonkeyPatch,
     breakout: bool,
 ) -> None:
-    from tests.slack.test_slack_thread_mapping import _Client
-
     client = _Client()
     monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
@@ -92,8 +112,6 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
 async def test_kickoff_delete_failure_does_not_interrupt_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tests.slack.test_slack_thread_mapping import _Client
-
     client = _Client()
     await client.store.put_item(("slack_kickoff", "C1"), "1.0", {"kickoff_ts": "1.1"})
     monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
@@ -162,8 +180,6 @@ async def test_freshness_conflicts_survive_offloaded_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from langchain_core.messages import HumanMessage, ToolMessage
-
-    from tests.slack.test_slack_thread_mapping import _Client
 
     client = _Client()
     monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)

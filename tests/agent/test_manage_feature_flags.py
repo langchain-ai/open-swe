@@ -7,6 +7,7 @@ import pytest
 from openswe.audit_logs import tools as audit_tools
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.models import AuditLog
+from openswe.dashboard.settings_records import WORKSPACE_SETTINGS
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_workspace_settings,
@@ -25,9 +26,8 @@ def private_admin(grant_tool_access: Callable[..., None]) -> None:
     grant_tool_access(admin=True, admin_surface=True)
 
 
-async def test_instance_flags_keep_unrelated_settings_and_reset(
-    fake_store: FakeStore,
-) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_instance_flags_keep_unrelated_settings_and_reset() -> None:
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(pr_summaries=False, org_guidelines="Keep me", gateway_enabled=True)
     )
@@ -40,10 +40,9 @@ async def test_instance_flags_keep_unrelated_settings_and_reset(
     assert (await get_workspace_settings())["gateway_enabled"] is False
 
 
-async def test_workspace_flags_inherit_and_keep_other_overrides(fake_store: FakeStore) -> None:
-    fake_store.seed(
-        ["workspace_settings"], "team", {"org_guidelines": "Keep me", "pr_summaries": False}
-    )
+@pytest.mark.usefixtures("registry_db")
+async def test_workspace_flags_inherit_and_keep_other_overrides() -> None:
+    await WORKSPACE_SETTINGS.put("team", {"org_guidelines": "Keep me", "pr_summaries": False})
     with (
         patch.object(
             WORKSPACES,
@@ -59,7 +58,7 @@ async def test_workspace_flags_inherit_and_keep_other_overrides(fake_store: Fake
         result = await manage_feature_flags("set", {"pr_summaries": None}, workspace="team")
         assert result["overrides"] == {}
         assert (await get_workspace_settings("team"))["pr_summaries"] is True
-        assert fake_store.values(["workspace_settings"])["team"]["org_guidelines"] == "Keep me"
+        assert (await WORKSPACE_SETTINGS.get("team") or {})["org_guidelines"] == "Keep me"
 
 
 @pytest.mark.parametrize(
@@ -105,8 +104,9 @@ async def test_private_admin_gate_rejects_other_surfaces(
     assert not fake_store.items
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_sole_writer_sets_flags_but_cannot_read_them(
-    fake_store: FakeStore, grant_tool_access: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+    grant_tool_access: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     entries: list[AuditLog] = []
 
