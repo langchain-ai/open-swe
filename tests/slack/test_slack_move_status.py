@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
+from openswe import event_claims
 from openswe.slack import move as slack_move
 from openswe.slack import thinking as slack_thinking
 from openswe.slack.channels import SlackChannel
@@ -97,6 +98,12 @@ class _LangGraph:
             {"source": "slack", "source_context": {"slack_thread": slack_thread}}
         )
         self.runs = _Runs()
+
+
+@pytest.fixture(autouse=True)
+def unclaimed_locks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(event_claims, "claim", AsyncMock(return_value=True))
+    monkeypatch.setattr(event_claims, "release", AsyncMock())
 
 
 @pytest.fixture

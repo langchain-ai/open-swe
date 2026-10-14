@@ -1,10 +1,12 @@
 import asyncio
+from datetime import timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
-import httpx2
 import pytest
-from langgraph_sdk.errors import ConflictError
 
+from openswe import event_claims
+from openswe.slack import client as slack_client
 from openswe.slack.client import (
     SlackThreadMappingError,
     bind_slack_thread_id,
@@ -55,16 +57,6 @@ class _Store:
 class _Threads:
     def __init__(self, matches: list[dict[str, Any]] | None = None) -> None:
         self.matches = matches or []
-        self.lock_ids: set[str] = set()
-
-    async def create(self, *, thread_id: str, **_kwargs: Any) -> None:
-        if thread_id in self.lock_ids:
-            response = httpx2.Response(409, request=httpx2.Request("POST", "http://test/threads"))
-            raise ConflictError("already exists", response=response, body=None)
-        self.lock_ids.add(thread_id)
-
-    async def delete(self, thread_id: str) -> None:
-        self.lock_ids.discard(thread_id)
 
     async def search(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self.matches
@@ -91,6 +83,7 @@ def _legacy_thread(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_thread_mutation_lock_returns_active_thread() -> None:
     client: Any = _Client(matches=[_legacy_thread("agent-thread")])
 
@@ -99,6 +92,7 @@ async def test_thread_mutation_lock_returns_active_thread() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_thread_mutation_lock_serializes_same_thread() -> None:
     client: Any = _Client()
     first_entered = asyncio.Event()
@@ -123,6 +117,23 @@ async def test_thread_mutation_lock_serializes_same_thread() -> None:
     release_first.set()
     await asyncio.gather(first_task, second_task)
     assert second_entered.is_set() is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_thread_mutation_lock_lapses_when_its_holder_cannot_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client: Any = _Client()
+    monkeypatch.setattr(slack_client, "_SLACK_THREAD_MUTATION_LOCK_TTL", timedelta(seconds=0.5))
+    monkeypatch.setattr(event_claims, "release", AsyncMock(side_effect=RuntimeError("503")))
+
+    async with slack_thread_mutation_lock(client, "C1", "1.0"):
+        pass
+
+    async with asyncio.timeout(3):
+        async with slack_thread_mutation_lock(client, "C1", "1.0"):
+            pass
 
 
 @pytest.mark.asyncio
