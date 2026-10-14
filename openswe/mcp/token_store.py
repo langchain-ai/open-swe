@@ -1,19 +1,20 @@
 """Where the MCP server's OAuth proxy keeps client registrations and tokens.
 
-Every replica answers any OAuth step, so the state lives in PostgreSQL, sealed
-with ``TOKEN_ENCRYPTION_KEY`` because it holds upstream GitHub tokens. An entry
-reads as absent once it expires, and each write sweeps a few expired rows.
+Every replica answers any OAuth step, so the state lives in PostgreSQL, one
+table per collection the proxy uses, sealed with ``TOKEN_ENCRYPTION_KEY``
+because it holds upstream GitHub tokens. An entry reads as absent once it
+expires, and each write sweeps a few expired rows from its table.
 """
 
 import logging
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import datetime
 from typing import Final, override
 from uuid import UUID, uuid7
 
 from key_value.aio.errors import DeserializationError
 from key_value.aio.stores.base import BaseStore, ManagedEntry
-from sqlalchemy import ColumnElement, ForeignKey, and_, delete, func, or_, select
+from sqlalchemy import ColumnElement, ForeignKey, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,10 +30,11 @@ STORE_NAMESPACE: Final = ("mcp_server_oauth",)
 _SWEEP_LIMIT: Final = 100
 
 
-class MCPOAuthEntryRow(Base):
-    __tablename__ = "mcp_oauth_entry"
+class MCPOAuthRow(Base):
+    """One sealed entry of a collection; each collection has a table of its own."""
 
-    collection: Mapped[str]
+    __abstract__ = True
+
     key: Mapped[str]
     sealed_entry: Mapped[str]
     expires_at: Mapped[datetime | None]
@@ -40,6 +42,7 @@ class MCPOAuthEntryRow(Base):
     copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    # No person is behind the proxy's writes, so these stay NULL.
     created_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
@@ -48,15 +51,59 @@ class MCPOAuthEntryRow(Base):
     )
 
 
-def _live() -> ColumnElement[bool]:
-    return or_(
-        MCPOAuthEntryRow.expires_at.is_(None),
-        MCPOAuthEntryRow.expires_at > func.clock_timestamp(),
-    )
+class MCPOAuthClientRow(MCPOAuthRow):
+    __tablename__ = "mcp_oauth_client"
 
 
-def _entry(collection: str, key: str) -> ColumnElement[bool]:
-    return and_(MCPOAuthEntryRow.collection == collection, MCPOAuthEntryRow.key == key)
+class MCPOAuthTransactionRow(MCPOAuthRow):
+    __tablename__ = "mcp_oauth_transaction"
+
+
+class MCPOAuthAuthorizationCodeRow(MCPOAuthRow):
+    __tablename__ = "mcp_oauth_authorization_code"
+
+
+class MCPOAuthUpstreamTokenRow(MCPOAuthRow):
+    __tablename__ = "mcp_oauth_upstream_token"
+
+
+class MCPOAuthRefreshTokenRow(MCPOAuthRow):
+    __tablename__ = "mcp_oauth_refresh_token"
+
+
+class MCPOAuthJTIMappingRow(MCPOAuthRow):
+    __tablename__ = "mcp_oauth_jti_mapping"
+
+
+class MCPOAuthConsentCSRFTokenRow(MCPOAuthRow):
+    __tablename__ = "mcp_oauth_consent_csrf_token"
+
+
+# The collections FastMCP's OAuth proxy keeps its state in.
+TABLES: Final[Mapping[str, type[MCPOAuthRow]]] = {
+    "mcp-oauth-proxy-clients": MCPOAuthClientRow,
+    "mcp-oauth-transactions": MCPOAuthTransactionRow,
+    "mcp-authorization-codes": MCPOAuthAuthorizationCodeRow,
+    "mcp-upstream-tokens": MCPOAuthUpstreamTokenRow,
+    "mcp-refresh-tokens": MCPOAuthRefreshTokenRow,
+    "mcp-jti-mappings": MCPOAuthJTIMappingRow,
+    "mcp-consent-csrf-tokens": MCPOAuthConsentCSRFTokenRow,
+}
+
+
+class UnknownOAuthCollection(LookupError):
+    """A collection with no table, such as one a FastMCP upgrade added."""
+
+
+def table_for(collection: str) -> type[MCPOAuthRow]:
+    try:
+        return TABLES[collection]
+    except KeyError:
+        raise UnknownOAuthCollection(collection) from None
+
+
+def _live(table: type[MCPOAuthRow]) -> ColumnElement[bool]:
+    return or_(table.expires_at.is_(None), table.expires_at > func.clock_timestamp())
 
 
 class SealedStore(BaseStore):
@@ -76,9 +123,10 @@ class SealedStore(BaseStore):
 
     @override
     async def _get_managed_entry(self, *, collection: str, key: str) -> ManagedEntry | None:
+        table = table_for(collection)
         async with postgres.session() as session:
             sealed = await session.scalar(
-                select(MCPOAuthEntryRow.sealed_entry).where(_entry(collection, key), _live())
+                select(table.sealed_entry).where(table.key == key, _live(table))
             )
         # An entry that no longer opens reads as absent, so the client signs in again.
         return None if sealed is None else self.open(sealed)
@@ -100,17 +148,17 @@ class SealedStore(BaseStore):
         *,
         store_copy: bool = False,
     ) -> None:
+        table = table_for(collection)
         async with postgres.session() as session:
             expired = (
-                select(MCPOAuthEntryRow.id)
-                .where(MCPOAuthEntryRow.expires_at <= func.clock_timestamp())
+                select(table.id)
+                .where(table.expires_at <= func.clock_timestamp())
                 .limit(_SWEEP_LIMIT)
                 .with_for_update(skip_locked=True)
             )
-            await session.execute(delete(MCPOAuthEntryRow).where(MCPOAuthEntryRow.id.in_(expired)))
-            upsert = insert(MCPOAuthEntryRow).values(
+            await session.execute(delete(table).where(table.id.in_(expired)))
+            upsert = insert(table).values(
                 id=uuid7(),
-                collection=collection,
                 key=key,
                 sealed_entry=sealed,
                 expires_at=expires_at,
@@ -118,7 +166,7 @@ class SealedStore(BaseStore):
             )
             await session.execute(
                 upsert.on_conflict_do_update(
-                    index_elements=[MCPOAuthEntryRow.collection, MCPOAuthEntryRow.key],
+                    index_elements=[table.key],
                     set_={
                         "sealed_entry": sealed,
                         "expires_at": expires_at,
@@ -131,19 +179,19 @@ class SealedStore(BaseStore):
 
     @override
     async def _delete_managed_entry(self, *, key: str, collection: str) -> bool:
+        table = table_for(collection)
         await _delete_store_copy(collection, key)
         async with postgres.session() as session:
             existed = await session.scalar(
-                delete(MCPOAuthEntryRow).where(_entry(collection, key)).returning(_live())
+                delete(table).where(table.key == key).returning(_live(table))
             )
         return bool(existed)
 
     async def written_at(self, collection: str, key: str) -> datetime | None:
         """When PostgreSQL last wrote the entry, which the Store import compares against."""
+        table = table_for(collection)
         async with postgres.session() as session:
-            return await session.scalar(
-                select(MCPOAuthEntryRow.updated_at).where(_entry(collection, key))
-            )
+            return await session.scalar(select(table.updated_at).where(table.key == key))
 
 
 async def _delete_store_copy(collection: str, key: str) -> None:
@@ -157,18 +205,20 @@ async def delete_store_copies(present: Collection[tuple[str, str]], copied_after
 
     A replica of the previous release deletes an entry only from the Store.
     """
+    deleted = 0
     async with postgres.session() as session:
-        copies = await session.execute(
-            select(MCPOAuthEntryRow.id, MCPOAuthEntryRow.collection, MCPOAuthEntryRow.key).where(
-                MCPOAuthEntryRow.copied_from_store, MCPOAuthEntryRow.updated_at > copied_after
+        for collection, table in TABLES.items():
+            copies = await session.execute(
+                select(table.id, table.key).where(
+                    table.copied_from_store, table.updated_at > copied_after
+                )
             )
-        )
-        gone = [row_id for row_id, collection, key in copies if (collection, key) not in present]
-        if not gone:
-            return 0
-        deleted = await session.scalars(
-            delete(MCPOAuthEntryRow)
-            .where(MCPOAuthEntryRow.id.in_(gone), MCPOAuthEntryRow.copied_from_store)
-            .returning(MCPOAuthEntryRow.id)
-        )
-        return len(deleted.all())
+            gone = [row_id for row_id, key in copies if (collection, key) not in present]
+            if gone:
+                removed = await session.scalars(
+                    delete(table)
+                    .where(table.id.in_(gone), table.copied_from_store)
+                    .returning(table.id)
+                )
+                deleted += len(removed.all())
+    return deleted

@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.fernet import Fernet
+from fastmcp.server.auth.providers.github import GitHubProvider
+from key_value.aio.adapters.pydantic.base import BasePydanticAdapter
 from key_value.aio.stores.base import ManagedEntry
 from sqlalchemy import select, update
 
@@ -11,11 +13,34 @@ from openswe.database.store_imports import StoreImport
 from openswe.encryption import encrypt_token
 from openswe.mcp import import_oauth_entries
 from openswe.mcp.import_oauth_entries import import_store_mcp_oauth_entries
-from openswe.mcp.token_store import STORE_NAMESPACE, MCPOAuthEntryRow, SealedStore
+from openswe.mcp.token_store import (
+    STORE_NAMESPACE,
+    TABLES,
+    MCPOAuthUpstreamTokenRow,
+    SealedStore,
+    UnknownOAuthCollection,
+)
 from openswe.store import StoreEntry
 from tests.conftest import FakeStore
 
-_COLLECTION = "upstream_tokens"
+_COLLECTION = "mcp-upstream-tokens"
+
+
+async def test_every_collection_the_oauth_proxy_uses_has_a_table() -> None:
+    proxy = GitHubProvider(
+        client_id="client",
+        client_secret="secret",
+        base_url="https://openswe.example",
+        client_storage=SealedStore(),
+    )
+    used = {
+        adapter._default_collection
+        for adapter in vars(proxy).values()
+        if isinstance(adapter, BasePydanticAdapter)
+    }
+    assert used == set(TABLES)
+    with pytest.raises(UnknownOAuthCollection):
+        await SealedStore().get("key", collection="mcp-added-by-an-upgrade")
 
 
 @pytest.fixture
@@ -66,16 +91,18 @@ async def test_entries_read_as_absent_once_expired_and_later_writes_sweep_them(
     await sealed_store.put("lapsing", {"token": "secret"}, collection=_COLLECTION, ttl=60)
     assert await _token("lapsing") == "secret"
     async with postgres.session() as session:
-        sealed = (await session.execute(select(MCPOAuthEntryRow.sealed_entry))).scalar_one()
+        sealed = (await session.execute(select(MCPOAuthUpstreamTokenRow.sealed_entry))).scalar_one()
         assert "secret" not in sealed
         await session.execute(
-            update(MCPOAuthEntryRow).values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+            update(MCPOAuthUpstreamTokenRow).values(
+                expires_at=datetime.now(UTC) - timedelta(seconds=1)
+            )
         )
 
     assert await _token("lapsing") is None
     await sealed_store.put("other", {"token": "other"}, collection=_COLLECTION)
     async with postgres.session() as session:
-        assert list(await session.scalars(select(MCPOAuthEntryRow.key))) == ["other"]
+        assert list(await session.scalars(select(MCPOAuthUpstreamTokenRow.key))) == ["other"]
 
 
 async def test_store_import_copies_live_entries_then_retires_the_store_records(
