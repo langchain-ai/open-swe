@@ -16,11 +16,20 @@ from openswe.review.eval_jobs import (
 from openswe.review.eval_report import REPORT_PATH, REPORT_TOKEN_HEADER
 from openswe.review.eval_report_routes import router
 from openswe.review.import_eval_runs import import_store_reviewer_eval
+from openswe.users.models import User
+from openswe.users.records import user_id_for_login
 from tests.conftest import FakeStore
 
 
 @pytest.fixture
-def launches(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+async def people(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    await User.sign_in("github", "1", login="alice")
+    await User.sign_in("github", "2", login="bob")
+
+
+@pytest.fixture
+def launches(people: None, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """The report token each launched sandbox was given."""
     tokens: list[str] = []
 
@@ -52,7 +61,7 @@ def _report(status: str, completed: int) -> dict[str, object]:
 async def test_only_the_launched_runs_sandbox_reports_its_progress(
     launches: list[str], sandbox: httpx.AsyncClient
 ) -> None:
-    await start_reviewer_eval(resolve_eval_config(), 5, "alice")
+    await start_reviewer_eval(resolve_eval_config(), 5, user_id_for_login("alice"))
     first = launches[0]
 
     for headers in ({}, {REPORT_TOKEN_HEADER: "guess"}):
@@ -69,14 +78,14 @@ async def test_only_the_launched_runs_sandbox_reports_its_progress(
     await sandbox.post(
         REPORT_PATH, json=_report("completed", 5), headers={REPORT_TOKEN_HEADER: first}
     )
-    await start_reviewer_eval(resolve_eval_config(), None, "bob")
+    await start_reviewer_eval(resolve_eval_config(), None, user_id_for_login("bob"))
     await sandbox.post(REPORT_PATH, json=_report("failed", 5), headers={REPORT_TOKEN_HEADER: first})
     status = await get_reviewer_eval_status()
     assert (status.status, status.worker_id, status.created_by) == ("starting", "sandbox-2", "bob")
 
 
 async def test_store_import_copies_the_latest_eval_and_takes_newer_saves(
-    registry_db: None, fake_store: FakeStore
+    people: None, fake_store: FakeStore
 ) -> None:
     record = {
         "name": "reviewer",
@@ -100,11 +109,12 @@ async def test_store_import_copies_the_latest_eval_and_takes_newer_saves(
 
     assert await import_store_reviewer_eval() == StoreImport(moved=1)
     status = await get_reviewer_eval_status()
-    assert (status.status, status.run_name, status.limit, status.worker_id) == (
+    assert (status.status, status.run_name, status.limit, status.worker_id, status.created_by) == (
         "completed",
         "nightly",
         3,
         "sandbox-old",
+        "alice",
     )
     assert await import_store_reviewer_eval() == StoreImport(waiting=1)
 

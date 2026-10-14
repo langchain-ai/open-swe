@@ -7,10 +7,11 @@ from uuid import UUID, uuid7
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator
-from sqlalchemy import ColumnElement, and_, delete, func, select
+from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, and_, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
+from openswe.dashboard.oauth import session_user_id
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.slack.http import (
@@ -21,6 +22,7 @@ from openswe.slack.http import (
     slack_identity,
 )
 from openswe.store import delete_value
+from openswe.users.records import github_login_of, user_id_for_login
 from openswe.utils import ttl_cache
 
 # Where the LangGraph Store kept allowed bots, keyed ``<team_id>:<bot_id>``.
@@ -50,16 +52,19 @@ class AllowedSlackBotRow(Base):
     app_id: Mapped[str]
     name: Mapped[str]
     image_url: Mapped[str]
-    created_by: Mapped[str]
-    created_at: Mapped[datetime]
     copied_from_store: Mapped[bool]
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    updated_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     updated_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
 
 
-class AllowedSlackBot(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+# What a bot's record writes; its ``created_by`` is a login, stored as that person's users id.
+_RECORD_COLUMNS = ("team_id", "bot_id", "user_id", "app_id", "name", "image_url", "created_at")
 
+
+class AllowedSlackBot(BaseModel):
     team_id: str
     bot_id: str
     user_id: str = ""
@@ -78,25 +83,46 @@ class AllowedSlackBot(BaseModel):
         return and_(AllowedSlackBotRow.team_id == team_id, AllowedSlackBotRow.bot_id == bot_id)
 
     @classmethod
-    async def get(cls, team_id: str, bot_id: str) -> Self | None:
+    async def _select(cls, *where: ColumnElement[bool]) -> list[Self]:
+        creator = github_login_of(AllowedSlackBotRow.created_by)
         async with postgres.session() as session:
-            row = await session.scalar(select(AllowedSlackBotRow).where(cls._is(team_id, bot_id)))
-        return None if row is None else cls.model_validate(row)
+            rows = await session.execute(
+                select(AllowedSlackBotRow, creator)
+                .where(*where)
+                .order_by(AllowedSlackBotRow.created_at)
+            )
+            return [
+                cls.model_validate(
+                    {column: getattr(row, column) for column in _RECORD_COLUMNS}
+                    | {"created_by": login or ""}
+                )
+                for row, login in rows.all()
+            ]
+
+    def _record(self) -> dict[str, object]:
+        return self.model_dump(include=set(_RECORD_COLUMNS))
+
+    @classmethod
+    async def get(cls, team_id: str, bot_id: str) -> Self | None:
+        bots = await cls._select(cls._is(team_id, bot_id))
+        return bots[0] if bots else None
 
     @classmethod
     async def all(cls) -> list[Self]:
-        async with postgres.session() as session:
-            rows = await session.scalars(
-                select(AllowedSlackBotRow).order_by(AllowedSlackBotRow.created_at)
-            )
-            return [cls.model_validate(row) for row in rows]
+        return await cls._select()
 
-    async def add(self) -> bool:
-        """Allow the bot; ``False`` when it already is."""
+    async def add(self, actor: UUID | ScalarSelect[UUID] | None) -> bool:
+        """Allow the bot as the person ``actor`` names; ``False`` when it already is."""
         async with postgres.session() as session:
             added = await session.scalar(
                 insert(AllowedSlackBotRow)
-                .values(id=uuid7(), **self.model_dump(), copied_from_store=False)
+                .values(
+                    id=uuid7(),
+                    **self._record(),
+                    copied_from_store=False,
+                    created_by=actor,
+                    updated_by=actor,
+                )
                 .on_conflict_do_nothing(
                     index_elements=[AllowedSlackBotRow.team_id, AllowedSlackBotRow.bot_id]
                 )
@@ -105,8 +131,13 @@ class AllowedSlackBot(BaseModel):
         return added is not None
 
     async def put_store_copy(self) -> None:
-        """Save the bot as the LangGraph Store import copied it."""
-        values = {**self.model_dump(), "copied_from_store": True}
+        """Save the bot as the LangGraph Store import copied it, a write no person made."""
+        values = {
+            **self._record(),
+            "copied_from_store": True,
+            "created_by": user_id_for_login(self.created_by) if self.created_by else None,
+            "updated_by": None,
+        }
         async with postgres.session() as session:
             await session.execute(
                 insert(AllowedSlackBotRow)
@@ -250,9 +281,9 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
         created_by=login,
         created_at=datetime.now(UTC),
     )
-    if not await record.add():
+    if not await record.add(session_user_id(admin) or user_id_for_login(login)):
         raise HTTPException(409, "This bot is already allowed.")
-    return record
+    return await AllowedSlackBot.get(team_id, bot_id) or record
 
 
 async def list_slack_bots() -> list[SlackBotOption]:

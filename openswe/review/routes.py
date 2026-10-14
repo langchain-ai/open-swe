@@ -11,6 +11,7 @@ from pydantic.alias_generators import to_camel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
+from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
@@ -68,6 +69,7 @@ from openswe.review.styles import (
     ReviewStylePromptUpdate,
 )
 from openswe.threads.handlers import mark_review_session_viewed
+from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
 
 router = APIRouter(tags=["review"])
@@ -132,7 +134,9 @@ async def admin_start_reviewer_eval(
     config = resolve_eval_config()
     config.update(body.model_dump(exclude={"limit"}))
     try:
-        return await start_reviewer_eval(config, body.limit, session.get("email") or session["sub"])
+        return await start_reviewer_eval(
+            config, body.limit, session_user_id(session) or user_id_for_login(session["sub"])
+        )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 

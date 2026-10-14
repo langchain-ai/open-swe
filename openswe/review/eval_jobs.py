@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, TypeAdapter
-from sqlalchemy import ColumnElement, func, select, update
+from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,6 +33,7 @@ from openswe.review.eval_report import (
     REPORT_URL_ENV,
     ReviewerEvalReport,
 )
+from openswe.users.records import github_login_of, user_id_for_login
 from openswe.utils.build_info import backend_build_info
 from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.gateway import gateway_base_url
@@ -154,10 +155,15 @@ class ReviewerEvalRun(Base):
 
     status: Mapped[str]
     config: Mapped[JsonObject] = mapped_column(JSONB)
-    started_at: Mapped[datetime]
+    created_at: Mapped[datetime]
     heartbeat_at: Mapped[datetime | None]
     example_limit: Mapped[int | None] = mapped_column(default=None)
-    created_by: Mapped[str | None] = mapped_column(default=None)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     sandbox_name: Mapped[str | None] = mapped_column(default=None)
     report_token_hash: Mapped[str | None] = mapped_column(default=None)
@@ -173,7 +179,7 @@ class ReviewerEvalRun(Base):
     @classmethod
     async def latest(cls, *, copied_from_store: bool = False) -> Self | None:
         """The run started last; with ``copied_from_store``, the Store import's copy."""
-        query = select(cls).order_by(cls.started_at.desc(), cls.id.desc()).limit(1)
+        query = select(cls).order_by(cls.created_at.desc(), cls.id.desc()).limit(1)
         if copied_from_store:
             query = query.where(cls.copied_from_store)
         async with postgres.session() as session:
@@ -181,31 +187,46 @@ class ReviewerEvalRun(Base):
 
     @classmethod
     async def begin(
-        cls, config: ReviewerEvalConfig, limit: int | None, created_by: str | None
-    ) -> tuple[Self, str]:
-        """Record a run about to launch, returning it and the token its sandbox reports with."""
+        cls,
+        config: ReviewerEvalConfig,
+        limit: int | None,
+        actor: UUID | ScalarSelect[UUID] | None,
+    ) -> tuple[ReviewerEvalRun, str]:
+        """Record a run the person ``actor`` names is launching, returning it and the token
+        its sandbox reports with."""
         token = secrets.token_urlsafe(32)
-        now = datetime.now(UTC)
-        run = cls(
-            status="starting",
-            config=dict(config),
-            started_at=now,
-            heartbeat_at=now,
-            example_limit=limit,
-            created_by=created_by,
-            report_token_hash=_token_hash(token),
-        )
         async with postgres.session() as session:
-            session.add(run)
+            run = await session.scalar(
+                insert(ReviewerEvalRun)
+                .values(
+                    id=uuid7(),
+                    status="starting",
+                    config=dict(config),
+                    heartbeat_at=func.clock_timestamp(),
+                    example_limit=limit,
+                    report_token_hash=_token_hash(token),
+                    created_by=actor,
+                    updated_by=actor,
+                )
+                .returning(ReviewerEvalRun)
+            )
+        if run is None:
+            raise RuntimeError("the reviewer eval run was not recorded")
         return run, token
 
-    async def put_store_copy(self, replacing: UUID | None) -> None:
-        """Save the run as the LangGraph Store import copied it, over its earlier copy if any."""
-        values: JsonObject = {
+    async def put_store_copy(self, replacing: UUID | None, creator_login: str | None) -> None:
+        """Save the run as the LangGraph Store import copied it, over its earlier copy if any.
+
+        ``creator_login`` is who the Store record says launched it, kept only when it
+        names a person; the copy itself is a write no person made.
+        """
+        values: dict[str, object] = {
             column.key: getattr(self, column.key)
             for column in ReviewerEvalRun.__table__.columns
             if column.key not in {"id", "updated_at"}
         }
+        values["created_by"] = user_id_for_login(creator_login) if creator_login else None
+        values["updated_by"] = None
         async with postgres.session() as session:
             await session.execute(
                 insert(ReviewerEvalRun)
@@ -217,24 +238,26 @@ class ReviewerEvalRun(Base):
             )
 
     async def _update(
-        self, *conditions: ColumnElement[bool], **values: object
+        self, *conditions: ColumnElement[bool], updated_by: UUID | None, **values: object
     ) -> ReviewerEvalRun | None:
         async with postgres.session() as session:
             return await session.scalar(
                 update(ReviewerEvalRun)
                 .where(ReviewerEvalRun.id == self.id, *conditions)
-                .values(**values, updated_at=func.clock_timestamp())
+                .values(**values, updated_by=updated_by, updated_at=func.clock_timestamp())
                 .returning(ReviewerEvalRun),
                 execution_options={"synchronize_session": False},
             )
 
     async def launched(self, sandbox_name: str) -> ReviewerEvalRun:
-        return await self._update(sandbox_name=sandbox_name) or self
+        """Record the sandbox the launching person's request started."""
+        return await self._update(updated_by=self.created_by, sandbox_name=sandbox_name) or self
 
     async def fail(self, error: str) -> ReviewerEvalRun:
         """Mark the run failed unless it has finished since it was read."""
         failed = await self._update(
             ReviewerEvalRun.status.in_(ACTIVE_STATUSES),
+            updated_by=None,
             status="failed",
             finished_at=func.coalesce(ReviewerEvalRun.finished_at, func.clock_timestamp()),
             error=error,
@@ -261,6 +284,7 @@ class ReviewerEvalRun(Base):
                     error=report.error,
                     heartbeat_at=func.clock_timestamp(),
                     finished_at=func.clock_timestamp() if finished else None,
+                    updated_by=None,
                     updated_at=func.clock_timestamp(),
                 )
                 .returning(cls.id),
@@ -279,7 +303,14 @@ class ReviewerEvalRun(Base):
             return f"Eval never reported in; see {LOG_PATH} in sandbox {self.sandbox_name}."
         return "Eval process is no longer tracked (eval sandbox stopped?)."
 
-    def view(self) -> ReviewerEvalStatus:
+    async def status_view(self) -> ReviewerEvalStatus:
+        """The run as the dashboard shows it, naming its launcher by GitHub login."""
+        async with postgres.session() as session:
+            launcher = await session.scalar(
+                select(github_login_of(ReviewerEvalRun.created_by)).where(
+                    ReviewerEvalRun.id == self.id
+                )
+            )
         config = EVAL_CONFIG.validate_python(self.config)
         progress = (
             None
@@ -293,9 +324,9 @@ class ReviewerEvalRun(Base):
                 "langsmith_project": config["langsmith_project"],
                 "limit": self.example_limit,
                 "config_snapshot": config,
-                "started_at": self.started_at,
+                "started_at": self.created_at,
                 "finished_at": self.finished_at,
-                "created_by": self.created_by,
+                "created_by": launcher,
                 "experiment_url": self.experiment_url,
                 "error": self.error,
                 "log_tail": self.log_tail,
@@ -318,7 +349,7 @@ async def get_reviewer_eval_status() -> ReviewerEvalStatus:
         return ReviewerEvalStatus.idle()
     if run.status in ACTIVE_STATUSES and not run.heartbeat_is_fresh():
         run = await run.fail(run.stale_error())
-    return run.view()
+    return await run.status_view()
 
 
 def _proxy_rules(headers: Iterable[tuple[str, str, str]]) -> list[dict[str, object]]:
@@ -421,18 +452,19 @@ async def _launch_sandbox(
 
 
 async def start_reviewer_eval(
-    config: ReviewerEvalConfig, limit: int | None, created_by: str | None
+    config: ReviewerEvalConfig, limit: int | None, actor: UUID | ScalarSelect[UUID] | None
 ) -> ReviewerEvalStatus:
-    """Launch a reviewer eval in a sandbox; raises ``RuntimeError`` if one can't start."""
+    """Launch a reviewer eval in a sandbox as the person ``actor`` names; raises
+    ``RuntimeError`` if one can't start."""
     if (await get_reviewer_eval_status()).status in ACTIVE_STATUSES:
         raise RuntimeError("a reviewer eval is already running")
     ref = backend_build_info()["commit"]
     if not ref:
         raise RuntimeError("the deployment's commit is unknown, so the eval can't match its code")
-    run, report_token = await ReviewerEvalRun.begin(config, limit, created_by)
+    run, report_token = await ReviewerEvalRun.begin(config, limit, actor)
     try:
         sandbox_name = await _launch_sandbox(config, limit, report_token, ref)
     except Exception as exc:
         await run.fail(f"Couldn't launch the eval sandbox: {exc}")
         raise
-    return (await run.launched(sandbox_name)).view()
+    return await (await run.launched(sandbox_name)).status_view()

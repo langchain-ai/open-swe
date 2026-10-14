@@ -68,7 +68,7 @@ async def test_store_import_revokes_copies_an_old_replica_revoked_in_the_store(
     store.seed(NAMESPACE, "T1:B2", _record("B2"))
     assert await import_store_allowed_slack_bots() == StoreImport(moved=2)
     added = AllowedSlackBot(team_id="T1", bot_id="B3", name="B3", created_at=datetime.now(UTC))
-    assert await added.add()
+    assert await added.add(None)
 
     store.items[NAMESPACE].pop("T1:B1")
 

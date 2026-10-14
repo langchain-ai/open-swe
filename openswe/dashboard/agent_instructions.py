@@ -23,8 +23,7 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
-from openswe.users.models import UserIdentity
-from openswe.users.records import user_id_for_login
+from openswe.users.records import github_login_of, user_id_for_login
 
 
 class AgentInstructionsCreate(BaseModel):
@@ -88,16 +87,12 @@ class AgentInstructionsRow(Base):
     @classmethod
     def records(cls) -> Select[str, str, str, datetime | None, datetime | None]:
         """Each row with its repository's name and its creator's GitHub login."""
-        creator_login = (
-            select(UserIdentity.login)
-            .where(UserIdentity.user_id == cls.created_by, UserIdentity.provider == "github")
-            .order_by(UserIdentity.last_seen_at.desc())
-            .limit(1)
-            .correlate(cls)
-            .scalar_subquery()
-        )
         return select(
-            Repository.full_name, cls.instructions, creator_login, cls.created_at, cls.updated_at
+            Repository.full_name,
+            cls.instructions,
+            github_login_of(cls.created_by).correlate(cls),
+            cls.created_at,
+            cls.updated_at,
         ).join(Repository, Repository.id == cls.repository_id)
 
 

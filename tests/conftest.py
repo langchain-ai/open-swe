@@ -266,7 +266,7 @@ async def allowed_bot(registry_db: None) -> AllowedSlackBot:
         created_by="alice",
         created_at=datetime(2026, 9, 9, tzinfo=UTC),
     )
-    await bot.add()
+    await bot.add(None)
     return bot
 
 

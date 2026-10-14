@@ -50,7 +50,10 @@ async def import_store_reviewer_eval() -> StoreImport:
             return StoreImport()
         if run is None:
             return StoreImport()
-        await run.put_store_copy(None if copy is None else copy.id)
+        launcher = value.get("created_by")
+        await run.put_store_copy(
+            None if copy is None else copy.id, launcher if isinstance(launcher, str) else None
+        )
         return StoreImport(moved=1)
     if not may_delete_store_copy(copy.updated_at):
         return StoreImport(waiting=1)
@@ -75,10 +78,9 @@ def _run_from_store(value: JsonObject) -> ReviewerEvalRun | None:
     return ReviewerEvalRun(
         status=status.status,
         config=dict(EVAL_CONFIG.validate_python(status.config_snapshot)),
-        started_at=timestamp(value.get("started_at")) or datetime.now(UTC),
+        created_at=timestamp(value.get("started_at")) or datetime.now(UTC),
         heartbeat_at=timestamp(value.get("heartbeat")),
         example_limit=status.limit,
-        created_by=status.created_by,
         sandbox_name=status.worker_id,
         experiment_url=status.experiment_url,
         error=status.error,

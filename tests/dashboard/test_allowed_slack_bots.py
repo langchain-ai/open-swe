@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 
 from openswe.dashboard import oauth, profiles, routes
+from openswe.users.models import User
 
 
 @pytest.fixture
@@ -36,6 +37,8 @@ async def client(
     slack_api,
 ) -> AsyncIterator[httpx.AsyncClient]:
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    await User.sign_in("github", "1", login="alice")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="test-token"))
 
