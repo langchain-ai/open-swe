@@ -7,7 +7,8 @@ from typing import Literal
 from openswe.analytics.feedback import record_feedback_submission
 from openswe.slack.blocks import ContextActionsBlock, plain_text
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import lookup_slack_run_mapping, slack_thread_mutation_lock
+from openswe.slack.client import slack_thread_mutation_lock
+from openswe.slack.mappings import lookup_slack_run_mapping
 from openswe.slack.payloads import (
     SlackBlockAction,
     SlackInteraction,
@@ -58,11 +59,11 @@ async def process_feedback(interaction: SlackInteraction, action: SlackBlockActi
         if selection is None or not (channel_id and message_ts and user_id):
             return
         client = langgraph_client()
-        mapping = await lookup_slack_run_mapping(client, channel_id, message_ts)
+        mapping = await lookup_slack_run_mapping(channel_id, message_ts)
         if (
-            not mapping
-            or mapping.get("run_id") != selection.run_id
-            or mapping.get("triggering_user_id") != user_id
+            mapping is None
+            or mapping.run_id != selection.run_id
+            or mapping.triggering_user_id != user_id
         ):
             return
         context = await SlackChannel.context_for(channel_id, use_cache=False)

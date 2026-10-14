@@ -615,9 +615,7 @@ async def _clear_early_status_if_idle(request: SlackRequest, status_ts: str) -> 
     thread_id = request.thread_id
     if not thread_id:
         try:
-            thread_id = await common.lookup_slack_thread_id(
-                get_langgraph_client(), request.channel_id, request.thread_ts
-            )
+            thread_id = await common.lookup_slack_thread_id(request.channel_id, request.thread_ts)
         except Exception:  # noqa: BLE001
             common.logger.warning("Could not determine whether Slack thread status is still owned")
             return
@@ -677,9 +675,7 @@ async def _notify_slack_processing_error(
     thread_id = request.thread_id
     if request.channel_id and request.thread_ts and not thread_id:
         try:
-            thread_id = await common.lookup_slack_thread_id(
-                get_langgraph_client(), request.channel_id, request.thread_ts
-            )
+            thread_id = await common.lookup_slack_thread_id(request.channel_id, request.thread_ts)
         except Exception:  # noqa: BLE001
             thread_id = None
     if thread_id:
@@ -1230,10 +1226,7 @@ async def _process_slack_mention_impl(
             "slack/dm-origin",
             origin=dm_origin,
             permalink=await slack_utils.get_slack_permalink(*dm_origin.location) or "",
-            agent_thread_id=await common.lookup_slack_thread_id(
-                langgraph_client, *dm_origin.location
-            )
-            or "",
+            agent_thread_id=await common.lookup_slack_thread_id(*dm_origin.location) or "",
         )
         if dm_origin is not None
         else ""
@@ -1488,7 +1481,6 @@ async def _process_slack_mention_impl(
     if is_first_mention:
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
-                langgraph_client,
                 channel_id,
                 thread_ts,
                 run_id,
@@ -1503,7 +1495,6 @@ async def _process_slack_mention_impl(
         )
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
-                langgraph_client,
                 channel_id,
                 thread_ts,
                 run_id,

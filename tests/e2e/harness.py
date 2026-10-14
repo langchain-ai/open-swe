@@ -76,7 +76,7 @@ from langgraph_sdk.errors import NotFoundError  # noqa: E402
 
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from openswe.slack.client import lookup_slack_thread_id  # noqa: E402
+from openswe.slack.mappings import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
@@ -687,11 +687,10 @@ async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> 
     event = payload["event"]
     channel = str(event["channel"])
     thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
-    client = get_client(url=os.environ["LANGGRAPH_URL"])
-    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
+    thread_id = await lookup_slack_thread_id(channel, thread_ts)
     if thread_id is None and channel.startswith("D"):
         # A concierge-mode DM is one conversation keyed on the fixed "0" timestamp.
-        concierge_thread_id = await lookup_slack_thread_id(client, channel, "0")
+        concierge_thread_id = await lookup_slack_thread_id(channel, "0")
         if concierge_thread_id is not None:
             thread_ts, thread_id = "0", concierge_thread_id
     return JSONResponse(

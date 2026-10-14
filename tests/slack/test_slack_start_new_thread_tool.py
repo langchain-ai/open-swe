@@ -271,7 +271,6 @@ async def test_slack_breakout_thread_success(
         return {"run_id": "run-123"}
 
     async def fake_store_mapping(
-        client: Any,
         channel_id: str,
         thread_ts: str,
         run_id: str,
@@ -281,7 +280,6 @@ async def test_slack_breakout_thread_success(
     ) -> None:
         captured["stored_mappings"].append(
             {
-                "client": client,
                 "channel_id": channel_id,
                 "thread_ts": thread_ts,
                 "run_id": run_id,
@@ -290,9 +288,8 @@ async def test_slack_breakout_thread_success(
             }
         )
 
-    async def fake_bind(client: Any, channel_id: str, thread_ts: str, thread_id: str) -> str:
+    async def fake_bind(channel_id: str, thread_ts: str, thread_id: str) -> str:
         captured["binding"] = {
-            "client": client,
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "thread_id": thread_id,

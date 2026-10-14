@@ -62,6 +62,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
+    from openswe.slack.import_mappings import run_slack_mapping_import
     from openswe.thread_feedback import run_feedback_import
     from openswe.threads.blobs import run_blob_import
     from openswe.threads.pins import import_store_pins
@@ -171,6 +172,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     plan_import = asyncio.create_task(run_plan_import())
     feedback_import = asyncio.create_task(run_feedback_import())
     assessment_import = asyncio.create_task(run_assessment_import())
+    # Slack thread and run mappings used to live in the LangGraph Store, one
+    # record per Slack thread, run, and bot message; too many to wait for.
+    slack_mapping_import = asyncio.create_task(run_slack_mapping_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -215,6 +219,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         plan_import.cancel()
         feedback_import.cancel()
         assessment_import.cancel()
+        slack_mapping_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()
