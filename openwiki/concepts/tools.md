@@ -4,8 +4,6 @@ title: Tool Ecosystem and Dynamic Loading
 description: How tools are defined, registered, dynamically loaded, and exposed to agents; tool categories (sandbox, integration, review, etc), authorization models, and mode-specific controls.
 tags: [tools, agent, authorization, integrations, dynamic-tools, automation, reviewer, access-control]
 sources:
-  - id: openwiki-source-9b527e24b573880a306ac5b0
-    resource: repo://openswe/analyzer.py
   - id: openwiki-source-70b814b26d317c2b15c4a4fb
     resource: repo://openswe/chat.py
   - id: openwiki-source-75a672d9a8b6d6c500b1cf8d
@@ -26,10 +24,10 @@ sources:
     resource: repo://openswe/tools/automations.py
   - id: openwiki-source-1a477779016142ec6f3dc601
     resource: repo://openswe/tools/read_user_settings.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 ---
 
 # Tool Ecosystem and Dynamic Loading
@@ -50,18 +48,15 @@ flowchart TD
     Catalog["openswe.tools lazy catalog"]
     Main["Main coding graph"]
     Reviewer["Reviewer graph"]
-    Analyzer["Analyzer graph"]
     Chat["Read-only PR chat graph"]
     Builtins["Deep Agents built-ins"]
-    Deferred["Deferred integration groups<br/>(MCPs, Notion, workspace skills)"]
+    Deferred["Deferred integration groups<br/>(MCPs, workspace skills)"]
 
     Catalog -->|static tools| Main
     Catalog -->|static tools| Reviewer
-    Catalog -->|static tools| Analyzer
     Catalog -->|static tools| Chat
     Builtins -->|filesystem, exec, task| Main
     Builtins -->|filesystem, exec, task| Reviewer
-    Builtins -->|filesystem, exec, task| Analyzer
     Builtins -->|filesystem, read-only| Chat
     Deferred -->|lazy-loaded on call| Main
 ```
@@ -80,34 +75,37 @@ This diagram distinguishes the curated import catalog from graph-specific execut
 - **PR creation and updates** (`open_pull_request`, `link_pull_request`, `search_pull_requests`)
 - **PR review workflow** (`expedite_pr_approval`, `merge_expedited_pr`, `request_pr_review`)
 - **Human reviewer management** (`request_human_review`, `assign_human_reviewer`, `auto_assign_human_reviewer`, `dismiss_human_review_request`, `get_human_review_status`)
-- **Notifications** (`notify_automation_channel`, `submit_thread_feedback`, `submit_review_assessment_feedback`)
+- **Notifications and feedback** (`submit_thread_feedback`, `submit_review_assessment_feedback`)
 - **Baby-sit management** (`manage_baby_sit`)
 - **Sandbox recovery** (`recreate_sandbox`)
-- **Scheduling** (`schedule_thread_wakeup`)
+- **Scheduling** (`schedule_thread_wakeup`, `request_rollout_check`)
 - **User-settings lookup** (`read_user_settings`) and optional mutation (`save_user_settings`)
 - **Platform support** (`report_platform_issue`)
-- **Slack tools** (reactions, thread moves, message posting, etc.)
+- **Slack tools** (reactions, thread moves, message posting, channel management, etc.)
 - **Incident management** (`manage_incident`)
-- **Code-channel management** (`manage_code_channel`)
+- **Code-channel management** (`manage_code_channel`, `code_channel_set_view`)
 - **Event operations** (`listen_events`, `list_event_types`)
 - **Optional Notion integrations** (`comment_on_notion_task`, design tools)
 - **SQL query** (`read_only_sql`)
+- **Store operations** (`read_store_item`)
 - **Sandbox downloads** (`output_iframe`, `create_sandbox_file_download_url`, `expose_port`, when enabled)
 - **Admin operations** (automation and workspace management, conditionally included)
+- **Design and review tools** (`propose_review_comment`, `propose_pr_review`)
 - **CLI result logging** (`cli_result`, when required for CLI mode)
-- **Review approval policy** (`manage_feature_flags`, `manage_review_approval_mode`)
+- **Worktree handoff** (`worktree_handoff`, for desktop non-stop-summary mode)
+- **Feature flags and review policy** (`manage_feature_flags`, `manage_review_approval_mode`, `manage_review_repos`)
 
 Tool inclusion depends on runtime context:
 
-- An `admin_thread` receives `ADMIN_TOOLS` (automation management, workspace management, organization-skill mutations). The factory verifies the triggering identity against configured administrators before adding these, so metadata cannot grant admin capability to later participants.
-- A desktop `local_run` collapses to only `http_request`, `fetch_url`, and `web_search`. Integration groups are not collected.
+- An `admin_thread` receives `ADMIN_TOOLS` (automation management: `create_automation`, `update_automation`, `delete_automation`, `trigger_automation`, `list_automations`; workspace management: `list_workspaces`, `publish_workspace`, `refresh_workspace_start`, `configure_repository`, `delete_workspace`; organization-skill operations: `save_organization_skill`, `delete_organization_skill`). The factory verifies the triggering identity against configured administrators before adding these, so metadata cannot grant admin capability to later participants.
+- A desktop `local_run` collapses static_tools to only `http_request`, `fetch_url`, and `web_search`. Integration groups are not collected.
 - A `stop_summary` run initially gets only `slack_read_thread_messages` and `slack_reply`. Integration groups are not collected.
-- Slack operations are conditionally removed unless trusted Slack context enables them. Channel-ask mode and by-the-way mode use `SLACK_ASK_EXCLUDED_TOOLS` and `SLACK_BY_THE_WAY_EXCLUDED_TOOLS` to remove thread-bound and incident operations while retaining write capabilities.
+- Slack operations are conditionally removed unless trusted Slack context enables them. Channel-ask mode uses `SLACK_ASK_EXCLUDED_TOOLS` to remove thread-bound operations (`slack_add_reaction`, `slack_attach_html`, `slack_move_thread`, `slack_start_review_channel`, plus code-channel and incident operations) while retaining write capabilities. Slack by-the-way mode additionally excludes `slack_breakout_thread`.
 - Slack DM mode excludes `slack_add_reaction` via `DM_EXCLUDED_TOOLS` to avoid clutter on user messages.
 - Personal user-settings tools are removed when no credential login is verified (no personal identity in the thread).
 - Human review tools are removed when Slack bot context is unavailable. Expedited review tools are removed when disabled or when Slack bot context is unavailable.
 - Incident-session tools are added if an incident is in scope; when incident management is automatic (not explicitly requested), additional mutations are excluded via `INCIDENT_AUTOMATIC_EXCLUDED_TOOLS`.
-- The general-purpose subagent gets the applicable static list except `save_user_settings`; separately compiled subagent graphs do not inherit parent middleware. Dynamic integration middleware is explicitly passed to it.
+- The general-purpose subagent gets the applicable static list except `save_user_settings`; separately compiled subagent graphs receive the parent's dynamic integration middleware explicitly but do not inherit parent middleware exclusions. Subagent sandbox-only tools are also filtered.
 
 ## Deferred integration tool loading
 
@@ -147,7 +145,6 @@ Models that support in-conversation tool addition (Anthropic's `tool_addition` a
 | --- | --- |
 | Main | Context-dependent static tools, eligible dynamic groups (MCPs, workspace skills), and applicable Deep Agents built-ins. Resolves access policies and excludes tools based on run mode. |
 | Reviewer | `fetch_review_diff`; finding operations (`add_finding`, `update_finding`, `list_findings`, `publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`); plus `web_search`, `fetch_url`, and `http_request`. Does not receive `open_pull_request`. |
-| Analyzer | Only `save_review_style_prompt` and `read_finding_outcomes`, supporting repository review-style guidance with a model-call limit. |
 | PR chat | `read_repo_file`, `search_repo_code`, `list_review_findings`, `web_search`, `fetch_url`, `propose_review_comment`, and `propose_pr_review`, with a read-only virtual-file surface seeded via `/pr/` paths. |
 
 PR chat has **no sandbox**. It excludes shell and write built-ins (`execute`, `write_file`, `edit_file`, `delete`), and its delegated subagent allowlists only `read_file`, `ls`, `glob`, and `grep`. The chat preparation middleware acquires a repository-scoped GitHub App installation token for the GitHub-backed read tools; PR overview, diff, and findings are supplied as virtual `/pr/` files by the review-chat API.
@@ -171,7 +168,7 @@ Automation operations repeat their authorization with `require_admin`, which che
 Tool exclusion is applied per-mode after the static list is determined, using `ExcludeToolsMiddleware` to remove context-inappropriate tools after Deep Agents injects built-ins:
 
 - **Stop-summary mode** (`STOP_SUMMARY_EXCLUDED_TOOLS`) removes filesystem mutation (`write_file`, `edit_file`, `delete`), shell execution (`execute`), delegation (`task`), and `grep`, leaving only Slack read/reply tools available.
-- **Slack channel-ask mode** (`SLACK_ASK_EXCLUDED_TOOLS`) removes thread-bound Slack operations (`slack_add_reaction`, `slack_attach_html`, `slack_move_thread`), incident management (`manage_code_channel`, `manage_incident`), and `grep`, but retains write capabilities for answering in the channel. Slack by-the-way mode additionally excludes `slack_breakout_thread`.
+- **Slack channel-ask mode** (`SLACK_ASK_EXCLUDED_TOOLS`) removes thread-bound Slack operations (`slack_add_reaction`, `slack_attach_html`, `slack_move_thread`, `slack_start_review_channel`), incident management (`manage_code_channel`, `manage_incident`), and `grep`, but retains write capabilities for answering in the channel. Slack by-the-way mode additionally excludes `slack_breakout_thread`.
 - **Slack DM mode** (`DM_EXCLUDED_TOOLS`) removes `slack_add_reaction` to avoid clutter on user messages.
 - **Incident automatic mode** (`INCIDENT_AUTOMATIC_EXCLUDED_TOOLS`) removes mutable operations when an incident sweep runs without explicit user request, preventing unintended side effects and enforcing read-only analysis during automatic incident assessment.
 - **PR chat** (`_EXCLUDED_TOOLS`) removes `execute`, `write_file`, `edit_file`, and `delete` to ensure read-only operation over GitHub-backed read tools.
@@ -191,7 +188,6 @@ The `tool_error_handler` middleware catches malformed tool calls that reference 
 ## Related pages
 
 - [Agent graph](../architecture/agent-graph.md) — graph factories and runtime assembly.
-- [Reviewer and analyzer](../architecture/reviewer-and-analyzer.md) — specialist graph responsibilities.
 - [Authorization and security](auth-and-security.md) — trust boundaries and credentials.
 - [Observability and MCP](../integrations/observability-and-mcp.md) — integration configuration.
 - [PR creation](../workflows/pr-creation.md) — PR workflow behavior.

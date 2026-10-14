@@ -1,14 +1,12 @@
 ---
-type: "Reference"
+type: "workflow"
 title: "Context and Prompt Engineering"
 description: "Workflow for assembling run input, managing dynamic context deduplication, and constructing layered system prompts from multiple instruction sources."
 tags: ["context-assembly", "prompt-engineering", "system-prompt", "dynamic-context"]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 sources:
-  - id: openwiki-source-9b527e24b573880a306ac5b0
-    resource: repo://openswe/analyzer.py
   - id: openwiki-source-1685d34aae8025be9332f45a
     resource: repo://openswe/dispatch.py
   - id: openwiki-source-836966ba5e0c4d710801c9a9
@@ -21,10 +19,6 @@ sources:
     resource: repo://openswe/prompt.py
   - id: openwiki-source-1c7c5f1a7efc26b4594613d2
     resource: repo://openswe/resources/prompts/system/main.md.jinja
-  - id: openwiki-source-96a93a0c40b165a7c789d81b
-    resource: repo://openswe/resources/prompts/system/repo-instructions.md.jinja
-  - id: openwiki-source-186b38ac0b4224d3604d01b6
-    resource: repo://openswe/resources/prompts/system/workspace-instructions.md.jinja
   - id: openwiki-source-919e16feae379651f2cbc1c9
     resource: repo://openswe/server.py
   - id: openwiki-source-76820c5856f1479d850c1ab9
@@ -33,9 +27,7 @@ sources:
     resource: repo://openswe/threads/recent_context.py
   - id: openwiki-source-6cab3229da0697cc82ed6224
     resource: repo://openswe/utils/agents_md.py
-  - id: openwiki-source-6c0778eb47df8418c590e93e
-    resource: repo://openswe/utils/analyzer_skills.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-05T16:54:23.398Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 ---
 
 # Context and Prompt Engineering
@@ -64,7 +56,7 @@ This shows the separation between event normalization at dispatch and run-specif
 
 ## Normalized input transcript
 
-`agent/input_messages.py` is the serialization boundary for application-owned input. A human or system message is represented as an `<input-message>` envelope with a namespaced sender, surface, kind, optional channel, structured `<data>`, and escaped content. It supports multimodal block lists by enveloping text blocks while preserving non-text blocks. Entity introductions appear first as `<dynamic-context>` XML messages for people, channels, and systems. Slack channel `topic` and `purpose` fields are contextual metadata, not trusted instructions, and belong in the channel identity alongside name and thread reference, not in the system prompt.
+`input_messages.py` is the serialization boundary for application-owned input. A human or system message is represented as an `<input-message>` envelope with a namespaced sender, surface, kind, optional channel, structured `<data>`, and escaped content. It supports multimodal block lists by enveloping text blocks while preserving non-text blocks. Entity introductions appear first as `<dynamic-context>` XML messages for people, channels, and systems. Slack channel `topic` and `purpose` fields are contextual metadata, not trusted instructions, and belong in the channel identity alongside name and thread reference, not in the system prompt.
 
 The generic dispatcher derives identities when an adapter has not supplied a complete input: Slack uses the triggering-user and channel information in `RunConfig`; GitHub login or Linear email supplies a person identity; otherwise the event is attributed to a synthetic system identity. Adapters can instead pass a deliberately ordered prebuilt transcript, which is necessary when history contains several participants or system/bot messages.
 
@@ -116,8 +108,6 @@ The reviewer cannot assume a sandbox clone. It fetches the root convention docum
 Skills are instructions exposed as virtual `SKILL.md` files rather than copied wholesale into the prompt. A `CompositeBackend` keeps the run backend as default and routes skill prefixes to specialized backends; it strips the route prefix before delegation. Passing those prefixes in `create_deep_agent(skills=[...])` lets deepagents advertise skills while the agent reads full instructions through ordinary `read_file`.
 
 The main graph always mounts repository-bundled `baby-sit` and `html-artifacts` skills read-only at `/bundled-skills/`. Hosted runs additionally mount organization skills read-only at `/organization-skills/` and, when a profile login exists, per-user skills read-only at `/skills/`; the user route is first, so it has priority. Skills are persisted as `/<name>/SKILL.md` under the appropriate store namespace with YAML name/description front matter and a replacement instruction body. Names, sizes, and organization count are bounded; user tools resolve the current GitHub login, while organization-skill tools require an admin. Desktop runs instead source user skills from run state, omit organization skills, and route artifacts away from the project checkout.
-
-The style analyzer uses an independent `/skills/` `StateBackend` route. Launchers seed its run input `files` with the prefix-stripped bundled playbooks, and `skill_path_for_mode` chooses `bootstrap-repo-analysis` or `continual-learning`. Its prepare middleware renders a focused analyzer prompt that requires reading that mode's playbook; it does not write a skill into the analyzer sandbox.
 
 ## Sender context and participation
 

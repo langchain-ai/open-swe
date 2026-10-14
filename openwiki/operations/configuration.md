@@ -30,12 +30,10 @@ sources:
     resource: repo://openswe/utils/gateway.py
   - id: openwiki-source-4cc74089c0207ec1e5a6ca3b
     resource: repo://openswe/utils/model.py
-  - id: openwiki-source-7b35cf61ea1491240ef4c804
-    resource: repo://openswe/workspaces/store.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 ---
 
 # Configuration and Startup Validation
@@ -55,7 +53,7 @@ The canonical name takes precedence over aliases. Deprecated aliases are central
 
 ### Deployment topology
 
-`langgraph.json` registers six graphs (`agent`, `reviewer`, `analyzer`, `review-scout`, `chat`, and `scheduler`) and mounts `openswe.webapp:app` as the platform HTTP application for dashboard and webhook routes. Its checkpointer uses delete-based TTL cleanup: a 60-minute sweep and a default TTL of 43200 minutes (30 days). The file names `.env` as its environment file.
+`langgraph.json` registers several graphs (`agent`, `reviewer`, `analyzer`, `review-scout`, `chat`, `scheduler`) and mounts `openswe.webapp:app` as the platform HTTP application for dashboard and webhook routes. Its checkpointer uses delete-based TTL cleanup: a 60-minute sweep and a default TTL of 43200 minutes (30 days). The file names `.env` as its environment file.
 
 ## Startup lifecycle and failures
 

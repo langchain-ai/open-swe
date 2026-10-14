@@ -28,8 +28,6 @@ sources:
     resource: repo://openswe/slack/code_channels.py
   - id: openwiki-source-5cbe93451d362668e53e314b
     resource: repo://openswe/slack/tools/manage_code_channel.py
-  - id: openwiki-source-72370931d61f0a7232adcf12
-    resource: repo://openswe/slack/webhook.py
   - id: openwiki-source-76820c5856f1479d850c1ab9
     resource: repo://openswe/source_context.py
   - id: openwiki-source-c5e061972b62c56ca429a531
@@ -38,16 +36,14 @@ sources:
     resource: repo://openswe/thread_ids.py
   - id: openwiki-source-5e89303bbff1b32492ae2b1c
     resource: repo://openswe/threads/creation.py
-  - id: openwiki-source-996097a4d0a674613168d766
-    resource: repo://openswe/utils/thread_ops.py
   - id: openwiki-source-183593e64b0a8affdce9abac
     resource: repo://openswe/utils/thread_participants.py
   - id: openwiki-source-1962e84a7cbf37fcca83381c
     resource: repo://openswe/utils/thread_settings.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 ---
 
 # Threads, Durable Runs, and State
@@ -58,7 +54,7 @@ The boundary matters when changing an integration: a webhook, dashboard action, 
 
 ## Thread creation enforces a title
 
-Threads are created through `openswe.threads.creation.create_thread`, which is the only place LangGraph threads are created. Every thread people can open must have a title; the module enforces this invariant by requiring a non-empty, stripped title string. Titles are stored in thread metadata and remain unchanging from the opening activity unless explicitly updated. System-named threads use `ensure_titled_thread` to create or keep titles current.
+Threads are created through `openswe.threads.creation.create_thread`, which is the only place LangGraph threads are created. Every thread people can open must have a title; the module enforces this invariant by requiring a non-empty, stripped title string. Titles are stored in thread metadata and remain unchanging from the opening activity unless explicitly updated via the `title_locked` mechanism. System-named threads use `ensure_titled_thread` to create or keep titles current.
 
 ## Identity is a persistence contract
 
@@ -141,7 +137,7 @@ A trigger creates a run on the selected durable thread using a normalized input 
 
 The standard defaults are `multitask_strategy="interrupt"`, `durability="sync"`, `if_not_exists="create"`, resumable streaming, the Protocol v3 stream modes, and subgraph streaming. Interrupt stops an active run while preserving its sync checkpoint, then runs with history plus the follow-up; background work such as baby-sit can choose `enqueue`. Webhook triggers therefore do not need an in-process busy lock. A Store FIFO remains for deliberate dashboard injection and Slack message edits; it caps `pending_messages` at `MAX_QUEUED_MESSAGES` (100), dropping oldest entries.
 
-A completion webhook is attached only if `RUN_COMPLETE_WEBHOOK_SECRET` is set and `COMPLETION_WEBHOOK_URL` is an absolute non-loopback HTTP(S) URL. Otherwise dispatch logs a warning and creates the run without the webhook, rather than allowing a platform-rejected URL to fail every run. The checkpointer has deletion TTL configured as 43,200 minutes with a 60-minute sweep interval: checkpointed state of inactive threads eventually expires.
+A completion webhook is attached only if `RUN_COMPLETE_WEBHOOK_SECRET` is set and `COMPLETION_WEBHOOK_URL` is an absolute non-loopback HTTP(S) URL. Otherwise dispatch logs a warning and creates the run without the webhook, rather than allowing a platform-rejected URL to fail every run. The checkpointer has deletion TTL configured as 43,200 minutes (30 days) with a 60-minute sweep interval: checkpointed state of inactive threads eventually expires.
 
 ### Invocation identity for deduplication and retry safety
 

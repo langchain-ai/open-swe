@@ -1,24 +1,24 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:4d8dd5d1e9f8ccf00633cf63d8129fe2ee68da1bb7d1bd6c40ce9a9fa6c26bc8",
+  "pageVersion": "sha256:b492974a61755a256923ce09b1412ee4cb2be5910a43b8ad7e4f47fe363db149",
   "claims": [
     {
       "id": "claim_0e227b88b5d94fd5924bb5c89a53831e",
-      "statement": "Open SWE's backend is a LangGraph application that registers six graphs (agent, reviewer, analyzer, review-scout, chat, scheduler) together with a FastAPI app (openswe.webapp:app), all wired through langgraph.json which declares the Python version (3.14), LangGraph API version (>~=0.15.0rc1), registered graphs, checkpointer TTL policy (60-minute sweep, 43,200-minute default TTL with delete strategy), and loads .env.",
+      "statement": "Open SWE's backend is a LangGraph application that registers five graphs (agent, reviewer, review-scout, chat, scheduler) together with a FastAPI app (openswe.webapp:app), all wired through langgraph.json which declares the Python version (3.14), LangGraph API version (>~=0.15.0rc1), registered graphs, checkpointer TTL policy (60-minute sweep, 43,200-minute default TTL with delete strategy), and loads .env.",
       "evidence": [
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:0b8325812538a8a7f0a217abec5fc8dcb48dfb282e367d1da3cd14c7765fc3f9"
+          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
         }
       ]
     },
     {
       "id": "claim_865f6195385d4d4ebbe6e5a23dd20014",
-      "statement": "make dev runs `uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10`, serving all six graphs plus the FastAPI app on http://localhost:2024 so that both the /webhooks/* and /dashboard/api/* endpoints are available from one process; a local PostgreSQL 16 container is started automatically unless POSTGRES_URI is set.",
+      "statement": "make dev runs `uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10`, serving all five graphs plus the FastAPI app on http://localhost:2024 so that both the /webhooks/* and /dashboard/api/* endpoints are available from one process; a local PostgreSQL 16 container is started automatically unless POSTGRES_URI is set.",
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         }
       ]
     },
@@ -28,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         }
       ]
     },
@@ -38,7 +38,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         }
       ]
     },
@@ -48,21 +48,21 @@
       "evidence": [
         {
           "resource": "repo://Dockerfile",
-          "version": "repo-file-v1:sha256:4a3b08b5a99ab0306c5b5f88eea5894b9476035a6ee4e84211f9198a22c41749"
+          "version": "repo-file-v1:sha256:6a549a4623048ef6495c26220f2b5ba2243c09bff44e4692865af68de110aee5"
         },
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:0b8325812538a8a7f0a217abec5fc8dcb48dfb282e367d1da3cd14c7765fc3f9"
+          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
         },
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:9c51a3f86fe91619ae32bdad36793c80b7f61f9a15c4592db600de1c757989e2"
+          "version": "repo-file-v1:sha256:8a2101170b57c538db79fc8e83f44e3634a00001e8a2ab5164dc5dfea26418f8"
         }
       ]
     },
     {
       "id": "claim_23f87a37794f43989803b0b0870d1bb3",
-      "statement": "langgraph.desktop.json is a separate trimmed deployment manifest for the desktop build that exposes only the agent graph, disables the built-in UI, and configures a local auth handler (openswe.local_auth:auth) with Studio auth disabled.",
+      "statement": "langgraph.desktop.json is a separate trimmed deployment manifest (Python 3.14, API version 0.13.3) that exposes only the agent graph, disables the built-in UI, configures a local auth handler (openswe.local_auth:auth) with Studio auth disabled, and uses a local checkpointer for a private loopback LangGraph server.",
       "evidence": [
         {
           "resource": "repo://langgraph.desktop.json",
@@ -80,7 +80,7 @@
         },
         {
           "resource": "repo://pnpm-workspace.yaml",
-          "version": "repo-file-v1:sha256:276b874122997df81847f9d6daf12966243bc4b1b158e3798680daf47cbe2f82"
+          "version": "repo-file-v1:sha256:6f6cdef520b3a7f7ff4d28e713b455085a40d4352aebc9d5568173eae8b757c0"
         },
         {
           "resource": "repo://turbo.json",
@@ -94,7 +94,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         },
         {
           "resource": "repo://package.json",
@@ -102,7 +102,7 @@
         },
         {
           "resource": "repo://ui/vite.config.ts",
-          "version": "repo-file-v1:sha256:9ea375298b4177b25dfe0266492ee0366554e55ff7bd7f787514238a253763e8"
+          "version": "repo-file-v1:sha256:f787f4d491689d150e6262ef3672fc6225f2804dd10b10696f4d72106953607a"
         }
       ]
     },
@@ -142,7 +142,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         }
       ]
     },
@@ -178,11 +178,11 @@
     },
     {
       "id": "claim_eadc4b3dcf5e4752bf245ed137ea5a67",
-      "statement": "The root Dockerfile builds the standalone production LangGraph API server image from langchain/langgraph-api:0.15.1-py3.14, installing the repository with uv and baking the six graph registrations (via LANGSERVE_GRAPHS), HTTP app (via LANGGRAPH_HTTP), and checkpointer TTL (via LANGGRAPH_CHECKPOINTER) into environment variables; it exposes port 8000.",
+      "statement": "The root Dockerfile builds the standalone production LangGraph API server image from langchain/langgraph-api:0.15.1-py3.14, installing the repository with uv and baking the five graph registrations (via LANGSERVE_GRAPHS), HTTP app (via LANGGRAPH_HTTP), and checkpointer TTL (via LANGGRAPH_CHECKPOINTER) into environment variables; it exposes port 8000.",
       "evidence": [
         {
           "resource": "repo://Dockerfile",
-          "version": "repo-file-v1:sha256:4a3b08b5a99ab0306c5b5f88eea5894b9476035a6ee4e84211f9198a22c41749"
+          "version": "repo-file-v1:sha256:6a549a4623048ef6495c26220f2b5ba2243c09bff44e4692865af68de110aee5"
         }
       ]
     },
@@ -192,7 +192,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:5c9726e2d616a99a1acf75b49d6c0572af120cfa8bb92363bd0b8cba8b4ddfc0"
+          "version": "repo-file-v1:sha256:f3159a127f4241557cd9d26a0011be2338e7318f4213cf92e3bc91b13acc88d9"
         }
       ]
     },
@@ -202,7 +202,7 @@
       "evidence": [
         {
           "resource": "repo://ui/Dockerfile",
-          "version": "repo-file-v1:sha256:403f72b7557df3e1838c1c9bcee65884978e58be74b3e3f9ce1ca678524fe896"
+          "version": "repo-file-v1:sha256:41da5dad3bba43f8faf3881f9d302893fe942603cf3d75b9f4e926495d27c536"
         }
       ]
     },
@@ -212,7 +212,7 @@
       "evidence": [
         {
           "resource": "repo://ui/vite.config.ts",
-          "version": "repo-file-v1:sha256:9ea375298b4177b25dfe0266492ee0366554e55ff7bd7f787514238a253763e8"
+          "version": "repo-file-v1:sha256:f787f4d491689d150e6262ef3672fc6225f2804dd10b10696f4d72106953607a"
         }
       ]
     },
@@ -222,7 +222,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:5c9726e2d616a99a1acf75b49d6c0572af120cfa8bb92363bd0b8cba8b4ddfc0"
+          "version": "repo-file-v1:sha256:f3159a127f4241557cd9d26a0011be2338e7318f4213cf92e3bc91b13acc88d9"
         }
       ]
     },
@@ -233,16 +233,6 @@
         {
           "resource": "repo://ui/server/backend-proxy.ts",
           "version": "repo-file-v1:sha256:621b86cafa2d1d4f2d0b305a00a90eaa4868efff6431a56b9381e3de27c8d0ac"
-        }
-      ]
-    },
-    {
-      "id": "claim_bb9d3a53ae9a4aa4905268d354202787",
-      "statement": "The FastAPI app rejects a wildcard DASHBOARD_ALLOWED_ORIGINS configuration because credentials are enabled, and applies the configured origins to credentialed CORS with dashboard, plan, workflow approval, GitHub webhook, Slack webhook, Linear webhook, Notion webhook, health check, sandbox-tool, and sandbox-openai routers installed.",
-      "evidence": [
-        {
-          "resource": "repo://openswe/api/app.py",
-          "version": "repo-file-v1:sha256:edd35965f3a7b500bb2f035b91b151997ca5e2935ec050221e6d5fecd1734bf7"
         }
       ]
     },
@@ -262,15 +252,15 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         },
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:0b8325812538a8a7f0a217abec5fc8dcb48dfb282e367d1da3cd14c7765fc3f9"
+          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
         },
         {
           "resource": "repo://ui/vite.config.ts",
-          "version": "repo-file-v1:sha256:9ea375298b4177b25dfe0266492ee0366554e55ff7bd7f787514238a253763e8"
+          "version": "repo-file-v1:sha256:f787f4d491689d150e6262ef3672fc6225f2804dd10b10696f4d72106953607a"
         }
       ]
     },
@@ -280,7 +270,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         },
         {
           "resource": "repo://examples/ngrok/webhooks-only.yml",
@@ -294,11 +284,11 @@
       "evidence": [
         {
           "resource": "repo://Dockerfile",
-          "version": "repo-file-v1:sha256:4a3b08b5a99ab0306c5b5f88eea5894b9476035a6ee4e84211f9198a22c41749"
+          "version": "repo-file-v1:sha256:6a549a4623048ef6495c26220f2b5ba2243c09bff44e4692865af68de110aee5"
         },
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:0b8325812538a8a7f0a217abec5fc8dcb48dfb282e367d1da3cd14c7765fc3f9"
+          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
         }
       ]
     },
@@ -308,7 +298,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:5c9726e2d616a99a1acf75b49d6c0572af120cfa8bb92363bd0b8cba8b4ddfc0"
+          "version": "repo-file-v1:sha256:f3159a127f4241557cd9d26a0011be2338e7318f4213cf92e3bc91b13acc88d9"
         }
       ]
     },
@@ -318,7 +308,7 @@
       "evidence": [
         {
           "resource": "repo://openswe/api/app.py",
-          "version": "repo-file-v1:sha256:edd35965f3a7b500bb2f035b91b151997ca5e2935ec050221e6d5fecd1734bf7"
+          "version": "repo-file-v1:sha256:a5b4653ecbe2b48d86d66b1c859011fe13bf9dee8e8598bfdf6aef86641d59f9"
         }
       ]
     },
@@ -328,7 +318,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         }
       ]
     },
@@ -338,7 +328,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
+          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
         }
       ]
     },
@@ -365,6 +355,6 @@
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-08T15:19:10.971Z"
+    "at": "2026-10-13T15:44:17.388Z"
   }
 }

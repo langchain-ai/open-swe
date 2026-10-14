@@ -32,10 +32,10 @@ sources:
     resource: repo://openswe/utils/model.py
   - id: openwiki-source-1962e84a7cbf37fcca83381c
     resource: repo://openswe/utils/thread_settings.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-07T15:19:51.431Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-07T15:19:51.431Z" }
 ---
 
 # Models, Profiles, and Instructions

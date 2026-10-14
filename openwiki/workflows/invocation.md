@@ -36,10 +36,10 @@ sources:
     resource: repo://openswe/threads/proxy.py
   - id: openwiki-source-5c84530a3d0edb1fb15187f1
     resource: repo://openswe/threads/runs.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 ---
 
 # Inbound Invocation to Durable Run
@@ -112,7 +112,7 @@ The desktop client uses this dashboard invocation path with `source="desktop"`; 
 
 A dashboard follow-up to an active thread is persisted in the message queue, not immediately started as another dashboard run. Stop cancels every pending/running run on the thread rather than trusting cached latest-run metadata; if messages were queued, it starts a new empty-input durable run to drain them. Interactive posting is denied on admin or automation threads to non-admins, while surfaced-source threads are readable to authenticated organization members.
 
-Schedules are workspace records backed by LangGraph crons targeting the `scheduler` assistant. The scheduler graph fans a schedule tick into `launch_scheduled_agent_run`. Each scheduled agent execution creates a **fresh UUID thread**, obtains schedule/automation metadata, and rechecks the creator's repository access before creating the run. A schedule may establish a Slack root message/thread for status replies; failure to create that message prevents the run, rather than losing the intended notification context.
+Schedules are workspace records backed by LangGraph crons targeting the `scheduler` assistant. The scheduler graph fans a schedule tick into task-specific work: `launch_scheduled_agent_run` for agent automation, `baby_sit` for watch evaluation, `reconcile` for stale-run recovery, and `workspace_refresh` for membership/configuration sync. Each scheduled agent execution creates a **fresh UUID thread**, obtains schedule/automation metadata, and rechecks the creator's repository access before creating the run. A schedule may establish a Slack root message/thread for status replies; failure to create that message prevents the run, rather than losing the intended notification context.
 
 ## Thread identity and structured input
 

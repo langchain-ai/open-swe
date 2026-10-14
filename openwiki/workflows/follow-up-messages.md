@@ -12,6 +12,8 @@ sources:
     resource: repo://openswe/completion.py
   - id: openwiki-source-1685d34aae8025be9332f45a
     resource: repo://openswe/dispatch.py
+  - id: openwiki-source-6e25a82711fecc0a57fbef58
+    resource: repo://openswe/message_queue.py
   - id: openwiki-source-1772d9a59ed3ff28f22ae21a
     resource: repo://openswe/middleware/check_message_queue.py
   - id: openwiki-source-96bcad07b4fe7078402bc2b8
@@ -26,12 +28,14 @@ sources:
     resource: repo://openswe/slack/webhook.py
   - id: openwiki-source-1b56c0378ee7dbe5ac66ab32
     resource: repo://openswe/threads/handlers.py
+  - id: openwiki-source-5c84530a3d0edb1fb15187f1
+    resource: repo://openswe/threads/runs.py
   - id: openwiki-source-996097a4d0a674613168d766
     resource: repo://openswe/utils/thread_ops.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 ---
 
 # Follow-up Messages and Background Work
@@ -97,12 +101,12 @@ Every durable dispatch attaches a completion webhook only when both `RUN_COMPLET
 The completion webhook handler (`handle_run_completion`) processes terminal runs:
 
 - **Success**: Clears any consecutive-failure counter, schedules a private feedback prompt five minutes later (unless the run was automated), and for Slack runs with an invocation ID, schedules deferred session-cost enrichment. Returns the code-channel session to `active`.
-- **Error or timeout**: Posts a best-effort failure reply with run-scoped idempotence (per run ID, with fallback to thread-level tracking). Limits consecutive failure replies to prevent loops. Never blocks run creation.
+- **Error or timeout**: Posts a best-effort failure reply with run-scoped idempotence (per run ID, with fallback to thread-level tracking for older/manual payloads without a run ID). Limits consecutive failure replies to prevent loops. Never blocks run creation.
 - **Interrupted**: Intentionally ignored—with `multitask_strategy="interrupt"`, an interruption is expected and healthy, not a failure.
 
 Run-completion replies are best-effort and never block run creation. A missing webhook or a completion that arrives out of order has no side effects beyond deferred feedback and cost enrichment.
 
-If a successful run (not a follow-up-pickup run) left pending messages in the store, `_start_run_for_pending_follow_ups` dispatches an empty-input `multitask_strategy="reject"` run to pick them up when no run is already pending, allowing stored work to reach the agent without losing it to an idle timeout.
+If a successful run (not a follow-up-pickup run) left pending messages in the store, `dispatch_pending_follow_ups` dispatches an empty-input follow-up run to pick them up when no run is already pending, allowing stored work to reach the agent without losing it to an idle timeout.
 
 ## Background monitoring and follow-up dispatch
 
@@ -133,6 +137,21 @@ When all running and pending background tasks are complete, the monitor deletes 
 - **Agent cost recording**: Writes a single run's usage cost to the dashboard.
 - **Baby-sit watches** and **background-task monitors**: Route to their dedicated evaluation and monitoring handlers.
 
+## Durable dispatch and multitask strategy
+
+`dispatch_agent_run` is the common agent/reviewer dispatch contract. It constructs or accepts structured `RunInput` and delegates to `create_durable_run`, which invokes `client.runs.create` with a caller-selectable multitask strategy that defaults to `"interrupt"`.
+
+The strategy choices are:
+
+- **Explicit Slack requests** (tagged mentions): use `"interrupt"` to prioritize the user's urgent input.
+- **Untagged Slack follow-ups**: use `"enqueue"` to allow the current turn to finish before the follow-up begins.
+- **Slack message edits**: placed in the store message queue instead of creating a run, so an edit corrects the existing conversation without creating new runs.
+- **Baby-sit and background-task notifications**: use `"enqueue"` to preserve the interactive run's ordering.
+
+Durable dispatch uses `durability="sync"` (checkpoint before each step), resumable/subgraph-capable Protocol v2 stream modes, and an optional completion webhook. This preserves a checkpoint before each step and allows a later dashboard client to replay runs it did not create. The run is also marked with the v3 streaming compatibility key so it streams `values`, `updates`, `messages`, and subagent namespaces, matching the behavior of dashboard-initiated runs.
+
+The sandbox lifecycle relies on interrupt dispatch: a subsequent agent step resolves the sandbox by thread, reusing an in-memory backend or reconnecting through the persisted `sandbox_id`. An unreachable existing sandbox is not silently replaced for a normal agent thread, because replacement would discard uncommitted work; a deleted sandbox can be recreated, and the read-only reviewer can explicitly allow replacement.
+
 ## Emergency stop and follow-up cleanup
 
 ### Slack emergency stop (`:x:` reaction)
@@ -153,24 +172,9 @@ A code-channel `agent_session_stopped` event performs the same cancellation and 
 
 ### Dashboard stop and queued-message preservation
 
-The dashboard stop endpoint (`cancel_dashboard_thread`) authorizes the caller, cancels all pending and running runs, and marks the thread interrupted. Unlike Slack stop, it **preserves** `pending_messages` in the store. If a queued follow-up exists (detected when `kept_queued` is `True`), it dispatches an empty-input agent run with `multitask_strategy="reject"`; the before-model middleware drains the preserved queue, allowing the follow-up to continue the conversation without losing user input.
+The dashboard stop endpoint (`cancel_dashboard_thread`) authorizes the caller, cancels all pending and running runs, and marks the thread interrupted. Unlike Slack stop, it **preserves** `pending_messages` in the store. If a queued follow-up exists, it dispatches an empty-input agent run; the before-model middleware drains the preserved queue, allowing the follow-up to continue the conversation without losing user input.
 
 The admin variant (`admin_cancel_dashboard_thread`) cancels and marks interrupted without authorization checks or queued continuation.
-
-## Durable dispatch and multitask strategy
-
-`dispatch_agent_run` is the common agent/reviewer dispatch contract. It constructs or accepts structured `RunInput` and delegates to `create_durable_run`, which invokes `client.runs.create` with a caller-selectable multitask strategy that defaults to `"interrupt"`.
-
-The strategy choices are:
-
-- **Explicit Slack requests** (tagged mentions): use `"interrupt"` to prioritize the user's urgent input.
-- **Untagged Slack follow-ups**: use `"enqueue"` to allow the current turn to finish before the follow-up begins.
-- **Slack message edits**: placed in the store message queue instead of creating a run, so an edit corrects the existing conversation without creating new runs.
-- **Baby-sit and background-task notifications**: use `"enqueue"` to preserve the interactive run's ordering.
-
-Durable dispatch uses `durability="sync"` (checkpoint before each step), resumable/subgraph-capable Protocol v2 stream modes, and an optional completion webhook. This preserves a checkpoint before each step and allows a later dashboard client to replay runs it did not create. The run is also marked with the v3 streaming compatibility key so it streams `values`, `updates`, `messages`, and subagent namespaces, matching the behavior of dashboard-initiated runs.
-
-The sandbox lifecycle relies on interrupt dispatch: a subsequent agent step resolves the sandbox by thread, reusing an in-memory backend or reconnecting through the persisted `sandbox_id`. An unreachable existing sandbox is not silently replaced for a normal agent thread, because replacement would discard uncommitted work; a deleted sandbox can be recreated, and the read-only reviewer can explicitly allow replacement.
 
 ## Testing and regression coverage
 

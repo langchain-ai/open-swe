@@ -30,13 +30,9 @@ sources:
     resource: repo://openswe/sandboxes/repo_prep.py
   - id: openwiki-source-63c74145043dac21719006df
     resource: repo://openswe/sandboxes/retry.py
-  - id: openwiki-source-7c557728721b38cad5fe3518
-    resource: repo://tests/sandbox/test_langsmith_sandbox_config.py
-  - id: openwiki-source-6c4c3340e6bc2f86a0e54411
-    resource: repo://tests/sandbox/test_local_integration.py
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
 ---
 

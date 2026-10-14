@@ -1,8 +1,11 @@
 ---
 type: testing strategy
 title: Testing Infrastructure and Validation Patterns
-description: Comprehensive test infrastructure, focused validation strategies, and end-to-end flows for agent behavior, middleware, integrations, and production boundaries.
+description: Test organization, fixture strategies, E2E setup, and focused validation patterns for agent behavior, middleware, integrations, and production boundaries.
 tags: [testing, pytest, vitest, playwright, e2e, fixtures, isolation, fakes]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-13T15:44:17.388Z
 sources:
   - id: openwiki-source-24f77a48f966a05631988d08
     resource: repo://desktop/package.json
@@ -38,29 +41,19 @@ sources:
     resource: repo://turbo.json
   - id: openwiki-source-436f4179fe22abf615d2f7d0
     resource: repo://ui/package.json
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 ---
 
 # Testing Infrastructure and Validation Patterns
 
 The testing strategy separates concerns by layer: focused pytest tests for agent, middleware, reviewer, sandbox, and webhook behavior; dashboard Vitest for React rendering and client state; desktop Node tests for Electron main-process code; and Playwright for real webhook, authenticated dashboard, git/sandbox, and Electron integration. Choose the test layer that owns the contract being changed, running it in isolation with fakes and mocking only external boundaries.
 
-<!-- openwiki: mermaid parse failed and this diagram was converted to a text fence so it does not break rendering. Fix the diagram source and restore the mermaid fence. Parser error: Heuristic: an unescaped angle bracket inside a label breaks rendering; rephrase the label. -->
-```text
-flowchart TD
-    Change["Changed behavior"] --> Owner{"Which system<br/>boundary owns it?"}
-    Owner -->|"Agent, middleware,<br/>reviewer, sandbox,<br/>webhook, tools"| Pytest["Focused pytest<br/>in asyncio auto mode"]
-    Owner -->|"Dashboard React<br/>component or client"| Vitest["Dashboard Vitest"]
-    Owner -->|"Electron main<br/>process"| Node["Desktop Node test"]
-    Owner -->|"Real webhook, UI auth,<br/>git, Electron"| Playwright["Focused Playwright<br/>E2E"]
-    Pytest --> Gate["Relevant quality gate"]
-    Vitest --> Gate
-    Node --> Gate
-    Playwright --> Gate
-```
+## Test layer decision tree
+
+- **Agent, middleware, reviewer, sandbox, webhook, tools**: Focused pytest in asyncio auto mode
+- **Dashboard React component or client utility**: Dashboard Vitest
+- **Electron main process**: Desktop Node test
+- **Real webhook, UI auth, git, Electron integration**: Focused Playwright E2E
 
 Test layer responsibilities: pytest owns Python backend contracts via unit tests with fakes; Vitest owns frontend React components; Node tests own Electron main process; Playwright owns real webhook routes, UI integration, and end-to-end flows through the agent.
 
@@ -106,7 +99,7 @@ Use the narrow test family that carries the failure semantics being changed:
 | Dashboard routes, thread API, session gate, or server rendering | `tests/dashboard/`; for example `test_dashboard_thread_api.py` verifies `/dashboard/api/*` behavior, and `test_dashboard_ui.py` asserts SSR and session requirements. |
 | Middleware ordering, tool composition, error recovery, or state transitions | `tests/middleware/`; each middleware has focused contract tests (e.g., `test_model_fallback_middleware.py` for retry logic, `test_stable_tool_order.py` for ordering). |
 
-Tests are organized by system owner. Use prompt snapshots only to protect rendered output, configuration precedence, tool composition, or behavioral results—not to restate static prompt text.
+Tests are organized by system owner: `tests/agent/`, `tests/reviewer/`, `tests/sandbox/`, `tests/webhooks/`, `tests/dashboard/`, `tests/middleware/`, `tests/github/`, `tests/slack/`, and `tests/tools/`. Use prompt snapshots only to protect rendered output, configuration precedence, tool composition, or behavioral results—not to restate static prompt text.
 
 ## Frontend tests: Vitest and Node
 
@@ -142,27 +135,6 @@ pnpm --dir desktop run test
 ## End-to-end: Playwright with controlled boundaries
 
 The E2E suite proves production integration without relying on live SaaS. It runs the real agent through `langgraph dev`, real webhook routes, tools, middleware, local sandbox provider, and real git against a seeded local bare remote. Only the LLM and external SaaS HTTP endpoints are faked; everything else is production code.
-
-```mermaid
-sequenceDiagram
-    participant PW as Playwright
-    participant Slack as Mock Slack UI
-    participant Harness as E2E harness
-    participant API as Real webhook API
-    participant Agent as Real agent graph
-    participant Git as Local sandbox and git
-    participant Hub as Mock GitHub API
-    PW->>Slack: Submit request
-    Slack->>Harness: Simulate signed event
-    Harness->>API: POST Slack webhook
-    API->>Agent: Dispatch run
-    Agent->>Git: Edit, commit, push
-    Agent->>Hub: Create pull request
-    Agent->>Slack: Post thread reply
-    PW->>Slack: Assert PR link in thread
-```
-
-The E2E flow drives the entire happy path: user mention in Slack → real agent implementation → PR opened → PR link posted back to the same thread.
 
 ### E2E architecture and fakes
 

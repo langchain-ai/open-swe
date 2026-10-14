@@ -42,15 +42,15 @@ sources:
     resource: repo://ui/server/backend-proxy.ts
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
+    at: 2026-10-13T15:44:17.388Z
 ---
 
 # Development, Deployment, and Serving
 
-Open SWE is deployed as a single LangGraph application: six registered graphs (`agent`, `reviewer`, `analyzer`, `review-scout`, `chat`, `scheduler`) plus a FastAPI application (`openswe.webapp:app`), wired through `langgraph.json`. The deployment topology determines serving: all components share one origin, so the LangGraph API (`/threads`, `/runs`, `/assistants`, `/store`), the FastAPI dashboard API (`/dashboard/api/*`), webhook endpoints (`/webhooks/*`), and the bundled dashboard UI are served from the same URL. Multiple replicas share Postgres for state and Redis for workers. The local development and production backend support Electron desktop clients as well as web clients.
+Open SWE is deployed as a single LangGraph application: five registered graphs (`agent`, `reviewer`, `review-scout`, `chat`, `scheduler`) plus a FastAPI application (`openswe.webapp:app`), wired through `langgraph.json`. The deployment topology determines serving: all components share one origin, so the LangGraph API (`/threads`, `/runs`, `/assistants`, `/store`), the FastAPI dashboard API (`/dashboard/api/*`), webhook endpoints (`/webhooks/*`), and the bundled dashboard UI are served from the same URL. Multiple replicas share Postgres for state and Redis for workers. The local development and production backend support Electron desktop clients as well as web clients.
 
 <!-- openwiki: broken internal link [../configuration.md] file "../configuration.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 See [Configuration](../configuration.md) for the complete environment variable reference, [Dashboard UI](../integrations/dashboard-ui.md) for UI behavior and mounting, and [Invocation](../workflows/invocation.md) for how requests become runs.
@@ -59,11 +59,11 @@ See [Configuration](../configuration.md) for the complete environment variable r
 
 ### Manifest and runtime versions
 
-Open SWE's local development runtime uses Python 3.14 and LangGraph constraints `langgraph-api>=0.15.0rc1,<0.16` and `langgraph-runtime-inmem>=0.35.0rc1,<0.36` (set in `pyproject.toml`). The manifest `langgraph.json` declares the Python version (`3.14`), LangGraph API version (`>~=0.15.0rc1`), the six registered graphs and FastAPI app (`http.app`), a checkpointer TTL policy (60-minute sweep interval, 43,200-minute—30 day—default TTL with delete strategy), and loads `.env` from the repository root.
+Open SWE's local development runtime uses Python 3.14 and LangGraph constraints `langgraph-api>=0.15.0rc1,<0.16` and `langgraph-runtime-inmem>=0.35.0rc1,<0.36` (set in `pyproject.toml`). The manifest `langgraph.json` declares the Python version (`3.14`), LangGraph API version (`>~=0.15.0rc1`), the five registered graphs and FastAPI app (`http.app`), a checkpointer TTL policy (60-minute sweep interval, 43,200-minute—30 day—default TTL with delete strategy), and loads `.env` from the repository root.
 
 For LangGraph Platform deployments, `langgraph.json` includes `dockerfile_lines` that perform a best-effort dashboard build: the platform extracts the `http.mount_prefix` from the manifest and supplies it to the build, then continues backend deployment even if the UI build fails. The standalone `Dockerfile` builds a production image using `langchain/langgraph-api:0.15.1-py3.14`, installs Open SWE with `uv`, and bakes graph registrations (via `LANGSERVE_GRAPHS`), the FastAPI app (via `LANGGRAPH_HTTP`), and checkpointer settings (via `LANGGRAPH_CHECKPOINTER`) into environment variables rather than manifest declarations.
 
-The desktop build uses a separate trimmed manifest `langgraph.desktop.json` that exposes only the `agent` graph, disables the built-in UI, and configures a local auth handler (`openswe.local_auth:auth`) with Studio auth disabled, so the app owns a private loopback LangGraph server for local-only agent work.
+The desktop build uses a separate trimmed manifest `langgraph.desktop.json` (Python 3.14, API version 0.13.3) that exposes only the `agent` graph, disables the built-in UI, and configures a local auth handler (`openswe.local_auth:auth`) with Studio auth disabled plus a local checkpointer, so the app owns a private loopback LangGraph server for local-only agent work.
 
 ### Startup sequence
 
@@ -72,35 +72,38 @@ sequenceDiagram
   participant Boot as Startup
   participant DB as Postgres
   participant Store as LangGraph Store
+  participant Analytics as Analytics
   participant Listeners
   participant Ready as Ready to serve
 
   Boot->>DB: Run migrations
-  Boot->>DB: Create analytics schema
   Boot->>Store: Import user mappings (once)
-  Boot->>Store: Import concierge preferences (once)
-  Boot->>Store: Migrate automation workspaces (once)
+  Boot->>Store: Import concierge mode (once)
+  Boot->>Store: Import user records (once)
+  Boot->>Store: Import automations (once)
+  Boot->>Store: Import skills (once)
+  Boot->>DB: Delete analyzer crons (cleanup)
   Boot->>DB: Sync admin flags
-  Boot->>DB: Load workspace metadata
-  Boot->>Listeners: Start analytics worker pool
+  Boot->>Analytics: Load workspace metadata
+  Boot->>Analytics: Start worker pool
   Boot->>Listeners: Start transcript listener
   Boot->>Listeners: Start sandbox-bridge listener
   Boot->>Listeners: Start UI invalidation hub
   Note over Listeners: failures log warnings only
-  Boot->>Ready: LangGraph runtime opens all graphs
+  Boot->>Ready: Warm agent build and open graphs
 ```
 
 The FastAPI lifespan startup runs in this order:
 
-1. **Database setup:** Validates configuration, runs SQLAlchemy migrations on `POSTGRES_URI`, creates the `open_swe_analytics` schema.
-2. **Store migrations:** Applies LangGraph Store migrations for workspace and user record mappings; any pre-migration workspaces or users in the Store are moved to Postgres.
-3. **Admin sync:** Admin flags are synced from `CONFIGURED_ADMINS` into the user table.
-4. **Analytics activation:** Workspace records are loaded and reporting metadata is initialized.
-5. **Background workers:** A pooled analytics event worker starts (reads the Store, writes to Postgres).
+1. **Database setup:** Validates configuration, runs SQLAlchemy migrations on `POSTGRES_URI`.
+2. **Store imports:** Migrates user mappings, concierge preferences, user records, automations, and skills from LangGraph Store to Postgres (each is idempotent, run once).
+3. **Cleanup:** Deletes legacy review-style analyzer crons that can no longer fire.
+4. **Admin sync:** Admin flags are synced from `CONFIGURED_ADMINS` into the user table.
+5. **Analytics activation:** Workspace records are loaded and reporting metadata is initialized; a pooled analytics event worker starts (reads the Store, writes to Postgres).
 6. **Listeners:** Transcript, sandbox-bridge, and UI invalidation listeners start (handle multi-replica notifications).
-7. **Ready:** LangGraph runtime opens all registered graphs and serves requests.
+7. **Build warming and ready:** The agent build is warmed for faster first use, then the LangGraph runtime opens all registered graphs.
 
-Failures in imports, analytics, listeners, or worker startup (steps 2–6) do not prevent the server from running; they log warnings and continue. The dashboard and API remain available, but affected features may degrade.
+Failures in imports, cleanup, analytics, listeners, or worker startup (steps 2–6) log warnings but do not prevent the server from running; the dashboard and API remain available, though affected features may degrade.
 
 ## API and router configuration
 
@@ -129,7 +132,7 @@ This runs `uv sync --extra dev` and installs Open SWE in development mode.
 make dev
 ```
 
-Executes `uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10`. The server runs all six graphs and the FastAPI app on `http://localhost:2024`, making both `/webhooks/*` and `/dashboard/api/*` endpoints available from a single process.
+Executes `uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10`. The server runs all five graphs and the FastAPI app on `http://localhost:2024`, making both `/webhooks/*` and `/dashboard/api/*` endpoints available from a single process.
 
 A local PostgreSQL 16 container (`open-swe-postgres`) is started automatically unless `POSTGRES_URI` is already set. The container binds to loopback only (`127.0.0.1:5433`) and persists data in a named volume (`open-swe-postgres`), so stopping the container preserves workspace and user data across restarts.
 
@@ -155,7 +158,7 @@ flowchart TD
   Vite["Vite dev server on port 3000"]
   LG["LangGraph dev on port 2024"]
   FastAPI["FastAPI app"]
-  Graphs["Six LangGraph graphs"]
+  Graphs["Five LangGraph graphs"]
   Routes["Dashboard API / Webhooks / Health"]
   Proxy["Reverse-proxy Vite for UI requests"]
 
@@ -226,7 +229,7 @@ Build with:
 docker build -t open-swe .
 ```
 
-The root `Dockerfile` uses the `langchain/langgraph-api:0.15.1-py3.14` base image, installs the repository with `uv`, bakes the six graph registrations into `LANGSERVE_GRAPHS`, the FastAPI app into `LANGGRAPH_HTTP`, and checkpointer settings into `LANGGRAPH_CHECKPOINTER`, and exposes port 8000.
+The root `Dockerfile` uses the `langchain/langgraph-api:0.15.1-py3.14` base image, installs the repository with `uv`, bakes the five graph registrations into `LANGSERVE_GRAPHS`, the FastAPI app into `LANGGRAPH_HTTP`, and checkpointer settings into `LANGGRAPH_CHECKPOINTER`, and exposes port 8000.
 
 For a standalone server, provide:
 
@@ -440,3 +443,4 @@ make swagger
 ```
 
 Regenerates `swagger.json` from the FastAPI app's OpenAPI schema.
+schema.

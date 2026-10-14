@@ -24,14 +24,12 @@ sources:
     resource: repo://openswe/github/routes.py
   - id: openwiki-source-813c25f6bac2408de322a1f5
     resource: repo://openswe/graphs/agent.py
-  - id: openwiki-source-c9678be3f577e55e574a349f
-    resource: repo://openswe/graphs/analyzer.py
+  - id: openwiki-source-3bfcac4339fc43029fdaee09
+    resource: repo://openswe/graphs/chat.py
   - id: openwiki-source-a9562865a4bff791686b49dd
     resource: repo://openswe/graphs/review_scout.py
   - id: openwiki-source-90b15fd6117126ebfe5b6b22
     resource: repo://openswe/graphs/reviewer.py
-  - id: openwiki-source-6b99105488d7c23beda1e5ad
-    resource: repo://openswe/graphs/scheduler.py
   - id: openwiki-source-ff94e6d6f8e823f174c61b08
     resource: repo://openswe/linear/routes.py
   - id: openwiki-source-96bcad07b4fe7078402bc2b8
@@ -50,15 +48,15 @@ sources:
     resource: repo://ui/src/router.tsx
   - id: openwiki-source-c7a3ad58e4b4017484c1e326
     resource: repo://ui/src/routes/agents.tsx
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 ---
 
 # Runtime and Product Architecture
 
-Open SWE is a LangGraph deployment with a custom FastAPI application. The HTTP layer accepts browser and integration traffic, while durable LangGraph runs execute coding or review work against thread-scoped state and—except for PR chat—a backend. Six registered graph entrypoints separate the primary agent, reviewer, review-style analyzer, review-scout tool inspector, read-only PR chat, and time-triggered work.
+Open SWE is a LangGraph deployment with a custom FastAPI application. The HTTP layer accepts browser and integration traffic, while durable LangGraph runs execute coding or review work against thread-scoped state and—except for PR chat—a backend. Five registered graph entrypoints separate the primary agent, reviewer, review-scout tool inspector, read-only PR chat, and time-triggered work.
 
 ## Mission and workflow
 
@@ -80,7 +78,6 @@ It also operates as a reviewer (runs on-demand or automatic reviews, publishes f
 |---|---|---|
 | `agent` | `openswe.graphs.agent:traced_agent` | Per-run coding-agent factory: backend, models, tools, skills, and middleware. |
 | `reviewer` | `openswe.graphs.reviewer:traced_reviewer_agent` | PR review and findings publication workflow. |
-| `analyzer` | `openswe.graphs.analyzer:traced_analyzer` | Repository-specific review-style learning. |
 | `review-scout` | `openswe.graphs.review_scout:traced_review_scout` | Review-tool inspection and capability discovery. |
 | `chat` | `openswe.graphs.chat:traced_chat_agent` | Read-only discussion of one PR, without a sandbox. |
 | `scheduler` | `openswe.graphs.scheduler:get_scheduler` | A cron-tick dispatcher for maintenance and scheduled work. |
@@ -106,18 +103,18 @@ flowchart TD
   Dispatch --> Reviewer["reviewer graph"]
   Agent --> Backend["Thread sandbox or desktop backend"]
   Reviewer --> Backend
-  Analyzer["analyzer graph"] --> Backend
   Scout["review-scout graph"] --> Backend
   Browser --> Chat["chat graph"]
 ```
 
-This shows the principal paths. `dispatch_agent_run` is the shared creation boundary for `agent` and `reviewer` runs; chat, analysis, review-scout, and scheduler invocations use their own graph entrypoints.
+This shows the principal paths. `dispatch_agent_run` is the shared creation boundary for `agent` and `reviewer` runs; chat, review-scout, and scheduler invocations use their own graph entrypoints.
 
 ## Graph and execution boundaries
 
 `openswe.server:get_agent` (wrapped as `_get_agent`) produces a fresh deep-agent graph for an executable thread. It uses the thread ID to acquire a cached or reconnected backend (or a desktop `LocalShellBackend`), starts it, resolves thread/team/profile model settings, persists normalized thread settings when needed, and assembles a composite backend, tools, skills, subagents, and middleware. If no thread ID is supplied or the graph is being loaded rather than executed, it returns a deliberately empty deep agent without provisioning a backend. This is important for graph discovery and other non-execution loads. See [Agent Graph & get_agent Factory](./agent-graph.md) and [Middleware Stack](./middleware-stack.md) for its detailed composition.
 
-The reviewer follows the sandbox lifecycle but deliberately has a review-only toolset: `add_finding`, `update_finding`, `list_findings`, and `publish_review`; it does not receive commit, push, or PR-opening tools. Its preparation computes an in-diff line set so finding validation occurs when a finding is created, rather than failing only during GitHub publication. The analyzer uses the reviewer-style sandbox and authenticated `gh` access to mine historical human review feedback and finding outcomes, then saves a per-repository prompt through `save_review_style_prompt`. The review-scout graph uses the same sandbox and tool environment but is designed for capability inspection and review-tool discovery. See [Reviewer & Review-Style Analyzer Graphs](./reviewer-and-analyzer.md).
+<!-- openwiki: broken internal link [./reviewer.md] file "./reviewer.md" does not exist. Fix the href or restore the target, then delete this comment. -->
+The reviewer follows the sandbox lifecycle but deliberately has a review-only toolset: `add_finding`, `update_finding`, `list_findings`, and `publish_review`; it does not receive commit, push, or PR-opening tools. Its preparation computes an in-diff line set so finding validation occurs when a finding is created, rather than failing only during GitHub publication. The review-scout graph uses the same sandbox and authenticated `gh` access but is designed for capability inspection and review-tool discovery. See [Reviewer Graph](./reviewer.md).
 
 The chat graph is intentionally sandbox-less and read-only. The dashboard review-chat proxy seeds the PR diff, findings, and overview as virtual `/pr/` files in the graph's `files` state channel. Filesystem tools can read that context, while `execute`, writes, edits, and deletion are excluded; GitHub-backed tools use a repository-scoped GitHub App token rather than a user credential.
 
@@ -157,4 +154,5 @@ The `ui/` application is a TanStack Router React client with routes for agent se
 - When changing dispatch defaults or stream fields, test durable run creation and cross-surface event attachment: dashboard observability relies on replayable v3-compatible streams for runs created outside the browser.
 - When changing desktop path handling, retain real-path validation, the allowlist/worktree boundary, and artifact routing; each prevents a distinct local safety or repository-hygiene failure.
 
-Related pages: [Agent Graph & get_agent Factory](./agent-graph.md), [Reviewer & Review-Style Analyzer Graphs](./reviewer-and-analyzer.md), [Sandbox Lifecycle](./sandbox-lifecycle.md), [Dashboard UI](../integrations/dashboard-ui.md), and [Invocation](../workflows/invocation.md).
+<!-- openwiki: broken internal link [./reviewer.md] file "./reviewer.md" does not exist. Fix the href or restore the target, then delete this comment. -->
+Related pages: [Agent Graph & get_agent Factory](./agent-graph.md), [Reviewer Graph](./reviewer.md), [Sandbox Lifecycle](./sandbox-lifecycle.md), [Dashboard UI](../integrations/dashboard-ui.md), and [Invocation](../workflows/invocation.md).

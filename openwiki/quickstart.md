@@ -4,7 +4,7 @@ title: "Quick Start: Navigate the Open SWE Codebase"
 openwiki_generated: true
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
+    at: 2026-10-13T15:44:17.388Z
 sources:
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
@@ -26,6 +26,8 @@ sources:
     resource: repo://openswe/review_scout/graph.py
   - id: openwiki-source-96bcad07b4fe7078402bc2b8
     resource: repo://openswe/reviewer.py
+  - id: openwiki-source-1b32e9f41fa7e64702b380f6
+    resource: repo://openswe/sandboxes/lifecycle.py
   - id: openwiki-source-685dc33e7199aa1f6e402f7a
     resource: repo://openswe/scheduler.py
   - id: openwiki-source-919e16feae379651f2cbc1c9
@@ -40,7 +42,7 @@ sources:
     resource: repo://tests/e2e/playwright.desktop.config.ts
   - id: openwiki-source-7ef60dc4372e1a33c7728fe6
     resource: repo://tests/e2e/README.md
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 ---
 
 
@@ -61,7 +63,7 @@ make web                # pnpm run dev
 make desktop            # pnpm run dev:desktop
 ```
 
-Use `make dev` when a change needs LangGraph graph execution; it serves all six registered graphs and the HTTP app. `make run` is FastAPI-only for dashboard and webhook testing without graph changes. `make dev-ui` fronts Vite through the backend at `:2024`; `make desktop` starts Electron and requires the backend separately. For local webhook exposure, use `make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev` to restrict the ngrok policy to `/webhooks/*` only, since the development server has no authentication.
+Use `make dev` when a change needs LangGraph graph execution; it serves all five registered graphs and the HTTP app. `make run` is FastAPI-only for dashboard and webhook testing without graph changes. `make dev-ui` fronts Vite through the backend at `:2024`; `make desktop` starts Electron and requires the backend separately. For local webhook exposure, use `make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev` to restrict the ngrok policy to `/webhooks/*` only, since the development server has no authentication.
 
 Python is async-first: implement the async path. Add a synchronous method only when an interface requires it, and make that method raise `NotImplementedError`; do not maintain parallel implementations.
 
@@ -73,7 +75,6 @@ Python is async-first: implement the async path. Add a synchronous method only w
 | --- | --- | --- |
 | `openswe.graphs.agent:traced_agent` | Main coding graph (`openswe/server.py`) | Agent assembly, tools, skills, models, prompts, middleware, and coding sandbox preparation. |
 | `openswe.graphs.reviewer:traced_reviewer_agent` | Reviewer graph (`openswe/reviewer.py`) | Diff-grounded findings, review publication, reviewer sandbox behavior, and reviewer middleware. |
-| `openswe.graphs.analyzer:traced_analyzer` | Style analyzer (`openswe/analyzer.py`) | Repository review-style analysis and learned guidance. |
 | `openswe.graphs.review_scout:traced_review_scout` | Review scout (`openswe/review_scout/graph.py`) | Diff walkthrough generation, commit ordering, and scout-specific sandbox behavior. |
 | `openswe.graphs.chat:traced_chat_agent` | PR chat (`openswe/chat.py`) | Dashboard "chat with this PR," virtual PR files, and read-only repository access. |
 | `openswe.graphs.scheduler:get_scheduler` | Scheduler (`openswe/scheduler.py`) | Cron routing, scheduled work, stale-run repair, CI watches, background tasks, and cost refreshes. |
@@ -120,7 +121,7 @@ The main agent graph is stateless and rebuilt per thread; all per-thread state l
 - [Coding Agent Assembly](architecture/agent-graph.md) — `get_agent`, backend/model/profile resolution, curated tools, skills, subagents, and preparation.
 - [Middleware and Failure Boundaries](architecture/middleware-stack.md) — ordering-sensitive retries, timeouts, guards, queues, fallbacks, and error reporting.
 - [Thread Sandbox Lifecycle](architecture/sandbox-lifecycle.md) and [Sandbox Provider Integration](integrations/sandbox-providers.md) — thread binding, safe recovery, proxy state, provider selection, and adding a provider.
-- [Review and Style Analysis Graphs](architecture/reviewer-and-analyzer.md) — the non-mutating reviewer, finding lifecycle, and style analysis.
+- [Review and Style Analysis Graphs](architecture/reviewer-and-analyzer.md) — the non-mutating reviewer and review-scout, finding lifecycle, and style analysis.
 - [Threads, Durable Runs, and State](concepts/threads-and-state.md) — checkpoints, metadata, thread identity, and ownership boundaries.
 - [Tool Catalog and Authorization](concepts/tools.md) — exporting, wiring, authorizing, and safely changing tools.
 - [Models, Profiles, and Instructions](concepts/models-profiles-instructions.md) — configuration precedence and prompt inputs.

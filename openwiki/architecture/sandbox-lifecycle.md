@@ -3,6 +3,9 @@ type: architecture lifecycle
 title: Thread Sandbox Lifecycle
 description: How a thread acquires, persists, reconnects to, and deliberately replaces its sandbox. Covers provider selection, proxy-backed credentials, recovery safety, and operational lifecycle controls.
 tags: [sandbox, lifecycle, threads, providers, github-proxy, recovery]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-13T15:44:17.388Z
 sources:
   - id: openwiki-source-3e4d955c2e907c017e3302d0
     resource: repo://openswe/desktop.py
@@ -24,9 +27,6 @@ sources:
     resource: repo://openswe/sandboxes/retry.py
   - id: openwiki-source-2dbb6fddd1531095bb57d08e
     resource: repo://openswe/sandboxes/state.py
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-08T15:19:10.971Z
 generated: { by: "openwiki/0.4.2", at: "2026-10-04T13:47:40.237Z" }
 ---
 
