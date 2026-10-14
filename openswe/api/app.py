@@ -52,6 +52,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.database.store_imports import run_store_import
+    from openswe.review.assessment_feedback import run_assessment_import
+    from openswe.review.import_records import import_review_records
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
@@ -118,6 +120,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # sidebar until an import succeeds.
         logger.exception("Importing thread pins from the LangGraph Store failed")
     try:
+        # Review settings, assessment feedback, and baby-sit watches used to be
+        # Store records; this moves them into PostgreSQL.
+        await run_store_import("review_records", import_review_records)
+    except Exception:  # noqa: BLE001
+        # Startup continues: repos still in the Store skip auto-review, keep the
+        # default review style, and their watched pull requests go unwatched
+        # until an import succeeds.
+        logger.exception("Importing review records from the LangGraph Store failed")
+    try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()
     except Exception:  # noqa: BLE001
@@ -125,6 +136,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     blob_import = asyncio.create_task(run_blob_import())
     plan_import = asyncio.create_task(run_plan_import())
     feedback_import = asyncio.create_task(run_feedback_import())
+    assessment_import = asyncio.create_task(run_assessment_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -169,6 +181,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         blob_import.cancel()
         plan_import.cancel()
         feedback_import.cancel()
+        assessment_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()

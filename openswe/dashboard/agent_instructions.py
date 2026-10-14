@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP, filter_repo_models_for_user
 from openswe.dashboard.repo_access import require_repo_access_for_user
-from openswe.review.styles import normalize_repo_full_name
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.store import TypedStore, now_iso
 
 AGENT_INSTRUCTIONS_NAMESPACE: list[str] = ["agent_instructions"]
