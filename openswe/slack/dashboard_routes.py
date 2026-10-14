@@ -8,7 +8,6 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import session_user_id
 from openswe.slack.allowed_bots import (
-    ALLOWED_SLACK_BOTS,
     AllowedSlackBot,
     AllowedSlackBotEntry,
     AllowSlackBot,
@@ -86,7 +85,7 @@ async def api_list_slack_channels(
 async def api_list_allowed_slack_bots(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> list[AllowedSlackBot]:
-    return await ALLOWED_SLACK_BOTS.search_all()
+    return await AllowedSlackBot.all()
 
 
 @router.get("/slack/allowed-bots/directory")
@@ -113,5 +112,5 @@ async def api_remove_allowed_slack_bot(
     bot_id: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, bool]:
-    await ALLOWED_SLACK_BOTS.delete(f"{team_id}:{bot_id}")
+    await AllowedSlackBot.remove(team_id, bot_id)
     return {"ok": True}

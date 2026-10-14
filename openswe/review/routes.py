@@ -33,6 +33,7 @@ from openswe.review.chat import (
 )
 from openswe.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from openswe.review.eval_jobs import (
+    ReviewerEvalStatus,
     ScoreMode,
     Severity,
     get_reviewer_eval_status,
@@ -99,7 +100,7 @@ async def api_set_enabled_review_repo(
 @router.get("/admin/evals/reviewer")
 async def admin_get_reviewer_eval(
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> dict[str, Any]:
+) -> ReviewerEvalStatus:
     """Status of the latest reviewer eval."""
     return await get_reviewer_eval_status()
 
@@ -126,7 +127,7 @@ class ReviewerEvalStart(BaseModel):
 async def admin_start_reviewer_eval(
     body: ReviewerEvalStart,
     session: dict[str, Any] = ADMIN_DEP,
-) -> dict[str, Any]:
+) -> ReviewerEvalStatus:
     """Launch the reviewer eval in a LangSmith sandbox with the given run config."""
     config = resolve_eval_config()
     config.update(body.model_dump(exclude={"limit"}))
