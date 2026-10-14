@@ -1,0 +1,13 @@
+REQUIRED: download the transcript now; the session does not exist until its file is written. On this machine, run:
+
+```sh
+mkdir -p "$(dirname "{{ download.transcript_path }}")" && curl -fsS -H 'Authorization: Bearer {{ download.download_token }}' '{{ download.download_url }}' -o "{{ download.transcript_path }}.gz" && gunzip -f "{{ download.transcript_path }}.gz"
+```
+
+{% if download.branch %}
+Then, in the clone of {{ download.repo }}, fetch and check out `{{ download.branch }}`. If the working tree has uncommitted changes, ask the user before switching branches.
+{% else %}
+The thread has not pushed a branch, so only its conversation carries over.
+{% endif %}
+
+Finally, tell the user to run `claude --resume {{ download.session_id }}` from that directory. If auto mode blocks the download, write it as a script that takes the transcript path, the download URL and the download token as its three arguments, run the script, and suggest the user add the script to their allowlist (in Claude Code, `Bash(<absolute script path>:*)`).

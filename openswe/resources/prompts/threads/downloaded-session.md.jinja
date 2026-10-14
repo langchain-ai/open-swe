@@ -1,0 +1,6 @@
+The conversation above was downloaded from the Open SWE thread {{ url }} and continues here. Its tool calls ran in Open SWE's cloud sandbox, not on this machine, and its tools may not exist here; use your own tools from now on.
+{% if branch %}
+The thread pushed its work to the branch `{{ branch }}` of {{ repo }}{% if pr_url %}, for the pull request {{ pr_url }}{% endif %}. Before you continue the work, make sure that branch is checked out and up to date, and push further commits to it rather than to a new branch.
+{% else %}
+The thread did not push a branch, so changes it made in its sandbox are not on this machine.
+{% endif %}

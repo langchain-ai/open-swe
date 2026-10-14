@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.types import Message
 
-from openswe.dashboard.oauth import decode_upload_ticket, issue_upload_ticket
+from openswe.dashboard.oauth import UploadTicket
 from openswe.threads import session_upload
 from openswe.threads.summary import assert_thread_postable
 
@@ -55,12 +55,12 @@ def reserved(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
 
 async def _upload(code: str) -> dict[str, object] | None:
-    ticket = decode_upload_ticket(code)
+    ticket = UploadTicket.decode(code)
     return await session_upload.upload_session(session_upload.UploadStream(_request()), ticket)
 
 
 def _code(login: str) -> str:
-    return issue_upload_ticket(login=login, email=None, user_id=None, thread_id="t1")
+    return UploadTicket(sub=login, thread_id="t1").issue()
 
 
 async def test_an_upload_code_fills_its_own_thread_once(reserved: dict[str, object]) -> None:
