@@ -59,7 +59,7 @@ async def write_database_rows(
     where: JsonObject | None = None,
     confirm: bool = False,
 ) -> dict[str, object]:
-    """Repair rows in an Open SWE table; update/delete require exact-match filters."""
+    """Repair Open SWE rows, including alembic_version; update/delete need exact-match filters."""
     _require_confirmation(confirm)
     if operation not in {"insert", "update", "delete"}:
         raise ValueError("Operation must be insert, update, or delete.")
@@ -85,8 +85,6 @@ async def write_database_rows(
         target = await conn.run_sync(
             lambda sync: Table(table, MetaData(), schema=postgres.SCHEMA, autoload_with=sync)
         )
-        if table == "alembic_version":
-            raise ValueError("Migration metadata cannot be repaired with this tool.")
         unknown = (set(values or {}) | set(where or {})) - set(target.c.keys())
         if unknown:
             raise ValueError("Unknown column names.")
