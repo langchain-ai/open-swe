@@ -1,11 +1,12 @@
 """Incident state moved out of the LangGraph Store.
 
-``incident_policy`` holds the one policy, in its only row. ``incident``,
-``incident_report``, ``incident_history`` and ``incident_postmortem`` each key
-on the incident id; each JSONB column keeps its record's Store shape.
-``incident_command`` holds responder command receipts; ``copied_from_store``
-marks one the Store import copied, which the import deletes again if a replica
-of the previous release deletes it from the Store.
+``incident_policy`` holds the one policy; a unique index on ``(true)`` keeps it
+to one row. ``incident``, ``incident_report``, ``incident_history`` and
+``incident_postmortem`` each hold one row per incident, unique on
+``incident_id``; each JSONB column keeps its record's Store shape.
+``incident_command`` holds responder command receipts, unique on ``claim_id``;
+``copied_from_store`` marks one the Store import copied, which the import
+deletes again if a replica of the previous release deletes it from the Store.
 """
 
 from alembic import op
@@ -19,15 +20,17 @@ depends_on = None
 def upgrade() -> None:
     op.execute("""
         CREATE TABLE incident_policy (
-            singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+            id uuid PRIMARY KEY,
             version integer NOT NULL,
             policy jsonb NOT NULL,
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
     """)
+    op.execute("CREATE UNIQUE INDEX incident_policy_singleton ON incident_policy ((true))")
     op.execute("""
         CREATE TABLE incident (
-            id text PRIMARY KEY,
+            id uuid PRIMARY KEY,
+            incident_id text NOT NULL,
             workspace_id text NOT NULL,
             channel_id text NOT NULL,
             thread_id text NOT NULL,
@@ -36,33 +39,41 @@ def upgrade() -> None:
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
     """)
+    op.execute("CREATE UNIQUE INDEX incident_incident_id ON incident (incident_id)")
     op.execute("CREATE INDEX incident_thread_id ON incident (thread_id)")
     op.execute("""
         CREATE TABLE incident_report (
-            incident_id text PRIMARY KEY,
+            id uuid PRIMARY KEY,
+            incident_id text NOT NULL,
             report jsonb NOT NULL,
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
     """)
+    op.execute("CREATE UNIQUE INDEX incident_report_incident_id ON incident_report (incident_id)")
     op.execute("""
         CREATE TABLE incident_history (
-            id text PRIMARY KEY,
-            workspace_id text NOT NULL,
-            channel_id text NOT NULL,
+            id uuid PRIMARY KEY,
+            incident_id text NOT NULL,
             history jsonb NOT NULL,
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
     """)
+    op.execute("CREATE UNIQUE INDEX incident_history_incident_id ON incident_history (incident_id)")
     op.execute("""
         CREATE TABLE incident_postmortem (
-            incident_id text PRIMARY KEY,
+            id uuid PRIMARY KEY,
+            incident_id text NOT NULL,
             markdown text NOT NULL,
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
     """)
+    op.execute(
+        "CREATE UNIQUE INDEX incident_postmortem_incident_id ON incident_postmortem (incident_id)"
+    )
     op.execute("""
         CREATE TABLE incident_command (
-            id text PRIMARY KEY,
+            id uuid PRIMARY KEY,
+            claim_id text NOT NULL,
             incident_id text NOT NULL,
             action text NOT NULL,
             content_hash text NOT NULL,
@@ -70,6 +81,7 @@ def upgrade() -> None:
             created_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
     """)
+    op.execute("CREATE UNIQUE INDEX incident_command_claim_id ON incident_command (claim_id)")
 
 
 def downgrade() -> None:

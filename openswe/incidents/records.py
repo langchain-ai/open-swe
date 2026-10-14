@@ -8,9 +8,10 @@ when PostgreSQL last wrote the row, which the Store import compares against.
 import logging
 from collections.abc import Collection, Iterable
 from datetime import UTC, datetime
+from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,62 +30,68 @@ from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
+# The conflict target of ``incident_policy_singleton``, the unique index on ``(true)``.
+_ONE_POLICY = text("(true)")
+
 
 class IncidentPolicyRow(Base):
     __tablename__ = "incident_policy"
 
     version: Mapped[int]
     policy: Mapped[JsonObject] = mapped_column(JSONB)
-    singleton: Mapped[bool] = mapped_column(primary_key=True, default=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
 class IncidentRow(Base):
     __tablename__ = "incident"
 
-    id: Mapped[str] = mapped_column(primary_key=True)
+    incident_id: Mapped[str]
     workspace_id: Mapped[str]
     channel_id: Mapped[str]
     thread_id: Mapped[str]
     status: Mapped[str]
     incident: Mapped[JsonObject] = mapped_column(JSONB)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
 class IncidentReportRow(Base):
     __tablename__ = "incident_report"
 
-    incident_id: Mapped[str] = mapped_column(primary_key=True)
+    incident_id: Mapped[str]
     report: Mapped[JsonObject] = mapped_column(JSONB)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
 class IncidentHistoryRow(Base):
     __tablename__ = "incident_history"
 
-    id: Mapped[str] = mapped_column(primary_key=True)
-    workspace_id: Mapped[str]
-    channel_id: Mapped[str]
+    incident_id: Mapped[str]
     history: Mapped[JsonObject] = mapped_column(JSONB)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
 class IncidentPostmortemRow(Base):
     __tablename__ = "incident_postmortem"
 
-    incident_id: Mapped[str] = mapped_column(primary_key=True)
+    incident_id: Mapped[str]
     markdown: Mapped[str]
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
 class IncidentCommandRow(Base):
     __tablename__ = "incident_command"
 
-    id: Mapped[str] = mapped_column(primary_key=True)
+    claim_id: Mapped[str]
     incident_id: Mapped[str]
     action: Mapped[str]
     content_hash: Mapped[str]
     copied_from_store: Mapped[bool] = mapped_column(default=False)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
@@ -118,9 +125,9 @@ class IncidentPolicies:
         async with postgres.session() as session:
             await session.execute(
                 insert(IncidentPolicyRow)
-                .values(singleton=True, version=policy.version, policy=value)
+                .values(id=uuid7(), version=policy.version, policy=value)
                 .on_conflict_do_update(
-                    index_elements=[IncidentPolicyRow.singleton],
+                    index_elements=[_ONE_POLICY],
                     set_={
                         "version": policy.version,
                         "policy": value,
@@ -141,24 +148,25 @@ class Incidents:
 
     async def get(self, id: IncidentId) -> Incident | None:
         async with postgres.session() as session:
-            value = await session.scalar(select(IncidentRow.incident).where(IncidentRow.id == id))
+            value = await session.scalar(
+                select(IncidentRow.incident).where(IncidentRow.incident_id == id)
+            )
         return None if value is None else Incident.model_validate(value)
 
     async def put(self, id: IncidentId, record: Incident) -> Incident:
-        value = record.model_dump(mode="json")
         columns = {
             "workspace_id": record.workspace_id,
             "channel_id": record.channel_id,
             "thread_id": record.thread_id,
             "status": record.status,
-            "incident": value,
+            "incident": record.model_dump(mode="json"),
         }
         async with postgres.session() as session:
             await session.execute(
                 insert(IncidentRow)
-                .values(id=id, **columns)
+                .values(id=uuid7(), incident_id=id, **columns)
                 .on_conflict_do_update(
-                    index_elements=[IncidentRow.id],
+                    index_elements=[IncidentRow.incident_id],
                     set_={**columns, "updated_at": func.clock_timestamp()},
                 )
             )
@@ -189,7 +197,9 @@ class Incidents:
 
     async def written_at(self, id: IncidentId) -> datetime | None:
         async with postgres.session() as session:
-            return await session.scalar(select(IncidentRow.updated_at).where(IncidentRow.id == id))
+            return await session.scalar(
+                select(IncidentRow.updated_at).where(IncidentRow.incident_id == id)
+            )
 
 
 class IncidentReports:
@@ -209,7 +219,7 @@ class IncidentReports:
         async with postgres.session() as session:
             await session.execute(
                 insert(IncidentReportRow)
-                .values(incident_id=incident_id, report=value)
+                .values(id=uuid7(), incident_id=incident_id, report=value)
                 .on_conflict_do_update(
                     index_elements=[IncidentReportRow.incident_id],
                     set_={"report": value, "updated_at": func.clock_timestamp()},
@@ -233,24 +243,19 @@ class IncidentHistories:
     async def get(self, id: IncidentId) -> IncidentHistory | None:
         async with postgres.session() as session:
             value = await session.scalar(
-                select(IncidentHistoryRow.history).where(IncidentHistoryRow.id == id)
+                select(IncidentHistoryRow.history).where(IncidentHistoryRow.incident_id == id)
             )
         return None if value is None else IncidentHistory.model_validate(value)
 
     async def put(self, id: IncidentId, history: IncidentHistory) -> IncidentHistory:
         value = history.model_dump(mode="json")
-        columns = {
-            "workspace_id": history.workspace_id,
-            "channel_id": history.channel_id,
-            "history": value,
-        }
         async with postgres.session() as session:
             await session.execute(
                 insert(IncidentHistoryRow)
-                .values(id=id, **columns)
+                .values(id=uuid7(), incident_id=id, history=value)
                 .on_conflict_do_update(
-                    index_elements=[IncidentHistoryRow.id],
-                    set_={**columns, "updated_at": func.clock_timestamp()},
+                    index_elements=[IncidentHistoryRow.incident_id],
+                    set_={"history": value, "updated_at": func.clock_timestamp()},
                 )
             )
             await Topic.INCIDENTS.invalidate(session, key=id)
@@ -265,7 +270,7 @@ class IncidentHistories:
     async def written_at(self, id: IncidentId) -> datetime | None:
         async with postgres.session() as session:
             return await session.scalar(
-                select(IncidentHistoryRow.updated_at).where(IncidentHistoryRow.id == id)
+                select(IncidentHistoryRow.updated_at).where(IncidentHistoryRow.incident_id == id)
             )
 
 
@@ -284,7 +289,7 @@ class IncidentPostmortems:
         async with postgres.session() as session:
             await session.execute(
                 insert(IncidentPostmortemRow)
-                .values(incident_id=incident_id, markdown=markdown)
+                .values(id=uuid7(), incident_id=incident_id, markdown=markdown)
                 .on_conflict_do_update(
                     index_elements=[IncidentPostmortemRow.incident_id],
                     set_={"markdown": markdown, "updated_at": func.clock_timestamp()},
@@ -302,15 +307,17 @@ class IncidentPostmortems:
 
 
 class CommandReceipts:
-    """Responder command receipts, each claimed before its command runs."""
+    """Responder command receipts by claim id, each claimed before its command runs."""
 
-    async def get(self, id: str) -> CommandReceipt | None:
+    async def get(self, claim_id: str) -> CommandReceipt | None:
         async with postgres.session() as session:
-            row = await session.get(IncidentCommandRow, id)
+            row = await session.scalar(
+                select(IncidentCommandRow).where(IncidentCommandRow.claim_id == claim_id)
+            )
         if row is None:
             return None
         return CommandReceipt(
-            id=row.id,
+            id=row.claim_id,
             incident_id=IncidentId(row.incident_id),
             action=row.action,
             content_hash=row.content_hash,
@@ -318,46 +325,49 @@ class CommandReceipts:
         )
 
     async def claim(self, receipt: CommandReceipt, *, store_copy: bool = False) -> bool:
-        """Write ``receipt`` unless its id is taken; whether this call wrote it."""
+        """Write ``receipt`` unless its claim id is taken; whether this call wrote it."""
         async with postgres.session() as session:
             claimed = await session.scalar(
                 insert(IncidentCommandRow)
                 .values(
-                    id=receipt.id,
+                    id=uuid7(),
+                    claim_id=receipt.id,
                     incident_id=receipt.incident_id,
                     action=receipt.action,
                     content_hash=receipt.content_hash,
                     copied_from_store=store_copy,
                 )
-                .on_conflict_do_nothing()
+                .on_conflict_do_nothing(index_elements=[IncidentCommandRow.claim_id])
                 .returning(IncidentCommandRow.id)
             )
         return claimed is not None
 
-    async def delete(self, id: str) -> None:
+    async def delete(self, claim_id: str) -> None:
         async with postgres.session() as session:
-            await session.execute(delete(IncidentCommandRow).where(IncidentCommandRow.id == id))
+            await session.execute(
+                delete(IncidentCommandRow).where(IncidentCommandRow.claim_id == claim_id)
+            )
 
-    async def written_at(self, id: str) -> datetime | None:
+    async def written_at(self, claim_id: str) -> datetime | None:
         async with postgres.session() as session:
             return await session.scalar(
-                select(IncidentCommandRow.created_at).where(IncidentCommandRow.id == id)
+                select(IncidentCommandRow.created_at).where(IncidentCommandRow.claim_id == claim_id)
             )
 
     async def delete_store_copies(self, present: Collection[str], copied_after: datetime) -> int:
         """Delete receipts the Store import copied after ``copied_after`` whose Store record,
-        keyed by id in ``present``, is gone.
+        keyed by claim id in ``present``, is gone.
 
         A replica of the previous release deletes a receipt only from the Store.
         """
         async with postgres.session() as session:
-            copies = await session.scalars(
-                select(IncidentCommandRow.id).where(
+            copies = await session.execute(
+                select(IncidentCommandRow.id, IncidentCommandRow.claim_id).where(
                     IncidentCommandRow.copied_from_store,
                     IncidentCommandRow.created_at > copied_after,
                 )
             )
-            gone = [id for id in copies if id not in present]
+            gone = [id for id, claim_id in copies.tuples() if claim_id not in present]
             if gone:
                 await session.execute(
                     delete(IncidentCommandRow).where(
