@@ -369,9 +369,10 @@ def _current_backend() -> tuple[str, Any]:
 
 
 async def background_execute(
-    command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS
+    command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS, description: str | None = None
 ) -> dict[str, Any]:
     """Implement the `background_execute` tool."""
+    # `description` is for people following the run, who read it from the call's args.
     if not command.strip():
         return {"success": False, "error": "command must not be empty"}
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:

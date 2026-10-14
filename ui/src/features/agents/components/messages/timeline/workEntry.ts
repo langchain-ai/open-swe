@@ -5,6 +5,7 @@ import type {
   ToolExecutionChunk,
 } from "@/features/agents/lib/types"
 import {
+  commandDescription,
   formatPathDisplayParts,
   formatToolDisplayParts,
   toolTextArguments,
@@ -116,7 +117,10 @@ function expandedTextForChunk(
   const command =
     typeof chunk.input?.command === "string" ? chunk.input.command.trim() : ""
   if (command) blocks.push(command)
-  const textArguments = toolTextArguments(chunk.input)
+  // A described shell row is already labeled by its description.
+  const textArguments = toolTextArguments(chunk.input).filter(
+    ([key]) => !(command && key === "description")
+  )
   for (const [key, value] of textArguments) {
     blocks.push(`${key.replace(/_/g, " ")}:\n${value}`)
   }
@@ -285,7 +289,11 @@ export function liveActivityLabel(
 
     const entry = describeWorkEntry(chunk, repoPath)
     const verb = toolActivityVerb(chunk)
-    return entry.preview ? `${verb} · ${entry.preview}` : `${verb}…`
+    const detail =
+      chunk.toolKind === "execute"
+        ? (commandDescription(chunk.input) ?? entry.preview)
+        : entry.preview
+    return detail ? `${verb} · ${detail}` : `${verb}…`
   }
 
   return "Working…"

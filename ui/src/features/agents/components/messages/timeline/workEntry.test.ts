@@ -128,6 +128,25 @@ describe("describeWorkEntry", () => {
     expect(entry.expandedText).toBe("ls\n\na.ts\nb.ts")
   })
 
+  it("labels a described command by its description alone and keeps the command expandable", () => {
+    const entry = describeWorkEntry(
+      chunk({
+        title: "execute",
+        toolKind: "execute",
+        input: {
+          command: "git status --short",
+          description: "Show working tree status",
+        },
+        output: "M a.ts",
+      }),
+      repoPath
+    )
+
+    expect(entry.heading).toBe("Show working tree status")
+    expect(entry.preview).toBeNull()
+    expect(entry.expandedText).toBe("git status --short\n\nM a.ts")
+  })
+
   it("shows important tool text in the preview and keeps every argument expandable", () => {
     const reason =
       "This is a conversation between people, not a request.".repeat(100)
@@ -226,6 +245,14 @@ describe("liveActivityLabel", () => {
       input: { command: "pnpm test" },
     })
     expect(liveActivityLabel([running, chunk()])).toBe("Running · pnpm test")
+    expect(
+      liveActivityLabel([
+        {
+          ...running,
+          input: { command: "pnpm test", description: "Run the UI tests" },
+        },
+      ])
+    ).toBe("Running · Run the UI tests")
     expect(
       liveActivityLabel([{ ...running, status: "completed" }, chunk()])
     ).toBe("Thinking…")

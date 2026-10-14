@@ -215,7 +215,8 @@ export function WorkEntryRow({
             <p className="flex w-full min-w-0 items-baseline gap-space-2 text-xs leading-5">
               <span
                 className={cn(
-                  "shrink-0 truncate font-medium",
+                  "min-w-0 truncate font-medium",
+                  entry.preview && "shrink-0",
                   isError
                     ? "text-error-secondary"
                     : entry.status === "pending" ||

@@ -107,6 +107,7 @@ from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
     BasePrepareRunMiddleware,
+    DescribeCommandsMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
@@ -2183,6 +2184,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ),
                     ToolErrorMiddleware(),
                     ExcludeToolsMiddleware(excluded=excluded_tools),
+                    DescribeCommandsMiddleware(),
                     SubdirAgentsReadMiddleware(),
                     ToolRetryMiddleware(
                         max_retries=2,

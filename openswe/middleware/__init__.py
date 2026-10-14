@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
     "deliver_event_matches_before_model": ".deliver_event_matches",
+    "DescribeCommandsMiddleware": ".describe_commands",
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
@@ -35,6 +36,7 @@ _MIDDLEWARE_MODULES = {
 }
 
 __all__ = [
+    "DescribeCommandsMiddleware",
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
@@ -69,6 +71,7 @@ __all__ = [
 if TYPE_CHECKING:
     from openswe.middleware.check_message_queue import check_message_queue_before_model
     from openswe.middleware.deliver_event_matches import deliver_event_matches_before_model
+    from openswe.middleware.describe_commands import DescribeCommandsMiddleware
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
     from openswe.middleware.model_call_timeout import ModelCallTimeoutMiddleware

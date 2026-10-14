@@ -54,6 +54,13 @@ const TEXT_ARGUMENTS = [
   "title",
 ]
 
+/** What the model said a shell command does, which labels the call in place of "Shell". */
+export function commandDescription(
+  input: Record<string, unknown> | undefined
+): string | undefined {
+  return firstStringArg(input, ["description"])
+}
+
 export function toolTextArguments(
   input: Record<string, unknown> | undefined
 ): Array<[string, string]> {
@@ -139,6 +146,8 @@ export function formatToolDisplayParts(
       return plain(humanizeToolTitle(title))
     }
     case "execute": {
+      const description = commandDescription(input)
+      if (command && description) return { heading: description, preview: null }
       if (command)
         return { heading: "Shell", preview: truncateMiddle(command, 60) }
       return plain(humanizeToolTitle(title))
