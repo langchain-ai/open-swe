@@ -169,7 +169,11 @@ let updateCheck: ReturnType<typeof autoUpdater.checkForUpdates> | null = null;
 async function checkAndDownloadLatest() {
   const result = await autoUpdater.checkForUpdates();
   const version = result?.updateInfo.version;
-  if (!result?.isUpdateAvailable || version === updateState.version)
+  if (
+    !result?.isUpdateAvailable ||
+    updateState.status === "downloading" ||
+    version === updateState.version
+  )
     return result;
   setUpdateState("downloading", version);
   void autoUpdater.downloadUpdate().catch(() => undefined);
