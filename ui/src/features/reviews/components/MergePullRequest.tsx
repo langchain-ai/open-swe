@@ -60,7 +60,9 @@ export function MergePullRequest({
     },
   })
   const busy = merge.isPending || merge.isSuccess
-  const state = actionLabel(githubActions.merge.labels, merge)
+  const state = merge.data?.auto_merge
+    ? "Auto-merge enabled"
+    : actionLabel(githubActions.merge.labels, merge)
   return (
     <SplitButton
       disabled={!pr.headSha || busy || allowed.isPending}

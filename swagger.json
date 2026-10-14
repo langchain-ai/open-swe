@@ -4122,6 +4122,7 @@
         "type": "object"
       },
       "PullRequestActionResult": {
+        "description": "GitHub-confirmed action outcome; queued auto-merge does not mean the PR merged.",
         "properties": {
           "action": {
             "enum": [
@@ -4132,6 +4133,11 @@
             ],
             "title": "Action",
             "type": "string"
+          },
+          "auto_merge": {
+            "default": false,
+            "title": "Auto Merge",
+            "type": "boolean"
           },
           "done": {
             "title": "Done",

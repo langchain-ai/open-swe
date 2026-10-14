@@ -107,7 +107,6 @@ export function canUpdateBranch(pr: OpenPullRequest) {
 // conflict, a draft, a missing required approval, or a required check that
 // never reported is not a guess: those merges are certain to be rejected.
 export function canAttemptMerge(pr: OpenPullRequest) {
-  if (pr.draft === true || pr.reviewRequired || pr.missingChecks.length)
-    return false
+  if (pr.draft === true || pr.reviewRequired) return false
   return pr.mergeable !== false && pr.mergeState !== "dirty"
 }
