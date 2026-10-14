@@ -593,6 +593,20 @@ describe("My PRs", () => {
     expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
+  it("shows review required instead of approved when approvals are still missing", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { reviewDecision: "approved", reviewRequired: true }),
+      ],
+    })
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    expect(within(card).getByText("Review required")).toBeTruthy()
+    expect(within(card).queryByText("Approved")).toBeNull()
+    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
+  })
+
   it("names a required check that never reported instead of offering the merge", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
