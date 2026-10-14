@@ -7,7 +7,7 @@ import httpx2
 import pytest
 
 from openswe.slack import client as slack_client
-from openswe.slack import webhook as slack_webhook
+from openswe.slack import files as slack_files
 from openswe.utils import url_safety
 
 
@@ -53,8 +53,8 @@ def download_http(monkeypatch: pytest.MonkeyPatch):
     return responses, requests
 
 
-def _entry(name: str, url: str) -> slack_webhook.SlackFileEntry:
-    return slack_webhook.SlackFileEntry(name=name, url=url)
+def _entry(name: str, url: str) -> slack_files.SlackFileEntry:
+    return slack_files.SlackFileEntry(name=name, url=url)
 
 
 @pytest.mark.asyncio
@@ -159,7 +159,7 @@ async def test_download_slack_files_uploads_before_downloading_next_file(
     )
     monkeypatch.setattr(slack_client, "download_slack_file", download)
 
-    staged = await slack_webhook._download_slack_files_to_sandbox(
+    staged = await slack_files.download_slack_files_to_sandbox(
         [
             _entry("bundle.zip", "https://files.slack.com/first.zip"),
             _entry("bundle.zip", "https://files.slack.com/second.zip"),
@@ -168,8 +168,8 @@ async def test_download_slack_files_uploads_before_downloading_next_file(
     )
 
     assert staged == [
-        slack_webhook.StagedSlackFile("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
-        slack_webhook.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
+        slack_files.StagedSlackFile("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
+        slack_files.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
     ]
     assert (tmp_path / "bundle-1").read_bytes() == b"zip"
 
