@@ -3,10 +3,11 @@
 import re
 from datetime import UTC, datetime
 from typing import Any, Self
+from uuid import UUID, uuid7
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import ColumnElement, and_, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,8 +44,8 @@ class AllowSlackBot(BaseModel):
 class AllowedSlackBotRow(Base):
     __tablename__ = "allowed_slack_bot"
 
-    team_id: Mapped[str] = mapped_column(primary_key=True)
-    bot_id: Mapped[str] = mapped_column(primary_key=True)
+    team_id: Mapped[str]
+    bot_id: Mapped[str]
     user_id: Mapped[str]
     app_id: Mapped[str]
     name: Mapped[str]
@@ -52,6 +53,7 @@ class AllowedSlackBotRow(Base):
     created_by: Mapped[str]
     created_at: Mapped[datetime]
     copied_from_store: Mapped[bool]
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     updated_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
 
 
@@ -71,10 +73,14 @@ class AllowedSlackBot(BaseModel):
     def store_key(self) -> str:
         return f"{self.team_id}:{self.bot_id}"
 
+    @staticmethod
+    def _is(team_id: str, bot_id: str) -> ColumnElement[bool]:
+        return and_(AllowedSlackBotRow.team_id == team_id, AllowedSlackBotRow.bot_id == bot_id)
+
     @classmethod
     async def get(cls, team_id: str, bot_id: str) -> Self | None:
         async with postgres.session() as session:
-            row = await session.get(AllowedSlackBotRow, (team_id, bot_id))
+            row = await session.scalar(select(AllowedSlackBotRow).where(cls._is(team_id, bot_id)))
         return None if row is None else cls.model_validate(row)
 
     @classmethod
@@ -90,8 +96,10 @@ class AllowedSlackBot(BaseModel):
         async with postgres.session() as session:
             added = await session.scalar(
                 insert(AllowedSlackBotRow)
-                .values(**self.model_dump(), copied_from_store=False)
-                .on_conflict_do_nothing()
+                .values(id=uuid7(), **self.model_dump(), copied_from_store=False)
+                .on_conflict_do_nothing(
+                    index_elements=[AllowedSlackBotRow.team_id, AllowedSlackBotRow.bot_id]
+                )
                 .returning(AllowedSlackBotRow.bot_id)
             )
         return added is not None
@@ -102,7 +110,7 @@ class AllowedSlackBot(BaseModel):
         async with postgres.session() as session:
             await session.execute(
                 insert(AllowedSlackBotRow)
-                .values(**values)
+                .values(id=uuid7(), **values)
                 .on_conflict_do_update(
                     index_elements=[AllowedSlackBotRow.team_id, AllowedSlackBotRow.bot_id],
                     set_={**values, "updated_at": func.clock_timestamp()},
@@ -114,9 +122,7 @@ class AllowedSlackBot(BaseModel):
         """When PostgreSQL last wrote the bot, which the Store import compares against."""
         async with postgres.session() as session:
             return await session.scalar(
-                select(AllowedSlackBotRow.updated_at).where(
-                    AllowedSlackBotRow.team_id == team_id, AllowedSlackBotRow.bot_id == bot_id
-                )
+                select(AllowedSlackBotRow.updated_at).where(cls._is(team_id, bot_id))
             )
 
     @classmethod
@@ -127,11 +133,7 @@ class AllowedSlackBot(BaseModel):
         """
         await delete_value(STORE_NAMESPACE, f"{team_id}:{bot_id}")
         async with postgres.session() as session:
-            await session.execute(
-                delete(AllowedSlackBotRow).where(
-                    AllowedSlackBotRow.team_id == team_id, AllowedSlackBotRow.bot_id == bot_id
-                )
-            )
+            await session.execute(delete(AllowedSlackBotRow).where(cls._is(team_id, bot_id)))
 
     @classmethod
     async def delete_store_copies(cls, present: set[str], copied_after: datetime) -> int:
@@ -147,19 +149,17 @@ class AllowedSlackBot(BaseModel):
         deleted = 0
         async with postgres.session() as session:
             rows = await session.execute(
-                select(AllowedSlackBotRow.team_id, AllowedSlackBotRow.bot_id).where(copied)
+                select(
+                    AllowedSlackBotRow.id, AllowedSlackBotRow.team_id, AllowedSlackBotRow.bot_id
+                ).where(copied)
             )
-            for team_id, bot_id in rows.all():
+            for row_id, team_id, bot_id in rows.all():
                 if f"{team_id}:{bot_id}" in present:
                     continue
                 gone = await session.scalar(
                     delete(AllowedSlackBotRow)
-                    .where(
-                        AllowedSlackBotRow.team_id == team_id,
-                        AllowedSlackBotRow.bot_id == bot_id,
-                        copied,
-                    )
-                    .returning(AllowedSlackBotRow.bot_id)
+                    .where(AllowedSlackBotRow.id == row_id, copied)
+                    .returning(AllowedSlackBotRow.id)
                 )
                 deleted += gone is not None
         return deleted

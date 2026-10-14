@@ -7,10 +7,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
 
+from openswe.api.body_limit import BodyLimitedRoute
 from openswe.review.eval_jobs import ReviewerEvalRun
 from openswe.review.eval_report import REPORT_PATH, REPORT_TOKEN_HEADER, ReviewerEvalReport
 
-router = APIRouter(tags=["reviewer-eval"])
+
+class ReportRoute(BodyLimitedRoute):
+    # Room for the largest valid report: its log tail and error JSON-escaped at six bytes a character.
+    max_bytes = 256 * 1024
+    too_large = "Reviewer eval report is too large"
+
+
+router = APIRouter(tags=["reviewer-eval"], route_class=ReportRoute)
 
 
 @router.post(REPORT_PATH, status_code=204)

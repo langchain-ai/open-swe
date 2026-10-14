@@ -1,6 +1,6 @@
 """Allowed Slack bots and reviewer eval runs moved out of the LangGraph Store.
 
-``allowed_slack_bot`` keys on the Slack workspace and bot it allows.
+``allowed_slack_bot`` holds one row per Slack workspace and bot it allows.
 ``reviewer_eval_run`` keeps one row per launched eval; the dashboard shows the
 latest. Its sandbox reports progress with a per-run token whose SHA-256 digest
 is ``report_token_hash``. In both, ``copied_from_store`` marks a row the Store
@@ -18,6 +18,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute("""
         CREATE TABLE allowed_slack_bot (
+            id uuid PRIMARY KEY,
             team_id text NOT NULL,
             bot_id text NOT NULL,
             user_id text NOT NULL DEFAULT '',
@@ -27,10 +28,12 @@ def upgrade() -> None:
             created_by text NOT NULL DEFAULT '',
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             copied_from_store boolean NOT NULL DEFAULT false,
-            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            PRIMARY KEY (team_id, bot_id)
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
     """)
+    op.execute(
+        "CREATE UNIQUE INDEX allowed_slack_bot_team_bot ON allowed_slack_bot (team_id, bot_id)"
+    )
     op.execute("""
         CREATE TABLE reviewer_eval_run (
             id uuid PRIMARY KEY,
