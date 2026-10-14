@@ -10,8 +10,8 @@ records until their rollout finishes. A Store record saved after the copy, by
 such a replica, replaces it, comparing each record's own ``updated_at``: the
 incident's, its report's, and its history's; the policy by its ``version``;
 and a postmortem by its incident history's, which is saved with it. A report,
-history, or postmortem lives on its incident's row, so incidents move first and
-one without an incident stays in the Store. Only command receipts are ever
+history, postmortem, or command receipt belongs to its incident's row, so
+incidents move first and one without an incident stays in the Store. Only command receipts are ever
 deleted, so a copied receipt whose Store record such a replica deleted goes too.
 """
 
@@ -176,8 +176,9 @@ async def _import_commands() -> StoreImport:
             continue
         copied_at = await COMMANDS.written_at(entry.key)
         if copied_at is None:
-            await COMMANDS.claim(receipt, store_copy=True)
-            result += StoreImport(moved=1)
+            result += await _copy(
+                COMMANDS_NAMESPACE, entry.key, COMMANDS.claim(receipt, store_copy=True)
+            )
         else:
             result += await _retire(COMMANDS_NAMESPACE, entry.key, copied_at)
     # Until the import retires a copy's Store record, a missing one was deleted there.

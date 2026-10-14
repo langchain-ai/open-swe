@@ -91,7 +91,8 @@ async def test_settings_and_commands_record_the_person_who_wrote_them(configured
     await service.update_settings(
         {"enabled": True}, 0, {"id": "github:admin", "github_login": "admin"}
     )
-    receipt = CommandReceipt(id="claim", incident_id="i1", action="ask", content_hash="h")
+    record = await _record()
+    receipt = CommandReceipt(id="claim", incident_id=record.id, action="ask", content_hash="h")
     assert await service.COMMANDS.claim(receipt, by="admin")
 
     async with postgres.session() as session:

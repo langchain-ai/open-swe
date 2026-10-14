@@ -35,9 +35,9 @@ def store(registry_db: None, fake_store: FakeStore) -> FakeStore:
     return fake_store
 
 
-def _receipt(id: str) -> dict[str, object]:
+def _receipt(id: str, incident_id: str = INCIDENT_ID) -> dict[str, object]:
     return CommandReceipt(
-        id=id, incident_id=INCIDENT_ID, action="ask", content_hash="h"
+        id=id, incident_id=IncidentId(incident_id), action="ask", content_hash="h"
     ).model_dump(mode="json")
 
 
@@ -95,8 +95,13 @@ async def test_store_import_copies_incident_state_then_retires_the_store_records
 async def test_store_import_drops_receipts_an_old_replica_deleted_from_the_store(
     store: FakeStore,
 ) -> None:
+    await service.INCIDENTS.put(
+        INCIDENT_ID, Incident(id=INCIDENT_ID, workspace_id="T1", channel_id="C1", thread_id="t1")
+    )
     store.seed(COMMANDS_NAMESPACE, "failed", _receipt("failed"))
     store.seed(COMMANDS_NAMESPACE, "kept", _receipt("kept"))
+    # A receipt links to its incident's row, so one without an incident waits in the Store.
+    store.seed(COMMANDS_NAMESPACE, "orphan", _receipt("orphan", "gone"))
     assert await import_store_incidents() == StoreImport(moved=2)
     assert await service.COMMANDS.claim(CommandReceipt.model_validate(_receipt("fresh")))
 
@@ -106,3 +111,5 @@ async def test_store_import_drops_receipts_an_old_replica_deleted_from_the_store
     assert await service.COMMANDS.get("failed") is None
     assert await service.COMMANDS.get("kept") is not None
     assert await service.COMMANDS.get("fresh") is not None
+    assert await service.COMMANDS.get("orphan") is None
+    assert "orphan" in store.items[COMMANDS_NAMESPACE]

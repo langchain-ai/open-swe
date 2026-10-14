@@ -27,6 +27,7 @@ from openswe.incidents.models import (
     IncidentPolicy,
     IncidentReportRecord,
 )
+from openswe.slack.channels import SlackChannel
 from openswe.ui_invalidations import Topic
 from openswe.users.records import user_id_for_login
 from openswe.utils.json_types import JsonObject
@@ -56,9 +57,9 @@ class IncidentPolicyRow(Base):
 class IncidentRow(Base):
     __tablename__ = "incident"
 
-    incident_id: Mapped[str]
-    workspace_id: Mapped[str]
-    channel_id: Mapped[str]
+    external_id: Mapped[str]
+    slack_team_id: Mapped[str]
+    channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
     thread_id: Mapped[str]
     status: Mapped[str]
     incident: Mapped[JsonObject] = mapped_column(JSONB)
@@ -80,7 +81,7 @@ class IncidentCommandRow(Base):
     __tablename__ = "incident_command"
 
     claim_id: Mapped[str]
-    incident_id: Mapped[str]
+    incident: Mapped[UUID] = mapped_column(ForeignKey("incident.id", ondelete="CASCADE"))
     action: Mapped[str]
     content_hash: Mapped[str]
     copied_from_store: Mapped[bool] = mapped_column(default=False)
@@ -118,7 +119,7 @@ def _readable[RecordT: BaseModel](
 
 
 class MissingIncident(LookupError):
-    """No incident row to keep a report, history, or postmortem on."""
+    """No incident row to keep a report, history, postmortem, or command receipt on."""
 
     def __init__(self, incident_id: str) -> None:
         super().__init__(f"No incident {incident_id!r} to update")
@@ -128,7 +129,7 @@ async def _part[ValueT](
     column: InstrumentedAttribute[ValueT], incident_id: IncidentId
 ) -> ValueT | None:
     async with postgres.session() as session:
-        return await session.scalar(select(column).where(IncidentRow.incident_id == incident_id))
+        return await session.scalar(select(column).where(IncidentRow.external_id == incident_id))
 
 
 async def _set_part(
@@ -138,7 +139,7 @@ async def _set_part(
     async with postgres.session() as session:
         updated = await session.scalar(
             update(IncidentRow)
-            .where(IncidentRow.incident_id == incident_id)
+            .where(IncidentRow.external_id == incident_id)
             .values(**values, updated_at=func.clock_timestamp(), updated_by=_person(by))
             .returning(IncidentRow.id)
         )
@@ -193,7 +194,7 @@ class Incidents:
     async def get(self, id: IncidentId) -> Incident | None:
         async with postgres.session() as session:
             value = await session.scalar(
-                select(IncidentRow.incident).where(IncidentRow.incident_id == id)
+                select(IncidentRow.incident).where(IncidentRow.external_id == id)
             )
         return None if value is None else Incident.model_validate(value)
 
@@ -201,7 +202,7 @@ class Incidents:
         """Save the incident; ``by`` is the GitHub login of the person whose action changed it."""
         person = _person(by)
         columns = {
-            "workspace_id": record.workspace_id,
+            "slack_team_id": record.workspace_id,
             "channel_id": record.channel_id,
             "thread_id": record.thread_id,
             "status": record.status,
@@ -209,11 +210,12 @@ class Incidents:
             "updated_by": person,
         }
         async with postgres.session() as session:
+            await SlackChannel.ensure(session, record.channel_id)
             await session.execute(
                 insert(IncidentRow)
-                .values(id=uuid7(), incident_id=id, created_by=person, **columns)
+                .values(id=uuid7(), external_id=id, created_by=person, **columns)
                 .on_conflict_do_update(
-                    index_elements=[IncidentRow.incident_id],
+                    index_elements=[IncidentRow.external_id],
                     set_={**columns, "updated_at": func.clock_timestamp()},
                 )
             )
@@ -236,7 +238,7 @@ class Incidents:
         self, workspace_id: str, statuses: Collection[str] | None = None
     ) -> list[Incident]:
         """The Slack workspace's incidents, only those in ``statuses`` when given."""
-        query = select(IncidentRow.incident).where(IncidentRow.workspace_id == workspace_id)
+        query = select(IncidentRow.incident).where(IncidentRow.slack_team_id == workspace_id)
         if statuses is not None:
             query = query.where(IncidentRow.status.in_(statuses))
         async with postgres.session() as session:
@@ -245,7 +247,7 @@ class Incidents:
     async def written_at(self, id: IncidentId) -> datetime | None:
         async with postgres.session() as session:
             return await session.scalar(
-                select(IncidentRow.updated_at).where(IncidentRow.incident_id == id)
+                select(IncidentRow.updated_at).where(IncidentRow.external_id == id)
             )
 
 
@@ -298,14 +300,19 @@ class CommandReceipts:
 
     async def get(self, claim_id: str) -> CommandReceipt | None:
         async with postgres.session() as session:
-            row = await session.scalar(
-                select(IncidentCommandRow).where(IncidentCommandRow.claim_id == claim_id)
-            )
-        if row is None:
+            found = (
+                await session.execute(
+                    select(IncidentCommandRow, IncidentRow.external_id)
+                    .join(IncidentRow, IncidentRow.id == IncidentCommandRow.incident)
+                    .where(IncidentCommandRow.claim_id == claim_id)
+                )
+            ).first()
+        if found is None:
             return None
+        row, incident_id = found.tuple()
         return CommandReceipt(
             id=row.claim_id,
-            incident_id=IncidentId(row.incident_id),
+            incident_id=IncidentId(incident_id),
             action=row.action,
             content_hash=row.content_hash,
             created_at=(row.created_at or datetime.now(UTC)).isoformat(),
@@ -316,16 +323,22 @@ class CommandReceipts:
     ) -> bool:
         """Write ``receipt`` unless its claim id is taken; whether this call wrote it.
 
-        ``by`` is the GitHub login of the responder who sent the command.
+        ``by`` is the GitHub login of the responder who sent the command. Raises
+        :class:`MissingIncident` when the receipt's incident has no row.
         """
         person = _person(by)
         async with postgres.session() as session:
+            incident = await session.scalar(
+                select(IncidentRow.id).where(IncidentRow.external_id == receipt.incident_id)
+            )
+            if incident is None:
+                raise MissingIncident(receipt.incident_id)
             claimed = await session.scalar(
                 insert(IncidentCommandRow)
                 .values(
                     id=uuid7(),
                     claim_id=receipt.id,
-                    incident_id=receipt.incident_id,
+                    incident=incident,
                     action=receipt.action,
                     content_hash=receipt.content_hash,
                     copied_from_store=store_copy,
