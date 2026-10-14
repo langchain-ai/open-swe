@@ -125,6 +125,11 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         # nothing about where this one was triggered from.
         return {"reply_surface": self._initial_surface, "reply_nudges": 0}
 
+    async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, object] | None:
+        if "reply_surface" in state:
+            return None
+        return {"reply_surface": self._initial_surface, "reply_nudges": 0}
+
     def _discharges_turn(self, call: Mapping[str, Any]) -> bool:
         name = call.get("name")
         if (

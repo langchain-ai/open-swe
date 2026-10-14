@@ -49,7 +49,6 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
-from langchain_quickjs import CodeInterpreterMiddleware
 from langchain_quickjs._ptc import is_valid_ptc_tool_name
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
@@ -133,6 +132,7 @@ from openswe.middleware import (
     task_retry_on,
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
+from openswe.middleware.code_mode import ResumableCodeInterpreterMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
@@ -828,7 +828,7 @@ async def _mcp_code_mode(
     *,
     local_run: bool,
     additional_tools: Sequence[str | BaseTool] = (),
-) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
+) -> tuple[ResumableCodeInterpreterMiddleware | None, Sequence[BaseTool]]:
     if local_run or not (tools or additional_tools):
         return None, tools
     thread = await read_thread(thread_id)
@@ -848,7 +848,9 @@ async def _mcp_code_mode(
     if not ptc_tools:
         return None, tools
     ordinary_tools = [tool for tool in tools if not is_valid_ptc_tool_name(tool.name)]
-    return CodeInterpreterMiddleware(ptc=ptc_tools, subagents=False, mode="turn"), ordinary_tools
+    return ResumableCodeInterpreterMiddleware(
+        ptc=ptc_tools, subagents=False, mode="turn"
+    ), ordinary_tools
 
 
 def _integration_middleware(

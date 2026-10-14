@@ -677,6 +677,10 @@ async def _stamp_transcript(thread_id: str) -> None:
 class TranscriptMiddleware(OpenSWEMiddleware):
     """Append the run's activity to the thread's transcript event log."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._resume_lock = asyncio.Lock()
+
     async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         del runtime
         try:
@@ -797,16 +801,12 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         run_state.enqueue(*commands)
         self._record_human_messages(run_state, input_events)
 
-    async def aresume_run(self, state: AgentState, runtime: Runtime) -> None:
-        """Rejoin the run's turn in a process that did not start it.
-
-        A run hosted on Managed Deep Agents calls back into any replica, so the
-        turn it started elsewhere, and what that turn already recorded, come
-        from PostgreSQL.
-        """
+    async def aresume_run(self, state: AgentState, runtime: object) -> None:
+        """Rejoin the run's persisted turn when its before-agent hook did not run here."""
         del runtime
         try:
-            await self._resume_run(state)
+            async with self._resume_lock:
+                await self._resume_run(state)
         except Exception:
             logger.warning("Transcript run resume failed", exc_info=True)
 
@@ -852,6 +852,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        await self.aresume_run(request.state, request.runtime)
         state = _lookup_state()
         if not state.enabled:
             return await handler(request)
@@ -1008,6 +1009,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | GraphCommand[Any]]],
     ) -> ToolMessage | GraphCommand[Any]:
+        await self.aresume_run(request.state, request.runtime)
         state = _lookup_state()
         tool_call = request.tool_call
         tool_call_id = tool_call.get("id")
