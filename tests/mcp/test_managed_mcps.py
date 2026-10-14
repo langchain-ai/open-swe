@@ -184,7 +184,7 @@ async def test_gateway_status_names_the_services_already_connected(monkeypatch):
     ]
 
 
-async def test_only_the_instance_picks_the_gateway(fake_store):
+async def test_only_the_instance_picks_the_gateway(registry_db):
     await upsert_workspace_overrides(
         "oss", WorkspaceSettingsUpdate(managed_tools_gateway_id=GATEWAY_ID)
     )
