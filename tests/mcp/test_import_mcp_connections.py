@@ -84,3 +84,31 @@ async def test_store_import_copies_every_tier_then_retires_the_store_records(
     assert {namespace for namespace, items in store.items.items() if items} == {
         ("user_mcps", "nobody")
     }
+
+
+async def test_store_import_drops_copies_an_old_replica_deleted_from_the_store(
+    store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    await User.sign_in("github", "1", login="alice")
+    store.seed(["instance_mcps"], "revoked", _record("revoked"))
+    store.seed(["workspace_mcps", "oss"], "revoked", _record("revoked"))
+    store.seed(["workspace_mcps", "oss"], "edited", _record("edited"))
+    store.seed(["user_mcps", "alice"], "revoked", _record("revoked"))
+    assert await import_store_mcp_connections() == StoreImport(moved=4)
+    await save_workspace_mcp(
+        "oss", "edited", MCPConnectionUpdate(name="edited", url="https://edited.example/mcp")
+    )
+    await save_workspace_mcp(
+        "core", "fresh", MCPConnectionUpdate(name="fresh", url="https://fresh.example/mcp")
+    )
+
+    for namespace in [("instance_mcps",), ("workspace_mcps", "oss"), ("user_mcps", "alice")]:
+        store.items[namespace].pop("revoked")
+    store.items[("workspace_mcps", "oss")].pop("edited")
+
+    assert await import_store_mcp_connections() == StoreImport(moved=3)
+    assert await list_instance_mcps() == []
+    assert _urls(await list_workspace_mcps("oss")) == {"edited": "https://edited.example/mcp"}
+    assert _urls(await list_workspace_mcps("core")) == {"fresh": "https://fresh.example/mcp"}
+    assert await list_user_mcps("alice") == []

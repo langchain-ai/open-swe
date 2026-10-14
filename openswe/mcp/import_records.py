@@ -7,18 +7,21 @@ this module.
 A Store record is copied, and deleted only once the copy has been in place for
 a day: replicas of the previous release load these connections on every run
 until their rollout finishes. A Store record saved after the copy, by such a
-replica, replaces it. Records from before workspaces, flat under
+replica, replaces it, and one such a replica deleted takes the copy with it
+unless this release has saved the connection since. Records from before workspaces, flat under
 ``["workspace_mcps"]``, belong to the instance tier unless it has a record of
 the same name.
 """
 
 import logging
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from pydantic import ValidationError
 
 from openswe.database.store_imports import (
+    RETIRE_STORE_COPY_AFTER,
     StoreImport,
     may_delete_store_copy,
     store_copy_is_newer,
@@ -32,6 +35,7 @@ from openswe.mcp.records import (
     MCPConnections,
     SharedMCPConnections,
     UserMCPConnections,
+    delete_store_copies,
 )
 from openswe.store import delete_value, now_iso, search_all_entries
 from openswe.users.records import UnknownUser
@@ -50,38 +54,45 @@ async def delete_store_copy(connections: MCPConnections, name: str) -> None:
 async def import_store_mcp_connections() -> StoreImport:
     """Move every tier's connections out of the LangGraph Store."""
     result = StoreImport()
+    present: set[tuple[tuple[str, ...], str]] = set()
     instance_names: set[str] = set()
     for entry in await search_all_entries(INSTANCE_MCPS_NAMESPACE):
         if tuple(entry.namespace or INSTANCE_MCPS_NAMESPACE) == INSTANCE_MCPS_NAMESPACE:
             instance_names.add(entry.key)
+            present.add((INSTANCE_CONNECTIONS.namespace, entry.key))
             result += await _import(
                 INSTANCE_CONNECTIONS, INSTANCE_MCPS_NAMESPACE, entry.key, entry.value
             )
     for entry in await search_all_entries(WORKSPACE_MCPS_NAMESPACE):
         match entry.namespace or list(WORKSPACE_MCPS_NAMESPACE):
             case [_]:
+                present.add((INSTANCE_CONNECTIONS.namespace, entry.key))
                 value = None if entry.key in instance_names else entry.value
                 result += await _import(
                     INSTANCE_CONNECTIONS, WORKSPACE_MCPS_NAMESPACE, entry.key, value
                 )
             case [_, workspace] as namespace:
-                result += await _import(
-                    SharedMCPConnections("workspace", workspace), namespace, entry.key, entry.value
-                )
+                connections = SharedMCPConnections("workspace", workspace)
+                present.add((connections.namespace, entry.key))
+                result += await _import(connections, namespace, entry.key, entry.value)
     for entry in await search_all_entries(USER_MCPS_NAMESPACE):
         if entry.namespace is None or len(entry.namespace) != 2:
             continue
         login = entry.namespace[1]
+        connections = UserMCPConnections(login)
+        present.add((connections.namespace, entry.key))
         try:
-            result += await _import(
-                UserMCPConnections(login), entry.namespace, entry.key, entry.value
-            )
+            result += await _import(connections, entry.namespace, entry.key, entry.value)
         except UnknownUser:
             logger.warning(
                 "Store MCP connection waits for its users row", extra={"github_login": login}
             )
             result += StoreImport(waiting=1)
-    return result
+    # Until the import retires a copy's Store record, a missing one was deleted there.
+    deleted = await delete_store_copies(present, datetime.now(UTC) - RETIRE_STORE_COPY_AFTER)
+    if deleted:
+        logger.info("Deleted MCP connections deleted in the Store", extra={"deleted": deleted})
+    return result + StoreImport(moved=deleted)
 
 
 async def _import(
@@ -114,7 +125,7 @@ async def _import(
         and value is not None
         and (written_at is None or store_copy_is_newer(value, written_at))
     ):
-        await connections.put(record)
+        await connections.put(record, store_copy=True)
         return StoreImport(moved=1)
     if not may_delete_store_copy(written_at):
         return StoreImport(waiting=1)
