@@ -25,6 +25,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph_sdk import get_client
 
 from openswe.github.token_scope import token_repositories_from_metadata
+from openswe.utils.errors import describe_exception
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,12 @@ class SandboxUnreachableError(RuntimeError):
     carried on believing it was still there.
     """
 
-    def __init__(self, thread_id: str, sandbox_id: str | None, cause: str) -> None:
+    def __init__(self, thread_id: str, sandbox_id: str | None, cause: str | BaseException) -> None:
         self.thread_id = thread_id
         self.sandbox_id = sandbox_id
+        reason = cause if isinstance(cause, str) else describe_exception(cause)
         super().__init__(
-            f"Sandbox {sandbox_id or '<unknown>'} for thread {thread_id} is unreachable: {cause}"
+            f"Sandbox {sandbox_id or '<unknown>'} for thread {thread_id} is unreachable: {reason}"
         )
 
 

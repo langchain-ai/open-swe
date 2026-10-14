@@ -106,6 +106,17 @@ def _messages(value: object) -> list[BaseMessage]:
     return [message for message in value if isinstance(message, BaseMessage)]
 
 
+def _refusal(hook: Hook, response: httpx2.Response) -> str:
+    """The backend's own ``detail`` for a refused call, which never echoes the token."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    reason = detail if isinstance(detail, str) and detail else response.reason_phrase
+    return f"{hook} failed ({response.status_code}): {reason}"
+
+
 class OpenSweBackend:
     """The Open SWE backend, called with one run's token."""
 
@@ -136,6 +147,8 @@ class OpenSweBackend:
                     json=dict(body or {}),
                 )
                 response.raise_for_status()
+        except httpx2.HTTPStatusError as exc:
+            raise BackendCallError(_refusal(hook, exc.response)) from exc
         except httpx2.HTTPError as exc:
             # Named by type only: transport errors can echo the request, and it carries the token.
             raise BackendCallError(f"{hook} failed ({type(exc).__name__})") from exc

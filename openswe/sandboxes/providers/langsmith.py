@@ -33,6 +33,7 @@ from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
+from openswe.utils.errors import describe_exception
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
 
@@ -260,6 +261,12 @@ def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
 
 
 def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
+    # The SDK transport already retries failures before the request is sent. What
+    # reaches here (a read timeout, a dropped connection) may follow a create the
+    # API did perform, so a retry can orphan that sandbox until its idle TTL stops
+    # it. Failing the run on one stall during an API brownout costs more.
+    if isinstance(exc, httpx2.TransportError):
+        return True
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
     if isinstance(status_code, int):
@@ -276,10 +283,10 @@ async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -
     try:
         return await client.get_sandbox(name=sandbox_id)
     except ResourceNotFoundError as e:
-        msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+        msg = f"Failed to connect to existing sandbox '{sandbox_id}': {describe_exception(e)}"
         raise SandboxGoneError(msg) from e
     except Exception as e:
-        msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+        msg = f"Failed to connect to existing sandbox '{sandbox_id}': {describe_exception(e)}"
         raise RuntimeError(msg) from e
 
 
@@ -314,9 +321,8 @@ async def _create_sandbox_with_retry(
                 min(attempt, len(SANDBOX_CREATE_RETRY_DELAYS_SECONDS) - 1)
             ]
             logger.warning(
-                "Failed to create LangSmith sandbox (%s); retrying in %.1fs",
-                type(exc).__name__,
-                delay,
+                "Failed to create LangSmith sandbox; retrying",
+                extra={"error_type": type(exc).__name__, "attempt": attempt + 1, "delay_s": delay},
             )
             await asyncio.sleep(delay)
     raise RuntimeError("unreachable sandbox retry state")
@@ -932,7 +938,8 @@ class LangSmithProvider(SandboxProvider):
                     timeout=timeout,
                 )
             except Exception as e:
-                msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
+                source = f"snapshot '{snapshot_id}'" if snapshot_id else "the default snapshot"
+                msg = f"Failed to create sandbox from {source}: {describe_exception(e)}"
                 raise RuntimeError(msg) from e
 
             return TimeoutLangSmithSandbox(sandbox.to_sync())

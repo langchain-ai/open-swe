@@ -11,6 +11,8 @@ from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
 from openswe.sandboxes.providers import langsmith as langsmith_provider
 from openswe.sandboxes.providers.langsmith import (
+    SANDBOX_CREATE_MAX_ATTEMPTS,
+    LangSmithProvider,
     _create_sandbox_with_retry,
     _install_create_extra_fields,
     _reuse_existing_sandbox,
@@ -89,6 +91,34 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
     assert "name" not in client.last_kwargs
+
+
+class _StalledSandboxClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def __aenter__(self) -> _StalledSandboxClient:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+    async def create_sandbox(self, **_kwargs: object) -> None:
+        self.calls += 1
+        raise httpx2.ReadTimeout("")
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_create_is_retried_then_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _StalledSandboxClient()
+    monkeypatch.setattr(langsmith_provider, "AsyncSandboxClient", lambda **_kwargs: client)
+    monkeypatch.setattr("openswe.sandboxes.providers.langsmith.asyncio.sleep", AsyncMock())
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await LangSmithProvider(api_key="test-key").get_or_create()
+
+    assert client.calls == SANDBOX_CREATE_MAX_ATTEMPTS
+    assert str(excinfo.value) == "Failed to create sandbox from the default snapshot: ReadTimeout"
 
 
 @pytest.mark.asyncio

@@ -261,7 +261,7 @@ async def _refresh_github_proxy_or_fail(
             thread_id,
             exc_info=True,
         )
-        raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
+        raise SandboxUnreachableError(thread_id, sandbox_backend.id, exc) from exc
     return sandbox_backend
 
 
@@ -344,7 +344,7 @@ async def _connect_existing_sandbox(
             raise
         except Exception as exc:
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
-            raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
+            raise SandboxUnreachableError(thread_id, sandbox_id, exc) from exc
     async with git_identity(thread_id, sandbox_backend):
         refreshed = await _refresh_github_proxy_or_fail(
             sandbox_backend,
@@ -569,9 +569,7 @@ async def ensure_sandbox_for_thread(
                     thread_id,
                     exc_info=True,
                 )
-                raise SandboxUnreachableError(
-                    thread_id, sandbox_id, str(create_exc)
-                ) from create_exc
+                raise SandboxUnreachableError(thread_id, sandbox_id, create_exc) from create_exc
             logger.info("Replacement sandbox created: %s", sandbox_backend.id)
 
     # Bind the thread only once the sandbox is created and initialized: a run
