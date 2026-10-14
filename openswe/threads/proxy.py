@@ -312,7 +312,7 @@ async def proxy_dashboard_thread_commands(
             await _fail_requested_turn(thread_id, enriched)
     if run_start_succeeded and not creating and not relayed_from:
         try:
-            await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
+            await _notify_slack_web_handoff(thread_id, metadata)
         except Exception:
             logger.exception(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id

@@ -14,12 +14,9 @@ from typing import Any, Self
 from pydantic import BaseModel, ValidationError
 
 from openswe.prompts import prompt
-from openswe.slack.client import (
-    get_slack_permalink,
-    lookup_slack_thread_id,
-    post_slack_top_level_message_with_ts,
-)
+from openswe.slack.client import get_slack_permalink, post_slack_top_level_message_with_ts
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
+from openswe.slack.mappings import lookup_slack_thread_id
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
@@ -54,7 +51,7 @@ async def note_for_concierge(slack_user_id: str, dm_channel_id: str, note: str) 
     """Queue ``note`` for the person's concierge thread, which skips the bot's own DM posts."""
     if not await User.concierge_mode_for_slack(slack_user_id):
         return
-    thread_id = await lookup_slack_thread_id(langgraph_client(), dm_channel_id, CONCIERGE_TS)
+    thread_id = await lookup_slack_thread_id(dm_channel_id, CONCIERGE_TS)
     if thread_id is None:
         return
     if not await queue_message_for_thread(thread_id, [{"type": "text", "text": note}]):
@@ -134,7 +131,7 @@ async def _record_in_concierge_thread(
     channel_id: str, text: str, origin: DmOrigin | None = None
 ) -> None:
     """Add a message the bot sent to the person's concierge conversation, so a reply has context."""
-    thread_id = await lookup_slack_thread_id(langgraph_client(), channel_id, CONCIERGE_TS)
+    thread_id = await lookup_slack_thread_id(channel_id, CONCIERGE_TS)
     if thread_id is None:
         return
     permalink = await get_slack_permalink(*origin.location) if origin is not None else None
