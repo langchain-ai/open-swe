@@ -170,16 +170,10 @@ async def create(
     return existing
 
 
-async def import_newer(
-    thread_id: str,
-    *,
-    runtime: Runtime,
-    metadata: Mapping[str, JsonValue],
-    status: ThreadStatus,
-    created_at: datetime,
-    updated_at: datetime,
-) -> None:
-    """Index a thread as the Agent Server has it, unless the index has a newer copy."""
+async def import_newer(threads: Sequence[IndexedThread]) -> None:
+    """Index threads as the Agent Server has them, except those the index has a newer copy of."""
+    if not threads:
+        return
     async with transaction() as conn:
         await conn.execute(
             text(
@@ -194,15 +188,14 @@ async def import_newer(
                 WHERE thread_index.updated_at < EXCLUDED.updated_at
                 """
             ),
-            {
-                "id": uuid7(),
-                "thread_id": thread_id,
-                "runtime": runtime,
-                "metadata": json.dumps(dict(metadata)),
-                "status": status,
-                "created_at": created_at,
-                "updated_at": updated_at,
-            },
+            [
+                {
+                    "id": uuid7(),
+                    **thread.model_dump(exclude={"metadata"}),
+                    "metadata": json.dumps(thread.metadata),
+                }
+                for thread in threads
+            ],
         )
 
 

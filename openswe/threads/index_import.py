@@ -9,10 +9,12 @@ import logging
 from datetime import datetime, timedelta
 from typing import Final
 
+from langgraph_sdk.schema import Thread
+
 from openswe import event_claims
 from openswe.remote_runtime.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.threads import index
-from openswe.threads.index import Runtime, as_status
+from openswe.threads.index import IndexedThread, as_status
 from openswe.threads.runtimes import RUNTIMES
 
 logger = logging.getLogger(__name__)
@@ -48,30 +50,35 @@ async def import_agent_server_threads() -> int:
 async def _import_all() -> int:
     client = RUNTIMES.local.client
     imported = 0
+    # Only what the index keeps: a thread's values are its whole conversation.
     while page := await client.threads.search(
-        limit=_PAGE, offset=imported, sort_by="created_at", sort_order="asc"
+        limit=_PAGE,
+        offset=imported,
+        sort_by="created_at",
+        sort_order="asc",
+        select=["thread_id", "metadata", "status", "created_at", "updated_at"],
     ):
-        for thread in page:
-            metadata = thread.get("metadata") or {}
-            created_at = _time(thread.get("created_at"))
-            updated_at = _time(thread.get("updated_at"))
-            if created_at is None or updated_at is None:
-                continue
-            runtime: Runtime = (
-                "mda" if metadata.get(RUNTIME_METADATA_KEY) == MDA_RUNTIME else "local"
-            )
-            await index.import_newer(
-                thread["thread_id"],
-                runtime=runtime,
-                metadata=metadata,
-                status=as_status(thread.get("status")) or "idle",
-                created_at=created_at,
-                updated_at=updated_at,
-            )
+        await index.import_newer([thread for raw in page if (thread := _indexed(raw))])
         imported += len(page)
         if len(page) < _PAGE:
             break
     return imported
+
+
+def _indexed(thread: Thread) -> IndexedThread | None:
+    metadata = thread.get("metadata") or {}
+    created_at = _time(thread.get("created_at"))
+    updated_at = _time(thread.get("updated_at"))
+    if created_at is None or updated_at is None:
+        return None
+    return IndexedThread(
+        thread_id=thread["thread_id"],
+        runtime="mda" if metadata.get(RUNTIME_METADATA_KEY) == MDA_RUNTIME else "local",
+        metadata=metadata,
+        status=as_status(thread.get("status")) or "idle",
+        created_at=created_at,
+        updated_at=updated_at,
+    )
 
 
 async def mark_index_stale() -> None:
