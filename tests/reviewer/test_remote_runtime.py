@@ -220,7 +220,7 @@ async def _through_proxy(
         token = sign_runtime_token(
             RemoteRun(thread_id=thread_id, assistant_id=assistant_id, configurable=configurable)
         )
-        return {"graph": assistant_id, "run_token": token}
+        return {"graph": assistant_id, "__run_token": token}
 
     monkeypatch.setenv("MDA_RUNTIME_URL", "http://localhost:2041")
     monkeypatch.setattr(proxy, "remote_run_context", context)
@@ -326,7 +326,7 @@ async def test_mda_proxy_claims_a_fresh_thread_and_signs_its_run_configuration(
     assert sent["langsmith_tracer"] == {"project_name": "open-swe-e2e"}
     context = sent["context"]
     assert context["__event_streaming_v2"] is True
-    assert verify_runtime_token(context["run_token"]).configurable == {
+    assert verify_runtime_token(context["__run_token"]).configurable == {
         "repo": {"owner": "acme", "name": "widgets"},
         "github_login": "ada",
     }
