@@ -810,7 +810,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
         except SandboxOperationError as exc:
-            if exc.error_type != "CommandNotFound":
+            if exc.error_type != "CommandNotFound" or exc.operation != "reconnect":
                 raise
             logger.exception(
                 "Sandbox lost command state while collecting its result",

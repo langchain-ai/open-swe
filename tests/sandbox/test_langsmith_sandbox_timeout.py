@@ -162,16 +162,25 @@ async def test_aexecute_midstream_ws_drop_falls_back_to_base(
     assert resp.output == "via-http"
 
 
-@pytest.mark.parametrize("error_type", ["CommandNotFound", "OtherFailure"])
+@pytest.mark.parametrize(
+    ("error_type", "operation"),
+    [
+        ("CommandNotFound", "reconnect"),
+        ("CommandNotFound", "command"),
+        ("OtherFailure", "reconnect"),
+    ],
+)
 async def test_aexecute_operation_error_does_not_replay(
-    monkeypatch: pytest.MonkeyPatch, error_type: str
+    monkeypatch: pytest.MonkeyPatch, error_type: str, operation: str
 ) -> None:
-    error = SandboxOperationError("Command not found: command-id", error_type=error_type)
+    error = SandboxOperationError(
+        "Command not found: command-id", error_type=error_type, operation=operation
+    )
     sb = _backend(_FakeHandle(raises=error))
     fallback = AsyncMock()
     monkeypatch.setattr(sb, "_afallback_execute", fallback)
 
-    if error_type == "CommandNotFound":
+    if error_type == "CommandNotFound" and operation == "reconnect":
         with pytest.raises(RuntimeError, match="outcome is unknown") as caught:
             await sb.aexecute("git commit", timeout=5)
         assert caught.value.__cause__ is error
