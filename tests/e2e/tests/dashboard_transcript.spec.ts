@@ -64,11 +64,11 @@ test.describe("finished transcript (shared fixture thread)", () => {
     const edit = page.getByRole("button", { name: "Edited greet.py" });
 
     // Folded: the acknowledgement shows, the individual tool calls do not.
-    await expect(worked).toBeVisible();
+    await expect(worked.first()).toBeVisible();
     await expect(acknowledgement).toBeVisible();
     await expect(edit).toHaveCount(0);
 
-    await worked.click();
+    for (const fold of await worked.all()) await fold.click();
     await expect(edit).toBeVisible();
     await expect(acknowledgement).toBeVisible();
     expect(
