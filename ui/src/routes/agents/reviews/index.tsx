@@ -83,19 +83,19 @@ function ReviewsPage() {
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div
-        className={cn(
-          "flex min-h-0 w-full flex-1 flex-col px-space-5 py-space-5",
-          clearTrafficLights && "pt-2.5 pl-32"
-        )}
-      >
+      <div className="flex min-h-0 w-full flex-1 flex-col px-space-5 py-space-5">
         <div
           className={cn(
             "mx-auto flex min-h-0 w-full flex-1 flex-col",
             !selection && "max-w-6xl"
           )}
         >
-          <div className="flex items-center gap-space-3">
+          <div
+            className={cn(
+              "flex items-center gap-space-3",
+              clearTrafficLights && "relative -top-4 pl-28"
+            )}
+          >
             <Text as="h1" variant="h3" weight="medium" color="primary">
               Pull Requests
             </Text>
