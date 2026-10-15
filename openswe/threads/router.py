@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Final, Literal
 
-from pydantic import JsonValue, ValidationError
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -38,13 +38,20 @@ from openswe.remote_runtime.asgi import (
     replay,
     send_json,
 )
-from openswe.remote_runtime.client import HOSTED_GRAPHS, MDA_RUNTIME, RUNTIME_METADATA_KEY
+from openswe.remote_runtime.client import (
+    HOSTED_GRAPHS,
+    MDA_GRAPH_ID,
+    MDA_RUNTIME,
+    RUNTIME_METADATA_KEY,
+)
 from openswe.remote_runtime.proxy import LOCAL_HEADER, MdaRuntime, runs_on_mda
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, Runtime, ThreadExistsError, ThreadSearch, as_status
 from openswe.threads.runtimes import RUNTIMES
 
 logger = logging.getLogger(__name__)
+
+_object = TypeAdapter(dict[str, JsonValue])
 
 _THREADS: Final = re.compile(r"^(?:/noauth)?/threads/?$")
 _SEARCH: Final = re.compile(r"^(?:/noauth)?/threads/search$")
@@ -80,6 +87,14 @@ def _timestamp(value: JsonValue) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _for_mda(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """Metadata as MDA keeps it: there every Open SWE graph is ``open-swe``."""
+    copied = dict(metadata)
+    if "graph_id" in copied:
+        copied["graph_id"] = MDA_GRAPH_ID
+    return copied
 
 
 async def _not_found(send: Send, thread_id: str) -> None:
@@ -125,6 +140,10 @@ class ThreadRouter:
                 await self._create_run(scope, send, body, thread_id, cron=rest == _CREATE_CRON)
             elif method == "POST" and rest == "/commands":
                 await self._command(scope, send, body, thread_id)
+            elif method == "POST" and rest == "/copy":
+                await self._copy(send, thread_id)
+            elif method == "POST" and rest == "/state":
+                await self._write_state(scope, send, body, thread_id)
             else:
                 await self._to_runtime(scope, send, body, thread_id)
 
@@ -215,7 +234,9 @@ class ThreadRouter:
             return
         for runtime in RUNTIMES.copies(thread.runtime):
             try:
-                await runtime.update(thread.thread_id, patch)
+                await runtime.update(
+                    thread.thread_id, _for_mda(patch) if runtime is not RUNTIMES.local else patch
+                )
             except Exception:
                 # Reads come from the index; a runtime's copy only feeds its traces.
                 logger.warning(
@@ -246,14 +267,21 @@ class ThreadRouter:
     async def _claim_for_mda(
         self, thread: IndexedThread, assistant_id: JsonValue, configurable: Mapping[str, JsonValue]
     ) -> IndexedThread:
-        """Move a fresh thread to MDA when its person (or workspace) chose MDA for its graph."""
+        """Move a fresh thread to MDA for its first agent or reviewer run or state.
+
+        With ``MDA_ALL_THREADS`` every such thread moves; otherwise those of people
+        (or workspaces) who chose MDA. Other graphs, and threads with checkpoints
+        here already, stay on this deployment.
+        """
         if (
             thread.runtime == "mda"
             or not isinstance(assistant_id, str)
             or assistant_id not in HOSTED_GRAPHS
             or RUNTIMES.mda_runtime is None
             or await RUNTIMES.local.has_history(thread.thread_id)
-            or not await runs_on_mda(thread.metadata, configurable)
+            or not (
+                ENV.MDA_ALL_THREADS.get_bool() or await runs_on_mda(thread.metadata, configurable)
+            )
         ):
             return thread
         await index.set_runtime(thread.thread_id, "mda")
@@ -261,7 +289,7 @@ class ThreadRouter:
         if claimed is None:
             return thread
         await RUNTIMES.local.update(thread.thread_id, {RUNTIME_METADATA_KEY: MDA_RUNTIME})
-        await RUNTIMES.mda.create(thread.thread_id, claimed.metadata)
+        await RUNTIMES.mda.create(thread.thread_id, _for_mda(claimed.metadata))
         logger.info("Claimed thread for Managed Deep Agents", extra={"thread_id": thread.thread_id})
         return claimed
 
@@ -317,6 +345,37 @@ class ThreadRouter:
                 await index.set_status(thread_id, "busy")
             return
         await self._to_runtime(scope, send, body, thread_id)
+
+    async def _write_state(self, scope: Scope, send: Send, body: bytes, thread_id: str) -> None:
+        """A first state write (an upload, a fork) decides the runtime as a first run would."""
+        thread = await self._thread(thread_id)
+        if thread is not None:
+            graph = thread.metadata.get("graph_id") or "agent"
+            await self._claim_for_mda(thread, graph, {})
+        await self._to_runtime(scope, send, body, thread_id)
+
+    async def _copy(self, send: Send, thread_id: str) -> None:
+        """Copy a thread on its runtime, and index the copy as the source is."""
+        thread = await self._thread(thread_id)
+        if thread is None:
+            await _not_found(send, thread_id)
+            return
+        made = _object.validate_python(
+            await RUNTIMES.runs_on(thread.runtime).client.http.post(
+                f"/threads/{thread_id}/copy", json={}
+            )
+        )
+        copy_id = made.get("thread_id")
+        if not isinstance(copy_id, str):
+            raise RuntimeError("The runtime's thread copy returned no thread id")
+        made_metadata = made.get("metadata")
+        metadata = dict(made_metadata) if isinstance(made_metadata, dict) else dict(thread.metadata)
+        copied = await index.create(
+            copy_id, runtime=thread.runtime, metadata=metadata, if_exists="do_nothing"
+        )
+        if thread.runtime == "mda":
+            await RUNTIMES.local.create(copy_id, copied.metadata)
+        await send_json(send, 200, copied.as_langgraph())
 
     async def _to_runtime(self, scope: Scope, send: Send, body: bytes, thread_id: str) -> None:
         thread = await self._thread(thread_id)

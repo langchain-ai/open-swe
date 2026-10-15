@@ -17,11 +17,28 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 THREAD = "00000000-0000-4000-8000-000000000001"
 
 
+class _Http:
+    def __init__(self, threads: _Threads) -> None:
+        self._threads = threads
+
+    async def post(self, path: str, *, json: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        source = path.split("/")[2]
+        copy_id = f"{source[:-4]}copy"
+        self._threads.threads[copy_id] = {**self._threads.threads[source], "thread_id": copy_id}
+        return self._threads.threads[copy_id]
+
+
+class _Client:
+    def __init__(self, threads: _Threads) -> None:
+        self.http = _Http(threads)
+
+
 class _Threads:
     """One runtime's threads, as the router copies them."""
 
     def __init__(self) -> None:
         self.threads: dict[str, dict[str, JsonValue]] = {}
+        self.client = _Client(self)
 
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         return self.threads.get(thread_id)
@@ -257,3 +274,52 @@ async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPa
     assert status == 204
     assert await index.get(THREAD) is None
     assert harness.runtimes.local.threads == {} and harness.runtimes.mda.threads == {}
+
+
+@pytest.mark.parametrize(("assistant_id", "moves"), [("agent", True), ("review-scout", False)])
+async def test_mda_all_threads_moves_every_agent_thread_but_no_other_graph(
+    monkeypatch: pytest.MonkeyPatch, secret: None, assistant_id: str, moves: bool
+) -> None:
+    monkeypatch.setenv("MDA_ALL_THREADS", "true")
+    harness = _Harness(monkeypatch, chose_mda=False)
+    await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": {}})
+
+    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": assistant_id})
+
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.runtime == ("mda" if moves else "local")
+    assert bool(harness.forwarded) is moves
+
+
+async def test_a_first_state_write_moves_a_fresh_thread_to_mda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MDA_ALL_THREADS", "true")
+    harness = _Harness(monkeypatch)
+    await harness.request(
+        "POST", "/threads", {"thread_id": THREAD, "metadata": {"graph_id": "agent"}}
+    )
+
+    await harness.request("POST", f"/threads/{THREAD}/state", {"values": {"messages": []}})
+
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.runtime == "mda"
+    assert harness.runtimes.mda.threads[THREAD]["metadata"] == {
+        "graph_id": "open-swe",
+        "runtime": "mda",
+    }
+    [(path, _)] = harness.forwarded
+    assert path == f"/threads/{THREAD}/state"
+
+
+async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = _Harness(monkeypatch)
+    await index.create(THREAD, runtime="mda", metadata={"title": "source"})
+    await harness.runtimes.mda.create(THREAD, {"title": "source"})
+
+    status, made = await harness.request("POST", f"/threads/{THREAD}/copy", {})
+
+    assert status == 200 and isinstance(made, dict)
+    copy = await index.get(str(made["thread_id"]))
+    assert copy is not None and copy.runtime == "mda" and copy.metadata == {"title": "source"}
+    assert copy.thread_id in harness.runtimes.local.threads
