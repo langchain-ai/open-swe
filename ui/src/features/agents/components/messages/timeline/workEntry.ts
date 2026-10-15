@@ -15,6 +15,7 @@ export type WorkEntryIconName =
   | "bot"
   | "check"
   | "circle-alert"
+  | "code"
   | "eye"
   | "globe"
   | "hammer"
@@ -50,6 +51,8 @@ function iconForChunk(chunk: ToolExecutionChunk): WorkEntryIconName {
   switch (chunk.toolKind) {
     case "execute":
       return "terminal"
+    case "code":
+      return "code"
     case "read":
       return "eye"
     case "search":
@@ -225,6 +228,7 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
     case "sql":
       return active ? "Querying" : "Queried"
     case "execute":
+    case "code":
       return active ? "Running" : "Ran"
     case "edit":
     case "delete":

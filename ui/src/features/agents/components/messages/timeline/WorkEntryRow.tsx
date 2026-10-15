@@ -7,6 +7,7 @@ import {
 } from "@langchain/macaw-components/icons"
 import { useCallback, useEffect, useState } from "react"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { CodeIcon } from "@phosphor-icons/react/dist/ssr/Code"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { HammerIcon } from "@phosphor-icons/react/dist/ssr/Hammer"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
@@ -27,6 +28,7 @@ const ICONS: Record<WorkEntryIconName, IconComponent> = {
   bot: RobotIcon,
   check: CheckIcon,
   "circle-alert": WarningCircleIcon,
+  code: CodeIcon,
   eye: EyeIcon,
   globe: GlobeRegularIcon,
   hammer: HammerIcon,
