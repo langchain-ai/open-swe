@@ -42,7 +42,23 @@ def _pr_close_payload(*, action: str, number: int = 7) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_push_event_skips_when_thread_not_watching() -> None:
+@pytest.mark.parametrize("action", ["opened", "ready_for_review"])
+@pytest.mark.parametrize("label", ["openswe:skip-review", "OpenSWE:Skip-Review", "unrelated", None])
+async def test_automatic_first_review_honors_opt_out(action: str, label: str | None) -> None:
+    payload = {
+        "action": action,
+        "pull_request": {"labels": [{"name": label}] if label else []},
+    }
+    with patch.object(
+        github_webhooks, "_dispatch_first_review_from_pr_payload", new_callable=AsyncMock
+    ) as dispatch:
+        await github_webhooks.process_github_pr_ready(payload)
+    assert dispatch.await_count == (0 if label and label.casefold() == "openswe:skip-review" else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opted_out", [False, True])
+async def test_push_event_skips_when_thread_not_watching_or_opted_out(opted_out: bool) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
         "number": 7,
@@ -51,6 +67,8 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
         "head": {"sha": "newsha", "ref": "feat-x"},
         "base": {"sha": "basesha", "ref": "main"},
     }
+    if opted_out:
+        pr["labels"] = [{"name": "openswe:skip-review"}]
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
 
@@ -73,7 +91,7 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
         patch(
             "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
-            return_value={"kind": "reviewer", "watch": False},
+            return_value={"kind": "reviewer", "watch": opted_out},
         ),
         patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):

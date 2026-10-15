@@ -526,6 +526,16 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
 
 
+def _automatic_review_opted_out(pull_request: Mapping[str, object]) -> bool:
+    labels = pull_request.get("labels")
+    return isinstance(labels, list) and any(
+        isinstance(label, dict)
+        and isinstance(name := label.get("name"), str)
+        and name.casefold() == "openswe:skip-review"
+        for label in labels
+    )
+
+
 async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     """Auto-review a PR that has just been opened or marked ready-for-review.
 
@@ -533,6 +543,8 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     (with the workspace's setting as a fallback).
     """
     pull_request = payload.get("pull_request", {})
+    if _automatic_review_opted_out(pull_request):
+        return
     is_draft = bool(pull_request.get("draft"))
     if is_draft:
         author = pull_request.get("user") or {}
@@ -668,6 +680,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             repo_config["name"],
             head_ref,
         )
+        return
+
+    if _automatic_review_opted_out(pr):
         return
 
     # Push payloads normally carry repo privacy/id; fall back to PR metadata.
