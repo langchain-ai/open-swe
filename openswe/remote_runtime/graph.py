@@ -81,7 +81,7 @@ from openswe.sandboxes.tool_runtime import (
     ToolSurface,
     tool_parameters,
 )
-from openswe.server import code_only, fallback_model_choice
+from openswe.server import code_only, direct_and_from_code, fallback_model_choice
 from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -314,6 +314,10 @@ class RunSession:
                     for name in tools
                     if code_only(name)
                     and (self.surface.code_mode or name in self.surface.integration_names)
+                ),
+                # Offered to the model, and callable from MDA's code mode too.
+                "also_from_code": sorted(
+                    name for name in tools if self.surface.code_mode and direct_and_from_code(name)
                 ),
             }
         )

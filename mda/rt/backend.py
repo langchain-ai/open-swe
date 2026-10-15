@@ -81,6 +81,8 @@ class Catalog(BaseModel):
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.
     code_only: list[str] = []
+    # Tools the model calls both directly and from code mode.
+    also_from_code: list[str] = []
 
 
 class PhaseReply(BaseModel):

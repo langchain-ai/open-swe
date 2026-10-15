@@ -174,6 +174,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
     assert "eval" not in names
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
+    assert catalog["also_from_code"] == ["read_file"]
 
 
 class _LocalThreads:
