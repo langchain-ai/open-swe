@@ -93,7 +93,9 @@ function ReviewsPage() {
           <div
             className={cn(
               "flex items-center gap-space-3",
-              clearTrafficLights && "relative -top-4 pl-28"
+              clearTrafficLights && "relative -top-4",
+              clearTrafficLights &&
+                (selection ? "pl-28" : "pl-[clamp(0px,708px-50vw,112px)]")
             )}
           >
             <Text as="h1" variant="h3" weight="medium" color="primary">
