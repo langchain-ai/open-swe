@@ -30,7 +30,6 @@ _TOOL_MODULES: Final = (
     "openswe.tools.manage_review_approval_mode",
     "openswe.tools.manage_review_repos",
     "openswe.tools.read_only_sql",
-    "openswe.tools.read_store_item",
     "openswe.tools.fetch_url",
     "openswe.tools.http_request",
     "openswe.tools.web_search",

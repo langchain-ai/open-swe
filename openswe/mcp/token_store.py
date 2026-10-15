@@ -11,13 +11,12 @@ each write sweeps a few expired rows.
 import hashlib
 import json
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, override
 from uuid import UUID, uuid7
 
-from key_value.aio.errors import DeserializationError
 from key_value.aio.stores.base import BaseStore, ManagedEntry
 from sqlalchemy import ColumnElement, Computed, ForeignKey, and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
@@ -26,13 +25,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import delete_value
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-# Where the previous release kept these entries, in the LangGraph Store.
-STORE_NAMESPACE: Final = ("mcp_server_oauth",)
 _SWEEP_LIMIT: Final = 100
 
 
@@ -46,7 +42,6 @@ class MCPOAuthEntryRow(Base):
         Computed("entry->>'collection'", persisted=True), init=False
     )
     key: Mapped[str] = mapped_column(Computed("entry->>'key'", persisted=True), init=False)
-    copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     # No person is behind the proxy's writes, so these stay NULL.
@@ -215,17 +210,6 @@ class SealedStore(BaseStore):
     def __init__(self) -> None:
         super().__init__(stable_api=True)
 
-    def open_store_record(self, sealed: str) -> ManagedEntry | None:
-        """The entry a LangGraph Store record sealed whole; one that does not open reads as absent."""
-        opened = decrypt_token(sealed)
-        if not opened:
-            return None
-        try:
-            return self._serialization_adapter.load_json(opened)
-        except DeserializationError:
-            logger.warning("Failed to read a sealed MCP OAuth entry", exc_info=True)
-            return None
-
     @override
     async def _get_managed_entry(self, *, collection: str, key: str) -> ManagedEntry | None:
         spec = collection_for(collection)
@@ -246,12 +230,6 @@ class SealedStore(BaseStore):
     async def _put_managed_entry(
         self, *, collection: str, key: str, managed_entry: ManagedEntry
     ) -> None:
-        await _delete_store_copy(collection, key)
-        await self.save(collection, key, managed_entry)
-
-    async def save(
-        self, collection: str, key: str, managed_entry: ManagedEntry, *, store_copy: bool = False
-    ) -> None:
         spec = collection_for(collection)
         document = self._serialization_adapter.dump_dict(
             managed_entry, key=spec.stored_key(key), collection=spec.name
@@ -269,7 +247,6 @@ class SealedStore(BaseStore):
                 id=uuid7(),
                 entry=document,
                 expires_at=managed_entry.expires_at,
-                copied_from_store=store_copy,
             )
             await session.execute(
                 upsert.on_conflict_do_update(
@@ -277,7 +254,6 @@ class SealedStore(BaseStore):
                     set_={
                         "entry": document,
                         "expires_at": managed_entry.expires_at,
-                        "copied_from_store": store_copy,
                         "updated_at": func.clock_timestamp(),
                         "updated_by": None,
                     },
@@ -287,48 +263,8 @@ class SealedStore(BaseStore):
     @override
     async def _delete_managed_entry(self, *, key: str, collection: str) -> bool:
         spec = collection_for(collection)
-        await _delete_store_copy(collection, key)
         async with postgres.session() as session:
             existed = await session.scalar(
                 delete(MCPOAuthEntryRow).where(spec.row(key)).returning(_live())
             )
         return bool(existed)
-
-    async def written_at(self, collection: str, key: str) -> datetime | None:
-        """When PostgreSQL last wrote the entry, which the Store import compares against."""
-        spec = collection_for(collection)
-        async with postgres.session() as session:
-            return await session.scalar(select(MCPOAuthEntryRow.updated_at).where(spec.row(key)))
-
-
-async def _delete_store_copy(collection: str, key: str) -> None:
-    """Delete the entry's Store record first, so the Store import cannot bring back what this replaces."""
-    await delete_value((*STORE_NAMESPACE, collection), key)
-
-
-async def delete_store_copies(present: Collection[tuple[str, str]], copied_after: datetime) -> int:
-    """Delete entries still as the Store import copied them after ``copied_after``
-    whose Store record, keyed by ``(collection, key)`` in ``present``, is gone.
-
-    A replica of the previous release deletes an entry only from the Store.
-    """
-    kept = {
-        (collection, COLLECTIONS[collection].stored_key(key))
-        for collection, key in present
-        if collection in COLLECTIONS
-    }
-    async with postgres.session() as session:
-        copies = await session.execute(
-            select(MCPOAuthEntryRow.id, MCPOAuthEntryRow.collection, MCPOAuthEntryRow.key).where(
-                MCPOAuthEntryRow.copied_from_store, MCPOAuthEntryRow.updated_at > copied_after
-            )
-        )
-        gone = [row_id for row_id, collection, key in copies if (collection, key) not in kept]
-        if not gone:
-            return 0
-        deleted = await session.scalars(
-            delete(MCPOAuthEntryRow)
-            .where(MCPOAuthEntryRow.id.in_(gone), MCPOAuthEntryRow.copied_from_store)
-            .returning(MCPOAuthEntryRow.id)
-        )
-        return len(deleted.all())

@@ -7,9 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.tools import tool as make_tool
 
-from openswe.thread_feedback import FEEDBACK, LEGACY_FEEDBACK_NAMESPACE, Feedback
+from openswe.thread_feedback import FEEDBACK, Feedback
 from openswe.tools.submit_thread_feedback import submit_thread_feedback
-from tests.conftest import FakeStore
 
 tool = importlib.import_module("openswe.tools.submit_thread_feedback")
 
@@ -96,22 +95,3 @@ async def test_updates_existing_feedback_submission(context: AsyncMock) -> None:
         status="completed", rating="bad", comment="Replace me"
     )
     context.assert_awaited_once()
-
-
-async def test_store_import_keeps_postgres_feedback_unless_the_store_holds_the_answer(
-    registry_db: None, fake_store: FakeStore
-) -> None:
-    newer = Feedback(event_id="answer:new")
-    for thread_id in ("answered", "pending"):
-        await FEEDBACK.put(thread_id, newer)
-    answered = Feedback(status="completed", rating="good", event_id="answer:old")
-    stale = Feedback(status="ready", event_id="answer:old")
-    for thread_id, record in (("answered", answered), ("pending", stale), ("legacy", stale)):
-        fake_store.seed(LEGACY_FEEDBACK_NAMESPACE, thread_id, record.model_dump())
-
-    await FEEDBACK.import_store()
-
-    assert await FEEDBACK.get("answered") == answered
-    assert await FEEDBACK.get("pending") == newer
-    assert await FEEDBACK.get("legacy") == stale
-    assert fake_store.values(LEGACY_FEEDBACK_NAMESPACE) == {}

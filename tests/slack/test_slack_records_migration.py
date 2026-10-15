@@ -73,7 +73,8 @@ async def test_upgrade_moves_mapping_rows_into_the_consolidated_tables(
         }
 
     async with engine.begin() as conn:
-        await conn.run_sync(postgres.upgrade, postgres.load_migrations(), schema)
+        # The revision that consolidated them; a later one drops ``copied_from_store``.
+        await conn.run_sync(postgres.upgrade, postgres.load_migrations(), schema, "1cdf9e884dad")
 
     async with engine.begin() as conn:
         await conn.execute(text(f"SET LOCAL search_path TO {schema}, public"))

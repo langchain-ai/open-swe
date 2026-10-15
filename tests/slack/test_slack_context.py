@@ -368,7 +368,7 @@ def _setup_slack_mention_fakes(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_choice", [None, ("anthropic:claude-opus-5-5", "max")])
 async def test_web_question_keeps_context_without_slack_delivery(
-    monkeypatch, fake_store, model_choice: tuple[str, str] | None
+    monkeypatch, model_choice: tuple[str, str] | None
 ):
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -409,7 +409,7 @@ async def test_web_question_keeps_context_without_slack_delivery(
 
 
 @pytest.fixture
-async def slack_file_mention(monkeypatch, fake_store, registry_db):
+async def slack_file_mention(monkeypatch, registry_db):
     from openswe.sandboxes import lifecycle, state
 
     captured: dict[str, Any] = {}
@@ -452,7 +452,6 @@ async def slack_file_mention(monkeypatch, fake_store, registry_db):
 
     client = slack_webhooks.get_langgraph_client()
     client.threads = Threads()
-    client.store = fake_store
     backends = {}
     monkeypatch.setattr(lifecycle, "client", client)
     monkeypatch.setattr(state, "get_client", lambda: client)
@@ -567,7 +566,7 @@ async def test_slack_file_provisioning_requires_account_and_persisted_thread(
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
 @pytest.mark.parametrize("kitchen_channel", [True, False])
 def test_slack_followup_publishes_as_requester_and_preserves_owner(
-    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool, fake_store
+    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool
 ) -> None:
     import importlib
 
@@ -579,7 +578,6 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     client = slack_webhooks.get_langgraph_client()
-    client.store = fake_store
     saved_metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
     client.threads = _FakeThreadsClient(thread={"metadata": saved_metadata})
     monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
@@ -732,7 +730,7 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
 
 
 @pytest.fixture
-def bot_run(monkeypatch, allowed_bot, fake_store):
+def bot_run(monkeypatch, allowed_bot):
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     monkeypatch.setenv("CONFIGURED_ADMINS", "mason-gh")
@@ -763,7 +761,6 @@ def bot_run(monkeypatch, allowed_bot, fake_store):
 
     client = slack_webhooks.get_langgraph_client()
     client.threads = Threads()
-    client.store = fake_store
     request = SlackRequest(
         channel_id="C123",
         thread_ts="1700000000.000100",
@@ -1232,7 +1229,6 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
 )
 async def test_performance_directive_switches_unless_quoted(
     monkeypatch: pytest.MonkeyPatch,
-    fake_store,
     registry_db,
     first_message: bool,
     text: str,

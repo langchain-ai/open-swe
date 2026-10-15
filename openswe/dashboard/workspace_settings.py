@@ -22,7 +22,6 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
-from openswe.dashboard.import_settings import delete_legacy_workspace_settings
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
@@ -35,9 +34,9 @@ from openswe.dashboard.options import (
 )
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
 from openswe.run_config import RunConfig
-from openswe.store import now_iso
 from openswe.ui_invalidations import Topic
 from openswe.utils.gateway import gateway_overrides, resolve_gateway_enabled
+from openswe.utils.time import now_iso
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
@@ -578,9 +577,8 @@ async def upsert_workspace_overrides(
 
 
 async def delete_workspace_settings(slug: str) -> None:
-    """Forget the workspace's overrides, including any Store copy not yet imported."""
+    """Forget the workspace's overrides."""
     await WORKSPACE_SETTINGS.delete(slug)
-    await delete_legacy_workspace_settings(slug)
     await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
 

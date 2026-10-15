@@ -31,8 +31,8 @@ from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef
-from openswe.store import now_iso
 from openswe.utils.dashboard_links import dashboard_incident_url
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 

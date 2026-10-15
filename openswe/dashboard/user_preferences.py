@@ -8,8 +8,8 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.store import now_iso
 from openswe.users.records import UserRecords
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 
