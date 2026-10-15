@@ -5,6 +5,7 @@ import logging
 from typing import Any, Literal
 
 import httpx
+from langgraph_sdk import get_client
 
 from openswe.dashboard.options import normalize_model_choice
 from openswe.dispatch import create_durable_run
@@ -26,7 +27,6 @@ from openswe.slack.client import (
     slack_message_bot_id,
     slack_message_bot_name,
 )
-from openswe.store import store_client
 from openswe.ui_invalidations import Topic
 from openswe.utils.thread_ops import queue_message_for_thread
 
@@ -106,9 +106,7 @@ async def queue_context(record: Incident, message: dict[str, Any]) -> bool:
 
 async def _runs(thread_id: str, status: Literal["pending", "running"]) -> list[dict[str, Any]]:
     try:
-        return [
-            dict(run) for run in await store_client().runs.list(thread_id, status=status) if run
-        ]
+        return [dict(run) for run in await get_client().runs.list(thread_id, status=status) if run]
     except Exception:  # noqa: BLE001
         logger.debug("Could not list %s runs for %s", status, thread_id, exc_info=True)
         return []
@@ -131,7 +129,7 @@ async def cancel_active_runs(thread_id: str, *, keep_run_id: str = "") -> None:
         if run.get("run_id") and str(run["run_id"]) != keep_run_id
     ]
     if run_ids:
-        await store_client().runs.cancel_many(
+        await get_client().runs.cancel_many(
             thread_id=thread_id, run_ids=run_ids, action="interrupt"
         )
 

@@ -10,15 +10,10 @@ import logging
 from sqlalchemy import select, update
 
 from openswe.database import postgres
-from openswe.database.store_imports import StoreImport
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
-from openswe.store import delete_value, get_value
 
 logger = logging.getLogger(__name__)
-
-_STORE_NAMESPACE = ["enabled_review_repos"]
-_STORE_KEY = "default"
 
 
 async def list_enabled_review_repos() -> list[str]:
@@ -57,22 +52,3 @@ async def is_review_repo_enabled(owner: str, name: str) -> bool:
         logger.warning("enabled review repos lookup failed; skipping auto-review", exc_info=True)
         return False
     return repository is not None and repository.review_enabled is True
-
-
-async def import_store_enabled_review_repos() -> StoreImport:
-    """Turn on review for the repos the Store's list names, unless someone already decided."""
-    record = await get_value(_STORE_NAMESPACE, _STORE_KEY)
-    if record is None:
-        return StoreImport()
-    repos = record.get("repos")
-    names = [name for name in repos if isinstance(name, str)] if isinstance(repos, list) else []
-    async with postgres.session() as session:
-        for name in names:
-            repository_id = await Repository.ensure_id(session, normalize_repo_full_name(name))
-            await session.execute(
-                update(Repository)
-                .where(Repository.id == repository_id, Repository.review_enabled.is_(None))
-                .values(review_enabled=True)
-            )
-    await delete_value(_STORE_NAMESPACE, _STORE_KEY)
-    return StoreImport(moved=len(names))

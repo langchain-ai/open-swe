@@ -7,9 +7,11 @@ import pytest
 
 from openswe import event_claims
 from openswe.database import postgres
+from openswe.human_review.notices import ReviewNotice
 from openswe.slack import client as slack_client
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SlackThreadMappingError, slack_thread_mutation_lock
+from openswe.slack.dm import DmOrigin
 from openswe.slack.records import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
@@ -232,3 +234,19 @@ async def test_message_mapping_tracks_latest_reply_in_exact_run() -> None:
     assert run_two is not None and (run_two.thread_ts, run_two.message_ts) == ("1.0", "1.2")
     current = await lookup_slack_thread_run_mapping("C1", "1.0")
     assert current is not None and current.run_id == "run-two"
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_dm_keeps_the_review_notice_it_carried() -> None:
+    notice = ReviewNotice(
+        kind="reviewer_pick",
+        review_request_id="0198",
+        pr_url="https://github.com/acme/widgets/pull/7",
+        text="Open SWE picked you to review acme/widgets#7.",
+        target_thread_id="thread-impl",
+    )
+    origin = DmOrigin(channel_id="C1", thread_ts="1.0", subject="review", notice=notice)
+
+    await origin.save_for("D1", "6.0", "unused: the notice already has its text")
+
+    assert await DmOrigin.of("D1", "6.0") == origin

@@ -65,7 +65,7 @@ def _incident_config(**extra: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("explicit", [False, True])
 async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
-    fake_store, monkeypatch, saved_thread_scope, explicit
+    monkeypatch, saved_thread_scope, explicit
 ):
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.sandboxes.state import SandboxBackendProxy

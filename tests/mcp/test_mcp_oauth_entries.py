@@ -1,6 +1,5 @@
 import json
 import re
-from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -14,24 +13,16 @@ from fastmcp.server.auth.oauth_proxy.models import (
 from fastmcp.server.auth.providers.github import GitHubProvider
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from key_value.aio.adapters.pydantic.base import BasePydanticAdapter
-from key_value.aio.stores.base import ManagedEntry
 from pydantic import AnyUrl, BaseModel
 from sqlalchemy import select, update
 
-from openswe.database import postgres, store_imports
-from openswe.database.store_imports import StoreImport
-from openswe.encryption import encrypt_token
-from openswe.mcp import import_oauth_entries
-from openswe.mcp.import_oauth_entries import import_store_mcp_oauth_entries
+from openswe.database import postgres
 from openswe.mcp.token_store import (
     COLLECTIONS,
-    STORE_NAMESPACE,
     MCPOAuthEntryRow,
     SealedStore,
     UnknownOAuthCollection,
 )
-from openswe.store import StoreEntry
-from tests.conftest import FakeStore
 
 _COLLECTION = "mcp-upstream-tokens"
 
@@ -54,39 +45,8 @@ async def test_every_collection_the_oauth_proxy_uses_has_a_spec() -> None:
 
 
 @pytest.fixture
-def store(registry_db: None, fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch) -> FakeStore:
-    """``fake_store`` searched by namespace prefix, reporting each entry's own namespace, as the real Store does."""
+def oauth_db(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-
-    async def search(namespace: Sequence[str]) -> list[StoreEntry]:
-        return [
-            StoreEntry(list(item_namespace), dict(value), key)
-            for item_namespace, items in fake_store.items.items()
-            if item_namespace[: len(namespace)] == tuple(namespace)
-            for key, value in items.items()
-        ]
-
-    monkeypatch.setattr(import_oauth_entries, "search_all_entries", search)
-    return fake_store
-
-
-def _seed(
-    store: FakeStore,
-    key: str,
-    token: str,
-    *,
-    saved: timedelta = timedelta(),
-    expires: timedelta | None = None,
-) -> None:
-    """Seed an entry as the previous release saved it, ``saved`` ago, expiring ``expires`` from now."""
-    now = datetime.now(UTC)
-    entry = ManagedEntry(
-        value={"token": token},
-        created_at=now - saved,
-        expires_at=None if expires is None else now + expires,
-    )
-    sealed = encrypt_token(SealedStore()._serialization_adapter.dump_json(entry))
-    store.seed([*STORE_NAMESPACE, _COLLECTION], key, {"sealed": sealed})
 
 
 async def _token(key: str) -> object:
@@ -95,7 +55,7 @@ async def _token(key: str) -> object:
 
 
 async def test_entries_read_as_absent_once_expired_and_later_writes_sweep_them(
-    store: FakeStore,
+    oauth_db: None,
 ) -> None:
     sealed_store = SealedStore()
     await sealed_store.put("lapsing", {"token": "secret"}, collection=_COLLECTION, ttl=60)
@@ -128,7 +88,7 @@ async def _saved_document[ModelT: BaseModel](
     return await adapter.get(key), json.dumps(entry)
 
 
-async def test_entries_keep_readable_metadata_and_no_plaintext_secret(store: FakeStore) -> None:
+async def test_entries_keep_readable_metadata_and_no_plaintext_secret(oauth_db: None) -> None:
     now = datetime.now(UTC).timestamp()
     tokens = UpstreamTokenSet(
         upstream_token_id="upstream-1",
@@ -190,42 +150,3 @@ async def test_entries_keep_readable_metadata_and_no_plaintext_secret(store: Fak
 
 def _words(text: str) -> set[str]:
     return set(re.findall(r"[\w-]+", text))
-
-
-async def test_store_import_copies_live_entries_then_retires_the_store_records(
-    store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _seed(store, "client", "registered", saved=timedelta(hours=1))
-    _seed(store, "session", "live", saved=timedelta(hours=1), expires=timedelta(hours=1))
-    _seed(store, "lapsed", "expired", saved=timedelta(hours=2), expires=-timedelta(minutes=1))
-
-    assert await import_store_mcp_oauth_entries() == StoreImport(moved=2)
-    assert await _token("client") == "registered"
-    assert await _token("session") == "live"
-    assert await _token("lapsed") is None
-    assert await import_store_mcp_oauth_entries() == StoreImport(waiting=2)
-
-    _seed(store, "client", "re-registered")
-    assert await import_store_mcp_oauth_entries() == StoreImport(moved=1, waiting=1)
-    assert await _token("client") == "re-registered"
-
-    await SealedStore().delete("session", collection=_COLLECTION)
-    monkeypatch.setattr(store_imports, "RETIRE_STORE_COPY_AFTER", timedelta())
-    assert await import_store_mcp_oauth_entries() == StoreImport(moved=1)
-    assert await _token("session") is None
-    assert await _token("client") == "re-registered"
-    assert set(store.values([*STORE_NAMESPACE, _COLLECTION])) == {"lapsed"}
-
-
-async def test_store_import_drops_copies_an_old_replica_deleted_from_the_store(
-    store: FakeStore,
-) -> None:
-    _seed(store, "revoked", "old")
-    _seed(store, "refreshed", "old")
-    assert await import_store_mcp_oauth_entries() == StoreImport(moved=2)
-    await SealedStore().put("refreshed", {"token": "new"}, collection=_COLLECTION)
-
-    store.items[(*STORE_NAMESPACE, _COLLECTION)].pop("revoked")
-    assert await import_store_mcp_oauth_entries() == StoreImport(moved=1)
-    assert await _token("revoked") is None
-    assert await _token("refreshed") == "new"

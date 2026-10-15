@@ -66,7 +66,7 @@ async def configured(registry_db, monkeypatch):
         ),
     )
     threads = SimpleNamespace(update=AsyncMock())
-    monkeypatch.setattr(channels, "store_client", lambda: SimpleNamespace(threads=threads))
+    monkeypatch.setattr(channels, "get_client", lambda: SimpleNamespace(threads=threads))
     monkeypatch.setattr(turns, "queue_context", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "schedule_automatic_turn", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "dispatch_turn", AsyncMock(return_value={"run_id": "r1"}))

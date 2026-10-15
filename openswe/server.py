@@ -224,7 +224,6 @@ from openswe.tools import (
     output_iframe,
     publish_workspace,
     read_only_sql,
-    read_store_item,
     read_user_settings,
     recreate_sandbox,
     refresh_workspace_start,
@@ -260,7 +259,6 @@ from openswe.tools import (
     update_automation,
     web_search,
     write_database_rows,
-    write_store_item,
 )
 from openswe.tools.access import permitted, resolve_access
 from openswe.tools.admin_gate import (
@@ -1777,12 +1775,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *((cli_result,) if cli_result_required else ()),
         *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
         read_only_sql,
-        read_store_item,
-        *(
-            (write_store_item, write_database_rows)
-            if ENV.OPENSWE_ENV.optional() in {"preview", "staging"}
-            else ()
-        ),
+        *((write_database_rows,) if ENV.OPENSWE_ENV.optional() in {"preview", "staging"} else ()),
         manage_feature_flags,
         manage_review_approval_mode,
         manage_review_repos,

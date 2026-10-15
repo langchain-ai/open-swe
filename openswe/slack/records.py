@@ -73,7 +73,6 @@ class SlackThread(Base):
     # Unset with ``kickoff_expires_at`` set once the kickoff message was removed.
     kickoff_ts: Mapped[str | None] = mapped_column(default=None)
     kickoff_expires_at: Mapped[datetime | None] = mapped_column(default=None)
-    copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     created_by: Mapped[UUID | None] = mapped_column(
@@ -114,7 +113,6 @@ class SlackThread(Base):
                     index_elements=[cls.channel_id, cls.thread_ts],
                     set_={
                         **{name: getattr(upsert.excluded, name) for name in values},
-                        "copied_from_store": False,
                         "updated_at": func.clock_timestamp(),
                     },
                 )
@@ -170,7 +168,6 @@ class SlackRun(Base):
     reply_seen_ts: Mapped[list[str] | None] = mapped_column(ARRAY(Text), default=None)
     reply_conflicts: Mapped[int | None] = mapped_column(default=None)
     reply_expires_at: Mapped[datetime | None] = mapped_column(default=None)
-    copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     created_by: Mapped[UUID | None] = mapped_column(
@@ -225,7 +222,6 @@ class SlackRun(Base):
                             else_=1,
                         ),
                         "reply_expires_at": upsert.excluded.reply_expires_at,
-                        "copied_from_store": False,
                         "updated_at": func.clock_timestamp(),
                     },
                 )
@@ -254,7 +250,6 @@ class SlackMessage(Base):
     reactions: Mapped[dict[str, list[str]]] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb"), default_factory=dict
     )
-    copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     created_by: Mapped[UUID | None] = mapped_column(
@@ -326,7 +321,6 @@ class SlackMessage(Base):
                         "origin_thread_ts": upsert.excluded.origin_thread_ts,
                         "origin_subject": upsert.excluded.origin_subject,
                         "origin_notice": upsert.excluded.origin_notice,
-                        "copied_from_store": False,
                         "updated_at": func.clock_timestamp(),
                     },
                 )
@@ -353,7 +347,6 @@ _TOGGLE_REACTION = text("""
             || CASE WHEN CAST(:added AS boolean)
                 THEN jsonb_build_array(CAST(:reaction AS text)) ELSE '[]'::jsonb END
         ),
-        copied_from_store = false,
         updated_at = clock_timestamp()
     RETURNING reactions -> CAST(:user_id AS text)
 """)
@@ -367,7 +360,6 @@ class SlackViewSuggestion(Base):
     channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
     view_id: Mapped[str]
     actions: Mapped[JsonObject] = mapped_column(JSONB)
-    copied_from_store: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     created_by: Mapped[UUID | None] = mapped_column(
@@ -392,7 +384,6 @@ class SlackViewSuggestion(Base):
             channel_id=self.channel_id,
             view_id=self.view_id,
             actions=self.actions,
-            copied_from_store=self.copied_from_store,
         )
         async with postgres.session() as session:
             await SlackChannel.ensure(session, self.channel_id)
@@ -401,7 +392,6 @@ class SlackViewSuggestion(Base):
                     index_elements=[type(self).channel_id, type(self).view_id],
                     set_={
                         "actions": upsert.excluded.actions,
-                        "copied_from_store": upsert.excluded.copied_from_store,
                         "updated_at": func.clock_timestamp(),
                     },
                 )
@@ -435,26 +425,25 @@ async def _clear_expired(
     )
 
 
-RUN_FIELDS = (
+_RUN_FIELDS = (
     "thread_ts",
     "message_ts",
     "triggering_user_id",
     "trace_message_ts",
     "agent_thread_id",
 )
-MESSAGE_FIELDS = ("run_id", "thread_ts", "triggering_user_id", "agent_thread_id")
+_MESSAGE_FIELDS = ("run_id", "thread_ts", "triggering_user_id", "agent_thread_id")
 
 
-def merge_run(*, store_copy: bool) -> dict[str, ColumnElement[object] | bool]:
+def _merge_run() -> dict[str, ColumnElement[object]]:
     """How an upsert of ``slack_run`` updates a row: set fields replace, unset ones keep."""
     excluded = insert(SlackRun).excluded
     return {
         **{
             field: func.coalesce(getattr(excluded, field), getattr(SlackRun, field))
-            for field in RUN_FIELDS
+            for field in _RUN_FIELDS
         },
         "started_at": func.greatest(excluded.started_at, SlackRun.started_at),
-        "copied_from_store": store_copy,
         "updated_at": func.clock_timestamp(),
     }
 
@@ -489,7 +478,6 @@ async def bind_slack_thread_id(channel_id: str, thread_ts: str, thread_id: str) 
                 set_={
                     "thread_id": upsert.excluded.thread_id,
                     "detach_nonce": None,
-                    "copied_from_store": False,
                     "updated_at": func.clock_timestamp(),
                 },
                 where=SlackThread.thread_id.is_(None)
@@ -580,7 +568,6 @@ async def delete_slack_thread_associations(
                 set_={
                     "thread_id": None,
                     "detach_nonce": detach.excluded.detach_nonce,
-                    "copied_from_store": False,
                     "updated_at": func.clock_timestamp(),
                 },
             )
@@ -601,8 +588,7 @@ async def delete_slack_thread_associations(
             update(SlackMessage)
             .where(in_thread)
             .values(
-                **dict.fromkeys(MESSAGE_FIELDS),
-                copied_from_store=False,
+                **dict.fromkeys(_MESSAGE_FIELDS),
                 updated_at=func.clock_timestamp(),
             )
         )
@@ -646,7 +632,7 @@ async def _upsert_run(
     saved = await session.scalars(
         upsert.on_conflict_do_update(
             index_elements=[SlackRun.channel_id, SlackRun.run_id],
-            set_=merge_run(store_copy=False),
+            set_=_merge_run(),
         ).returning(SlackRun),
         execution_options={"populate_existing": True},
     )
@@ -667,8 +653,7 @@ async def _upsert_message(
         upsert.on_conflict_do_update(
             index_elements=[SlackMessage.channel_id, SlackMessage.message_ts],
             set_={
-                **{field: getattr(upsert.excluded, field) for field in MESSAGE_FIELDS},
-                "copied_from_store": False,
+                **{field: getattr(upsert.excluded, field) for field in _MESSAGE_FIELDS},
                 "updated_at": func.clock_timestamp(),
             },
         )

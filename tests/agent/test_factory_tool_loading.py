@@ -40,7 +40,6 @@ def _config() -> RunnableConfig:
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("fake_store")
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
 @pytest.mark.parametrize("github_login", ["octocat", None])
 async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
