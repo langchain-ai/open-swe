@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -42,6 +42,6 @@ class WorkspaceSkillsMiddleware(SkillsMiddleware):
 
     async def awrap_model_call(
         self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
-    ) -> ModelResponse:
+    ) -> ModelResponse | ExtendedModelResponse:
         request = request.override(state=self._scoped_state(cast(dict[str, Any], request.state)))
         return await super().awrap_model_call(request, handler)
