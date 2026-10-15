@@ -109,6 +109,20 @@ def slack_message_bot_id(message: dict[str, Any]) -> str:
     return "" if isinstance(user_id, str) and user_id.strip() else "unknown"
 
 
+def slack_image_file_urls(message: Mapping[str, object]) -> list[str]:
+    """Private URLs of the images attached to a Slack message."""
+    files = message.get("files")
+    if not isinstance(files, list):
+        return []
+    return [
+        str(file_info["url_private"])
+        for file_info in files
+        if isinstance(file_info, dict)
+        and str(file_info.get("mimetype", "")).startswith("image/")
+        and file_info.get("url_private")
+    ]
+
+
 def slack_message_bot_name(message: dict[str, Any]) -> str:
     """The display name for a bot-authored Slack message."""
     profile = message.get("bot_profile")
@@ -1771,13 +1785,7 @@ async def resolve_slack_links_in_context(
                 resolved_parts.append(
                     f"**{link_url}**\n  Author: {author}\n  Message: {resolved_text}"
                 )
-                for file_info in resolved.get("files", []):
-                    if (
-                        isinstance(file_info, dict)
-                        and file_info.get("mimetype", "").startswith("image/")
-                        and file_info.get("url_private")
-                    ):
-                        image_urls.append(file_info["url_private"])
+                image_urls.extend(slack_image_file_urls(resolved))
             else:
                 resolved_parts.append(
                     f"**{link_url}**\n  (Could not fetch — bot may not have access)"
