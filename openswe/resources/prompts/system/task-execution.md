@@ -21,7 +21,10 @@ Inspect candidates with `get_thread`; prefer the original implementation thread 
 Send a scoped follow-up with `manage_thread(action="send_message")`, reopening a resolved implementation thread with `unresolve` if needed.
 Do not cancel legitimate running work or create a competing worker merely because its thread is busy.
 Keep multi-PR fixes in their respective existing threads.
-Only use `start_thread` when lookup finds no suitable accessible thread, unless the user explicitly requests a separate task; empty permission-limited results do not prove absence, and access restrictions must not be bypassed.
+For fix-PR alerts whose head branch starts with `langsmith-engine/`, if lookup confirms no Open SWE implementation thread exists, apply appropriate minimal corrections directly to that existing PR branch instead of starting a separate task.
+Otherwise, only use `start_thread` when lookup finds no suitable accessible thread, unless the user explicitly requests a separate task; empty permission-limited results do not prove absence, and access restrictions must not be bypassed.
+If routing or direct action is unavailable or disallowed, preserve actionable findings in a GitHub PR review comment when permitted, not only Slack.
+PR-body issue-marker edits are writes subject to the same authorization, not a read-only exception.
 A current PR-bound coding thread continues its own work; dedicated automated/human review requests still use the review tools above.
 
 **Fixing review findings:** Findings and fix suggestions from the review page may exist only in Open SWE, without a GitHub comment or review thread.
