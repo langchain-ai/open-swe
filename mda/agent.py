@@ -75,14 +75,14 @@ def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[A
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
 
 
-def _code_mode(graph: Graph, code_only: Sequence[BaseTool]) -> list[AgentMiddleware]:
-    """The graph's code mode, with every code-only tool callable from it."""
+def _code_mode(graph: Graph, from_code: Sequence[BaseTool]) -> list[AgentMiddleware]:
+    """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
-        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *code_only])]
-    if not code_only:
+        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])]
+    if not from_code:
         return []
     # As the in-process agent's code mode: state per turn, subagents through `task`.
-    return [CodeInterpreterMiddleware(ptc=list(code_only), subagents=False, mode="turn")]
+    return [CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")]
 
 
 # `mda build` reads the agent's name without running this factory, so its body
@@ -115,6 +115,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     # carrying hundreds with nothing; the tools the model seldom needs are called from code.
     in_code = [tool for tool in tools if tool.name in catalog.code_only]
     offered = [tool for tool in tools if tool not in in_code]
+    from_code = [*in_code, *(tool for tool in offered if tool.name in catalog.also_from_code)]
     subagent_tools = {
         subagent.name: offered
         if subagent.tools is None
@@ -148,7 +149,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             BackendRunMiddleware(backend, context.invocation_id),
             *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(offered, excluded),
-            *_code_mode(context.graph, in_code),
+            *_code_mode(context.graph, from_code),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],

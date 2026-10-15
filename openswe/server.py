@@ -801,14 +801,17 @@ async def _run_mcp_tools(
         return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
 
 
-# Never called from code: the file and shell tools besides reads and writes, the replies a
-# run waits on, and tools whose results update graph state, which a call from code drops.
+# The sandbox's file and shell tools, which code mode offers directly as well.
+SANDBOX_TOOL_NAMES = frozenset({*FILESYSTEM_TOOL_NAMES, "delete", "background_execute"})
+# In-process code mode calls tools directly, skipping the guards that wrap these calls.
+_GUARDED_SHELL_TOOLS = frozenset({"execute", "background_execute"})
+# Never called from code: subagents, the replies a run waits on, and tools whose
+# results update graph state, which a call from code drops.
 _NOT_FROM_CODE = (
-    frozenset(DEEP_AGENT_TOOL_NAMES - {"read_file", "write_file"})
+    frozenset({"task"})
     | GUIDE_REPLY_TOOLS
     | frozenset(
         {
-            "background_execute",
             "slack_reply",
             "slack_no_reply_needed",
             "cli_result",
@@ -823,14 +826,17 @@ _NOT_FROM_CODE = (
     )
 )
 # Everyday tools code mode still offers the model directly.
-_DIRECT_IN_CODE_MODE = frozenset(
-    {"read_file", "write_file", "open_pull_request", "web_search", "fetch_url"}
-)
+_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {"open_pull_request", "web_search", "fetch_url"}
 
 
 def callable_from_code(name: str) -> bool:
     """Whether code mode can offer a tool as ``tools.<camelCaseName>``."""
     return name not in _NOT_FROM_CODE and is_valid_ptc_tool_name(name)
+
+
+def direct_and_from_code(name: str) -> bool:
+    """Whether code mode offers a tool from code while keeping its schema on the model's list."""
+    return callable_from_code(name) and name in _DIRECT_IN_CODE_MODE
 
 
 def code_only(name: str) -> bool:
@@ -852,7 +858,11 @@ async def _mcp_code_mode(
     if not profile or profile.get("experimental_mcp_ptc") is not True:
         return None, tools
     ptc_tools: list[str | BaseTool] = [tool for tool in tools if callable_from_code(tool.name)]
-    ptc_tools.extend(name for name in additional_tools if callable_from_code(name))
+    ptc_tools.extend(
+        name
+        for name in additional_tools
+        if callable_from_code(name) and name not in _GUARDED_SHELL_TOOLS
+    )
     if not ptc_tools:
         return None, tools
     ordinary_tools = [tool for tool in tools if not callable_from_code(tool.name)]
@@ -1898,7 +1908,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ],
             *[
                 name
-                for name in ("read_file", "write_file")
+                for name in sorted(SANDBOX_TOOL_NAMES)
                 if name not in excluded_tools and name not in client_tool_names
             ],
         ],
