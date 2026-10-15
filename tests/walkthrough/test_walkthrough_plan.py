@@ -373,3 +373,10 @@ async def test_partly_reviewed_chunk_renders_only_remaining_lines(
     assert "remaining = 1" in shown.message_text
     assert "x" * 12000 not in shown.message_text
     assert shown.lines == chunk.lines[1:]
+
+    _git(repo, "update-ref", "-d", HEAD_REF)
+    posted.reset_mock()
+    result = await review_walkthrough.walkthrough_show_chunk(1)
+    assert result["success"] is False
+    assert result["error"]
+    posted.assert_not_awaited()

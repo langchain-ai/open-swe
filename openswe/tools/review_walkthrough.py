@@ -142,11 +142,14 @@ async def walkthrough_show_chunk(number: int | None = None) -> dict[str, Any]:
     lines = state.reader.remaining(chunk.lines)
     if not lines:
         return {"success": False, "error": "the reader already approved or skipped that chunk"}
-    code = (
-        await state.ctx.workspace.checkout.render(lines, state.ctx.workspace.changes)
-        if lines != chunk.lines
-        else chunk.code
-    )
+    try:
+        code = (
+            await state.ctx.workspace.checkout.render(lines, state.ctx.workspace.changes)
+            if lines != chunk.lines
+            else chunk.code
+        )
+    except PLANNING_ERRORS as exc:
+        return {"success": False, "error": str(exc)}
     return await state.post(state.reader.show(chunk, code=code))
 
 
