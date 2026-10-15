@@ -17,7 +17,6 @@ from openswe.input_messages import build_run_input
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.client import get_active_slack_thread
-from openswe.ui_invalidations import Topic
 from openswe.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ _WAKEUP_SENDER_ID = "system:thread-wakeup"
 _MAX_WAKEUPS_BETWEEN_USER_MESSAGES = 10
 _WAKEUP_GENERATION_METADATA_KEY = "thread_wakeup_generation"
 _WAKEUP_COUNT_METADATA_KEY = "thread_wakeup_count"
-_NEXT_WAKEUP_METADATA_KEY = "next_wakeup_at_ms"
+_PENDING_WAKEUPS_METADATA_KEY = "pending_wakeups_at_ms"
 _WAKEUP_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _PURGE_PAGE_SIZE = 100
 
@@ -161,34 +160,27 @@ async def _wakeup_crons(client: Any, *, thread_id: str | None = None) -> list[di
     return crons
 
 
-async def sync_next_wakeup(client: Any, thread_id: str) -> None:
-    """Point ``next_wakeup_at_ms`` at the thread's earliest pending wakeup; never raises.
+async def _sync_pending_wakeups(client: Any, thread_id: str) -> None:
+    """Mirror the thread's pending wakeup fire times into its metadata; never raises.
 
-    Recomputed from the crons rather than written once, so the dashboard stops
-    showing a wakeup once it has run, and shows the next one when several are armed.
+    Every pending time is kept so readers can skip the ones that have since fired
+    without anything rewriting the metadata when a wakeup runs.
     """
     now = datetime.now(UTC)
     try:
-        fire_times = [
-            end_time - timedelta(seconds=_END_TIME_PADDING_SECONDS)
+        fire_times = sorted(
+            int(fire_time.timestamp() * 1000)
             for cron in await _wakeup_crons(client, thread_id=thread_id)
             if (end_time := _parse_iso(cron.get("end_time"))) is not None
-        ]
-        pending = [fire_time for fire_time in fire_times if fire_time > now]
+            and (fire_time := end_time - timedelta(seconds=_END_TIME_PADDING_SECONDS)) > now
+        )
         await client.threads.update(
-            thread_id=thread_id,
-            metadata={
-                _NEXT_WAKEUP_METADATA_KEY: (
-                    int(min(pending).timestamp() * 1000) if pending else None
-                )
-            },
+            thread_id=thread_id, metadata={_PENDING_WAKEUPS_METADATA_KEY: fire_times}
         )
     except Exception:
         logger.warning(
-            "Failed to sync next thread wakeup", extra={"thread_id": thread_id}, exc_info=True
+            "Failed to sync pending thread wakeups", extra={"thread_id": thread_id}, exc_info=True
         )
-        return
-    await Topic.THREADS.invalidate(key=thread_id)
 
 
 async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[str]:
@@ -229,7 +221,7 @@ async def cancel_thread_wakeups(thread_id: str) -> None:
             await client.crons.delete(cron["cron_id"])
         except NotFoundError:
             logger.info("Thread wakeup already removed", extra={"cron_id": cron["cron_id"]})
-    await sync_next_wakeup(client, thread_id)
+    await _sync_pending_wakeups(client, thread_id)
 
 
 async def _purge_expired_wakeups_best_effort() -> None:
@@ -373,5 +365,5 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         except Exception as exc:
             logger.exception("Failed to schedule thread wakeup for %s", thread_id)
             return {"success": False, "error": str(exc)}
-        await sync_next_wakeup(client, thread_id)
+        await _sync_pending_wakeups(client, thread_id)
     return result

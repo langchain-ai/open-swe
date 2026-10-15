@@ -547,7 +547,7 @@ export interface AgentThread {
   resolved?: boolean
   resolvedAt?: number | null
   attentionReason?: string | null
-  /** When the agent's latest scheduled wakeup fires, in epoch ms. */
+  /** When the agent's next scheduled wakeup fires, in epoch ms. */
   nextWakeupAt?: number | null
   createdAt: number
   updatedAt: number

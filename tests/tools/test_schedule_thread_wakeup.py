@@ -141,7 +141,7 @@ async def test_cancel_thread_wakeups_removes_every_timer_only_for_that_thread(
     await wakeup_tool.cancel_thread_wakeups("worker")
 
     assert await client.crons.search() == unrelated
-    assert client.threads.metadata["next_wakeup_at_ms"] is None
+    assert client.threads.metadata["pending_wakeups_at_ms"] == []
 
 
 def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:
@@ -335,7 +335,7 @@ async def test_purge_deletes_only_expired_wakeups() -> None:
     assert client.crons.search_calls[0]["metadata"] == {"kind": "thread_wakeup"}
 
 
-async def test_sync_points_at_earliest_pending_wakeup_and_clears_when_none() -> None:
+async def test_sync_records_only_pending_wakeups_in_fire_order() -> None:
     padding = timedelta(seconds=wakeup_tool._END_TIME_PADDING_SECONDS)
     now = datetime.now(UTC).replace(microsecond=0)
     soon, later = now + timedelta(minutes=5), now + timedelta(hours=1)
@@ -350,11 +350,9 @@ async def test_sync_points_at_earliest_pending_wakeup_and_clears_when_none() -> 
         ]
     )
 
-    await wakeup_tool.sync_next_wakeup(client, "thread-1")
+    await wakeup_tool._sync_pending_wakeups(client, "thread-1")
 
-    assert client.threads.metadata["next_wakeup_at_ms"] == int(soon.timestamp() * 1000)
-
-    client.crons._crons = []
-    await wakeup_tool.sync_next_wakeup(client, "thread-1")
-
-    assert client.threads.metadata["next_wakeup_at_ms"] is None
+    assert client.threads.metadata["pending_wakeups_at_ms"] == [
+        int(soon.timestamp() * 1000),
+        int(later.timestamp() * 1000),
+    ]

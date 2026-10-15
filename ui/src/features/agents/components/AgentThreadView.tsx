@@ -140,7 +140,7 @@ function ScheduledWakeup({ at }: { at?: number | null }) {
   if (!at || at <= now) return null
   return (
     <div
-      className="mb-space-2 flex w-fit items-center gap-1.5 px-2 py-1 text-xs text-secondary"
+      className="mb-space-2 flex w-fit items-center gap-1.5 px-space-2 py-space-1 text-xs text-secondary"
       title={`Scheduled for ${new Date(at).toLocaleString()}`}
     >
       <ClockIcon size={14} weight="regular" aria-hidden />

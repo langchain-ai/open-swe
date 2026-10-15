@@ -710,11 +710,6 @@ export function useSidebarActiveThread({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
     enabled: enabled && Boolean(activeThreadId) && !detail && !loaded,
-    meta: {
-      invalidatedBy: activeThreadId
-        ? [invalidationTopic("threads", activeThreadId)]
-        : [],
-    },
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
@@ -854,7 +849,6 @@ export function useAgentThread(threadId: string) {
     // its stop button — believing the run already ended.
     refetchInterval: (current) =>
       current.state.data?.status === "running" ? 3000 : false,
-    meta: { invalidatedBy: [invalidationTopic("threads", threadId)] },
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.
