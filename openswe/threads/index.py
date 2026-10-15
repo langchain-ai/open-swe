@@ -1,8 +1,11 @@
 """The thread index in PostgreSQL: each thread's metadata, runtime and last known status.
 
-With ``THREAD_STORE=postgres`` it answers thread reads, updates and searches in
-the Agent Server's own shape, so callers of ``client.threads`` see no change.
-Runs, checkpoints and streams stay with the thread's runtime.
+``THREAD_STORE`` moves threads onto it in steps. With ``dual`` every thread
+change is written here beside the Agent Server, which still answers thread
+calls; with ``postgres`` the index answers thread reads, updates and searches
+in the Agent Server's own shape, so callers of ``client.threads`` see no change,
+and each change is still copied to the Agent Server. Runs, checkpoints and
+streams stay with the thread's runtime.
 """
 
 import json
@@ -11,10 +14,13 @@ from datetime import datetime
 from typing import Final, Literal, Self, get_args
 from uuid import uuid7
 
+from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import RowMapping, text
 
+from openswe.config import ENV
 from openswe.database.postgres import transaction
+from openswe.remote_runtime.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 
 Runtime = Literal["local", "mda"]
 ThreadStatus = Literal["idle", "busy", "interrupted", "error"]
@@ -23,11 +29,31 @@ SelectField = Literal[
     "thread_id", "created_at", "updated_at", "metadata", "status", "values", "interrupts", "config"
 ]
 
+ThreadStore = Literal["agent_server", "dual", "postgres"]
+
 THREAD_STATUSES: Final[frozenset[str]] = frozenset(get_args(ThreadStatus))
+# What the index keeps of an Agent Server thread; its values are its whole conversation.
+INDEXED_FIELDS: Final[list[ThreadSelectField]] = [
+    "thread_id",
+    "metadata",
+    "status",
+    "created_at",
+    "updated_at",
+]
 _COLUMNS: Final = "thread_id, runtime, metadata, status, created_at, updated_at"
 
 
 _status = TypeAdapter(ThreadStatus)
+_store = TypeAdapter(ThreadStore)
+
+
+def thread_store() -> ThreadStore:
+    return _store.validate_python(ENV.THREAD_STORE.get())
+
+
+def index_kept() -> bool:
+    """Whether thread changes are written to the index, whichever store answers reads."""
+    return thread_store() != "agent_server"
 
 
 def as_status(value: object) -> ThreadStatus | None:
@@ -36,6 +62,15 @@ def as_status(value: object) -> ThreadStatus | None:
         return _status.validate_python(value)
     except ValidationError:
         return None
+
+
+_metadata = TypeAdapter(dict[str, JsonValue])
+
+
+def _time(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(value) if isinstance(value, str) and value else None
 
 
 class ThreadExistsError(Exception):
@@ -53,6 +88,24 @@ class IndexedThread(BaseModel):
     @classmethod
     def from_row(cls, row: RowMapping) -> Self:
         return cls.model_validate(dict(row))
+
+    @classmethod
+    def from_agent_server(cls, thread: Mapping[str, object]) -> Self | None:
+        """The thread as the local Agent Server keeps it; ``None`` without its timestamps."""
+        raw_metadata = thread.get("metadata")
+        metadata = _metadata.validate_python(raw_metadata if isinstance(raw_metadata, dict) else {})
+        created_at, updated_at = _time(thread.get("created_at")), _time(thread.get("updated_at"))
+        thread_id = thread.get("thread_id")
+        if created_at is None or updated_at is None or not isinstance(thread_id, str):
+            return None
+        return cls(
+            thread_id=thread_id,
+            runtime="mda" if metadata.get(RUNTIME_METADATA_KEY) == MDA_RUNTIME else "local",
+            metadata=metadata,
+            status=as_status(thread.get("status")) or "idle",
+            created_at=created_at,
+            updated_at=updated_at,
+        )
 
     def as_langgraph(self, select: Sequence[SelectField] | None = None) -> dict[str, JsonValue]:
         """The thread as the Agent Server serves it; its state stays with the runtime."""
@@ -196,6 +249,33 @@ async def import_newer(threads: Sequence[IndexedThread]) -> None:
                 }
                 for thread in threads
             ],
+        )
+
+
+async def mirror(thread: IndexedThread) -> None:
+    """Index a thread as the Agent Server just wrote it: its metadata and runtime, not status.
+
+    Its status here follows runs as they start and end, which the Agent Server
+    does not know for threads that run on MDA.
+    """
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO thread_index
+                    (id, thread_id, runtime, metadata, status, created_at, updated_at)
+                VALUES (:id, :thread_id, :runtime, CAST(:metadata AS jsonb), :status,
+                        :created_at, :updated_at)
+                ON CONFLICT (thread_id) DO UPDATE SET
+                    runtime = EXCLUDED.runtime, metadata = EXCLUDED.metadata,
+                    updated_at = greatest(thread_index.updated_at, EXCLUDED.updated_at)
+                """
+            ),
+            {
+                "id": uuid7(),
+                **thread.model_dump(exclude={"metadata"}),
+                "metadata": json.dumps(thread.metadata),
+            },
         )
 
 

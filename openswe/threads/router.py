@@ -1,7 +1,8 @@
 """Serve the Agent Server's thread API from the PostgreSQL thread index.
 
-With ``THREAD_STORE=postgres`` this middleware sits where ``MdaThreadProxy``
-does, in front of the core ``/threads`` and ``/runs`` routes, so every client
+``ThreadIndexMirror`` keeps the index beside the Agent Server with
+``THREAD_STORE=dual``. With ``THREAD_STORE=postgres``, ``ThreadRouter`` sits where
+``MdaThreadProxy`` does, in front of the core ``/threads`` and ``/runs`` routes, so every client
 (the dashboard, the CLI and the backend's own ``client.threads``) keeps working
 unchanged:
 
@@ -21,7 +22,6 @@ import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime
 from typing import Final, Literal
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -46,7 +46,7 @@ from openswe.remote_runtime.client import (
 )
 from openswe.remote_runtime.proxy import LOCAL_HEADER, MdaRuntime, runs_on_mda
 from openswe.threads import index
-from openswe.threads.index import IndexedThread, Runtime, ThreadExistsError, ThreadSearch, as_status
+from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
 from openswe.threads.runtimes import RUNTIMES
 
 logger = logging.getLogger(__name__)
@@ -62,10 +62,6 @@ _CREATE_RUN: Final = re.compile(r"^/runs(?:/stream|/wait)?$")
 _CREATE_CRON: Final = "/runs/crons"
 
 
-def thread_store_postgres() -> bool:
-    return ENV.THREAD_STORE.get() == "postgres"
-
-
 def _routed(scope: Scope) -> bool:
     path: str = scope["path"]
     if _THREAD.match(path):
@@ -78,15 +74,6 @@ def _routed(scope: Scope) -> bool:
         or _COUNT.match(path)
         or _CANCEL_MANY.match(path)
     )
-
-
-def _timestamp(value: JsonValue) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
 
 
 def _for_mda(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
@@ -162,20 +149,17 @@ class ThreadRouter:
         indexed = await index.get(thread_id)
         if indexed is not None:
             return indexed
-        local = await RUNTIMES.local.get(thread_id)
+        local = await RUNTIMES.local.indexed(thread_id)
         if local is None:
             return None
-        metadata = local.get("metadata")
-        metadata = metadata if isinstance(metadata, dict) else {}
-        runtime: Runtime = "mda" if metadata.get(RUNTIME_METADATA_KEY) == MDA_RUNTIME else "local"
         return await index.create(
             thread_id,
-            runtime=runtime,
-            metadata=metadata,
+            runtime=local.runtime,
+            metadata=local.metadata,
             if_exists="do_nothing",
-            status=as_status(local.get("status")) or "idle",
-            created_at=_timestamp(local.get("created_at")),
-            updated_at=_timestamp(local.get("updated_at")),
+            status=local.status,
+            created_at=local.created_at,
+            updated_at=local.updated_at,
         )
 
     async def _create(self, send: Send, body: bytes) -> None:
@@ -411,3 +395,90 @@ class ThreadRouter:
             await self._to_runtime(scope, receive, send, body, thread_id)
             return
         await self.app(scope, receive, send)
+
+
+class ThreadIndexMirror:
+    """ASGI middleware writing each thread change the Agent Server makes to the index too.
+
+    With ``THREAD_STORE=dual`` the Agent Server, behind ``MdaThreadProxy``, still
+    answers every thread call. Once it has made a change, the thread is copied
+    here as the Agent Server now has it, and a started run marks it busy, so
+    moving reads to the index finds it current. A failed copy is logged; the
+    caller already has the Agent Server's answer.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or Headers(scope=scope).get(LOCAL_HEADER) or not _routed(scope):
+            await self.app(scope, receive, send)
+            return
+        path: str = scope["path"]
+        method: str = scope["method"]
+        match = _THREAD.match(path)
+        if match is None:
+            if method == "POST" and _THREADS.match(path):
+                await self._made(scope, receive, send)
+            else:
+                await self.app(scope, receive, send)
+            return
+        thread_id, rest = match["thread_id"], match["rest"] or ""
+        if rest in {"", "/"} and method in {"PATCH", "DELETE"}:
+            recorder = StatusRecorder(send)
+            await self.app(scope, receive, recorder)
+            if recorder.succeeded:
+                await (self._forget(thread_id) if method == "DELETE" else self._copy(thread_id))
+        elif method == "POST" and rest == "/copy":
+            await self._made(scope, receive, send)
+        elif method == "POST" and _CREATE_RUN.match(rest):
+            await self.app(
+                scope, receive, StatusRecorder(send, on_success=self._started(thread_id))
+            )
+        elif method == "POST" and rest == "/commands":
+            body = await read_body(receive)
+            command = json_body(body) or {}
+            started = self._started(thread_id) if command.get("method") == "run.start" else None
+            await self.app(scope, replay(body, receive), StatusRecorder(send, on_success=started))
+        else:
+            await self.app(scope, receive, send)
+
+    async def _made(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """A thread created or copied: indexed by the id the Agent Server answered with."""
+        recorder = StatusRecorder(send, keep_body=True)
+        await self.app(scope, receive, recorder)
+        made = json_body(recorder.body) if recorder.succeeded else None
+        thread_id = made.get("thread_id") if made else None
+        if isinstance(thread_id, str):
+            await self._copy(thread_id)
+
+    def _started(self, thread_id: str) -> Callable[[], Awaitable[None]]:
+        async def started() -> None:
+            await self._copy(thread_id, busy=True)
+
+        return started
+
+    async def _copy(self, thread_id: str, *, busy: bool = False) -> None:
+        try:
+            thread = await RUNTIMES.local.indexed(thread_id)
+            if thread is None:
+                return
+            await index.mirror(thread)
+            if busy:
+                await index.set_status(thread_id, "busy")
+        except Exception:
+            logger.warning(
+                "Copying a thread change to the index failed",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+
+    async def _forget(self, thread_id: str) -> None:
+        try:
+            await index.delete(thread_id)
+        except Exception:
+            logger.warning(
+                "Deleting a thread from the index failed",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )

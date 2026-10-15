@@ -1,5 +1,6 @@
 import json
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -43,16 +44,29 @@ class _Threads:
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         return self.threads.get(thread_id)
 
+    async def indexed(self, thread_id: str) -> index.IndexedThread | None:
+        thread = self.threads.get(thread_id)
+        return None if thread is None else index.IndexedThread.from_agent_server(thread)
+
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
+        now = datetime.now(UTC).isoformat()
         self.threads.setdefault(
             thread_id,
-            {"thread_id": thread_id, "metadata": dict(metadata), "status": "idle", "values": {}},
+            {
+                "thread_id": thread_id,
+                "metadata": dict(metadata),
+                "status": "idle",
+                "values": {},
+                "created_at": now,
+                "updated_at": now,
+            },
         )
 
     async def update(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
         thread = self.threads[thread_id]
         current = thread["metadata"]
         thread["metadata"] = {**(current if isinstance(current, dict) else {}), **metadata}
+        thread["updated_at"] = datetime.now(UTC).isoformat()
 
     async def delete(self, thread_id: str) -> None:
         self.threads.pop(thread_id, None)
@@ -323,3 +337,43 @@ async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.Mon
     copy = await index.get(str(made["thread_id"]))
     assert copy is not None and copy.runtime == "mda" and copy.metadata == {"title": "source"}
     assert copy.thread_id in harness.runtimes.local.threads
+
+
+async def test_with_dual_writes_each_agent_server_change_reaches_the_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    local = harness.runtimes.local
+
+    async def agent_server(scope: Scope, receive: Receive, send: Send) -> None:
+        """The Agent Server, answering thread calls as the index is kept beside it."""
+        message = await receive()
+        body = json.loads(message.get("body") or b"{}")
+        path, method = scope["path"], scope["method"]
+        answer: JsonValue = {}
+        if path == "/threads":
+            await local.create(body["thread_id"], body["metadata"])
+            answer = local.threads[body["thread_id"]]
+        elif method == "PATCH":
+            await local.update(THREAD, body["metadata"])
+            answer = local.threads[THREAD]
+        elif method == "DELETE":
+            await local.delete(THREAD)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": json.dumps(answer).encode()})
+
+    harness.router = router.ThreadIndexMirror(agent_server)
+
+    await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": {"o": "ada"}})
+    await harness.request("PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Fix it"}})
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.metadata == {"o": "ada", "title": "Fix it"}
+
+    # MDA's proxy claims the thread on the Agent Server itself, then starts the run there.
+    await local.update(THREAD, {"runtime": "mda"})
+    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent"})
+    started = await index.get(THREAD)
+    assert started is not None and (started.runtime, started.status) == ("mda", "busy")
+
+    await harness.request("DELETE", f"/threads/{THREAD}")
+    assert await index.get(THREAD) is None

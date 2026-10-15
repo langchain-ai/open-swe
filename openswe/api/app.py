@@ -26,8 +26,9 @@ from openswe.review.eval_report_routes import router as reviewer_eval_report_rou
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
+from openswe.threads.index import thread_store
 from openswe.threads.plan_api import plan_router
-from openswe.threads.router import ThreadRouter, thread_store_postgres
+from openswe.threads.router import ThreadIndexMirror, ThreadRouter
 from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
@@ -149,7 +150,11 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(AuditLogMiddleware)
     # Ahead of the core /threads and /runs routes, which the custom app shadows.
-    app.add_middleware(ThreadRouter if thread_store_postgres() else MdaThreadProxy)
+    store = thread_store()
+    app.add_middleware(ThreadRouter if store == "postgres" else MdaThreadProxy)
+    if store == "dual":
+        # Added last, so outermost: it sees each change once the proxy has answered it.
+        app.add_middleware(ThreadIndexMirror)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)

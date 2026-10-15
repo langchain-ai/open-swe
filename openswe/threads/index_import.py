@@ -1,20 +1,19 @@
 """Bring the thread index up to date with the Agent Server's threads.
 
-Runs when the job worker starts with ``THREAD_STORE=postgres`` and the index is
-not known to be current: on the first switch, and after any time the switch was
-off, when only the Agent Server saw new threads and metadata changes.
+Runs when the job worker starts with the index kept (``THREAD_STORE`` ``dual``
+or ``postgres``) and not known to be current: on the first switch to ``dual``,
+and after any time the index was not kept, when only the Agent Server saw new
+threads and metadata changes. Kept, it stays current through the writes that
+keep it, so moving reads to it imports nothing.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Final
 
-from langgraph_sdk.schema import Thread
-
 from openswe import event_claims
-from openswe.remote_runtime.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.threads import index
-from openswe.threads.index import IndexedThread, as_status
+from openswe.threads.index import INDEXED_FIELDS, IndexedThread
 from openswe.threads.runtimes import RUNTIMES
 
 logger = logging.getLogger(__name__)
@@ -25,10 +24,6 @@ _RUNNING: Final = "index-import"
 # Held while the index is current; released whenever the backend starts without it.
 _CURRENT: Final = "index-current"
 _CURRENT_FOR: Final = timedelta(days=3650)
-
-
-def _time(value: object) -> datetime | None:
-    return datetime.fromisoformat(value) if isinstance(value, str) and value else None
 
 
 async def import_agent_server_threads() -> int:
@@ -50,35 +45,20 @@ async def import_agent_server_threads() -> int:
 async def _import_all() -> int:
     client = RUNTIMES.local.client
     imported = 0
-    # Only what the index keeps: a thread's values are its whole conversation.
     while page := await client.threads.search(
         limit=_PAGE,
         offset=imported,
         sort_by="created_at",
         sort_order="asc",
-        select=["thread_id", "metadata", "status", "created_at", "updated_at"],
+        select=INDEXED_FIELDS,
     ):
-        await index.import_newer([thread for raw in page if (thread := _indexed(raw))])
+        await index.import_newer(
+            [thread for raw in page if (thread := IndexedThread.from_agent_server(raw))]
+        )
         imported += len(page)
         if len(page) < _PAGE:
             break
     return imported
-
-
-def _indexed(thread: Thread) -> IndexedThread | None:
-    metadata = thread.get("metadata") or {}
-    created_at = _time(thread.get("created_at"))
-    updated_at = _time(thread.get("updated_at"))
-    if created_at is None or updated_at is None:
-        return None
-    return IndexedThread(
-        thread_id=thread["thread_id"],
-        runtime="mda" if metadata.get(RUNTIME_METADATA_KEY) == MDA_RUNTIME else "local",
-        metadata=metadata,
-        status=as_status(thread.get("status")) or "idle",
-        created_at=created_at,
-        updated_at=updated_at,
-    )
 
 
 async def mark_index_stale() -> None:

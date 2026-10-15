@@ -16,7 +16,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from openswe.remote_runtime.client import mda_runtime_url
 from openswe.remote_runtime.proxy import LOCAL_HEADER, MdaRuntime
-from openswe.threads.index import Runtime, ThreadStatus, as_status
+from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,13 @@ class _SdkThreads:
         except NotFoundError:
             return None
 
+    async def indexed(self, thread_id: str) -> IndexedThread | None:
+        """The thread as the index keeps it, read without its values."""
+        found = await self.client.threads.search(ids=[thread_id], limit=1, select=INDEXED_FIELDS)
+        return next(
+            (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
+        )
+
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
         await self.client.threads.create(
             thread_id=thread_id, if_exists="do_nothing", metadata=dict(metadata)
@@ -51,8 +58,8 @@ class _SdkThreads:
 
     async def status(self, thread_id: str) -> ThreadStatus | None:
         """The thread's status here; one this runtime does not have has nothing running."""
-        thread = await self.get(thread_id)
-        return "idle" if thread is None else as_status(thread.get("status"))
+        thread = await self.indexed(thread_id)
+        return "idle" if thread is None else thread.status
 
     async def has_history(self, thread_id: str) -> bool:
         """Whether runs already left checkpoints here, which keeps the thread on this runtime."""
