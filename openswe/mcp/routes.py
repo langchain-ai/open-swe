@@ -233,7 +233,7 @@ class PersonalOAuthStart(BaseModel):
     authorization_url: str
 
 
-@user_mcp_router.post("/my-mcps/{name}/oauth/start", response_model=PersonalOAuthStart)
+@user_mcp_router.post("/my-mcps/{name}/oauth/authorization", response_model=PersonalOAuthStart)
 @audit_endpoint
 async def api_start_my_mcp_oauth(
     name: str, request: Request, session: dict[str, Any] = SESSION_DEP
@@ -246,14 +246,14 @@ async def api_start_my_mcp_oauth(
         raise HTTPException(400, str(exc)) from None
 
 
-@user_mcp_router.get("/my-mcps/{name}/oauth/status", response_model=MCPOAuthStatus)
+@user_mcp_router.get("/my-mcps/{name}/oauth", response_model=MCPOAuthStatus)
 async def api_my_mcp_oauth_status(
     name: str, session: dict[str, Any] = SESSION_DEP
 ) -> MCPOAuthStatus:
     return await oauth_status(session["sub"], await _personal_oauth_record(session["sub"], name))
 
 
-@user_mcp_router.post("/my-mcps/{name}/oauth/disconnect", status_code=204)
+@user_mcp_router.delete("/my-mcps/{name}/oauth", status_code=204)
 @audit_endpoint
 async def api_disconnect_my_mcp_oauth(name: str, session: dict[str, Any] = SESSION_DEP) -> None:
     await _personal_oauth_record(session["sub"], name)

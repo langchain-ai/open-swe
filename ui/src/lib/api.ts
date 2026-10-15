@@ -1743,16 +1743,14 @@ export const api = {
   getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
   startMyMCPOAuth: (name: string) =>
     request<{ authorization_url: string }>(
-      `/my-mcps/${encodeURIComponent(name)}/oauth/start`,
+      `/my-mcps/${encodeURIComponent(name)}/oauth/authorization`,
       { method: "POST" }
     ),
   getMyMCPOAuthStatus: (name: string) =>
-    request<MCPOAuthStatus>(
-      `/my-mcps/${encodeURIComponent(name)}/oauth/status`
-    ),
+    request<MCPOAuthStatus>(`/my-mcps/${encodeURIComponent(name)}/oauth`),
   disconnectMyMCPOAuth: (name: string) =>
-    request<void>(`/my-mcps/${encodeURIComponent(name)}/oauth/disconnect`, {
-      method: "POST",
+    request<void>(`/my-mcps/${encodeURIComponent(name)}/oauth`, {
+      method: "DELETE",
     }),
   revealMyMCPHeaders: (name: string) =>
     request<Record<string, string>>(

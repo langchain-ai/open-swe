@@ -489,6 +489,9 @@ async def start_oauth(login: str, record: MCPConnection, session_binding: str) -
     try:
         async with asyncio.timeout(90):
             url = await HostedProvider(record, authorization).begin(record.connection_headers())
+    except MCPOAuthError:
+        logger.warning("Personal MCP OAuth discovery failed", extra={"mcp_name": record.name})
+        raise
     except Exception:
         logger.warning("Personal MCP OAuth discovery failed", extra={"mcp_name": record.name})
         raise MCPOAuthError(
@@ -528,7 +531,8 @@ class PersonalOAuthAuth(httpx2.Auth):
 
     async def access_token(self, rejected: str | None = None) -> str:
         store = AuthorizationStore(self.login, self.record.name)
-        for _ in range(100):
+        delay = 0.1
+        while True:
             authorization, claimed = await store.refresh_claim(self.record, rejected)
             if claimed:
                 with anyio.CancelScope(shield=True):
@@ -553,13 +557,13 @@ class PersonalOAuthAuth(httpx2.Auth):
                     finally:
                         authorization.refreshing_until = 0
                         await store.finish(authorization)
-            elif authorization.refreshing_until > time.time():
-                await asyncio.sleep(0.1)
+            elif (remaining := authorization.refreshing_until - time.time()) > 0:
+                await asyncio.sleep(min(delay, remaining))
+                delay = min(delay * 2, 1)
                 continue
             if authorization.status.status != "connected" or authorization.tokens is None:
                 raise MCPOAuthError(authorization.status.error or _RECONNECT)
             return authorization.tokens.access_token
-        raise MCPOAuthError("MCP authorization is refreshing; try again shortly")
 
     async def async_auth_flow(
         self, request: httpx2.Request
