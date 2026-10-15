@@ -432,10 +432,10 @@ async def test_routes_bind_callback_to_signed_in_owner_and_session(oauth_server,
         base_url="https://openswe.example",
         cookies={"osw_session": "browser-session"},
     ) as client:
-        start = await client.post("/dashboard/api/my-mcps/notion/oauth/start")
+        start = await client.post("/dashboard/api/my-mcps/notion/oauth/authorization")
         assert start.status_code == 200
         state = parse_qs(urlsplit(start.json()["authorization_url"]).query)["state"][0]
-        assert (await client.get("/dashboard/api/my-mcps/notion/oauth/status")).json()[
+        assert (await client.get("/dashboard/api/my-mcps/notion/oauth")).json()[
             "status"
         ] == "connecting"
         session["sub"] = "bob"
@@ -455,12 +455,10 @@ async def test_routes_bind_callback_to_signed_in_owner_and_session(oauth_server,
             == "https://openswe.example/my-settings/connections?mcp_oauth=connected"
         )
         assert callback.headers["referrer-policy"] == "no-referrer"
-        assert (await client.get("/dashboard/api/my-mcps/notion/oauth/status")).json()[
+        assert (await client.get("/dashboard/api/my-mcps/notion/oauth")).json()[
             "status"
         ] == "connected"
-        assert (
-            await client.post("/dashboard/api/my-mcps/notion/oauth/disconnect")
-        ).status_code == 204
-        assert (await client.get("/dashboard/api/my-mcps/notion/oauth/status")).json()[
+        assert (await client.delete("/dashboard/api/my-mcps/notion/oauth")).status_code == 204
+        assert (await client.get("/dashboard/api/my-mcps/notion/oauth")).json()[
             "status"
         ] == "not_connected"
