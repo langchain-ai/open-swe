@@ -50,8 +50,9 @@ class _SdkThreads:
             return
 
     async def status(self, thread_id: str) -> ThreadStatus | None:
+        """The thread's status here; one this runtime does not have has nothing running."""
         thread = await self.get(thread_id)
-        return None if thread is None else as_status(thread.get("status"))
+        return "idle" if thread is None else as_status(thread.get("status"))
 
     async def has_history(self, thread_id: str) -> bool:
         """Whether runs already left checkpoints here, which keeps the thread on this runtime."""

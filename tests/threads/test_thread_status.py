@@ -42,20 +42,29 @@ async def test_threads_stuck_busy_are_settled_from_their_runtime(
     await _busy_since("finished", long_ago)
     await _busy_since("still-running", long_ago)
     await _busy_since("just-started", datetime.now(UTC))
+    await _busy_since("gone-from-runtime", long_ago)
     monkeypatch.setattr(
         status,
         "RUNTIMES",
-        _Runtimes({"finished": "interrupted", "still-running": "busy", "just-started": "idle"}),
+        _Runtimes(
+            {
+                "finished": "interrupted",
+                "still-running": "busy",
+                "just-started": "idle",
+                "gone-from-runtime": "idle",
+            }
+        ),
     )
 
-    assert await status.reconcile_busy_threads() == 1
+    assert await status.reconcile_busy_threads() == 2
 
     settled = {
         thread_id: (await index.get(thread_id))
-        for thread_id in ("finished", "still-running", "just-started")
+        for thread_id in ("finished", "still-running", "just-started", "gone-from-runtime")
     }
     assert {thread_id: thread.status for thread_id, thread in settled.items() if thread} == {
         "finished": "interrupted",
         "still-running": "busy",
         "just-started": "busy",
+        "gone-from-runtime": "idle",
     }

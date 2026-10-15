@@ -16,7 +16,7 @@ from openswe.threads.runtimes import RUNTIMES
 
 logger = logging.getLogger(__name__)
 
-STALE_BUSY: Final = timedelta(minutes=10)
+STALE_BUSY: Final = timedelta(minutes=1)
 RECONCILE_JOB: Final = "thread_status_reconcile"
 RECONCILE_SCHEDULE: Final = "* * * * *"
 
