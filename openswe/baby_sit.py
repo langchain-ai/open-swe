@@ -25,7 +25,7 @@ from openswe.github.ci import (
     is_completed_ci_payload,
 )
 from openswe.github.comments import post_github_comment
-from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, read_result
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repositories import Repository
@@ -512,7 +512,12 @@ def _prompt_scalar(value: Any, limit: int) -> str:
     return " ".join(str(value).split())[:limit]
 
 
-async def _record_evaluation_error(watch: BabySitWatch, detail: str) -> str:
+async def _record_evaluation_error(
+    watch: BabySitWatch, detail: str, *, retryable: bool = False
+) -> str:
+    if retryable:
+        await WATCHES.save(watch)
+        return "error"
     errors = watch.evaluation_errors + 1
     watch.evaluation_errors = errors
     await WATCHES.save(watch)
@@ -521,7 +526,7 @@ async def _record_evaluation_error(watch: BabySitWatch, detail: str) -> str:
     return await _finish_watch(
         watch,
         f"*`/baby-sit` stopped:* {watch.pr_url} could not be evaluated after "
-        f"{MAX_EVALUATION_ERRORS} attempts ({detail}). Check GitHub App access and permissions.",
+        f"{MAX_EVALUATION_ERRORS} attempts ({detail}).",
     )
 
 
@@ -552,9 +557,14 @@ async def _evaluate_watch(key: str) -> str:
 
 async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
     key = watch.key
-    pr = await or_none(pull.pull())
+    result = await read_result(pull.pull())
+    pr = result.value
     if not pr:
-        return await _record_evaluation_error(watch, "pull request unavailable")
+        detail = {
+            "missing": "pull request not found or hidden from the GitHub App (404)",
+            "forbidden": "GitHub denied access to the pull request (401/403)",
+        }.get(result.status, "pull request unavailable")
+        return await _record_evaluation_error(watch, detail, retryable=result.status == "transient")
     # A merged or closed PR already says so where people look; the watch just ends.
     if pr.get("state") != "open":
         await stop_watch(key)
@@ -573,9 +583,14 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         watch.dispatch_keys = []
         watch.alert_keys = []
 
-    checks = await CommitChecks.read(pull.repo, head_sha)
+    check_result = await CommitChecks.read_result(pull.repo, head_sha)
+    checks = check_result.value
     if checks is None:
-        return await _record_evaluation_error(watch, "CI status unavailable")
+        return await _record_evaluation_error(
+            watch,
+            f"CI status unavailable ({check_result.status})",
+            retryable=check_result.status == "transient",
+        )
 
     watch.evaluation_errors = 0
     state, failures = aggregate_check_state(checks.runs, checks.statuses)

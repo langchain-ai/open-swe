@@ -1,12 +1,50 @@
 import importlib
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 
 from openswe.baby_sit import BabySitWatch
+from openswe.github.http import GitHubError
 from openswe.github.pull_request_status import PullRequestClient
 
 manage_tool = importlib.import_module("openswe.tools.manage_baby_sit")
+
+
+@pytest.mark.parametrize(
+    ("status_code", "body", "retryable", "explanation"),
+    [
+        (403, "API rate limit exceeded for installation", True, "temporarily unavailable"),
+        (503, "Service unavailable", True, "temporarily unavailable"),
+        (404, "Not Found", False, "not found"),
+        (403, "Resource not accessible", False, "denied access"),
+    ],
+)
+async def test_start_reports_retryable_github_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    body: str,
+    retryable: bool,
+    explanation: str,
+) -> None:
+    monkeypatch.setattr(
+        manage_tool, "get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
+    )
+    monkeypatch.setattr(
+        manage_tool, "resolve_github_token", AsyncMock(return_value=("token", None))
+    )
+    response = httpx2.Response(
+        status_code,
+        text=body,
+        request=httpx2.Request("GET", "https://api.github.com/repos/acme/repo/pulls/7"),
+    )
+    monkeypatch.setattr(PullRequestClient, "pull", AsyncMock(side_effect=GitHubError(response)))
+
+    result = await manage_tool.manage_baby_sit("https://github.com/acme/repo/pull/7")
+
+    assert result["success"] is False
+    assert bool(result.get("retryable")) is retryable
+    assert explanation in result["error"]
 
 
 async def test_manage_baby_sit_starts_cross_repo_watch_from_github_issue(

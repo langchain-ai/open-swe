@@ -16,6 +16,7 @@ from openswe.github.http import (
     GitHubSignInRequired,
     _compute_backoff,
     github_request,
+    read_result,
 )
 
 
@@ -58,6 +59,38 @@ async def test_validation_listings_reject_incomplete_responses(listing: str) -> 
 
 def _make_response(status_code: int, headers: dict[str, str] | None = None) -> httpx2.Response:
     return httpx2.Response(status_code, headers=headers or {})
+
+
+@pytest.mark.parametrize(
+    ("status_code", "headers", "body", "expected"),
+    [
+        (403, {"X-RateLimit-Remaining": "0"}, "", "transient"),
+        (403, {}, "API rate limit exceeded for installation", "transient"),
+        (403, {}, "secondary rate limit", "transient"),
+        (403, {"Retry-After": "60"}, "", "transient"),
+        (429, {}, "", "transient"),
+        (500, {}, "", "transient"),
+        (404, {}, "Not Found", "missing"),
+        (401, {}, "Bad credentials", "forbidden"),
+        (403, {"X-RateLimit-Remaining": "100"}, "Resource not accessible", "forbidden"),
+    ],
+)
+async def test_read_result_preserves_failure_reason(
+    status_code: int, headers: dict[str, str], body: str, expected: str
+) -> None:
+    response = httpx2.Response(
+        status_code,
+        headers=headers,
+        text=body,
+        request=httpx2.Request("GET", "https://api.github.com/test"),
+    )
+    read = AsyncMock(side_effect=github_http.GitHubError(response))
+
+    result = await read_result(read())
+
+    assert result.value is None
+    assert result.status == expected
+    assert await github_http.or_none(read()) is None
 
 
 class TestComputeBackoff:
