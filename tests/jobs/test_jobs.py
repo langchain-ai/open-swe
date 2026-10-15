@@ -103,3 +103,27 @@ async def test_jobs_are_found_and_cancelled_by_metadata() -> None:
     assert [job.metadata["thread_id"] for job in await queue.find({"thread_id": "t1"})] == ["t1"]
     assert await queue.cancel_matching({"thread_id": "t1"}) == 1
     assert [job.metadata["thread_id"] for job in await queue.find({"kind": "wake"})] == ["t2"]
+
+
+async def test_cancelling_a_running_job_stops_its_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.jobs import worker as worker_module
+
+    monkeypatch.setattr(worker_module, "_HEARTBEAT_SECONDS", 0.05)
+    started = asyncio.Event()
+    finished: list[bool] = []
+    worker = JobWorker()
+
+    @worker.register("probe")
+    async def long_running(job: Job) -> None:
+        started.set()
+        await asyncio.sleep(5)
+        finished.append(True)
+
+    job = await queue.schedule("probe", due_at=_PAST)
+    running = asyncio.create_task(worker.run_due())
+    await started.wait()
+    await queue.cancel(job.id)
+
+    async with asyncio.timeout(2):
+        await running
+    assert finished == []

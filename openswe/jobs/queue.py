@@ -10,6 +10,7 @@ import logging
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from typing import Final, Self
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,15 @@ _RETRY_BASE: Final = timedelta(seconds=30)
 _RETRY_CAP: Final = timedelta(hours=1)
 
 _COLUMNS: Final = "id, kind, payload, due_at, cron, timezone, key, metadata, attempts"
+
+
+class Hold(Enum):
+    """What a running job learns when it renews its claim."""
+
+    HELD = "held"
+    # Queued again under its key: this run finishes, and the replacement stays.
+    REPLACED = "replaced"
+    CANCELLED = "cancelled"
 
 
 class Job(BaseModel):
@@ -50,6 +60,23 @@ class Job(BaseModel):
             raise ValueError("A one-shot job has no next fire time")
         local = moment.astimezone(ZoneInfo(self.timezone))
         return croniter(self.cron, local).get_next(datetime).astimezone(UTC)
+
+    async def hold(self) -> Hold:
+        """Renew this run's claim, unless the job was replaced or cancelled meanwhile."""
+        async with transaction() as conn:
+            row = (
+                await conn.execute(
+                    text(
+                        "UPDATE job SET locked_until = CASE WHEN locked_until IS NULL "
+                        "THEN NULL ELSE clock_timestamp() + CAST(:ttl AS interval) END "
+                        "WHERE id = :id RETURNING locked_until"
+                    ),
+                    {"id": self.id, "ttl": CLAIM_TTL},
+                )
+            ).first()
+        if row is None:
+            return Hold.CANCELLED
+        return Hold.REPLACED if row[0] is None else Hold.HELD
 
     async def finish(self) -> None:
         """Delete a one-shot job, or move a cron job to its next fire time."""
