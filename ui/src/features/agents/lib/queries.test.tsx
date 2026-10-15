@@ -13,10 +13,12 @@ import {
   optimisticThread,
   setAgentThreadStatus,
   setAgentThreadResolved,
+  useAgentThread,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useRenameAgentThread,
   useResolveAgentThread,
+  useSeedAgentThreadDetails,
   useSidebarActiveThread,
   useSidebarPinnedThreads,
   useSidebarRepoThreads,
@@ -470,19 +472,104 @@ describe("sidebar queries", () => {
     )
   })
 
-  it("only inserts the active thread while it is outside the loaded families", async () => {
+  it.each([true, false])(
+    "reactively uses onscreen detail while the sidebar request stalls (preloaded: %s)",
+    async (preloaded) => {
+      const opened = {
+        id: "opened-thread",
+        title: "Onscreen thread",
+        resolved: false,
+      } as AgentThread
+      const getThread = vi
+        .spyOn(agentsApi, "getThread")
+        .mockReturnValue(new Promise<AgentThread>(() => {}))
+      const client = testClient()
+      const key = agentThreadKeys.detail(opened.id)
+      if (preloaded) client.setQueryData(key, opened)
+      const { result } = renderHook(
+        () =>
+          useSidebarActiveThread({
+            activeThreadId: opened.id,
+            loadedThreads: [],
+          }),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={client}>
+              {children}
+            </QueryClientProvider>
+          ),
+        }
+      )
+
+      expect(getThread).toHaveBeenCalledTimes(preloaded ? 0 : 1)
+      if (!preloaded) act(() => client.setQueryData(key, opened))
+      await waitFor(() => expect(result.current).toEqual(opened))
+
+      const updated = { ...opened, title: "Updated onscreen title" }
+      act(() => client.setQueryData(key, updated))
+      await waitFor(() => expect(result.current).toEqual(updated))
+    }
+  )
+
+  it("refetches detail after sidebar rerenders and normalizes its hierarchy", async () => {
+    const worker = { id: "worker", status: "idle" } as AgentThread
+    const opened = {
+      id: "opened-thread",
+      status: "idle",
+      taskWorkers: [worker],
+      taskMembership: { role: "coordinator" },
+    } as AgentThread
+    const updated = { ...opened, title: "Refreshed title" }
+    vi.spyOn(agentsApi, "getThread")
+      .mockResolvedValueOnce(opened)
+      .mockResolvedValue(updated)
+    const client = testClient()
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    renderHook(() => useAgentThread(opened.id), { wrapper })
+    const { result, rerender } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: opened.id,
+          loadedThreads: [],
+        }),
+      { wrapper }
+    )
+    await waitFor(() => expect(result.current?.id).toBe(opened.id))
+    expect(result.current?.taskWorkers).toBeUndefined()
+    expect(result.current?.taskMembership).toBeUndefined()
+    rerender()
+    await act(() =>
+      client.invalidateQueries({ queryKey: agentThreadKeys.detail(opened.id) })
+    )
+    await waitFor(() => expect(result.current?.title).toBe(updated.title))
+    expect(
+      client.getQueryState(agentThreadKeys.detail(opened.id))?.status
+    ).toBe("success")
     profile.data.experimental_task_coordination = true
-    const opened = { id: "opened-thread", resolved: false } as AgentThread
+    rerender()
+    expect(result.current?.taskWorkers).toEqual([worker])
+  })
+
+  it("keeps the deep-linked active thread available as cached pages catch up", async () => {
+    const opened = {
+      id: "opened-thread",
+      source: "slack",
+      repoFullName: "langchain-ai/deepagents",
+      status: "finished",
+      resolved: false,
+    } as AgentThread
     const getThread = vi.spyOn(agentsApi, "getThread").mockResolvedValue(opened)
     const client = testClient()
     const { result, rerender } = renderHook(
-      (loadedThreads: Array<AgentThread>) =>
+      ({ loadedThreads }: { loadedThreads: Array<AgentThread> }) =>
         useSidebarActiveThread({
           activeThreadId: opened.id,
           loadedThreads,
         }),
       {
-        initialProps: [] as Array<AgentThread>,
+        initialProps: { loadedThreads: [] as Array<AgentThread> },
         wrapper: ({ children }) => (
           <QueryClientProvider client={client}>{children}</QueryClientProvider>
         ),
@@ -491,8 +578,15 @@ describe("sidebar queries", () => {
 
     await waitFor(() => expect(result.current).toEqual(opened))
     expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
-    rerender([{ ...opened, id: "coordinator", taskWorkers: [opened] }])
-    expect(result.current).toBeUndefined()
+
+    const cached = { ...opened, title: "Updated title" }
+    rerender({ loadedThreads: [cached] })
+    expect(result.current).toEqual(cached)
+
+    const archived = { ...cached, resolved: true }
+    getThread.mockResolvedValue(archived)
+    rerender({ loadedThreads: [] })
+    await waitFor(() => expect(result.current).toEqual(archived))
   })
 })
 
@@ -571,6 +665,60 @@ function wrapperFor(client: QueryClient) {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
 }
+
+describe("active thread menu metadata", () => {
+  it("refreshes menu actions from the sidebar without replacing live detail", () => {
+    const client = testClient()
+    const detail = optimisticThread("thread-1", { prompt: "Pending prompt" })
+    client.setQueryData(agentThreadKeys.detail(detail.id), detail)
+    const summary: AgentThread = {
+      ...detail,
+      updatedAt: detail.updatedAt + 1,
+      traceUrl: "https://smith.langchain.com/trace/thread-1",
+      sandboxId: "sandbox-1",
+      messages: [],
+      pendingMessages: [],
+    }
+    const { rerender } = renderHook(
+      ({ threads }) => useSeedAgentThreadDetails(threads, detail.id),
+      { initialProps: { threads: [summary] }, wrapper: wrapperFor(client) }
+    )
+    expect(client.getQueryData(agentThreadKeys.detail(detail.id))).toEqual({
+      ...detail,
+      updatedAt: summary.updatedAt,
+      traceUrl: summary.traceUrl,
+      sandboxId: summary.sandboxId,
+      sourceUrl: summary.sourceUrl,
+      sourceAppUrl: summary.sourceAppUrl,
+      automationId: summary.automationId,
+    })
+    const refreshed = client.getQueryData<AgentThread>(
+      agentThreadKeys.detail(detail.id)
+    )
+    const refreshedAt = client.getQueryState(
+      agentThreadKeys.detail(detail.id)
+    )?.dataUpdatedAt
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1000)
+    for (const updatedAt of [detail.updatedAt, summary.updatedAt]) {
+      rerender({ threads: [{ ...summary, updatedAt, sandboxId: null }] })
+      expect(
+        client.getQueryState(agentThreadKeys.detail(detail.id))?.dataUpdatedAt
+      ).toBe(refreshedAt)
+      expect(client.getQueryData(agentThreadKeys.detail(detail.id))).toEqual(
+        refreshed
+      )
+    }
+    rerender({
+      threads: [
+        { ...summary, updatedAt: summary.updatedAt + 1, sandboxId: null },
+      ],
+    })
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(detail.id))
+        ?.sandboxId
+    ).toBeNull()
+  })
+})
 
 describe("optimistic thread mutations", () => {
   const thread = {

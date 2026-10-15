@@ -13,7 +13,6 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
 from openswe.review.session import ReviewSessionMetadata
-from openswe.review.walkthrough import Walkthrough
 from openswe.tasks.flags import task_coordination_enabled
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -45,6 +44,7 @@ from openswe.transcript.subagents import attach_subagents
 from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_search_filters
+from openswe.walkthrough.record import Walkthrough
 from openswe.workspaces.routing import workspace_for_repo
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 

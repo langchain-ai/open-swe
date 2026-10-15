@@ -1,3 +1,3 @@
-/** Native select sized to sit beside the xs action buttons. */
-export const control =
-  "h-5 rounded-xs border border-default bg-surface-level-1 px-space-1 text-xs text-primary"
+/** Quiet inline text that opens something: dotted underline, full colour on hover. */
+export const subtleLink =
+  "text-secondary underline decoration-text-tertiary underline-offset-2 hover:text-primary hover:decoration-current"

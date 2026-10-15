@@ -43,9 +43,8 @@ async def fake_apply(record: Incident, action: str, actor, *, keep_run_id: str =
 
 
 @pytest.fixture
-async def configured(fake_store, monkeypatch):
+async def configured(registry_db, monkeypatch):
     await service.POLICIES.put(
-        "default",
         IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", channel_prefix="inc-"),
     )
     use_config(monkeypatch)
@@ -78,9 +77,7 @@ async def test_start_needs_a_connected_account_and_an_eligible_channel(configure
 
     SlackChannel.fetch.return_value = dict(CHANNEL)
     policy = await service.get_policy()
-    await service.POLICIES.put(
-        "default", policy.model_copy(update={"excluded_channel_ids": ["C7"]})
-    )
+    await service.POLICIES.put(policy.model_copy(update={"excluded_channel_ids": ["C7"]}))
     excluded = await tools.manage_incident("start")
     assert excluded["success"] is False
     channels.enroll_channel.assert_not_awaited()

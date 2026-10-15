@@ -11,8 +11,11 @@ from openswe.credential_scope import (
     pr_author_login,
     private_credential_login,
 )
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.slack import solo_threads
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
+from tests.slack.test_slack_solo_threads import _Harness
 
 slack_breakout_tool = importlib.import_module("openswe.slack.tools.start_new_thread")
 
@@ -113,9 +116,50 @@ class _FakeClient:
 def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: _FakeClient({}))
     monkeypatch.setattr(slack_breakout_tool, "get_slack_permalink", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_breakout_tool,
+        "cached_workspace_settings",
+        AsyncMock(return_value=WorkspaceSettings({"fable_enabled": False})),
+    )
 
 
-async def test_web_breakout_does_not_post_or_bind_slack(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("model", "effort"),
+    [
+        ("unknown:model", None),
+        ("anthropic:claude-fable-5-1", None),
+        ("anthropic:claude-opus-5-5", "none"),
+    ],
+)
+async def test_breakout_rejects_invalid_model_settings_without_creating_thread(
+    monkeypatch: pytest.MonkeyPatch, model: str, effort: str | None
+) -> None:
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: _FakeClient(captured))
+    post = AsyncMock()
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+
+    result = await slack_breakout_tool.slack_breakout_thread(
+        "Title", "Do the thing.", model=model, effort=effort
+    )
+
+    assert result["success"] is False
+    assert "Unsupported" in str(result["error"])
+    options = result["available_models"]
+    assert isinstance(options, list)
+    assert any(option["id"] == "anthropic:claude-opus-5-5" for option in options)
+    assert all(option["id"] != "anthropic:claude-fable-5-1" for option in options)
+    if effort is not None:
+        assert result["available_efforts"] == ["low", "medium", "high", "xhigh", "max"]
+    assert "thread_create" not in captured
+    post.assert_not_awaited()
+
+
+@pytest.mark.parametrize("model", [None, "anthropic:claude-opus-5-5"])
+async def test_web_breakout_does_not_post_or_bind_slack(
+    monkeypatch: pytest.MonkeyPatch, model: str | None
+) -> None:
     monkeypatch.setattr("openswe.run_config.get_config", _config)
     dispatch = AsyncMock(return_value=True)
     post = AsyncMock()
@@ -124,23 +168,44 @@ async def test_web_breakout_does_not_post_or_bind_slack(monkeypatch: pytest.Monk
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", bind)
     result = await slack_breakout_tool.slack_breakout_thread(
-        "Side question", "Explain this", web_only=True
+        "Side question", "Explain this", web_only=True, model=model
     )
     assert result["success"] is True
     assert "slack_url" not in result
     request = dispatch.await_args.args[0]
     assert request.context_thread_ts == _config()["configurable"]["slack_thread"]["thread_ts"]
     assert request.text == "Explain this"
+    assert dispatch.await_args.kwargs["model_choice"] == ((model, "high") if model else None)
     post.assert_not_awaited()
     bind.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
-    ("explicit", "target"),
-    [(None, "C1"), ("C3", "C3")],
+    ("explicit", "target", "model", "effort", "expected_model", "expected_effort"),
+    [
+        (None, "C1", None, None, "anthropic:claude-sonnet-4-5", "high"),
+        ("C3", "C3", None, None, "anthropic:claude-sonnet-4-5", "high"),
+        (None, "C1", "anthropic:claude-opus-5-5", "max", "anthropic:claude-opus-5-5", "max"),
+        (
+            None,
+            "C1",
+            "google_genai:gemini-3.8-flash",
+            None,
+            "google_genai:gemini-3.8-flash",
+            "medium",
+        ),
+        (None, "C1", None, "none", "openai:gpt-6.1-sol", "none"),
+    ],
 )
+@pytest.mark.usefixtures("registry_db")
 async def test_slack_breakout_thread_success(
-    monkeypatch: pytest.MonkeyPatch, explicit: str | None, target: str
+    monkeypatch: pytest.MonkeyPatch,
+    explicit: str | None,
+    target: str,
+    model: str | None,
+    effort: str | None,
+    expected_model: str,
+    expected_effort: str,
 ) -> None:
     permalink = None
     captured: dict[str, Any] = {"stored_mappings": []}
@@ -206,7 +271,6 @@ async def test_slack_breakout_thread_success(
         return {"run_id": "run-123"}
 
     async def fake_store_mapping(
-        client: Any,
         channel_id: str,
         thread_ts: str,
         run_id: str,
@@ -216,7 +280,6 @@ async def test_slack_breakout_thread_success(
     ) -> None:
         captured["stored_mappings"].append(
             {
-                "client": client,
                 "channel_id": channel_id,
                 "thread_ts": thread_ts,
                 "run_id": run_id,
@@ -225,9 +288,8 @@ async def test_slack_breakout_thread_success(
             }
         )
 
-    async def fake_bind(client: Any, channel_id: str, thread_ts: str, thread_id: str) -> str:
+    async def fake_bind(channel_id: str, thread_ts: str, thread_id: str) -> str:
         captured["binding"] = {
-            "client": client,
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "thread_id": thread_id,
@@ -235,7 +297,13 @@ async def test_slack_breakout_thread_success(
         return thread_id
 
     fake_client = _FakeClient(captured)
-    monkeypatch.setattr("openswe.run_config.get_config", _config)
+    routing = _Harness()
+    routing.history = [{"ts": new_ts, "user": "BOT", "bot_id": "B1", "text": "breakout"}]
+    monkeypatch.setattr(solo_threads.SlackClient, "bot", routing.bot)
+    monkeypatch.setattr(solo_threads, "slack_thread_mutation_lock", routing.mutation_lock)
+    config = _config()
+    config["configurable"]["resolved_agent_model_id"] = "openai:gpt-6.1-sol"
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: fake_client)
     monkeypatch.setattr(
@@ -263,8 +331,18 @@ async def test_slack_breakout_thread_success(
         "Investigate follow-up",
         "Use the same repo and investigate the follow-up aspect in detail.",
         channel_id=explicit,
+        model=model,
+        effort=effort,
     )
 
+    assert await solo_threads.allow_solo_thread_followup(
+        fake_client,
+        channel_id=target,
+        thread_ts=new_ts,
+        message_ts="1700000001.0",
+        user_id="U1",
+        explicit_mention=False,
+    )
     expected_thread_id = captured["thread_create"]["thread_id"]
     assert uuid.UUID(expected_thread_id).version == 4
     assert result == {
@@ -325,7 +403,11 @@ async def test_slack_breakout_thread_success(
     assert dispatch["configurable"]["slack_thread"]["thread_ts"] == new_ts
     assert dispatch["configurable"]["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert dispatch["configurable"]["github_login"] == "alice"
-    assert dispatch["configurable"]["agent_model_id"] == "anthropic:claude-sonnet-4-5"
+    assert dispatch["configurable"]["agent_model_id"] == expected_model
+    assert dispatch["configurable"]["agent_effort"] == expected_effort
+    assert dispatch["configurable"].get("model_selection") == (
+        "explicit" if model is not None or effort is not None else None
+    )
     assert "Breakout Instructions" in dispatch["content"]
     assert "## Open SWE Links" in dispatch["content"]
     assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
@@ -480,6 +562,7 @@ async def test_slack_breakout_thread_returns_detail_failure_without_dispatch(
     assert result["success"] is False
     assert result["error"] == "rate_limited: 30"
     assert result["slack_error"] == "rate_limited: 30"
+    assert isinstance(result["hint"], str)
     assert "30s" in result["hint"]
     assert captured["detail_posts"] == 2
     assert captured["sleeps"] == [30]

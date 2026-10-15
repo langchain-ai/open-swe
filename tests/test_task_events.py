@@ -9,11 +9,17 @@ from uuid import uuid4
 from xml.etree import ElementTree
 
 import pytest
+from deepagents.middleware.summarization import (
+    SummarizationEvent,
+    SummarizationState,
+    _DeepAgentsSummarizationMiddleware,
+)
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 
 from openswe import completion
 from openswe.database import postgres
@@ -408,9 +414,14 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
     assert await TaskMessage.owed(_COORDINATOR, checkpoint) == []
 
 
-@pytest.mark.parametrize("thread_id", [_COORDINATOR, _WORKER])
-async def test_running_task_thread_checkpoints_owed_messages_once(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch, thread_id: str
+@pytest.mark.parametrize(
+    ("thread_id", "missing_task_message"), [(_COORDINATOR, False), (_WORKER, True)]
+)
+async def test_repaired_task_thread_checkpoints_owed_messages_once(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    thread_id: str,
+    missing_task_message: bool,
 ) -> None:
     from openswe.middleware import task_coordination
 
@@ -430,8 +441,24 @@ async def test_running_task_thread_checkpoints_owed_messages_once(
         content="Check logout too",
         run_config={},
     )
-    async with postgres.session() as session:
-        await message.record(session)
+    if not missing_task_message:
+        async with postgres.session() as session:
+            await message.record(session)
+    async with postgres.transaction() as conn:
+        if missing_task_message:
+            await conn.execute(text("DROP TABLE task_message"))
+        await conn.execute(text("DELETE FROM alembic_version"))
+        await conn.execute(
+            text(
+                "INSERT INTO alembic_version (version_num) VALUES ('6f06bbadfc02'), ('a823229a905f')"
+            )
+        )
+        await conn.run_sync(
+            postgres.upgrade, postgres.load_migrations(), postgres.SCHEMA, "7d34d8e5b6a3"
+        )
+    if missing_task_message:
+        async with postgres.session() as session:
+            await message.record(session)
     context = await store.TaskMembership.context_for_thread(thread_id)
     middleware = task_coordination.TaskCoordinationMiddleware(thread_id, "owner", True, context)
     monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
@@ -451,44 +478,129 @@ async def test_running_task_thread_checkpoints_owed_messages_once(
         assert saved.delivered_at is not None
 
 
-async def test_first_spawn_adds_task_context_without_changing_system_prompt(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_task_context_is_checkpointed_once_without_changing_request_prefix(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> None:
     from openswe.middleware import task_coordination
 
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", True, None)
-    lookup = AsyncMock(
-        side_effect=AssertionError("Run preference must not be reread per model call")
+    task = store.Task(
+        title="Repair login", workspace_id=uuid4(), coordinator_thread_id=_COORDINATOR
     )
-    monkeypatch.setattr(task_coordination, "task_coordination_enabled", lookup)
-    request = ModelRequest(
-        model=FakeListChatModel(responses=["ok"]),
-        messages=[HumanMessage(content="Repair login")],
-        system_message=SystemMessage(content="Existing instructions"),
+    context = store.TaskContext(
+        task,
+        store.TaskMembership(thread_id=_COORDINATOR, task_id=task.id, role="coordinator"),
     )
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(store.TaskMembership, "context_for_thread", lookup)
+    monkeypatch.setattr(postgres, "configured", lambda: False)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", enabled, None)
+    state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
     received: list[ModelRequest] = []
 
     async def handler(request: ModelRequest) -> ModelResponse:
         received.append(request)
         return ModelResponse(result=[AIMessage(content="ok")])
 
-    await middleware.awrap_model_call(request, handler)
-    task, _ = await store.Task.reserve_worker(
-        _COORDINATOR,
-        _WORKER,
-        title="Repair login",
-        workspace="default",
-        instructions="Fix login",
-        model="openai:gpt-5.5",
-        effort="high",
+    async def model_call() -> None:
+        await middleware.awrap_model_call(
+            ModelRequest(
+                model=FakeListChatModel(responses=["ok"]),
+                messages=list(state["messages"]),
+                system_message=SystemMessage(content="Existing instructions"),
+            ),
+            handler,
+        )
+        assert received[-1].messages == state["messages"]
+
+    assert await middleware.abefore_model(state, Runtime()) is None
+    await model_call()
+    state["messages"] = add_messages(
+        state["messages"],
+        [
+            AIMessage(content="", tool_calls=[{"name": "spawn_worker", "args": {}, "id": "spawn"}]),
+            ToolMessage(content="Worker started", tool_call_id="spawn"),
+        ],
     )
-    await middleware.awrap_model_call(request, handler)
-    assert received[0].system_message == received[1].system_message
-    assert received[1].system_message is not None
-    assert str(task.id) not in received[1].system_message.text
-    assert str(task.id) in received[1].messages[-1].text
-    assert _COORDINATOR in received[1].messages[-1].text
-    assert len(received[0].messages) + 1 == len(received[1].messages)
+    lookup.return_value = context
+    update = await middleware.abefore_model(state, Runtime())
+    assert update is not None
+    assert len(update["messages"]) == 1
+    state["messages"] = add_messages(state["messages"], update["messages"])
+    assert str(task.id) in state["messages"][-1].text
+    assert _COORDINATOR in state["messages"][-1].text
+    await model_call()
+    state["messages"] = add_messages(
+        state["messages"],
+        [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "slack_no_reply_needed", "args": {}, "id": "quiet"}],
+            ),
+            ToolMessage(content="Done", tool_call_id="quiet"),
+        ],
+    )
+    assert await middleware.abefore_model(state, Runtime()) is None
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", enabled, None)
+    assert await middleware.abefore_model(state, Runtime()) is None
+    await model_call()
+    for previous, current in zip(received, received[1:], strict=False):
+        assert previous.system_message == current.system_message
+        assert previous.messages == current.messages[: len(previous.messages)]
+    assert isinstance(received[-1].messages[-1], ToolMessage)
+
+
+async def test_task_context_returns_after_summarization_without_replacing_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.middleware import task_coordination
+
+    task = store.Task(
+        title="Repair login", workspace_id=uuid4(), coordinator_thread_id=_COORDINATOR
+    )
+    context = store.TaskContext(
+        task,
+        store.TaskMembership(thread_id=_COORDINATOR, task_id=task.id, role="coordinator"),
+    )
+    monkeypatch.setattr(postgres, "configured", lambda: False)
+    state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", False, context)
+    initial = await middleware.abefore_model(state, Runtime())
+    assert initial is not None
+    state["messages"] = add_messages(state["messages"], initial["messages"])
+    original_context = state["messages"][-1]
+    for _ in range(2):
+        cutoff = len(state["messages"])
+        state["messages"] = add_messages(
+            state["messages"],
+            [
+                AIMessage(content="", tool_calls=[{"name": "ls", "args": {}, "id": "list"}]),
+                ToolMessage(content="Files", tool_call_id="list"),
+            ],
+        )
+        event: SummarizationEvent = {
+            "cutoff_index": cutoff,
+            "summary_message": HumanMessage(content="Investigating login"),
+            "file_path": None,
+        }
+        state["_summarization_event"] = event
+        before = list(state["messages"])
+        visible_before = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(before, event)
+        assert original_context not in visible_before
+        update = await middleware.abefore_model(state, Runtime())
+        assert update is not None
+        state["messages"] = add_messages(before, update["messages"])
+        assert state["messages"][:-1] == before
+        visible = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(
+            state["messages"], event
+        )
+        assert visible[:-1] == visible_before
+        assert visible[-1].content == original_context.content
+        assert visible[-1].id != original_context.id
+        middleware = task_coordination.TaskCoordinationMiddleware(
+            _COORDINATOR, "owner", False, context
+        )
+        assert await middleware.abefore_model(state, Runtime()) is None
 
 
 async def test_workspace_deletion_cascades_through_tasks_and_messages(registry_db: None) -> None:

@@ -16,7 +16,6 @@ __all__ = [
     "linear_issue_thread_id",
     "pr_comment_thread_id",
     "review_chat_thread_id",
-    "review_style_thread_id",
     "reviewer_thread_id",
     "slack_thread_id",
     "thread_id_from_branch",
@@ -53,10 +52,6 @@ def pr_comment_thread_id(owner: str, repo: str, pr_number: int) -> str:
 def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> str:
     """The one chat a user has about a PR. Per-user: chats are not shared."""
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/chat/{login.lower()}")
-
-
-def review_style_thread_id(owner: str, repo: str) -> str:
-    return _url_uuid(f"{owner}/{repo}/review-style")
 
 
 def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> str:

@@ -1,8 +1,10 @@
+import {
+  InfoRegularIcon,
+  WarningRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Component, createElement, memo, useMemo, useState } from "react"
 import { ChatCenteredTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCenteredText"
-import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
 import { LightbulbIcon } from "@phosphor-icons/react/dist/ssr/Lightbulb"
-import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
 import { WarningOctagonIcon } from "@phosphor-icons/react/dist/ssr/WarningOctagon"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import {
@@ -36,20 +38,6 @@ interface MarkdownProps {
   enlargeImages?: boolean
 }
 
-/**
- * Must stay referentially and structurally stable while a message is streaming.
- * Streamdown keys its animate plugin on JSON.stringify(animated); changing
- * stagger/duration recreates the plugin, resets prevContentLength, and
- * re-animates text that was already on screen.
- */
-const STREAMDOWN_ANIMATED = {
-  sep: "word",
-  animation: "slideUp",
-  duration: 60,
-  stagger: 10,
-  easing: "ease-out",
-} as const
-
 const REMARK_PLUGINS = [
   ...Object.values(defaultRemarkPlugins),
   remarkGithubAlerts,
@@ -66,10 +54,10 @@ const SHIKI_THEME: ["github-light", "github-dark"] = [
 
 /** GitHub's own five alert kinds; the colours live in styles/markdown.css. */
 const ALERTS: Record<string, { label: string; Icon: IconComponent }> = {
-  note: { label: "Note", Icon: InfoIcon },
+  note: { label: "Note", Icon: InfoRegularIcon },
   tip: { label: "Tip", Icon: LightbulbIcon },
   important: { label: "Important", Icon: ChatCenteredTextIcon },
-  warning: { label: "Warning", Icon: WarningIcon },
+  warning: { label: "Warning", Icon: WarningRegularIcon },
   caution: { label: "Caution", Icon: WarningOctagonIcon },
 }
 
@@ -315,7 +303,6 @@ export const Markdown = memo(function Markdown({
           mode={isLive ? "streaming" : "static"}
           parseIncompleteMarkdown={isLive}
           isAnimating={isLive}
-          animated={isLive ? STREAMDOWN_ANIMATED : false}
           shikiTheme={SHIKI_THEME}
           className="streamdown-agent max-w-full min-w-0 space-y-0"
           components={components}

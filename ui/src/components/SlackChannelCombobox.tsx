@@ -1,9 +1,8 @@
+import { CheckIcon, GlobeRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { SpinnerIcon } from "@langchain/macaw-components/Spinner"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
-import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
 import { useMemo, useState } from "react"
@@ -22,7 +21,7 @@ export function SlackChannelIcon({
   const Icon = channel?.is_private
     ? LockSimpleIcon
     : channel?.is_ext_shared
-      ? GlobeIcon
+      ? GlobeRegularIcon
       : HashIcon
   return (
     <Icon className="shrink-0 text-icon-secondary" size={14} weight="regular" />

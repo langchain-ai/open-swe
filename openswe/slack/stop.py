@@ -12,13 +12,13 @@ from openswe.config import ENV
 from openswe.dispatch import dispatch_agent_run, thread_workspace
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import (
+from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
+from openswe.slack.events import claim_slack_event
+from openswe.slack.records import (
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
     store_slack_run_mapping,
 )
-from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
-from openswe.slack.events import claim_slack_event
 from openswe.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
@@ -49,16 +49,10 @@ def _matching_slack_context(
 async def _resolve_stop_target(
     client: LangGraphClient, channel_id: str, message_ts: str
 ) -> tuple[str, str, dict[str, Any], dict[str, Any]] | None:
-    mapping = await lookup_slack_run_mapping(client, channel_id, message_ts)
-    if mapping is None:
-        thread_ts = message_ts
-    else:
-        mapped_thread_ts = mapping.get("thread_ts")
-        if not isinstance(mapped_thread_ts, str) or not mapped_thread_ts:
-            return None
-        thread_ts = mapped_thread_ts
+    mapping = await lookup_slack_run_mapping(channel_id, message_ts)
+    thread_ts = (mapping.thread_ts if mapping else None) or message_ts
 
-    thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+    thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     if not thread_id:
         return None
     try:
@@ -200,7 +194,6 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
     if isinstance(summary_run_id, str) and summary_run_id:
         triggering_user_id = slack_thread.get("triggering_user_id")
         await store_slack_run_mapping(
-            client,
             channel_id,
             thread_ts,
             summary_run_id,
@@ -224,7 +217,7 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     if not isinstance(channel_id, str) or not channel_id:
         return
     client = get_client(url=LANGGRAPH_URL)
-    thread_id = await lookup_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS)
+    thread_id = await lookup_slack_thread_id(channel_id, CODE_CHANNEL_SESSION_TS)
     if not thread_id:
         return
     try:

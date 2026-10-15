@@ -4,11 +4,13 @@ Replaces the per-site ``runs.create`` calls (plus the ``is_thread_active``
 busy-check and the custom store-queue) with one function that uses:
 
 - ``multitask_strategy="interrupt"`` by default — a follow-up halts the active run
-  (progress preserved by the sync checkpoint) and resumes the agent with full
+  (progress preserved by its checkpoints) and resumes the agent with full
   history + the new message; on an idle thread it just starts. Background
   follow-ups such as `/baby-sit` can opt into ``enqueue`` instead.
-- ``durability="sync"`` — checkpoint before each step so a crash/recycle
-  resumes from the last checkpoint instead of losing all work.
+- ``durability="async"`` — checkpoint every step, written while the next one
+  runs, so a crash/recycle resumes from at most a step back instead of losing
+  all work. ``"sync"`` made every step wait on its write (~0.3s per model/tool
+  step in prod); dashboard-started runs already use the platform's async default.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
 - ``stream_resumable=True`` — the run's event stream is retained so a client that
@@ -30,6 +32,7 @@ from datetime import UTC, datetime
 from typing import Any, Self
 from urllib.parse import urlparse
 
+from langgraph.types import Durability
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
@@ -98,9 +101,7 @@ async def _dispatch_input(
     content: ContentBlocks, source: str, configurable: dict[str, Any]
 ) -> RunInput:
     surface: Surface = (
-        source
-        if source in {"slack", "linear", "github", "web", "desktop", "eval"}
-        else "automation"
+        source if source in {"slack", "linear", "github", "web", "eval"} else "automation"
     )  # type: ignore[assignment]
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
@@ -316,7 +317,7 @@ async def _run_user_id(
     if cfg.background_task_completion:
         return None
     try:
-        if (source or cfg.source) in {"dashboard", "web", "desktop"} and cfg.github_login:
+        if (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
         elif cfg.slack_thread and cfg.slack_thread.triggering_user_id:
             user = await User.for_identity("slack", cfg.slack_thread.triggering_user_id)
@@ -345,7 +346,7 @@ async def create_durable_run(
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
-    durability: str = "sync",
+    durability: Durability = "async",
     if_not_exists: str = "create",
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
@@ -354,7 +355,9 @@ async def create_durable_run(
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread.
+    means the caller already created and titled the thread. With MDA_RUNTIME_URL
+    set, threads of people who chose Managed Deep Agents run there; the request
+    goes here regardless and ``openswe.remote_runtime.proxy`` routes it.
     """
     client = client or dispatch_client()
     if thread_title is not None:
@@ -450,10 +453,6 @@ async def dispatch_agent_run(
             else await _dispatch_input(content, source, configurable)
         )
     client = client or dispatch_client()
-    if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:
-        from openswe.thread_feedback import note_feedback_activity
-
-        await note_feedback_activity(thread_id, client=client)
     return await create_durable_run(
         thread_id,
         assistant_id,

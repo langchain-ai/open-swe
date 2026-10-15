@@ -21,6 +21,8 @@ export function AgentThreadPage(props: {
   /** Show this subagent's transcript instead of the thread's own. */
   subagentId?: string
   composerDraft?: { key: number; text: string }
+  /** False when the thread is embedded in a page that names the tab itself. */
+  ownsTitle?: boolean
 }) {
   return (
     <CatchBoundary
@@ -44,11 +46,13 @@ function AgentThreadContent({
   active = true,
   subagentId,
   composerDraft,
+  ownsTitle = true,
 }: {
   threadId: string
   active?: boolean
   subagentId?: string
   composerDraft?: { key: number; text: string }
+  ownsTitle?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)
   const transcript = threadQuery.data?.transcript === "v2"
@@ -70,17 +74,17 @@ function AgentThreadContent({
   }, [active, hasDetail, threadId, threadQuery.isError])
 
   useEffect(() => {
-    if (!active || !title) return
+    if (!active || !ownsTitle || !title) return
     const documentTitle = pageTitle(title)
     document.title = documentTitle
     return () => {
       if (document.title === documentTitle) document.title = pageTitle("Agents")
     }
-  }, [active, title])
+  }, [active, ownsTitle, title])
 
   if (threadQuery.isPending && !timedOut) {
     return (
-      <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+      <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )

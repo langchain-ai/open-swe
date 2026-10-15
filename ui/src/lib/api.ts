@@ -301,23 +301,21 @@ export interface Profile {
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
-  default_model?: string
-  reasoning_effort?: string
-  default_subagent_model?: string | null
-  subagent_reasoning_effort?: string | null
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean
+  auto_human_review_enabled?: boolean
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
-  preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
+  experimental_mcp_ptc?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
+  run_on_mda?: boolean
+  mda_available?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -328,22 +326,19 @@ export interface ProfileUpdate {
   experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
-  default_model: string
-  reasoning_effort: string
-  default_subagent_model?: string | null
-  subagent_reasoning_effort?: string | null
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean | null
+  auto_human_review_enabled?: boolean
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
-  preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
+  experimental_mcp_ptc?: boolean
   experimental_act_as_approval?: boolean
+  run_on_mda?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -380,13 +375,15 @@ export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
-  /** Tri-state adaptive model routing toggle; user preference overrides this org default. */
+  /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
+  /** Threads no person starts run on Managed Deep Agents, when it is configured. */
+  run_on_mda?: boolean
   /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
   managed_tools_gateway_id?: string | null
   org_guidelines?: string | null
@@ -474,12 +471,19 @@ export interface ManagedToolsMissingCredential {
   kind: "oauth" | "secret"
 }
 
+export interface ManagedToolsConnectedService {
+  name: string
+  tool_count: number
+}
+
 export interface ManagedToolsGatewayStatus {
   gateway: ManagedToolsGateway
-  workspaces: string[]
   ready: boolean
   tool_count?: number | null
   missing: ManagedToolsMissingCredential[]
+  connected?: ManagedToolsConnectedService[]
+  /** LangSmith offers no tools until every missing service is connected. */
+  all_required: boolean
 }
 
 /** The card the agent offered in a thread, identified by its tool call. */
@@ -502,6 +506,22 @@ export interface AdminUser {
   display_name: string
   avatar_url: string
   is_admin: boolean
+}
+
+export interface AnnouncementSummary {
+  id: string
+  text: string
+  author: string
+  created_at: string
+  finished_at: string | null
+  recipients: number
+  sent: number
+  failed: number
+}
+
+export interface AnnouncementsView {
+  recipients: number
+  items: Array<AnnouncementSummary>
 }
 
 export interface AdminUsersPage {
@@ -702,8 +722,6 @@ export interface ReposPayload {
   repositories: Array<Repository>
 }
 
-export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
-
 /** What a positive approval assessment does; `null` is the `dry_run` default. */
 export type ReviewApprovalMode = "off" | "dry_run" | "approve"
 
@@ -715,16 +733,8 @@ export interface ReviewStyle {
   full_name: string
   owner?: string
   name?: string
-  status: ReviewStyleStatus
   custom_prompt: string | null
   approval_mode?: ReviewApprovalMode | null
-  analysis_summary: string | null
-  top_reviewers: Array<string>
-  prs_sampled: number
-  reviews_sampled: number
-  analysis_thread_id: string | null
-  analysis_run_id: string | null
-  error: string | null
   created_by?: string
   created_at?: string
   updated_at?: string
@@ -754,8 +764,6 @@ export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
-  local_tracing_project: string | null
-  default_local_tracing_project: string
   default_workspace: string | null
   follow_up_behavior: FollowUpBehavior
 }
@@ -992,30 +1000,6 @@ export interface SubmittedReview {
   id: number
   html_url: string
   state: string
-}
-
-export interface ReviewCommentResult {
-  id: number
-  html_url: string
-}
-
-export interface PrReviewComment {
-  id: number
-  author: string
-  author_avatar_url: string
-  path: string
-  line: number | null
-  side: "LEFT" | "RIGHT"
-  body: string
-  html_url: string
-  created_at: string
-  is_open_swe: boolean
-  // Outdated: the line no longer appears in the current diff, so it can't render inline.
-  is_outdated: boolean
-}
-
-export interface ReviewCommentsPayload {
-  comments: Array<PrReviewComment>
 }
 
 export interface ReviewCounts {
@@ -1420,7 +1404,6 @@ export interface ReviewerEvalProgress {
 }
 
 export interface ReviewerEvalStatus {
-  name: string
   status: "idle" | "starting" | "running" | "completed" | "failed"
   run_name?: string
   langsmith_project: string
@@ -1429,15 +1412,11 @@ export interface ReviewerEvalStatus {
   started_at: string | null
   finished_at: string | null
   created_by: string | null
-  pid: number | null
-  exit_code: number | null
   experiment_url: string | null
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
   worker_id?: string | null
-  trigger?: string | null
-  updated_at: string
 }
 
 export interface HumanReviewRequestResult {
@@ -1522,20 +1501,6 @@ export const api = {
   getApprovalsFile: (full_name: string) =>
     request<ApprovalsFileStatus>(
       `/review-styles/${encodeURIComponent(full_name)}/approvals-file`
-    ),
-  analyzeReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/analyze`,
-      {
-        method: "POST",
-      }
-    ),
-  cancelReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/cancel`,
-      {
-        method: "POST",
-      }
     ),
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
@@ -1846,6 +1811,12 @@ export const api = {
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
     ),
+  listAnnouncements: () => request<AnnouncementsView>("/admin/announcements"),
+  sendAnnouncement: (text: string, test: boolean) =>
+    request<{ test: boolean; recipients: number }>("/admin/announcements", {
+      method: "POST",
+      body: JSON.stringify({ text, test }),
+    }),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   searchPullRequests: (query: string, offset = 0) =>
@@ -1924,13 +1895,18 @@ export const api = {
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
   humanReviewAvailability: (pr: OpenPullRequest) =>
-    request<{ available: boolean }>(
+    request<{
+      available: boolean
+      active: boolean
+      permalink: string
+      blockers: string[]
+    }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
-  requestHumanReview: (pr: OpenPullRequest) =>
+  requestHumanReview: (pr: OpenPullRequest, channel = "") =>
     request<HumanReviewRequestResult>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
-      { method: "POST" }
+      { method: "POST", body: JSON.stringify({ channel }) }
     ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
@@ -2096,21 +2072,6 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
       { method: "POST", body: JSON.stringify(comment) }
     ),
-  listReviewComments: (owner: string, repo: string, number: number) =>
-    request<ReviewCommentsPayload>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
-    ),
-  updateReviewComment: (
-    owner: string,
-    repo: string,
-    number: number,
-    commentId: number,
-    body: string
-  ) =>
-    request<ReviewCommentResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments/${commentId}`,
-      { method: "PATCH", body: JSON.stringify({ body }) }
-    ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   startReviewerEval: (body: ReviewerEvalStartRequest) =>
     request<ReviewerEvalStatus>("/admin/evals/reviewer", {
@@ -2144,8 +2105,13 @@ export function connectService(
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
-    const query = redirectTo
-      ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
+    const target =
+      redirectTo ??
+      (provider === "slack"
+        ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+        : "")
+    const query = target
+      ? `?${new URLSearchParams({ redirect_to: target })}`
       : ""
     window.location.assign(
       `${API_BASE}/dashboard/api/${provider}/login${query}`

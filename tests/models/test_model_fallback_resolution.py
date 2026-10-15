@@ -3,7 +3,6 @@ import runpy
 import pytest
 
 from openswe.dashboard import options
-from openswe.dashboard.agent_overrides import normalize_profile_overrides
 from openswe.dashboard.options import (
     FABLE_MODEL_IDS,
     fable_disabled_fallback,
@@ -55,10 +54,6 @@ def test_profile_response_and_override_defer_deprecated_models(model_id: str, ef
     assert "reasoning_effort" not in profile
     assert "default_subagent_model" not in profile
     assert "subagent_reasoning_effort" not in profile
-    assert normalize_profile_overrides({"default_model": model_id, "reasoning_effort": effort}) == (
-        None,
-        None,
-    )
 
 
 def test_workspace_settings_update_rejects_invalid_effort_for_openai_model() -> None:

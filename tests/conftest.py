@@ -6,20 +6,23 @@ import hmac
 import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
+import httpx2
 import pytest
 
-from openswe import store as agent_store
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
+from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
 from openswe.tools import access as tool_access
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
+from openswe.utils.thread_ops import langgraph_url
 from openswe.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
 
@@ -49,67 +52,6 @@ def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) 
         raise AttributeError(f"no dashboard thread module defines {name!r}")
     for module in modules:
         monkeypatch.setattr(module, name, value)
-
-
-class _FakeStoreNotFoundError(Exception):
-    status_code = 404
-
-
-class FakeStore:
-    """In-memory stand-in for the LangGraph Store, in the SDK's item shape.
-
-    Backs the real ``openswe.store`` code path, so values round-trip through
-    ``model_dump``/``model_validate`` the way they do in production.
-    """
-
-    def __init__(self) -> None:
-        self.items: dict[tuple[str, ...], dict[str, dict[str, Any]]] = {}
-
-    def seed(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
-        self.items.setdefault(tuple(namespace), {})[key] = dict(value)
-
-    def values(self, namespace: Sequence[str]) -> dict[str, dict[str, Any]]:
-        return self.items.get(tuple(namespace), {})
-
-    async def get_item(self, namespace: Sequence[str], key: str) -> dict[str, Any]:
-        value = self.values(namespace).get(key)
-        if value is None:
-            raise _FakeStoreNotFoundError
-        return {"value": dict(value)}
-
-    async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
-        self.seed(namespace, key, value)
-
-    async def delete_item(self, namespace: Sequence[str], key: str) -> None:
-        self.values(namespace).pop(key, None)
-
-    async def search_items(
-        self,
-        namespace: Sequence[str],
-        *,
-        filter: dict[str, Any] | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        matches = [
-            {"key": key, "value": dict(value)}
-            for key, value in self.values(namespace).items()
-            if all(value.get(k) == expected for k, expected in (filter or {}).items())
-        ]
-        return {"items": matches[offset : offset + limit]}
-
-
-class FakeStoreClient:
-    def __init__(self) -> None:
-        self.store = FakeStore()
-
-
-@pytest.fixture
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
-    """Route every ``openswe.store`` access to an in-memory store for this test."""
-    client = FakeStoreClient()
-    monkeypatch.setattr(agent_store, "store_client", lambda: client)
-    return client.store
 
 
 class FakeUserRecords:
@@ -252,18 +194,71 @@ def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
-    bot = {
-        "team_id": "T123",
-        "bot_id": "B123",
-        "user_id": "U123",
-        "app_id": "A123",
-        "name": "Release bot",
-        "created_by": "alice",
-        "created_at": "2026-09-09",
-    }
-    fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
+async def allowed_bot(registry_db: None) -> AllowedSlackBot:
+    bot = AllowedSlackBot(
+        team_id="T123",
+        bot_id="B123",
+        user_id="U123",
+        app_id="A123",
+        name="Release bot",
+        created_by="alice",
+        created_at=datetime(2026, 9, 9, tzinfo=UTC),
+    )
+    await bot.add(None)
     return bot
+
+
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _refusal(url: httpx.URL | httpx2.URL) -> str | None:
+    """Why a test may not reach ``url``: another machine, or the LangGraph server a
+    developer may have running on ``LANGGRAPH_URL``."""
+    if url.host not in _LOOPBACK:
+        reason = "tests never leave this machine"
+    elif (langgraph := httpx.URL(langgraph_url())).host in _LOOPBACK and url.port == langgraph.port:
+        reason = "that is LANGGRAPH_URL, where a developer's LangGraph server may be running"
+    else:
+        return None
+    return f"Refused {url}: {reason}. Fake the boundary this test reaches."
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse real network requests; MockTransport, ASGITransport and local fakes still work."""
+    send_async = httpx.AsyncHTTPTransport.handle_async_request
+    send = httpx.HTTPTransport.handle_request
+    send_async2 = httpx2.AsyncHTTPTransport.handle_async_request
+    send2 = httpx2.HTTPTransport.handle_request
+
+    async def guarded_async(
+        self: httpx.AsyncHTTPTransport, request: httpx.Request
+    ) -> httpx.Response:
+        if refusal := _refusal(request.url):
+            raise httpx.ConnectError(refusal, request=request)
+        return await send_async(self, request)
+
+    def guarded(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        if refusal := _refusal(request.url):
+            raise httpx.ConnectError(refusal, request=request)
+        return send(self, request)
+
+    async def guarded_async2(
+        self: httpx2.AsyncHTTPTransport, request: httpx2.Request
+    ) -> httpx2.Response:
+        if refusal := _refusal(request.url):
+            raise httpx2.ConnectError(refusal, request=request)
+        return await send_async2(self, request)
+
+    def guarded2(self: httpx2.HTTPTransport, request: httpx2.Request) -> httpx2.Response:
+        if refusal := _refusal(request.url):
+            raise httpx2.ConnectError(refusal, request=request)
+        return send2(self, request)
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", guarded_async)
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guarded)
+    monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", guarded_async2)
+    monkeypatch.setattr(httpx2.HTTPTransport, "handle_request", guarded2)
 
 
 @pytest.fixture(autouse=True)
@@ -275,6 +270,15 @@ def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
 def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Serve no dashboard build by default, whatever ``ui/.output`` holds locally."""
     monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path / "no-dashboard-build"))
+
+
+@pytest.fixture(autouse=True)
+async def _close_http_pool() -> AsyncIterator[None]:
+    """Each test runs on its own event loop, which takes its connection pool down with it."""
+    from openswe.utils.http_pool import close_pool
+
+    yield
+    await close_pool()
 
 
 @pytest.fixture(autouse=True)
@@ -310,7 +314,7 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
     The dashboard's opt-in list (loaded by :func:`openswe.review.enabled_repos.is_review_repo_enabled`)
-    is empty in the test environment because there is no live LangGraph Store.
+    is empty in the test environment.
 
     Tests targeting the automatic-review gate should override this fixture or set
     ``monkeypatch.setattr(webhook_common, "is_review_repo_enabled", ...)`` to a stricter stub.

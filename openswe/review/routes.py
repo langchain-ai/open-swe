@@ -11,19 +11,18 @@ from pydantic.alias_generators import to_camel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
+from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
-from openswe.review.analyzer_cron import remove_continual_cron
 from openswe.review.approvals import fetch_approvals_md
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
-    feedback_store,
-    require_assessment_access,
-    save_feedback,
+    PublishedAssessment,
 )
 from openswe.review.chat import (
     ReviewChat,
@@ -35,6 +34,7 @@ from openswe.review.chat import (
 )
 from openswe.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from openswe.review.eval_jobs import (
+    ReviewerEvalStatus,
     ScoreMode,
     Severity,
     get_reviewer_eval_status,
@@ -56,27 +56,21 @@ from openswe.review.reviews import (
     get_review_diff,
     get_review_file_contents,
     get_review_summaries,
-    list_review_comments,
     list_reviews,
     proxy_pr_image,
     trigger_re_review,
     trigger_review_scout,
 )
 from openswe.review.session import ReviewSession
-from openswe.review.style_jobs import (
-    cancel_review_style_analysis,
-    start_bootstrap_analysis,
-    sync_review_style_run_status,
-)
 from openswe.review.styles import (
     REVIEW_STYLES,
     ReviewStyle,
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
-    normalize_repo_full_name,
 )
-from openswe.review.walkthrough import Walkthrough
 from openswe.threads.handlers import mark_review_session_viewed
+from openswe.users.records import user_id_for_login
+from openswe.walkthrough.record import Walkthrough
 
 router = APIRouter(tags=["review"])
 
@@ -108,7 +102,7 @@ async def api_set_enabled_review_repo(
 @router.get("/admin/evals/reviewer")
 async def admin_get_reviewer_eval(
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> dict[str, Any]:
+) -> ReviewerEvalStatus:
     """Status of the latest reviewer eval."""
     return await get_reviewer_eval_status()
 
@@ -135,12 +129,14 @@ class ReviewerEvalStart(BaseModel):
 async def admin_start_reviewer_eval(
     body: ReviewerEvalStart,
     session: dict[str, Any] = ADMIN_DEP,
-) -> dict[str, Any]:
+) -> ReviewerEvalStatus:
     """Launch the reviewer eval in a LangSmith sandbox with the given run config."""
     config = resolve_eval_config()
     config.update(body.model_dump(exclude={"limit"}))
     try:
-        return await start_reviewer_eval(config, body.limit, session.get("email") or session["sub"])
+        return await start_reviewer_eval(
+            config, body.limit, session_user_id(session) or user_id_for_login(session["sub"])
+        )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -149,13 +145,7 @@ async def admin_start_reviewer_eval(
 async def api_list_review_styles(
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[ReviewStyle]:
-    records = await filter_repo_models_for_user(session["sub"], await REVIEW_STYLES.list_all())
-    return [
-        await sync_review_style_run_status(record.full_name)
-        if record.status == "running"
-        else record
-        for record in records
-    ]
+    return await filter_repo_models_for_user(session["sub"], await REVIEW_STYLES.list_all())
 
 
 class ReviewSummaryRef(BaseModel):
@@ -233,8 +223,8 @@ async def get_assessment_feedback(
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback | None:
     login = str(session["sub"])
-    await require_assessment_access(owner, repo, pr_number, review_id, login)
-    return await feedback_store(review_id).get(login.lower())
+    assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
+    return await assessment.feedback_from(login)
 
 
 @router.put("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
@@ -247,7 +237,9 @@ async def submit_assessment_feedback(
     submission: FeedbackSubmission,
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback:
-    return await save_feedback(owner, repo, pr_number, review_id, str(session["sub"]), submission)
+    login = str(session["sub"])
+    assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
+    return await assessment.record_feedback(login, submission)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/preview")
@@ -379,17 +371,6 @@ async def api_dismiss_walkthrough(
     return WalkthroughDismissed(dismissed=await Walkthrough.dismiss(owner, repo, pr_number))
 
 
-@router.get("/reviews/{owner}/{repo}/{pr_number}/comments")
-async def api_list_review_comments(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await list_review_comments(owner, repo, pr_number)
-
-
 @router.post("/reviews/{owner}/{repo}/{pr_number}/comments")
 @audit_endpoint
 async def api_post_review_comment(
@@ -507,32 +488,6 @@ async def api_discard_pending_review(
             repository.pull_request(pr_number), login=session["sub"]
         )
     return PendingReviewDiscarded(discarded=discarded)
-
-
-class ReviewCommentUpdate(BaseModel):
-    body: str
-
-
-@router.patch("/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}")
-@audit_endpoint
-async def api_update_review_comment(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    comment_id: int,
-    comment: ReviewCommentUpdate,
-    session: dict[str, Any] = SESSION_DEP,
-) -> PostedReviewComment:
-    body = comment.body.strip()
-    if not body:
-        raise HTTPException(422, "comment body is required")
-    async with _as_viewer(session, owner, repo) as repository:
-        return await PostedReviewComment.edit(
-            repository.pull_request(pr_number),
-            comment_id,
-            viewer_login=session["sub"],
-            body=body,
-        )
 
 
 # --- PR chat (main agent) ---------------------------------------------------
@@ -679,8 +634,6 @@ async def api_get_review_style(
     record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
-    if record.status == "running":
-        record = await sync_review_style_run_status(full_name)
     return record
 
 
@@ -702,41 +655,6 @@ async def api_update_review_style_prompt(
     return await REVIEW_STYLES.update_prompts(full_name, body)
 
 
-@router.post("/review-styles/{full_name:path}/analyze")
-@audit_endpoint
-async def api_analyze_review_style(
-    full_name: str,
-    session: dict[str, Any] = SESSION_DEP,
-) -> ReviewStyle:
-    full_name = normalize_repo_full_name(full_name)
-    token = await require_repo_access_for_user(session["sub"], full_name)
-    record = await REVIEW_STYLES.get(full_name) or await REVIEW_STYLES.create(
-        full_name, session["sub"]
-    )
-    if record.status == "running":
-        record = await sync_review_style_run_status(full_name)
-        if record.status == "running":
-            raise HTTPException(409, "analysis already running")
-    return await start_bootstrap_analysis(
-        full_name,
-        github_token=token,
-        created_by=session["sub"],
-    )
-
-
-@router.post("/review-styles/{full_name:path}/cancel")
-@audit_endpoint
-async def api_cancel_review_style(
-    full_name: str,
-    session: dict[str, Any] = SESSION_DEP,
-) -> ReviewStyle:
-    full_name = normalize_repo_full_name(full_name)
-    await require_repo_access_for_user(session["sub"], full_name)
-    if not await REVIEW_STYLES.get(full_name):
-        raise HTTPException(404, "review style not found")
-    return await cancel_review_style_analysis(full_name)
-
-
 @router.delete("/review-styles/{full_name:path}")
 @audit_endpoint
 async def api_delete_review_style(
@@ -752,8 +670,5 @@ async def api_delete_review_style(
         from openswe.dashboard.deps import require_admin
 
         require_admin(session)
-    if record.status == "running":
-        await cancel_review_style_analysis(full_name)
-    await remove_continual_cron(full_name)
     await REVIEW_STYLES.delete(full_name)
     return Response(status_code=204)

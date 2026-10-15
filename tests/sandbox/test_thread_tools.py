@@ -23,7 +23,6 @@ from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
 from openswe.sandboxes.tool_data import ToolContext
 from openswe.sandboxes.tool_runtime import ToolSurface
-from tests.conftest import FakeStore
 
 TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
 
@@ -148,7 +147,7 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
 async def test_proxy_refresh_preserves_tools_and_custom_rules(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,
-    fake_store: FakeStore,
+    registry_db: None,
     enabled: bool,
 ) -> None:
     from openswe.dashboard.workspace_settings import (
@@ -300,7 +299,7 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
         large = await http.post(
             "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
-            content=b" " * (tool_routes.MAX_REQUEST_BYTES + 1),
+            content=b" " * (tool_routes.ToolRoute.max_bytes + 1),
         )
         assert large.status_code == 413
         for content in (
@@ -383,7 +382,7 @@ def test_invocation_openapi_declares_raw_arguments_and_result() -> None:
 
 
 async def test_chunked_request_limit_precedes_json_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tool_routes, "MAX_REQUEST_BYTES", 16)
+    monkeypatch.setattr(tool_routes.ToolRoute, "max_bytes", 16)
     app = FastAPI()
     app.include_router(tool_routes.router)
 

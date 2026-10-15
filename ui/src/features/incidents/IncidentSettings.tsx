@@ -1,3 +1,4 @@
+import { CheckIcon } from "@langchain/macaw-components/icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -6,7 +7,6 @@ import { Switch } from "@langchain/macaw-components/Switch"
 import { Text } from "@langchain/macaw-components/Text"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
 import { BroadcastIcon } from "@phosphor-icons/react/dist/ssr/Broadcast"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { useState } from "react"
 import type { ReactNode } from "react"
@@ -81,7 +81,7 @@ function PolicyForm({
     save.mutate(policy)
   }
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} className="space-y-space-4">
       <SettingsSection
         title="Incidents"
         description="Investigate matching Slack channels and maintain incident summaries with Open SWE."
@@ -125,11 +125,11 @@ function PolicyForm({
           </div>
         </SettingsPanel>
         <details>
-          <summary className="cursor-pointer px-4 py-3 text-xs font-medium">
+          <summary className="cursor-pointer px-space-4 py-space-3 text-xs font-medium">
             Model and analysis limits
           </summary>
           <SettingsPanel>
-            <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
+            <div className="grid gap-x-space-5 gap-y-space-5 sm:grid-cols-2">
               <Input
                 size="md"
                 type="number"
@@ -168,12 +168,12 @@ function PolicyForm({
             : "Settings update requested. The policy becomes effective after server validation."}
         </Notice>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-default pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-space-4 border-t border-default pt-space-4">
         <p className="max-w-md text-xs leading-relaxed text-secondary">
           Policy version {initial.version}. Existing matching channels are not
           enrolled unless a new matching rename event is received.
         </p>
-        <div className="flex gap-2">
+        <div className="flex gap-space-2">
           <Button
             color="secondary"
             variant="outlined"
@@ -214,8 +214,8 @@ function SlackConnectionStatus({
         ? "Required Slack scopes are missing."
         : null)
   return (
-    <div className="px-4 py-4">
-      <div className="flex items-start gap-3">
+    <div className="px-space-4 py-space-4">
+      <div className="flex items-start gap-space-3">
         {connectionError ? (
           <WarningCircleIcon
             size={20}
@@ -230,20 +230,20 @@ function SlackConnectionStatus({
           />
         )}
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-medium text-primary">
+          <Text as="h2" variant="h5" weight="medium" color="primary">
             {connectionError
               ? "Slack connection needs attention"
               : "Slack connection configured"}
-          </h2>
+          </Text>
           {connectionError && (
-            <p className="mt-1 text-xs leading-relaxed text-secondary">
+            <p className="mt-space-1 text-xs leading-relaxed text-secondary">
               {connectionError}
             </p>
           )}
-          <dl className="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+          <dl className="mt-space-4 grid grid-cols-1 gap-space-3 text-xs sm:grid-cols-3">
             <div>
               <dt className="text-secondary">Workspace</dt>
-              <dd className="mt-1 font-mono">
+              <dd className="mt-space-1 font-mono">
                 {connection.workspace_id ||
                   policy.workspace_id ||
                   "Not configured"}
@@ -251,7 +251,7 @@ function SlackConnectionStatus({
             </div>
             <div>
               <dt className="text-secondary">Slack app</dt>
-              <dd className="mt-1 font-mono">
+              <dd className="mt-space-1 font-mono">
                 {connection.slack_app_id ||
                   policy.slack_app_id ||
                   "Not configured"}
@@ -259,7 +259,9 @@ function SlackConnectionStatus({
             </div>
             <div>
               <dt className="text-secondary">Last verified</dt>
-              <dd className="mt-1">{formatTime(connection.verified_at)}</dd>
+              <dd className="mt-space-1">
+                {formatTime(connection.verified_at)}
+              </dd>
             </div>
           </dl>
         </div>
@@ -279,7 +281,7 @@ export function IncidentSettings() {
   if (settings.isPending) return <LoadingState />
   if (settings.error)
     return (
-      <div className="p-6">
+      <div className="p-space-5">
         <ErrorState
           error={settings.error}
           retry={() => void settings.refetch()}

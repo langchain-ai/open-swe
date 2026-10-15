@@ -1,20 +1,18 @@
 Update the authenticated requester's ordinary personal settings in a private dashboard thread or linked Slack DM.
 
-Pass only the fields the user asked to change in `settings`; omitted fields stay unchanged. No login, email, thread ID, or on-behalf-of identity is accepted. Use `read_user_settings` to inspect existing values before changing model/effort pairs. Model choices and reasoning-effort combinations use the same validation and stale-model normalization as the dashboard.
+Pass only the fields the user asked to change in `settings`; omitted fields stay unchanged. No login, email, thread ID, or on-behalf-of identity is accepted. Model selection uses workspace defaults and per-thread overrides, not personal settings.
 
 Supported profile fields:
-- `default_model`, `reasoning_effort`: the main-agent model and effort.
-- `default_subagent_model`, `subagent_reasoning_effort`: overrides for a different subagent model; forks using the main model reuse its effort. Set both to null to inherit the main model.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `auto_fix_ci`, `recent_thread_context_enabled`: boolean preferences.
+- `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record. Browser-local Feature Flags tab visibility cannot be changed here.
-- `model_routing_enabled`, `review_draft_prs`: boolean overrides; null inherits the shared default.
+- `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
 Supported dashboard preferences:
 - `default_visibility`: `private` or `public`, for future threads only.
 - `default_workspace`: workspace slug; null clears the default.
-- `local_tracing_project`: tracing project; null clears it. Restart the desktop app after changing this.
 - `follow_up_behavior`: `queue` or `steer`. What a message sent while a run is live does: wait for the run to end, or steer the running agent.
 
 `concierge_mode` (the user's Slack DM with Open SWE as one conversation) is read-only through agent tools. Direct the user to the dashboard settings to enable or disable it; including it rejects the entire patch without saving any fields.

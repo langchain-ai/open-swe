@@ -14,9 +14,9 @@ from langgraph_sdk import get_client
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.slack.events import claim_slack_event
-from openswe.store import now_iso
 from openswe.users import User, UserPreferencesPatch
 from openswe.utils.thread_participants import participant_ids
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 

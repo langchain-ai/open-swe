@@ -6,6 +6,7 @@ recreate rebind. The registry itself lives in ``state``.
 
 import asyncio
 import logging
+import shlex
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from openswe.config import ENV
 from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from openswe.github.sandbox_access import SandboxGitHubAccess, workspace_token
 from openswe.sandboxes.handoff import complete_handoff
+from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from openswe.sandboxes.state import (
@@ -37,7 +39,6 @@ from openswe.sandboxes.state import (
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import TaskMembership
-from openswe.users import User
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.startup_trace import aphase
 from openswe.workspaces.refresh import is_snapshot_stale, maybe_start_update
@@ -50,11 +51,6 @@ from openswe.workspaces.store import (
 logger = logging.getLogger(__name__)
 
 client = get_client()
-
-
-def _owner_login(metadata: dict[str, Any]) -> str | None:
-    owner = metadata.get("owner_login")
-    return owner.strip() if isinstance(owner, str) and owner.strip() else None
 
 
 SandboxSource = Literal["workspace", "base"]
@@ -75,21 +71,12 @@ class SandboxCreateConfig:
         workspace_slug: str | None = None,
         *,
         source: SandboxSource = "workspace",
-        owner_login: str | None = None,
     ) -> SandboxCreateConfig:
-        async def workspace_for_source() -> Workspace | None:
-            # An absent slug is not "no workspace": load_workspace falls back to the
-            # `default` workspace, so "base" has to skip the lookup outright.
-            return None if source == "base" else await load_workspace(workspace_slug)
-
-        workspace, preserve_memory = await asyncio.gather(
-            workspace_for_source(), cls._owner_preserves_memory(owner_login)
-        )
+        workspace = None if source == "base" else await load_workspace(workspace_slug)
         if workspace is not None and workspace.inherit_default_sandbox:
             workspace = await load_workspace(None)
         create_params = workspace.sandbox_create_params() if workspace is not None else {}
-        if preserve_memory:
-            create_params = {**create_params, "preserve_memory_on_stop": True}
+        create_params = {**create_params, "preserve_memory_on_stop": True}
         if workspace is None:
             return cls(snapshot_id=None, create_params=create_params)
         return cls(
@@ -98,22 +85,6 @@ class SandboxCreateConfig:
             create_params=create_params,
             workspace=workspace,
         )
-
-    @staticmethod
-    async def _owner_preserves_memory(owner_login: str | None) -> bool:
-        if not owner_login:
-            return False
-        try:
-            preferences = await User.preferences_for_login(owner_login)
-        except Exception:
-            # A preference only picks how the box stops; it must not block the boot.
-            logger.warning(
-                "Could not load sandbox memory preference",
-                exc_info=True,
-                extra={"owner_login": owner_login},
-            )
-            return False
-        return preferences.preserve_sandbox_memory
 
     @property
     def proxy_config(self) -> dict[str, Any] | None:
@@ -124,9 +95,20 @@ class SandboxCreateConfig:
             return await create_sandbox(
                 snapshot_id=self.snapshot_id,
                 create_params=self.create_params,
+                prepare_work_dir=False,
                 **self.resources,
             )
-        return await create_sandbox(snapshot_id=self.snapshot_id, **self.resources)
+        # The git identity write right after boot readies the work dir in its own round trip.
+        return await create_sandbox(
+            snapshot_id=self.snapshot_id, prepare_work_dir=False, **self.resources
+        )
+
+
+async def _proxy_token(
+    thread_id: str | None, workspace_slug: str | None, repositories: Sequence[str] | None
+) -> SandboxGitHubAccess:
+    async with aphase(thread_id, "sandbox.proxy_token"):
+        return await workspace_token(workspace_slug, repositories=repositories)
 
 
 async def _create_sandbox_with_proxy(
@@ -135,23 +117,30 @@ async def _create_sandbox_with_proxy(
     github_proxy_repositories: Sequence[str] | None = None,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
-    owner_login: str | None = None,
     record_stale_boot: bool = False,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
-        config = await SandboxCreateConfig.resolve(
-            workspace_slug, source=source, owner_login=owner_login
-        )
-    async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
-        sandbox_backend = await config.boot()
+        config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
+    # The proxy token does not depend on the sandbox, so it is minted while the box boots.
+    token = (
+        asyncio.ensure_future(_proxy_token(thread_id, workspace_slug, github_proxy_repositories))
+        if ENV.SANDBOX_TYPE.get() == "langsmith"
+        else None
+    )
+    if token is not None:
+        token.add_done_callback(lambda minted: minted.cancelled() or minted.exception())
+    try:
+        async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
+            sandbox_backend = await config.boot()
+    except BaseException:
+        if token is not None:
+            token.cancel()
+        raise
 
     async with git_identity(thread_id, sandbox_backend):
-        if ENV.SANDBOX_TYPE.get() == "langsmith":
-            async with aphase(thread_id, "sandbox.proxy_token"):
-                access = await workspace_token(
-                    workspace_slug, repositories=github_proxy_repositories
-                )
+        if token is not None:
+            access = await token
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
                 await _configure_proxy(
@@ -276,11 +265,29 @@ async def _refresh_github_proxy_or_fail(
     return sandbox_backend
 
 
+_WORK_DIR_READY = "__open_swe_work_dir_ready__"
+
+
 async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await sandbox_backend.aexecute(
+    """Write the bot identity, and ready the provider's work dir in the same round trip.
+
+    Creating the work dir and proving it writable is the check the work-dir probe
+    makes, so every connection that runs this spares the run that probe.
+    """
+    identity = (
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
-        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
+        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
     )
+    work_dir = declared_work_dir(sandbox_backend)
+    if work_dir is None:
+        await sandbox_backend.aexecute(identity)
+        return
+    quoted = shlex.quote(work_dir)
+    result = await sandbox_backend.aexecute(
+        f"{{ mkdir -p {quoted} && test -w {quoted} && echo {_WORK_DIR_READY}; }}; {identity}"
+    )
+    if _WORK_DIR_READY in result.output:
+        remember_work_dir(sandbox_backend, work_dir)
 
 
 @asynccontextmanager
@@ -500,7 +507,6 @@ async def ensure_sandbox_for_thread(
         if isinstance(metadata_proxy_config, dict)
         else get_recorded_proxy_base_config(thread_id)
     )
-    owner_login = _owner_login(sandbox_metadata)
     created = False
     created_proxy_config: dict[str, Any] | None = None
     async with aphase(thread_id, "sandbox.token_scope"):
@@ -514,7 +520,6 @@ async def ensure_sandbox_for_thread(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
             workspace_slug=workspace_slug,
-            owner_login=owner_login,
             record_stale_boot=record_stale_boot,
         )
         created = True
@@ -551,7 +556,6 @@ async def ensure_sandbox_for_thread(
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
                     workspace_slug=workspace_slug,
-                    owner_login=owner_login,
                     record_stale_boot=record_stale_boot,
                 )
                 created = True
@@ -663,7 +667,6 @@ async def recreate_sandbox_for_thread(
         github_proxy_repositories=await thread_token_repositories(thread_id),
         workspace_slug=workspace_slug,
         source=source,
-        owner_login=_owner_login(metadata),
     )
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")

@@ -72,10 +72,11 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
 }
 
 from langgraph_sdk import get_client  # noqa: E402
+from langgraph_sdk.errors import NotFoundError  # noqa: E402
 
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from openswe.slack.client import lookup_slack_thread_id  # noqa: E402
+from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
@@ -115,7 +116,14 @@ async def control_reset() -> JSONResponse:
     await _cancel_inflight_runs()
     await _reset_durable_pr_state()
     from langgraph_api.cache import cache_set
+    from sqlalchemy import delete
 
+    from openswe.database import postgres
+    from openswe.threads.pins import THREAD_PINS
+    from openswe.users.records import UserRecord
+
+    async with postgres.session() as session:
+        await session.execute(delete(UserRecord).where(UserRecord.kind == THREAD_PINS.kind))
     for owner, repo in ((OWNER, REPO), (SECOND_OWNER, SECOND_REPO)):
         await cache_set(f"__lg_swr__:repo-settings:{owner}/{repo}".lower(), None)
     return JSONResponse({"ok": True})
@@ -127,9 +135,14 @@ async def _cancel_inflight_runs() -> None:
     # Per run, not cancel_many(status=...): the inmem runtime never delivers a status-only interrupt to a running run.
     for thread in await client.threads.search(status="busy", limit=1000):
         thread_id = thread["thread_id"]
-        for status in ("pending", "running"):
-            for run in await client.runs.list(thread_id, status=status, limit=100):
-                await client.runs.cancel(thread_id, run["run_id"], wait=True)
+        try:
+            for status in ("pending", "running"):
+                for run in await client.runs.list(thread_id, status=status, limit=100):
+                    await client.runs.cancel(thread_id, run["run_id"], wait=True)
+        except NotFoundError:
+            # Deleted since the search, so nothing of it is left running. Raising
+            # here aborted the reset before it cleared the durable PR state.
+            continue
 
 
 @app.post("/control/reset-default-workspace")
@@ -171,7 +184,7 @@ async def _reset_durable_pr_state() -> None:
     """
     from openswe.baby_sit import WATCHES, stop_watch
 
-    for watch in await WATCHES.search_all():
+    for watch in await WATCHES.list_active():
         await stop_watch(watch.key)
 
     from sqlalchemy import text
@@ -262,6 +275,23 @@ async def control_repo_merge_methods(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "repo": f"{owner}/{name}", **flags})
 
 
+@app.post("/control/session-upload")
+async def control_reserve_session_upload(request: Request) -> JSONResponse:
+    """Reserve an upload thread as the remote MCP's ``upload_session`` tool does.
+
+    The E2E deployment mounts no remote MCP, so a spec reserves here and then
+    posts to the returned ``upload_url`` with ``upload_token`` as the agent's curl does."""
+    from openswe.threads.session_upload import SessionUploadHeader, reserve_session_upload
+
+    body = await request.json()
+    login = str(body.pop("login"))
+    email = body.pop("email", None)
+    reservation = await reserve_session_upload(
+        SessionUploadHeader.model_validate(body), login, email=email
+    )
+    return JSONResponse(reservation.model_dump())
+
+
 @app.post("/control/pull-request")
 async def control_seed_pull_request(request: Request) -> JSONResponse:
     """Seed an open pull request the PR search returns, without running the agent.
@@ -309,26 +339,42 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/control/walkthrough")
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
-    """Store a one-step walkthrough for a fake pull request's current head, as a scout would."""
-    from openswe.review.walkthrough import FileLines, StepDraft, Walkthrough
+    """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
+    from openswe.github.pull_requests import PullRequest
+    from openswe.walkthrough.diff import parse
+    from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+    from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
     pull = _seeded_pull(body)
-    await Walkthrough.replace(
-        pull["owner"],
-        pull["repo"],
-        pull["number"],
+    changes = parse(
+        "\n".join(
+            f"diff --git a/{file['filename']} b/{file['filename']}\n"
+            f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
+            for file in pull["files"]
+        )
+    )
+    plan = Plan(
         head_sha=pull["head_sha"],
-        merge_base_sha=fakes.base_sha(pull),
-        scout_thread_id="",
-        steps=[
-            StepDraft(
-                title=str(body.get("title") or "Seeded step"),
-                files=[FileLines(path=file["filename"]) for file in pull["files"]],
+        chunks=[
+            PlanChunk(
+                title=str(body.get("title") or "Seeded chunk"),
+                lines=[LineRef.of(line) for change in changes for line in change.lines],
             )
         ],
-        human_input_summary=str(body.get("human_input") or ""),
     )
+    pull_request = await PullRequest(
+        owner=pull["owner"], repo=pull["repo"], number=pull["number"]
+    ).ensure()
+    await Walkthrough.dismiss(pull["owner"], pull["repo"], pull["number"])
+    await Walkthrough.install(
+        pull_request.id,
+        plan,
+        merge_base_sha=fakes.base_sha(pull),
+        changes=changes,
+        replacing=None,
+    )
+    await Walkthrough.set_human_input(pull_request.id, str(body.get("human_input") or ""))
     return JSONResponse({"ok": True})
 
 
@@ -641,11 +687,10 @@ async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> 
     event = payload["event"]
     channel = str(event["channel"])
     thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
-    client = get_client(url=os.environ["LANGGRAPH_URL"])
-    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
+    thread_id = await lookup_slack_thread_id(channel, thread_ts)
     if thread_id is None and channel.startswith("D"):
         # A concierge-mode DM is one conversation keyed on the fixed "0" timestamp.
-        concierge_thread_id = await lookup_slack_thread_id(client, channel, "0")
+        concierge_thread_id = await lookup_slack_thread_id(channel, "0")
         if concierge_thread_id is not None:
             thread_ts, thread_id = "0", concierge_thread_id
     return JSONResponse(
@@ -1254,6 +1299,13 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
     if "vnd.github.diff" in request.headers.get("Accept", ""):
         return Response(fakes.pull_diff(pr), media_type="text/plain")
     return JSONResponse(_gh_pr_json(pr))
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/commits")
+async def gh_list_pull_commits(owner: str, repo: str, number: int) -> JSONResponse:
+    if fakes.find_pull(number, owner, repo) is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse([])
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")

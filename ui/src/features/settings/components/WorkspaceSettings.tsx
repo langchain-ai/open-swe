@@ -21,7 +21,7 @@ import {
 } from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
-import { ManagedToolsGatewaySection } from "./ManagedToolsGatewaySection"
+import { MdaRuntimeSection } from "./MdaRuntimeSection"
 import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
@@ -99,7 +99,7 @@ function GeneralSection({
         workspaces={workspaces}
         channelLabel={channelLabel}
       />
-      <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-space-3">
         {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-error-secondary">
@@ -303,7 +303,7 @@ export function WorkspaceSettingsPanel({
       <LLMGatewaySection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
-      <ManagedToolsGatewaySection scope={scope} canEdit={canEdit} />
+      <MdaRuntimeSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection

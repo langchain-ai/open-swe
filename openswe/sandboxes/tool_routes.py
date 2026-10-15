@@ -4,10 +4,9 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
-from fastapi.routing import APIRoute
 from pydantic import BaseModel
-from starlette.types import Message, Receive, Scope, Send
 
+from openswe.api.body_limit import BodyLimitedRoute
 from openswe.sandboxes.tool_access import (
     TOOLS_HEADER,
     TOOLS_PATH,
@@ -17,23 +16,10 @@ from openswe.sandboxes.tool_access import (
 from openswe.sandboxes.tool_models import ToolArguments, ToolDescription, ToolResult
 
 logger = logging.getLogger(__name__)
-MAX_REQUEST_BYTES = 1024 * 1024
 
 
-class ToolRoute(APIRoute):
-    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
-        size = 0
-
-        async def limited_receive() -> Message:
-            nonlocal size
-            message = await receive()
-            if message["type"] == "http.request":
-                size += len(message.get("body", b""))
-                if size > MAX_REQUEST_BYTES:
-                    raise HTTPException(413, "Tool request is too large")
-            return message
-
-        await super().handle(scope, limited_receive, send)
+class ToolRoute(BodyLimitedRoute):
+    too_large = "Tool request is too large"
 
 
 router = APIRouter(prefix=TOOLS_PATH, tags=["sandbox-tools"], route_class=ToolRoute)

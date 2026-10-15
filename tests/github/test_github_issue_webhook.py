@@ -24,8 +24,11 @@ _TEST_SLACK_SECRET = "test-slack-secret"
 
 
 @pytest.fixture(autouse=True)
-def _incidents_policy_store(fake_store) -> None:
-    """The Slack webhook consults the Incidents policy, which lives in the Store."""
+def _no_incident_channels(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Slack webhook offers each event to Incidents first; none of these channels is one."""
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -535,8 +538,8 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "metadata": {"title": "Review: #1244"},
     }
     assert captured["metadata_token"] == "app-token"
-    assert "<base_sha>base-sha</base_sha>" in prompt
-    assert "<head_sha>head-sha</head_sha>" in prompt
+    assert "\nbase_sha: base-sha\n" in prompt
+    assert "\nhead_sha: head-sha\n" in prompt
     assert config["source"] == "slack"
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244

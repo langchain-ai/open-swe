@@ -17,13 +17,12 @@ from pydantic import BaseModel
 from openswe.slack.client import (
     SlackStreamError,
     append_slack_stream,
-    lookup_slack_thread_id,
     set_slack_thread_status,
     start_slack_stream,
     stop_slack_stream,
-    store_slack_run_mapping,
 )
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
+from openswe.slack.records import lookup_slack_thread_id, store_slack_run_mapping
 from openswe.source_context import SourceContext
 from openswe.tasks.store import TaskMembership, sidebar_memberships
 from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
@@ -185,14 +184,12 @@ class SlackThinkingStream:
             return False
         self.steps[((), "startup")] = initial
         await store_slack_run_mapping(
-            self.client,
             self.channel_id,
             self.mapping_thread_ts,
             self.run_id,
             message_ts=self.original_message_ts,
             triggering_user_id=self.recipient_user_id,
             agent_thread_id=self.thread_id,
-            thinking_message_ts=self.message_ts,
         )
         return True
 
@@ -476,7 +473,7 @@ async def settle_slack_thread_status(channel_id: str, thread_ts: str) -> None:
     """Hand a Slack thread's status back to the conversation mapped there, or clear it."""
     client = langgraph_client()
     try:
-        thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+        thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     except Exception:
         logger.warning(
             "Could not look up the conversation owning a Slack thread's status",

@@ -2,10 +2,12 @@
 
 import hashlib
 import logging
+from datetime import timedelta
 from html import escape
 
 from langgraph_sdk import get_client
 
+from openswe import event_claims
 from openswe.config import ENV
 from openswe.slack.client import (
     get_active_slack_thread,
@@ -14,9 +16,12 @@ from openswe.slack.client import (
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thinking import sync_slack_background_status
-from openswe.store import get_value, put_value
 
 logger = logging.getLogger(__name__)
+
+_NOTICE_SCOPE = "github_review_slack_notice"
+# Long enough to outlast GitHub's redeliveries and anyone redelivering by hand.
+_NOTICE_TTL = timedelta(days=30)
 
 
 async def notify_slack_review(
@@ -31,7 +36,6 @@ async def notify_slack_review(
 ) -> None:
     """Attempt each review notice once, even if Slack's response is lost."""
     client = get_client(url=ENV.LANGGRAPH_URL.get())
-    namespace = ("github_review_slack_notices", thread_id)
     action = "submitted" if edited_body is None else "edited"
     outcome = {
         "approved": "Approved",
@@ -40,7 +44,7 @@ async def notify_slack_review(
     }.get(review_state.lower())
     notice = f"{action} a review on {escape(pr_label, quote=False)}"
     suffix = f": *{outcome}*." if outcome else "."
-    key = hashlib.sha256(
+    digest = hashlib.sha256(
         f"{review_url}:{action}:{edited_at or edited_body or ''}".encode()
     ).hexdigest()
     try:
@@ -52,9 +56,10 @@ async def notify_slack_review(
                 if active != location:
                     location = active
                     continue
-                if await get_value(namespace, key) is not None:
+                if not await event_claims.claim(
+                    _NOTICE_SCOPE, f"{thread_id}:{digest}", ttl=_NOTICE_TTL
+                ):
                     return
-                await put_value(namespace, key, {"review_url": review_url, "action": action})
                 try:
                     await post_slack_thread_reply_with_ts(
                         location["channel_id"],

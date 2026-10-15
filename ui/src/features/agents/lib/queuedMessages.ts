@@ -155,26 +155,6 @@ export function queueEntryToTurn(
   }
 }
 
-/**
- * Reconstructs the composer display shape from a submission queue entry, for
- * local/desktop threads (no `ThreadSource`/transcript to route it through).
- */
-export function queueEntryToMessage(
-  entry: SubmissionQueueEntry
-): QueuedThreadMessage | null {
-  const found = queuedEntryChunks(entry)
-  if (!found) return null
-  const { id, chunks } = found
-  const images = chunks.filter(
-    (chunk): chunk is ImageChunk => chunk.kind === "image"
-  )
-  const content = chunks
-    .filter((chunk) => chunk.kind === "text")
-    .map((chunk) => chunk.text)
-    .join("\n\n")
-  return { id, content, images, createdAt: entry.createdAt.getTime() }
-}
-
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

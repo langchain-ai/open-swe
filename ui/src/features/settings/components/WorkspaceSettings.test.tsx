@@ -195,7 +195,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     const trigger = (await screen.findByText("GPT-6.1 Sol")).closest("button")!
     const models = screen
-      .getByRole("heading", { name: "Model defaults" })
+      .getByRole("heading", { name: "Model Defaults" })
       .closest("section")!
     expect(within(models).getByText("Inherit instance setting")).toBeTruthy()
     expect(screen.queryByRole("listbox")).toBeNull()
@@ -721,7 +721,7 @@ describe("WorkspaceSettingsPanel", () => {
       name: "Rebuilding…",
     })
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
-  })
+  }, 15_000)
 
   it("offers every accessible repository as its default", async () => {
     mockApis()

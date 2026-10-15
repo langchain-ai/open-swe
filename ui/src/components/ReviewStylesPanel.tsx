@@ -1,4 +1,4 @@
-import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Select } from "@langchain/macaw-components/Select"
@@ -23,19 +23,6 @@ const APPROVAL_MODES: Array<{ value: ReviewApprovalMode; label: string }> = [
   { value: "dry_run", label: "Dry run" },
   { value: "approve", label: "Approve" },
 ]
-
-function statusColor(status: ReviewStyle["status"]): BadgeProps["color"] {
-  switch (status) {
-    case "completed":
-      return "success"
-    case "running":
-      return "primary"
-    case "failed":
-      return "error"
-    default:
-      return "secondary"
-  }
-}
 
 export function ReviewStylesPanel() {
   const session = useSession()
@@ -101,43 +88,6 @@ export function ReviewStylesPanel() {
     },
   })
 
-  const analyze = useMutation({
-    mutationFn: (full_name: string) => api.analyzeReviewStyle(full_name),
-    meta: { errorTitle: "Couldn't start analysis" },
-    onMutate: async (full_name) => {
-      await Promise.all([
-        qc.cancelQueries({ queryKey: ["reviewStyles"] }),
-        qc.cancelQueries({ queryKey: ["reviewStyle", full_name] }),
-      ])
-      const snapshot = {
-        list: qc.getQueryData<Array<ReviewStyle>>(["reviewStyles"]),
-        detail: qc.getQueryData<ReviewStyle>(["reviewStyle", full_name]),
-      }
-      const running = (style: ReviewStyle): ReviewStyle =>
-        style.full_name === full_name
-          ? { ...style, status: "running", error: null }
-          : style
-      qc.setQueryData<Array<ReviewStyle>>(["reviewStyles"], (old) =>
-        old?.map(running)
-      )
-      qc.setQueryData<ReviewStyle>(["reviewStyle", full_name], (old) =>
-        old ? running(old) : old
-      )
-      return snapshot
-    },
-    onSuccess: (record) => {
-      qc.setQueryData(["reviewStyle", record.full_name], record)
-    },
-    onError: (_e, full_name, snapshot) => {
-      qc.setQueryData(["reviewStyles"], snapshot?.list)
-      qc.setQueryData(["reviewStyle", full_name], snapshot?.detail)
-    },
-    onSettled: (_record, _error, full_name) => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", full_name] })
-    },
-  })
-
   const savePrompt = useMutation({
     mutationFn: ({
       full_name,
@@ -147,15 +97,6 @@ export function ReviewStylesPanel() {
       custom_prompt: string
     }) => api.saveReviewStylePrompt(full_name, custom_prompt),
     meta: { errorTitle: "Couldn't save prompt" },
-    onSuccess: (record) => {
-      qc.setQueryData(["reviewStyle", record.full_name], record)
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-    },
-  })
-
-  const cancelAnalysis = useMutation({
-    mutationFn: (full_name: string) => api.cancelReviewStyle(full_name),
-    meta: { errorTitle: "Couldn't cancel analysis" },
     onSuccess: (record) => {
       qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
@@ -208,7 +149,7 @@ export function ReviewStylesPanel() {
 
   const githubReauth =
     (repos.isError && isGithubReauthError(repos.error)) ||
-    [saveMode, createStyle, analyze, savePrompt, cancelAnalysis, removeStyle]
+    [saveMode, createStyle, savePrompt, removeStyle]
       .map((m) => m.error)
       .some(isGithubReauthError)
 
@@ -218,17 +159,14 @@ export function ReviewStylesPanel() {
         <Banner intent="error">
           <span className="text-xs text-error-secondary">
             Your GitHub connection expired.{" "}
-            <a
-              href={loginUrl()}
-              className="font-medium underline underline-offset-2"
-            >
+            <MacawLink href={loginUrl()} variant="sm">
               Sign in with GitHub again
-            </a>{" "}
-            to list installed repos and run style analysis.
+            </MacawLink>{" "}
+            to list installed repos.
           </span>
         </Banner>
       )}
-      <section className="space-y-4">
+      <section className="space-y-space-4">
         <AddRepositoryField
           id="add-repo"
           value={addRepo}
@@ -238,19 +176,19 @@ export function ReviewStylesPanel() {
           onAdd={handleAdd}
         />
 
-        <div className="space-y-2">
+        <div className="space-y-space-2">
           <p className="text-xs font-medium text-primary">Repositories</p>
           {(styles.data ?? []).length === 0 ? (
             <p className="text-xs text-secondary">No repositories yet.</p>
           ) : (
-            <ul className="flex flex-wrap gap-2">
+            <ul className="flex flex-wrap gap-space-2">
               {(styles.data ?? []).map((s) => (
                 <li key={s.full_name}>
                   <button
                     type="button"
                     aria-pressed={selected === s.full_name}
                     className={cn(
-                      "inline-flex max-w-full items-center gap-space-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-level-1-hover",
+                      "inline-flex max-w-full items-center gap-space-2 rounded-md border px-space-2 py-space-1 text-left text-xs transition-colors hover:bg-surface-level-1-hover",
                       selected === s.full_name
                         ? "border-brand bg-selected font-medium"
                         : "border-default"
@@ -258,13 +196,6 @@ export function ReviewStylesPanel() {
                     onClick={() => setSelected(s.full_name)}
                   >
                     <span className="truncate">{s.full_name}</span>
-                    <Badge
-                      color={statusColor(s.status)}
-                      size="xs"
-                      className="shrink-0"
-                    >
-                      {s.status}
-                    </Badge>
                   </button>
                 </li>
               ))}
@@ -275,7 +206,7 @@ export function ReviewStylesPanel() {
 
       <div className="border-t border-default" />
 
-      <section className="space-y-3">
+      <section className="space-y-space-3">
         {!selected || !active ? (
           <p className="text-xs text-secondary">
             Select a repository above to view or edit its review style prompt.
@@ -285,55 +216,7 @@ export function ReviewStylesPanel() {
             <p className="text-sm font-medium text-primary">
               {active.full_name}
             </p>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge color={statusColor(active.status)} size="xs">
-                {active.status}
-              </Badge>
-              {active.top_reviewers.length > 0 && (
-                <span className="text-secondary">
-                  Reviewers: {active.top_reviewers.join(", ")}
-                </span>
-              )}
-              {active.prs_sampled > 0 && (
-                <span className="text-secondary">
-                  {active.prs_sampled} PRs · {active.reviews_sampled} reviews
-                  sampled
-                </span>
-              )}
-            </div>
-            {active.analysis_summary && (
-              <p className="text-xs text-secondary">
-                {active.analysis_summary}
-              </p>
-            )}
-            {active.error && (
-              <p className="text-xs text-error-secondary">{active.error}</p>
-            )}
             <div className="flex flex-wrap gap-space-2">
-              <Button
-                color="secondary"
-                variant="normal"
-                size="xs"
-                disabled={active.status === "running" || analyze.isPending}
-                onClick={() => {
-                  void analyze
-                    .mutateAsync(active.full_name)
-                    .catch(() => undefined)
-                }}
-              >
-                {active.status === "running" ? "Analyzing…" : "Run analysis"}
-              </Button>
-              {active.status === "running" && (
-                <Button
-                  color="secondary"
-                  variant="outlined"
-                  size="xs"
-                  disabled={cancelAnalysis.isPending}
-                  onClick={() => cancelAnalysis.mutate(active.full_name)}
-                >
-                  Cancel
-                </Button>
-              )}
               <Button
                 color="primary"
                 size="xs"
@@ -374,12 +257,7 @@ export function ReviewStylesPanel() {
               size="md"
               value={draftPrompt}
               onChange={setDraftPrompt}
-              placeholder={
-                active.status === "running"
-                  ? "Analysis in progress…"
-                  : "Run analysis or write a custom prompt for this repository."
-              }
-              disabled={active.status === "running"}
+              placeholder="Write a custom prompt for this repository."
             />
             <Text as="h3" variant="sm" weight="medium">
               Approval Mode

@@ -1,4 +1,9 @@
-import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
+import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
+import {
+  ReviewChatActionsContext,
+  ReviewExcerptChips,
+} from "@/features/reviews/components/ReviewChatActions"
+import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
 import {
   Profiler,
   useCallback,
@@ -12,10 +17,8 @@ import {
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Icon } from "@langchain/macaw-components/Icon"
-import { Link } from "@langchain/macaw-components/Link"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { formatRelativeTime } from "@/lib/utils"
@@ -30,16 +33,11 @@ import type {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
-import {
-  type ThreadTarget,
-  ThreadTargetMenu,
-} from "@/features/agents/components/ThreadTargetMenu"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -60,6 +58,7 @@ import {
   useAgentSkills,
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
+  useAgentThreadQueuedMessages,
 } from "@/features/agents/lib/queries"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -72,6 +71,7 @@ import type {
   RestoredDraft,
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
+import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
   localThreadKeys,
@@ -149,7 +149,7 @@ export function AgentThreadView({
   const runsElsewhere =
     runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
   // A move takes effect with the next message, whose run carries the checkout over.
-  const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
+  const [handoff, setHandoff] = useState<RunTarget | null>(null)
   // A thread its Mac isn't serving can still move to the cloud, from its pushed work.
   const macOffline = runsElsewhere && handoff !== "cloud"
   // A Slack bot's thread is steered from its Slack thread, never from here.
@@ -215,7 +215,7 @@ export function AgentThreadView({
         ? localBridge.error.message
         : "This Mac could not be reached"
       : null
-  const runsHere: ThreadTarget = runsOnAMac(thread) ? "local" : "cloud"
+  const runsHere: RunTarget = runsOnAMac(thread) ? "local" : "cloud"
   const canMove =
     (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
@@ -240,9 +240,10 @@ export function AgentThreadView({
       sandboxBridgeClient: "desktop",
     }
   }, [handoff, thread.id, thread.repoFullName])
+  // The review page shows its PR's status itself; don't poll it a second time here.
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
-    (thread.pullRequests?.length ?? 0) > 0
+    !reviewChat && (thread.pullRequests?.length ?? 0) > 0
   )
   const pullRequestHealth = pullRequestStatus.isError
     ? undefined
@@ -346,6 +347,24 @@ export function AgentThreadView({
     ]
   )
 
+  // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
+  const submitWithExcerpts = useCallback(
+    async (
+      content: string,
+      images: Array<ImageChunk>,
+      options?: SubmitOptions
+    ) => {
+      const excerpts = reviewChat?.excerpts ?? []
+      await submitMessage(
+        excerpts.length ? serializeExcerpts(content, excerpts) : content,
+        images,
+        options
+      )
+      if (excerpts.length) reviewChat?.clearExcerpts?.()
+    },
+    [reviewChat, submitMessage]
+  )
+
   const commentOnDiff = useCallback(
     (content: string) => submitMessage(content, []),
     [submitMessage]
@@ -371,9 +390,27 @@ export function AgentThreadView({
         key: (previous?.key ?? 0) + 1,
         text: composerDraft.text,
         images: [],
+        replacesSuggestion: true,
       }))
     }
   }
+
+  const question = reviewChat?.question
+  const clearQuestion = reviewChat?.clearQuestion
+  useEffect(() => {
+    if (!question || !canPost) return
+    clearQuestion?.()
+    // oxlint-disable-next-line react/set-state-in-effect
+    submitWithExcerpts(question, []).catch((error: unknown) => {
+      console.error("Could not send the review question", error)
+      setRestoreDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: question,
+        images: [],
+      }))
+    })
+  }, [question, canPost, clearQuestion, submitWithExcerpts])
+
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>
@@ -421,39 +458,6 @@ export function AgentThreadView({
     },
     [restoreQueuedAutoSelection, source, thread.id]
   )
-  const steerInFlightRef = useRef(false)
-  // Send now: the follow-up leaves the queue and goes into the live run.
-  const steerQueued = useCallback(
-    async (entry: QueuedTurn) => {
-      if (steerInFlightRef.current || entry.runId === null) return
-      steerInFlightRef.current = true
-      try {
-        const images = await materializeQueuedImages(entry)
-        if (images === null) return
-        await withdrawQueued(entry)
-        sendMessage.mutate({ content: queuedText(entry), images })
-      } catch (error) {
-        reportError({ title: "Couldn't send the queued message now", error })
-      } finally {
-        steerInFlightRef.current = false
-      }
-    },
-    [materializeQueuedImages, sendMessage, withdrawQueued]
-  )
-  const steerQueuedMessage = useCallback(
-    (id: string) => {
-      const entry = queued.find((candidate) => candidate.message.id === id)
-      if (entry) void steerQueued(entry)
-    },
-    [queued, steerQueued]
-  )
-  // Enter on an empty composer sends the head of the queue now.
-  const steerNextQueuedMessage = useCallback(() => {
-    const entry = queued.find(
-      (candidate) => candidate.runId !== null && isOwnQueued(candidate)
-    )
-    if (entry) void steerQueued(entry)
-  }, [isOwnQueued, queued, steerQueued])
   const removeQueuedMessage = useCallback(
     (id: string) => {
       const entry = queued.find((candidate) => candidate.message.id === id)
@@ -611,8 +615,14 @@ export function AgentThreadView({
     )
   }, [baseMessages, queryClient, queued, thread.id, thread.pendingMessages])
 
+  const agentQueue = useAgentThreadQueuedMessages(thread.id).data
   const queuedRows = useMemo(() => {
     const known = new Set(queued.map((entry) => entry.message.id))
+    // A steered follow-up is already on the transcript under the same id.
+    const shown = new Set([
+      ...known,
+      ...baseMessages.map((message) => message.id),
+    ])
     return [
       ...queued.map((entry) => ({
         id: entry.message.id,
@@ -631,8 +641,17 @@ export function AgentThreadView({
           createdAt: message.createdAt,
           pending: true,
         })),
+      ...(agentQueue ?? [])
+        .filter((message) => !shown.has(message.id))
+        .map((message) => ({
+          id: message.id,
+          content: message.text,
+          createdAt: message.queued_at ? Date.parse(message.queued_at) : 0,
+          waitsForAgent: true,
+          sender: message.sender,
+        })),
     ]
-  }, [isOwnQueued, queued, thread.pendingMessages])
+  }, [agentQueue, baseMessages, isOwnQueued, queued, thread.pendingMessages])
 
   const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedRows.length > 0
@@ -698,39 +717,32 @@ export function AgentThreadView({
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <AgentThreadHeader
-          key={thread.id}
-          title={thread.title}
-          onRename={(title) =>
-            renameThread.mutateAsync({ threadId: thread.id, title })
-          }
-          target={
-            localThread || thread.sandboxBridgeClient === "desktop"
-              ? "This Mac"
-              : thread.sandboxBridgeClient === "cli"
-                ? "Local CLI"
-                : "Cloud"
-          }
-          targetMenu={
-            canMove ? (
-              <ThreadTargetMenu
-                value={handoff ?? runsHere}
-                pending={handoff !== null}
-                disabled={isStreaming}
-                onChange={(next) => setHandoff(next === runsHere ? null : next)}
-              />
-            ) : undefined
-          }
-          panelCollapsed={panelCollapsed}
-          thread={thread}
-        />
+        {/* The review page's rail is the header for its chat. */}
+        {!reviewChat && (
+          <AgentThreadHeader
+            key={thread.id}
+            title={thread.title}
+            onRename={(title) =>
+              renameThread.mutateAsync({ threadId: thread.id, title })
+            }
+            target={
+              localThread || thread.sandboxBridgeClient === "desktop"
+                ? "This Mac"
+                : thread.sandboxBridgeClient === "cli"
+                  ? "Local CLI"
+                  : "Cloud"
+            }
+            panelCollapsed={panelCollapsed}
+            thread={thread}
+          />
+        )}
         {(macOffline || bridgeError) && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent={bridgeError ? "error" : "info"}
               icon={
                 <Icon
-                  icon={LaptopIcon}
+                  icon={LaptopRegularIcon}
                   size="md"
                   className={
                     bridgeError ? "text-icon-error" : "text-icon-brand"
@@ -745,19 +757,25 @@ export function AgentThreadView({
           </div>
         )}
         {thread.status === "error" && !reconnect.label && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent="error"
               action={
                 thread.traceUrl ? (
-                  <Link
-                    href={thread.traceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    variant="sm"
+                  <Button
+                    as={
+                      <a
+                        href={thread.traceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      />
+                    }
+                    color="secondary"
+                    variant="underlined"
+                    size="md"
                   >
                     Open trace
-                  </Link>
+                  </Button>
                 ) : undefined
               }
             >
@@ -769,7 +787,7 @@ export function AgentThreadView({
         {source.kind === "transcript" && source.workspaceStale && (
           <div
             hidden={dismissedWarning === workspaceWarningKey}
-            className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
+            className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3"
           >
             <Banner
               key={workspaceWarningKey}
@@ -786,7 +804,7 @@ export function AgentThreadView({
           </div>
         )}
         {thread.attentionReason === "prs_closed" && !thread.resolved && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent="info"
               icon={
@@ -840,10 +858,14 @@ export function AgentThreadView({
               }
             />
           ) : isHydrating ? (
-            <div className="flex flex-1 items-center justify-center px-6">
+            <div
+              role="status"
+              aria-label="Loading conversation"
+              className="flex flex-1 items-center justify-center px-space-5"
+            >
               <img
                 src={`${import.meta.env.BASE_URL}logo-mark.png`}
-                alt="Loading conversation"
+                alt=""
                 className="size-12 animate-pulse"
               />
             </div>
@@ -873,18 +895,17 @@ export function AgentThreadView({
                           Reload to try again.
                         </Banner>
                       ) : (
-                        <p className="text-xs text-tertiary">
-                          This thread has no messages yet.
-                        </p>
+                        (reviewChat?.emptyState ?? (
+                          <p className="text-xs text-tertiary">
+                            This thread has no messages yet.
+                          </p>
+                        ))
                       )}
                     </div>
                   }
                   onOpenFile={handleOpenFile}
                   loadEarlier={loadEarlier}
                   queuedMessages={queuedRows}
-                  onSteerQueuedMessage={
-                    canPost ? steerQueuedMessage : undefined
-                  }
                   onRemoveQueuedMessage={
                     canPost ? removeQueuedMessage : undefined
                   }
@@ -897,17 +918,6 @@ export function AgentThreadView({
                   settingUpSandbox={settingUpSandbox}
                   pollWorkflowApprovalsWhileActive={isStreaming}
                   contentWidthClass="max-w-3xl"
-                  footer={
-                    !isStreaming &&
-                    !sendMessage.isPending &&
-                    queuedRows.length === 0 && (
-                      <ThreadFeedbackCard
-                        key={`${thread.id}:${session.data?.login ?? ""}`}
-                        threadId={thread.id}
-                        login={session.data?.login ?? null}
-                      />
-                    )
-                  }
                 />
               </Profiler>
             </PullRequestPreviewProvider>
@@ -932,6 +942,7 @@ export function AgentThreadView({
                   fixDisabled={!canPost || sendMessage.isPending}
                 />
               )}
+              {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
                 placeholder={
                   macOffline
@@ -950,8 +961,7 @@ export function AgentThreadView({
                 busy={isStreaming}
                 activeRun={activeRun}
                 onStop={stopRun}
-                onSubmit={submitMessage}
-                onEmptySubmit={steerNextQueuedMessage}
+                onSubmit={submitWithExcerpts}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
@@ -977,6 +987,14 @@ export function AgentThreadView({
                       localWorktreeLabel: "Worktree",
                     }
                   : {})}
+                {...(canMove && {
+                  runTarget: handoff ?? runsHere,
+                  runTargetPending: handoff !== null,
+                  onRunTargetChange: isStreaming
+                    ? undefined
+                    : (next: RunTarget) =>
+                        setHandoff(next === runsHere ? null : next),
+                })}
                 contextUsage={{
                   usedTokens: contextUsage?.tokens,
                   contextWindow: activeModel?.context_window ?? null,
@@ -988,14 +1006,17 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      <AgentGitPanel
-        thread={thread}
-        onComment={canPost ? commentOnDiff : undefined}
-        revealFilePath={revealFilePath}
-        revealChangesKey={revealChangesKey}
-        collapsed={panelCollapsed}
-        onCollapsedChange={handlePanelCollapsedChange}
-      />
+      {/* The review page is already the diff; a second panel only squeezes the chat. */}
+      {!reviewChat && (
+        <AgentGitPanel
+          thread={thread}
+          onComment={canPost ? commentOnDiff : undefined}
+          revealFilePath={revealFilePath}
+          revealChangesKey={revealChangesKey}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+        />
+      )}
     </div>
   )
 }

@@ -8,21 +8,12 @@ import {
   agentThreadKeys,
   invalidateAgentThreadLists,
 } from "@/features/agents/lib/queries"
-import {
-  createDashboardClient,
-  createLocalGraphClient,
-  dashboardFetch,
-} from "@/lib/langgraph-client"
+import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
 import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from "./connection"
 import { useReconnectNotice } from "./useReconnectNotice"
 import { createRunAcceptanceTracker } from "./runAcceptance"
-import type {
-  AgentStream,
-  AgentThreadTransport,
-  RoutedModel,
-  StreamConnection,
-} from "./connection"
+import type { AgentStream, RoutedModel, StreamConnection } from "./connection"
 
 const AGENT_ASSISTANT_ID = "agent"
 
@@ -37,30 +28,21 @@ export interface AgentThreadStream {
  * client — the run keeps going server-side and is picked up again from the
  * thread's history on the next visit — so nothing needs to outlive the page.
  */
-export function useAgentThreadStream({
-  transport,
-  threadId,
-}: {
-  transport: AgentThreadTransport
-  threadId: string
-}): AgentThreadStream {
+export function useAgentThreadStream(threadId: string): AgentThreadStream {
   const queryClient = useQueryClient()
-  const cloud = transport === "cloud"
   const [runAcceptance] = useState(() =>
     createRunAcceptanceTracker(dashboardFetch)
   )
   const client = useMemo(
     () =>
-      cloud
-        ? createDashboardClient(
-            agentsApi.langGraphApiUrl,
-            orderRunStarts(runAcceptance.fetch)
-          )
-        : createLocalGraphClient(),
-    [cloud, runAcceptance]
+      createDashboardClient(
+        agentsApi.langGraphApiUrl,
+        orderRunStarts(runAcceptance.fetch)
+      ),
+    [runAcceptance]
   )
   const { connection, onReconnect, onConnected } = useReconnectNotice()
-  const [runTracker] = useState(() => new RunTracker({ transport, threadId }))
+  const [runTracker] = useState(() => new RunTracker({ threadId }))
   useEffect(() => () => runTracker.dispose(), [runTracker])
   const [isOffloading, setIsOffloading] = useState(false)
   const [routed, setRouted] = useState<RoutedModel | null>(null)
@@ -69,7 +51,7 @@ export function useAgentThreadStream({
     client,
     assistantId: AGENT_ASSISTANT_ID,
     threadId,
-    fetch: cloud ? runAcceptance.fetch : dashboardFetch,
+    fetch: runAcceptance.fetch,
     // Only affects "stream"-kind threads; transcript threads never call
     // useStream() at all.
     queue: "server",
@@ -80,12 +62,11 @@ export function useAgentThreadStream({
     onCreated: () => {
       runTracker.created()
       setIsOffloading(false)
-      if (cloud) invalidateAgentThreadLists(queryClient)
+      invalidateAgentThreadLists(queryClient)
     },
     onCompleted: (info) => {
       runTracker.completed(info.reason)
       setIsOffloading(false)
-      if (!cloud) return
       void queryClient.invalidateQueries({
         queryKey: agentThreadKeys.detail(threadId),
       })
@@ -115,8 +96,6 @@ export function useAgentThreadStream({
     onEvent: (event) => runTracker.event(event),
   })
 
-  // Every send goes through the handle this hook returns, so timing it here
-  // covers the composer and the local prompt queue alike.
   const submit = useCallback<AgentStream["submit"]>(
     (...args) => {
       runTracker.submitted()

@@ -36,8 +36,6 @@ async def slack_start_review_channel(
             extra={"agent_thread_id": cfg.thread_id},
         )
         return {"success": False, "error": "Cannot verify thread credential scope"}
-    if thread_is_private(metadata):
-        return {"success": False, "error": "Private threads cannot open review channels"}
     active = await get_active_slack_thread(
         client, cfg.thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
     )
@@ -58,6 +56,7 @@ async def slack_start_review_channel(
                 team_id=cfg.slack_thread.team_id if cfg.slack_thread else "",
                 workspace_slug=cfg.workspace_slug,
                 invite=invite or [],
+                is_private=thread_is_private(metadata) or origin.channel_id.startswith("D"),
             )
         )
     except GuideStartError as exc:
