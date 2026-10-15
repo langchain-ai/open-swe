@@ -138,12 +138,12 @@ def _messages(value: object) -> list[BaseMessage]:
 class OpenSweBackend:
     """The Open SWE backend, called with one run's token."""
 
-    def __init__(self, run_token: str | None) -> None:
+    def __init__(self, credentials: Mapping[str, str] | None) -> None:
         base = os.environ.get(BACKEND_URL_ENV, "").strip().rstrip("/")
         if not base:
             raise BackendCallError(f"{BACKEND_URL_ENV} is not configured")
         self._base = base
-        self._run_token = run_token
+        self._run_token = credentials.get("run_token") if credentials is not None else None
 
     @property
     def has_run(self) -> bool:

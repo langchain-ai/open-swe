@@ -64,7 +64,7 @@ class OpenSweRunContext(BaseModel):
     # The Agent Server keeps only context keys this schema names, and reads the
     # protocol v2 stream marker from the context it mirrors into configurable.
     event_streaming_v2: bool = Field(default=False, alias="__event_streaming_v2")
-    run_token: str | None = None
+    credentials: dict[str, str] | None = None
     invocation_id: str | None = None
     # JSON, not RunModels: the gRPC runtime serializes only the context's top level.
     models: dict[str, JsonValue] | None = None
@@ -92,7 +92,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     context = OpenSweRunContext.model_validate(
         execution.context if execution is not None and execution.context is not None else {}
     )
-    backend = OpenSweBackend(context.run_token)
+    backend = OpenSweBackend(context.credentials)
     # Runs without a context (state reads, assistant reads) never call a model or a tool.
     catalog = await backend.catalog(None) if backend.has_run else Catalog()
     models = catalog.models or (
