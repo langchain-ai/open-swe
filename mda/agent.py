@@ -75,14 +75,14 @@ def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[A
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
 
 
-def _code_mode(graph: Graph, integrations: Sequence[BaseTool]) -> list[AgentMiddleware]:
-    """The graph's code mode, with every connected integration callable from it."""
+def _code_mode(graph: Graph, code_only: Sequence[BaseTool]) -> list[AgentMiddleware]:
+    """The graph's code mode, with every code-only tool callable from it."""
     if graph == "reviewer":
-        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *integrations])]
-    if not integrations:
+        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *code_only])]
+    if not code_only:
         return []
-    # As the in-process agent's MCP code mode: state per turn, subagents through `task`.
-    return [CodeInterpreterMiddleware(ptc=list(integrations), subagents=False, mode="turn")]
+    # As the in-process agent's code mode: state per turn, subagents through `task`.
+    return [CodeInterpreterMiddleware(ptc=list(code_only), subagents=False, mode="turn")]
 
 
 # `mda build` reads the agent's name without running this factory, so its body
@@ -111,9 +111,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     tools = [backend_tool(spec, backend) for spec in catalog.tools]
     by_name = {tool.name: tool for tool in tools}
     excluded = frozenset(catalog.excluded)
-    # Integrations are called from code: hundreds of their schemas on every call cost
-    # the model its context, and OpenAI answers some such requests with nothing.
-    in_code = [tool for tool in tools if tool.name in catalog.integrations]
+    # Every schema offered costs each call its context, and OpenAI answers some requests
+    # carrying hundreds with nothing; the tools the model seldom needs are called from code.
+    in_code = [tool for tool in tools if tool.name in catalog.code_only]
     offered = [tool for tool in tools if tool not in in_code]
     subagent_tools = {
         subagent.name: offered

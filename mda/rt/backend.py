@@ -79,8 +79,8 @@ class Catalog(BaseModel):
     models: RunModels | None = None
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
-    # Connected integrations' tools the model calls from code rather than directly.
-    integrations: list[str] = []
+    # Tools the model calls from code mode rather than directly.
+    code_only: list[str] = []
 
 
 class PhaseReply(BaseModel):

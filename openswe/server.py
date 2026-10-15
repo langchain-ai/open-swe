@@ -47,7 +47,6 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
-from langchain_quickjs import CodeInterpreterMiddleware
 from langchain_quickjs._ptc import is_valid_ptc_tool_name
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
@@ -125,6 +124,7 @@ from openswe.middleware import (
     task_retry_on,
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
+from openswe.middleware.code_mode import CodeModeMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
@@ -801,17 +801,49 @@ async def _run_mcp_tools(
         return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
 
 
+# Never called from code: the file and shell tools besides reads and writes, the replies a
+# run waits on, and tools whose results update graph state, which a call from code drops.
+_NOT_FROM_CODE = (
+    frozenset(DEEP_AGENT_TOOL_NAMES - {"read_file", "write_file"})
+    | GUIDE_REPLY_TOOLS
+    | frozenset(
+        {
+            "background_execute",
+            "slack_reply",
+            "slack_no_reply_needed",
+            "cli_result",
+            "connect_managed_tools",
+            "switch_to_performance_model",
+            "record_human_input",
+            "load_integration_tools",
+            "spawn_worker",
+            "control_worker",
+            "message_task_thread",
+        }
+    )
+)
+# Everyday tools code mode still offers the model directly.
+_DIRECT_IN_CODE_MODE = frozenset(
+    {"read_file", "write_file", "open_pull_request", "web_search", "fetch_url"}
+)
+
+
 def callable_from_code(name: str) -> bool:
-    """Whether code mode can expose a tool as ``tools.<camelCaseName>``."""
-    return is_valid_ptc_tool_name(name)
+    """Whether code mode can offer a tool as ``tools.<camelCaseName>``."""
+    return name not in _NOT_FROM_CODE and is_valid_ptc_tool_name(name)
+
+
+def code_only(name: str) -> bool:
+    """Whether code mode offers a tool only from code, keeping its schema off the model's list."""
+    return callable_from_code(name) and name not in _DIRECT_IN_CODE_MODE
 
 
 async def _mcp_code_mode(
     thread_id: str,
     tools: Sequence[BaseTool],
     *,
-    additional_tools: Sequence[str | BaseTool] = (),
-) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
+    additional_tools: Sequence[str] = (),
+) -> tuple[CodeModeMiddleware | None, Sequence[BaseTool]]:
     if not (tools or additional_tools):
         return None, tools
     thread = await read_thread(thread_id)
@@ -820,18 +852,12 @@ async def _mcp_code_mode(
     if not profile or profile.get("experimental_mcp_ptc") is not True:
         return None, tools
     ptc_tools: list[str | BaseTool] = [tool for tool in tools if callable_from_code(tool.name)]
-    ptc_tools.extend(
-        tool
-        for tool in additional_tools
-        if (tool if isinstance(tool, str) else tool.name)
-        not in (DEEP_AGENT_TOOL_NAMES - {"read_file", "write_file"})
-        | {"background_execute", "slack_reply", "slack_no_reply_needed", "cli_result"}
-        and callable_from_code(tool if isinstance(tool, str) else tool.name)
-    )
+    ptc_tools.extend(name for name in additional_tools if callable_from_code(name))
     if not ptc_tools:
         return None, tools
     ordinary_tools = [tool for tool in tools if not callable_from_code(tool.name)]
-    return CodeInterpreterMiddleware(ptc=ptc_tools, subagents=False, mode="turn"), ordinary_tools
+    hidden = frozenset(name for name in additional_tools if code_only(name))
+    return CodeModeMiddleware(ptc_tools, code_only=hidden), ordinary_tools
 
 
 def _integration_middleware(
@@ -2186,6 +2212,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
         ]
         tool_surface.dynamic = full_dynamic_tools
+        tool_surface.code_mode = True
         tool_surface.excluded = (
             STOP_SUMMARY_EXCLUDED_TOOLS
             if stop_summary_mode

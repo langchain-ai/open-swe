@@ -81,7 +81,7 @@ from openswe.sandboxes.tool_runtime import (
     ToolSurface,
     tool_parameters,
 )
-from openswe.server import callable_from_code, fallback_model_choice
+from openswe.server import code_only, fallback_model_choice
 from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -309,10 +309,11 @@ class RunSession:
                 # Hidden from the model, as the in-process graph hides them.
                 "excluded": sorted((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS),
                 # Called from MDA's code mode, never offered to the model as schemas.
-                "integrations": sorted(
+                "code_only": sorted(
                     name
-                    for name in tools.keys() & set(self.surface.integration_names)
-                    if callable_from_code(name)
+                    for name in tools
+                    if code_only(name)
+                    and (self.surface.code_mode or name in self.surface.integration_names)
                 ),
             }
         )
