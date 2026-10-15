@@ -1,12 +1,10 @@
-import asyncio
 import logging
 
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
-from openswe.database import postgres
 from openswe.dispatch import create_durable_run, dispatch_client
-from openswe.input_messages import SystemIdentity, build_run_input
+from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
 from openswe.thread_ids import review_scout_thread_id
@@ -16,17 +14,7 @@ from openswe.walkthrough.record import WalkthroughView
 logger = logging.getLogger(__name__)
 
 ASSISTANT_ID = "review-scout"
-SCOUT_IDENTITY: SystemIdentity = {
-    "id": "system:review-scout",
-    "display_name": "Review scout",
-    "platform": "open-swe",
-}
-# The reviewer looks for the walkthrough this long before reviewing without it;
-# the scout keeps running and still stores its result for the review page.
-SCOUT_WAIT_SECONDS = 600
-# The reviewer resumes up to one interval after the scout finishes; a poll is one run read.
-_POLL_SECONDS = 1
-_ACTIVE_STATUSES = frozenset({"pending", "running"})
+_SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
 
 
@@ -203,8 +191,10 @@ class ReviewScoutTarget(BaseModel):
             ASSISTANT_ID,
             input=build_run_input(
                 prompt("review-scout/kickoff", pr_number=self.pr_number),
-                {"sender_id": SCOUT_IDENTITY["id"], "surface": "automation", "kind": "system"},
-                systems=[SCOUT_IDENTITY],
+                {"sender_id": _SENDER_ID, "surface": "automation", "kind": "system"},
+                systems=[
+                    {"id": _SENDER_ID, "display_name": "Review scout", "platform": "open-swe"}
+                ],
             ),
             source="review-scout",
             thread_title=f"Walkthrough: {self.pr_title} #{self.pr_number}",
@@ -213,33 +203,3 @@ class ReviewScoutTarget(BaseModel):
         )
         logger.info("Started review scout", extra=self.log_extra)
         return _ScoutRun.model_validate(run).run_id
-
-    async def _walkthrough_or_scout(self) -> WalkthroughView | str:
-        """This head's walkthrough, or else the id of the scout run writing it."""
-        existing = await self.walkthrough()
-        return existing if existing is not None else await self.start()
-
-    async def await_walkthrough(self) -> WalkthroughView | None:
-        """This head's walkthrough, running the scout first when it has none yet.
-
-        ``None`` when the scout cannot run or does not finish within
-        ``SCOUT_WAIT_SECONDS``. A caller that stops waiting early still leaves
-        the scout started.
-        """
-        if not postgres.configured() or not self.base_sha or not self.head_sha:
-            return None
-        found = await asyncio.shield(self._walkthrough_or_scout())
-        if isinstance(found, WalkthroughView):
-            return found
-        run_id = found
-        # Polled rather than joined: one join request idles for the whole run
-        # and would hit the client's 300s read timeout first.
-        client = dispatch_client()
-        deadline = asyncio.get_running_loop().time() + SCOUT_WAIT_SECONDS
-        while asyncio.get_running_loop().time() < deadline:
-            run = _ScoutRun.model_validate(await client.runs.get(self.thread_id, run_id))
-            if run.status not in _ACTIVE_STATUSES:
-                return await self.walkthrough()
-            await asyncio.sleep(_POLL_SECONDS)
-        logger.warning("Review scout did not finish in time for the reviewer", extra=self.log_extra)
-        return None

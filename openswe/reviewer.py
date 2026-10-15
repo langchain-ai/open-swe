@@ -19,11 +19,8 @@ import asyncio
 import logging
 import posixpath
 import re
-import time
-import uuid
 import warnings
-from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, NamedTuple, NotRequired, cast
+from typing import Any, NamedTuple, NotRequired, cast
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +36,15 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware, OmitFromOutput
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
-from langgraph.prebuilt.tool_node import ToolCallRequest
-from langgraph.types import Command
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.thread_token import cache_github_token_for_thread
-from openswe.input_messages import build_input_messages, visible_dynamic_context_hashes
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ModelCallTimeoutMiddleware,
@@ -66,10 +59,8 @@ from openswe.middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from openswe.middleware.message_content import content_to_text
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
@@ -86,7 +77,6 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
-from openswe.review_scout.launch import SCOUT_IDENTITY, SCOUT_WAIT_SECONDS, ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -127,7 +117,6 @@ from openswe.utils.startup_trace import aphase
 from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
-_WALKTHROUGH_POLL_SECONDS = 2
 
 
 def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
@@ -271,12 +260,6 @@ def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
             "</step>"
         )
     return prompt("reviewer/walkthrough", steps="\n".join(steps))
-
-
-def _walkthrough_context(walkthrough: WalkthroughView | None) -> str:
-    """The scout's steps and its summary of what people asked for, or ``""`` without either."""
-    blocks = (_format_walkthrough(walkthrough), _format_human_input(walkthrough))
-    return "\n\n".join(block for block in blocks if block)
 
 
 def _build_first_review_context(
@@ -535,9 +518,6 @@ class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
     review_approval_policy: NotRequired[str | None]
-    # Epoch seconds until which the reviewer looks for a walkthrough the scout had not
-    # written by the end of preparation; ``None`` once delivered or not awaited.
-    walkthrough_wait_until: NotRequired[Annotated[float | None, OmitFromOutput]]
 
 
 async def _cached_org_guidelines(workspace: str | None) -> str | None:
@@ -655,7 +635,6 @@ async def prepare_reviewer_run(
     runtime: Runtime,
 ) -> dict[str, Any]:
     """Ready the sandbox, checkout and diff, and render this run's system prompt."""
-    prepare_started = time.time()
     cfg = RunConfig.from_config(config)
     repo_owner = cfg.repo.owner if cfg.repo else ""
     repo_name = cfg.repo.name if cfg.repo else ""
@@ -791,24 +770,19 @@ async def prepare_reviewer_run(
             )
             return ""
 
-    async def _await_walkthrough() -> WalkthroughView | None:
+    # The scout runs only when someone asks for a walkthrough; the review uses one
+    # already written for this head and never waits for it.
+    async def _fetch_walkthrough() -> WalkthroughView | None:
         if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
             return None
-        pr_title, _ = await pr_overview_task
-        target = ReviewScoutTarget(
-            owner=repo_owner,
-            repo=repo_name,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            base_sha=base_sha,
-            head_sha=head_sha,
-            workspace_slug=cfg.workspace_slug,
-        )
         try:
-            async with aphase(thread_id, "prepare.walkthrough"):
-                return await target.await_walkthrough()
+            return await WalkthroughView.for_head(repo_owner, repo_name, pr_number, head_sha)
         except Exception:
-            logger.warning("Reviewing without a walkthrough", exc_info=True, extra=target.log_extra)
+            logger.warning(
+                "Reviewing without a walkthrough",
+                exc_info=True,
+                extra={"pr_repo_full_name": f"{repo_owner}/{repo_name}", "pr_number": pr_number},
+            )
             return None
 
     # Benchmark runs score the stock reviewer, without our workspace's
@@ -852,12 +826,11 @@ async def prepare_reviewer_run(
             return None
         return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
 
-    # Only the diff waits on the checkout; the walkthrough above all, a whole
-    # scout run in its own sandbox, must not queue behind the clone.
+    # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
     pr_overview_task = asyncio.create_task(_fetch_pr_overview())
-    walkthrough_task = asyncio.create_task(_await_walkthrough())
+    walkthrough_task = asyncio.create_task(_fetch_walkthrough())
     existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
     repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
     agents_md_task = asyncio.create_task(_fetch_agents_md_context())
@@ -889,10 +862,7 @@ async def prepare_reviewer_run(
         org_guidelines = await org_guidelines_task
         approval_policy = await approval_policy_task
         api_standards_skill = await api_standards_task
-        # The scout often takes minutes; the review starts without it and
-        # DeliverWalkthroughMiddleware hands it over when it lands.
-        walkthrough_ready = walkthrough_task.done()
-        walkthrough = walkthrough_task.result() if walkthrough_ready else None
+        walkthrough = await walkthrough_task
     finally:
         for task in tasks:
             task.cancel()
@@ -961,9 +931,12 @@ async def prepare_reviewer_run(
     )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
-    walkthrough_block = _walkthrough_context(walkthrough)
+    walkthrough_block = _format_walkthrough(walkthrough)
     if walkthrough_block:
         system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
+    human_input_block = _format_human_input(walkthrough)
+    if human_input_block:
+        system_prompt = f"{system_prompt}\n\n{human_input_block}"
     if checkout.skills_prompt:
         system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
@@ -973,100 +946,8 @@ async def prepare_reviewer_run(
         "review_approval_policy": approval_policy,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
-        "walkthrough_wait_until": None
-        if walkthrough_ready
-        else prepare_started + SCOUT_WAIT_SECONDS,
     }
     return prepared
-
-
-class DeliverWalkthroughMiddleware(OpenSWEMiddleware[PrepareReviewerRunState]):
-    """Hand the reviewer the scout's walkthrough once it lands, when preparation finished first.
-
-    The review starts without it but does not publish until it lands or the wait runs out.
-    """
-
-    state_schema = PrepareReviewerRunState
-
-    def __init__(self, *, config: RunnableConfig) -> None:
-        self._cfg = RunConfig.from_config(config)
-
-    @property
-    def _log_extra(self) -> dict[str, object]:
-        repo = self._cfg.repo
-        return {
-            "pr_repo_full_name": repo.full_name if repo else None,
-            "pr_number": self._cfg.pr_number,
-        }
-
-    async def _context(self) -> str | None:
-        """The walkthrough's prompt block, ``""`` when it has none, ``None`` until it lands."""
-        repo, number = self._cfg.repo, self._cfg.pr_number
-        if repo is None or not isinstance(number, int):
-            return ""
-        try:
-            walkthrough = await WalkthroughView.for_head(
-                repo.owner, repo.name, number, self._cfg.head_sha or ""
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Loading the review walkthrough failed", exc_info=True, extra=self._log_extra
-            )
-            return None
-        return None if walkthrough is None else _walkthrough_context(walkthrough)
-
-    async def abefore_model(
-        self,
-        state: PrepareReviewerRunState,
-        runtime: Runtime,  # noqa: ARG002
-    ) -> dict[str, Any] | None:
-        wait_until = state.get("walkthrough_wait_until")
-        if wait_until is None:
-            return None
-        context = await self._context()
-        if context is None:
-            if time.time() < wait_until:
-                return None
-            logger.warning(
-                "Review scout did not finish in time for the reviewer", extra=self._log_extra
-            )
-            return {"walkthrough_wait_until": None}
-        if not context:
-            return {"walkthrough_wait_until": None}
-        logger.info("Delivered the review walkthrough mid-review", extra=self._log_extra)
-        built = build_input_messages(
-            prompt("reviewer/walkthrough-arrived", walkthrough=context),
-            {"sender_id": SCOUT_IDENTITY["id"], "surface": "automation", "kind": "system"},
-            systems=[SCOUT_IDENTITY],
-            injected_dynamic_context_hashes=visible_dynamic_context_hashes(state),
-        )
-        return {
-            "walkthrough_wait_until": None,
-            "messages": [
-                HumanMessage(content=content_to_text(m["content"]), id=str(uuid.uuid7()))
-                for m in built
-            ],
-        }
-
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
-        wait_until = request.state.get("walkthrough_wait_until")
-        if request.tool_call["name"] != publish_review.__name__ or wait_until is None:
-            return await handler(request)
-        while (context := await self._context()) is None and time.time() < wait_until:
-            await asyncio.sleep(_WALKTHROUGH_POLL_SECONDS)
-        if not context:
-            return await handler(request)
-        logger.info("Held the review for its walkthrough", extra=self._log_extra)
-        return ToolMessage(
-            content=prompt("reviewer/publish-awaits-walkthrough"),
-            name=publish_review.__name__,
-            tool_call_id=request.tool_call["id"],
-            status="error",
-        )
 
 
 class ReviewerModelChoice(NamedTuple):
@@ -1211,7 +1092,6 @@ async def build_reviewer_agent(
             ToolErrorMiddleware(),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
-            DeliverWalkthroughMiddleware(config=config),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeOpenAIResponsesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),

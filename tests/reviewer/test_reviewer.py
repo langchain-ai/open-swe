@@ -1,17 +1,12 @@
-import asyncio
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.agents.middleware import AgentMiddleware, AgentState
-from langchain_core.messages import ToolMessage
 from langgraph.graph.state import RunnableConfig
-from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 
 from openswe import reviewer
-from openswe.review_scout.launch import ReviewScoutTarget
-from openswe.walkthrough.record import WalkthroughFileView, WalkthroughStepView, WalkthroughView
 
 pytestmark = pytest.mark.usefixtures("fake_store")
 
@@ -363,107 +358,3 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
     )
     assert updates["diff_text"] == pr_diff
     assert updates["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}
-
-
-@pytest.mark.asyncio
-async def test_reviewer_starts_before_a_slow_walkthrough_and_publishes_after_it() -> None:
-    config: RunnableConfig = {
-        "configurable": {
-            "__is_for_execution__": True,
-            "thread_id": "reviewer-thread-id",
-            "source": "github",
-            "repo": {"owner": "acme", "name": "repo"},
-            "pr_number": 42,
-            "pr_url": "https://github.com/acme/repo/pull/42",
-            "base_sha": "base",
-            "head_sha": "head",
-        },
-        "metadata": {},
-    }
-    captured: dict[str, object] = {}
-
-    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
-        captured["middleware"] = kwargs["middleware"]
-        return _DummyAgent()
-
-    async def scout_still_running(_target: object) -> None:
-        await asyncio.Event().wait()
-
-    walkthrough = WalkthroughView(
-        head_sha="head",
-        human_input="",
-        steps=[
-            WalkthroughStepView(
-                index=1,
-                title="Add the retry loop",
-                summary="Retries failed uploads.",
-                other=False,
-                files=[WalkthroughFileView(path="upload.py", added=[(3, 9)], deleted=[])],
-            )
-        ],
-    )
-
-    with (
-        patch(
-            "openswe.reviewer.get_github_app_installation_token_with_expiry",
-            new_callable=AsyncMock,
-            return_value=("gh-token", None),
-        ),
-        patch(
-            "openswe.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
-        patch(
-            "openswe.reviewer.resolve_sandbox_work_dir",
-            new_callable=AsyncMock,
-            return_value="/workspace",
-        ),
-        patch("openswe.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value=None),
-        patch(
-            "openswe.reviewer.fetch_pr_metadata",
-            new_callable=AsyncMock,
-            return_value=("Retry uploads", ""),
-        ),
-        patch("openswe.reviewer.fetch_pr_review_threads", new_callable=AsyncMock, return_value=[]),
-        patch("openswe.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
-        patch(
-            "openswe.reviewer.approval_policy_for_review", new_callable=AsyncMock, return_value=None
-        ),
-        patch.object(ReviewScoutTarget, "await_walkthrough", scout_still_running),
-        patch("openswe.reviewer.make_model", return_value=MagicMock()),
-        patch("openswe.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
-    ):
-        await reviewer.get_reviewer_agent(config)
-        middleware = cast(list[AgentMiddleware], captured["middleware"])
-        updates = await asyncio.wait_for(_run_prepare(middleware[0]), timeout=5)
-        deliver = next(
-            m for m in middleware if isinstance(m, reviewer.DeliverWalkthroughMiddleware)
-        )
-        state = cast(
-            reviewer.PrepareReviewerRunState,
-            {"messages": [], "walkthrough_wait_until": updates["walkthrough_wait_until"]},
-        )
-        runtime = cast(Runtime[None], MagicMock())
-
-        assert "Add the retry loop" not in cast(str, updates["rendered_system_prompt"])
-        with patch.object(WalkthroughView, "for_head", AsyncMock(return_value=None)):
-            assert await deliver.abefore_model(state, runtime) is None
-        publish = AsyncMock()
-        with patch.object(WalkthroughView, "for_head", AsyncMock(return_value=walkthrough)):
-            held = await deliver.awrap_tool_call(
-                ToolCallRequest(
-                    tool_call={"name": "publish_review", "args": {}, "id": "call-1"},
-                    tool=None,
-                    state=state,
-                    runtime=runtime,
-                ),
-                publish,
-            )
-            delivered = await deliver.abefore_model(state, runtime)
-
-    publish.assert_not_awaited()
-    assert isinstance(held, ToolMessage) and held.status == "error"
-    assert delivered is not None
-    assert delivered["walkthrough_wait_until"] is None
-    assert any("Add the retry loop" in str(m.content) for m in delivered["messages"])
