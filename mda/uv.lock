@@ -1315,6 +1315,7 @@ dependencies = [
     { name = "managed-deepagents" },
     { name = "mcp" },
     { name = "pydantic" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -1329,6 +1330,7 @@ requires-dist = [
     { name = "managed-deepagents", specifier = "==0.9.1" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "pydantic", specifier = ">=2.11" },
+    { name = "websockets", specifier = ">=16.0,<17" },
 ]
 
 [[package]]

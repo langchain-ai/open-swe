@@ -1,10 +1,20 @@
+import asyncio
 import time
+from collections.abc import Mapping
+from unittest.mock import patch
 
 import jwt
 import pytest
+from langchain_core.runnables import RunnableConfig
+from pydantic import JsonValue
+from starlette.applications import Starlette
+from starlette.routing import WebSocketRoute
+from starlette.testclient import TestClient
 from starlette.types import Message, Receive, Scope, Send
+from starlette.websockets import WebSocketDisconnect
 
-from openswe.remote_runtime.server import RunTokenMiddleware
+from openswe.remote_runtime import server
+from openswe.remote_runtime.server import RunTokenMiddleware, UnknownHookError
 from openswe.remote_runtime.tokens import (
     RemoteRun,
     RuntimeTokenError,
@@ -488,3 +498,94 @@ async def test_mda_proxy_status_search_counts_claimed_threads_by_their_mda_statu
 
     page = json.loads(sent[-1]["body"])
     assert [(thread["thread_id"], thread["status"]) for thread in page] == expected
+
+
+def _session_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    async def graph(run: RemoteRun, hook: str, body: Mapping[str, JsonValue]) -> JsonValue:
+        if hook == "slow":
+            await asyncio.sleep(0.2)
+        if hook == "broken":
+            raise RuntimeError("the hook broke")
+        if hook not in {"slow", "fast", "broken"}:
+            raise UnknownHookError(hook)
+        return {"hook": hook, "thread_id": run.thread_id, "body": dict(body)}
+
+    monkeypatch.setattr(server, "_graphs", lambda: {"reviewer": graph})
+    app = Starlette(routes=[WebSocketRoute(server.SESSION_PATH, server.session_endpoint)])
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("authorization", [None, "Bearer not-a-token"])
+def test_run_session_refuses_connections_without_a_valid_run_token(
+    monkeypatch: pytest.MonkeyPatch, authorization: str | None
+) -> None:
+    headers = {"Authorization": authorization} if authorization else {}
+    with (
+        _session_client(monkeypatch) as client,
+        pytest.raises(WebSocketDisconnect) as refused,
+        client.websocket_connect(server.SESSION_PATH, headers=headers),
+    ):
+        pass
+
+    assert refused.value.code == 1008
+
+
+def test_run_session_answers_each_call_when_it_finishes(monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = {"Authorization": f"Bearer {sign_runtime_token(RUN)}"}
+    with (
+        _session_client(monkeypatch) as client,
+        client.websocket_connect(server.SESSION_PATH, headers=headers) as session,
+    ):
+        for call_id, hook in enumerate(["slow", "fast", "broken", "missing"], start=1):
+            session.send_json({"id": call_id, "hook": hook, "body": {"n": call_id}})
+        replies = {reply["id"]: reply for reply in (session.receive_json() for _ in range(4))}
+        order = list(replies)
+
+    assert order[-1] == 1
+    assert replies[2] == {
+        "id": 2,
+        "result": {"hook": "fast", "thread_id": "thread-1", "body": {"n": 2}},
+    }
+    assert replies[3]["error"]["status"] == 500
+    assert replies[4]["error"]["status"] == 404
+
+
+async def test_a_run_starts_with_its_own_catalog_session_but_never_another_runs() -> None:
+    from langchain.agents import create_agent
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.tools import tool
+
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    def read_file(path: str) -> str:
+        """Read a file."""
+        return path
+
+    builds: list[RemoteRun] = []
+
+    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
+        builds.append(RemoteRun.model_validate(config["configurable"]["__run"]))
+        surface.graph = create_agent(GenericFakeChatModel(messages=iter([])), tools=[read_file])
+
+    async def start_models(cfg: object) -> object:
+        raise AssertionError("not asked for")
+
+    graph = RemoteGraph("reviewer", build, start_models)
+    later = RUN.model_copy(update={"configurable": {**RUN.configurable, "pr_number": 8}})
+    with patch.object(
+        RemoteGraph,
+        "_config",
+        lambda _self, run, run_id: {"configurable": {"__run": run.model_dump(), "run_id": run_id}},
+    ):
+        catalog = await graph.session(RUN, None)
+        started = await graph.session(RUN, "run-1", fresh=True)
+        other = await graph.session(later, None)
+        restarted = await graph.session(RUN, "run-1", fresh=True)
+
+    assert started is catalog
+    assert started.config["configurable"]["run_id"] == "run-1"
+    assert other is not catalog
+    assert restarted is not started
+    assert builds == [RUN, later, RUN]

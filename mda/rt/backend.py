@@ -2,9 +2,16 @@
 
 Dispatch signs a run token into each run's context. The backend reads the thread,
 repository and run configuration from that token, so nothing the model writes can
-point a call elsewhere. Every call is ``POST /remote-runtime/hooks/{hook}``.
+point a call elsewhere. A run makes every call over one websocket to
+``/remote-runtime/session``, so they all reach the backend replica that built its
+graph and connected its sandbox; a backend without it answers each call at ``POST
+/remote-runtime/hooks/{hook}``.
 """
 
+import asyncio
+import itertools
+import json
+import logging
 import os
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -14,6 +21,8 @@ from typing import Final, Literal
 import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from websockets.asyncio.client import ClientConnection, connect
+from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 from rt.models import ModelSpec, RunModels
 
@@ -24,6 +33,14 @@ _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count
 # call can run a long command.
 _LONG_CALL_SECONDS: Final = 1800.0
 _HOOK_SECONDS: Final = 300.0
+_CONNECT_SECONDS: Final = 30.0
+# A busy backend replica can be slow to answer a ping; dropping the session would
+# fail every call in flight on it.
+_PING_TIMEOUT_SECONDS: Final = 120.0
+# Closed when quiet this long; the next call opens another.
+_IDLE_SECONDS: Final = 900.0
+
+logger = logging.getLogger(__name__)
 
 Hook = Literal[
     "catalog",
@@ -124,6 +141,102 @@ def _messages(value: object) -> list[BaseMessage]:
     return [message for message in value if isinstance(message, BaseMessage)]
 
 
+class SessionUnavailableError(Exception):
+    """The backend did not open a session; the call goes over HTTP instead."""
+
+    def __init__(self, *, refused: bool) -> None:
+        super().__init__("The backend session is unavailable")
+        # Refused: this backend serves no sessions, so none is tried again.
+        self.refused = refused
+
+
+class _SessionReply(BaseModel):
+    id: int
+    result: JsonValue = None
+    error: dict[str, JsonValue] | None = None
+
+
+class BackendSession:
+    """One run's websocket to the backend: calls by id, each answered when it finishes."""
+
+    def __init__(self, url: str, run_token: str) -> None:
+        self._url = url
+        self._run_token = run_token
+        self._ids = itertools.count(1)
+        self._pending: dict[int, asyncio.Future[_SessionReply]] = {}
+        self._connection: ClientConnection | None = None
+        self._reader: asyncio.Task[None] | None = None
+        self._connecting = asyncio.Lock()
+
+    async def _connected(self) -> ClientConnection:
+        async with self._connecting:
+            if self._connection is None:
+                try:
+                    connection = await connect(
+                        self._url,
+                        additional_headers={"Authorization": f"Bearer {self._run_token}"},
+                        open_timeout=_CONNECT_SECONDS,
+                        ping_timeout=_PING_TIMEOUT_SECONDS,
+                        max_size=None,
+                    )
+                except InvalidHandshake as exc:
+                    raise SessionUnavailableError(refused=True) from exc
+                except (OSError, TimeoutError) as exc:
+                    raise SessionUnavailableError(refused=False) from exc
+                self._connection = connection
+                self._reader = asyncio.create_task(self._read(connection))
+            return self._connection
+
+    async def _read(self, connection: ClientConnection) -> None:
+        try:
+            while True:
+                try:
+                    raw = await asyncio.wait_for(connection.recv(), _IDLE_SECONDS)
+                except TimeoutError:
+                    if self._pending:
+                        continue
+                    self._connection = None
+                    await connection.close()
+                    return
+                reply = _SessionReply.model_validate_json(raw)
+                waiting = self._pending.get(reply.id)
+                if waiting is not None and not waiting.done():
+                    waiting.set_result(reply)
+        except Exception as exc:
+            if isinstance(exc, ConnectionClosed):
+                logger.info("Backend session closed")
+            else:
+                logger.exception("Backend session failed")
+            if self._connection is connection:
+                self._connection = None
+            # Calls sent on this connection get no answer: they fail as a dropped HTTP call would.
+            for waiting in self._pending.values():
+                if not waiting.done():
+                    waiting.set_exception(BackendCallError("The backend session closed"))
+
+    async def call(
+        self, hook: Hook, body: Mapping[str, JsonValue], timeout: float
+    ) -> dict[str, JsonValue]:
+        connection = await self._connected()
+        call_id = next(self._ids)
+        reply: asyncio.Future[_SessionReply] = asyncio.get_running_loop().create_future()
+        self._pending[call_id] = reply
+        try:
+            await connection.send(json.dumps({"id": call_id, "hook": hook, "body": dict(body)}))
+            answered = await asyncio.wait_for(reply, timeout)
+        except (ConnectionClosed, TimeoutError) as exc:
+            raise BackendCallError(f"{hook} failed ({type(exc).__name__})") from exc
+        finally:
+            self._pending.pop(call_id, None)
+        if answered.error is not None:
+            raise BackendCallError(f"{hook} failed ({answered.error.get('status')})")
+        return _json_object.validate_python(answered.result)
+
+    async def close(self) -> None:
+        if self._connection is not None:
+            await self._connection.close()
+
+
 class OpenSweBackend:
     """The Open SWE backend, called with one run's token."""
 
@@ -133,6 +246,11 @@ class OpenSweBackend:
             raise BackendCallError(f"{BACKEND_URL_ENV} is not configured")
         self._base = base
         self._run_token = run_token
+        self._session = (
+            None
+            if run_token is None
+            else BackendSession(f"ws{base.removeprefix('http')}/remote-runtime/session", run_token)
+        )
 
     @property
     def has_run(self) -> bool:
@@ -146,6 +264,20 @@ class OpenSweBackend:
                 "This run carries no Open SWE run token; start it through Open SWE"
             )
         timeout = _LONG_CALL_SECONDS if hook in {"prepare", "call"} else _HOOK_SECONDS
+        if self._session is not None:
+            try:
+                result = await self._session.call(hook, body or {}, timeout)
+            except SessionUnavailableError as exc:
+                logger.warning(
+                    "Backend session unavailable; calling over HTTP",
+                    extra={"hook": hook, "session_refused": exc.refused},
+                )
+                if exc.refused:
+                    self._session = None
+            else:
+                if hook == "after_agent":
+                    await self._session.close()
+                return result
         try:
             async with httpx2.AsyncClient(timeout=timeout) as client:
                 response = await client.post(

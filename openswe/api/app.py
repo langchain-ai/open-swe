@@ -7,7 +7,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Route, WebSocketRoute
 
 from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
@@ -163,6 +163,9 @@ def create_app() -> FastAPI:
     # Routed at the exact path so no redirect sits between a remote runtime and its hooks.
     app.router.routes.append(
         Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
+    )
+    app.router.routes.append(
+        WebSocketRoute(remote_runtime_server.SESSION_PATH, remote_runtime_server.session_endpoint)
     )
     if AGENT_MCP is not None:
         app.router.routes.extend(AGENT_MCP.root_routes)

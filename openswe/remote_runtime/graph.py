@@ -227,17 +227,30 @@ class RunSession:
 
     def __init__(
         self,
+        run: RemoteRun,
         surface: ToolSurface,
         config: RunnableConfig,
         restore: StateRestorer | None,
         *,
         started_here: bool,
     ) -> None:
+        self.run = run
         self.surface = surface
         self.config = config
         self._restore = restore
         self._joined = started_here
         self.expires_at = time.monotonic() + _SESSION_TTL_SECONDS
+
+    def serves(self, run: RemoteRun) -> bool:
+        """Whether this session was built for ``run``'s token and is still fresh."""
+        return self.run == run and time.monotonic() < self.expires_at
+
+    def start_here(self) -> bool:
+        """Take this session for the run's start, unless a hook has already run in it."""
+        if self._joined:
+            return False
+        self._joined = True
+        return True
 
     def _carried(self) -> list[CarriedAcrossProcesses]:
         return [m for m in self.surface.middleware if isinstance(m, CarriedAcrossProcesses)]
@@ -491,13 +504,22 @@ class RemoteGraph:
     ) -> RunSession:
         key = (run.thread_id, run_id)
         cached = self._sessions.get(key)
-        if not fresh and cached is not None and time.monotonic() < cached.expires_at:
+        if not fresh and cached is not None and cached.serves(run):
             return cached
+        if fresh and run_id is not None:
+            # The run's catalog, read before the run had an id, built the graph this
+            # run starts with when it reached this replica too.
+            built = self._sessions.get((run.thread_id, None))
+            if built is not None and built.serves(run) and built.start_here():
+                del self._sessions[(run.thread_id, None)]
+                built.config = self._config(run, run_id)
+                self._sessions[key] = built
+                return built
         config = self._config(run, run_id)
         surface = ToolSurface()
         await self._build(config, surface)
         await surface.prepare({})
-        session = RunSession(surface, config, self._restore_state, started_here=fresh)
+        session = RunSession(run, surface, config, self._restore_state, started_here=fresh)
         if len(self._sessions) >= _SESSION_LIMIT:
             now = time.monotonic()
             self._sessions = {k: s for k, s in self._sessions.items() if s.expires_at > now}
