@@ -9,6 +9,7 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Final, Literal, Self, get_args
+from uuid import uuid7
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import RowMapping, text
@@ -137,8 +138,8 @@ async def create(
                     text(
                         f"""
                     INSERT INTO thread_index
-                        (thread_id, runtime, metadata, status, created_at, updated_at)
-                    VALUES (:thread_id, :runtime, CAST(:metadata AS jsonb), :status,
+                        (id, thread_id, runtime, metadata, status, created_at, updated_at)
+                    VALUES (:id, :thread_id, :runtime, CAST(:metadata AS jsonb), :status,
                             coalesce(:created_at, clock_timestamp()),
                             coalesce(:updated_at, :created_at, clock_timestamp()))
                     ON CONFLICT (thread_id) DO NOTHING
@@ -146,6 +147,7 @@ async def create(
                     """
                     ),
                     {
+                        "id": uuid7(),
                         "thread_id": thread_id,
                         "runtime": runtime,
                         "metadata": json.dumps(dict(metadata or {})),
@@ -183,8 +185,8 @@ async def import_newer(
             text(
                 """
                 INSERT INTO thread_index
-                    (thread_id, runtime, metadata, status, created_at, updated_at)
-                VALUES (:thread_id, :runtime, CAST(:metadata AS jsonb), :status,
+                    (id, thread_id, runtime, metadata, status, created_at, updated_at)
+                VALUES (:id, :thread_id, :runtime, CAST(:metadata AS jsonb), :status,
                         :created_at, :updated_at)
                 ON CONFLICT (thread_id) DO UPDATE SET
                     runtime = EXCLUDED.runtime, metadata = EXCLUDED.metadata,
@@ -193,6 +195,7 @@ async def import_newer(
                 """
             ),
             {
+                "id": uuid7(),
                 "thread_id": thread_id,
                 "runtime": runtime,
                 "metadata": json.dumps(dict(metadata)),
@@ -241,7 +244,10 @@ async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedTh
 async def set_runtime(thread_id: str, runtime: Runtime) -> None:
     async with transaction() as conn:
         await conn.execute(
-            text("UPDATE thread_index SET runtime = :runtime WHERE thread_id = :thread_id"),
+            text(
+                "UPDATE thread_index SET runtime = :runtime, updated_at = clock_timestamp() "
+                "WHERE thread_id = :thread_id"
+            ),
             {"thread_id": thread_id, "runtime": runtime},
         )
 

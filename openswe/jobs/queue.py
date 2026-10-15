@@ -33,6 +33,10 @@ _COLUMNS: Final = (
 )
 
 
+# Set by every write the worker makes on its own: no person caused it.
+_SYSTEM_WRITE: Final = "updated_at = clock_timestamp(), updated_by = NULL"
+
+
 class Hold(Enum):
     """What a running job learns when it renews its claim."""
 
@@ -72,8 +76,8 @@ class Job(BaseModel):
             renewed = (
                 await conn.execute(
                     text(
-                        "UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval) "
-                        "WHERE id = :id AND claim_token = :token RETURNING 1"
+                        "UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval), "
+                        f"{_SYSTEM_WRITE} WHERE id = :id AND claim_token = :token RETURNING 1"
                     ),
                     {"id": self.id, "token": self.claim_token, "ttl": CLAIM_TTL},
                 )
@@ -96,7 +100,7 @@ class Job(BaseModel):
             await conn.execute(
                 text(
                     "UPDATE job SET due_at = :due_at, attempts = 0, locked_until = NULL, "
-                    "claim_token = NULL WHERE id = :id AND claim_token = :token"
+                    f"claim_token = NULL, {_SYSTEM_WRITE} WHERE id = :id AND claim_token = :token"
                 ),
                 {
                     "id": self.id,
@@ -123,8 +127,8 @@ class Job(BaseModel):
             await conn.execute(
                 text(
                     "UPDATE job SET due_at = clock_timestamp() + CAST(:delay AS interval), "
-                    "attempts = :attempts, locked_until = NULL, claim_token = NULL "
-                    "WHERE id = :id AND claim_token = :token"
+                    "attempts = :attempts, locked_until = NULL, claim_token = NULL, "
+                    f"{_SYSTEM_WRITE} WHERE id = :id AND claim_token = :token"
                 ),
                 {"id": self.id, "token": self.claim_token, "delay": delay, "attempts": attempts},
             )
@@ -139,12 +143,16 @@ async def schedule(
     timezone: str = "UTC",
     key: str | None = None,
     metadata: Mapping[str, JsonValue] | None = None,
+    by: uuid.UUID | None = None,
 ) -> Job:
-    """Queue a job; one with ``key`` replaces the job queued under that key before."""
+    """Queue a job; one with ``key`` replaces the job queued under that key before.
+
+    ``by`` is the person whose action queued it, ``None`` for the system's own work.
+    """
     if cron is not None and not croniter.is_valid(cron):
         raise ValueError(f"Invalid cron schedule: {cron}")
     job = Job(
-        id=uuid.uuid4(),
+        id=uuid.uuid7(),
         kind=kind,
         payload=dict(payload or {}),
         due_at=due_at or datetime.now(UTC),
@@ -163,14 +171,16 @@ async def schedule(
                 await conn.execute(
                     text(
                         f"""
-                    INSERT INTO job (id, kind, payload, due_at, cron, timezone, key, metadata)
+                    INSERT INTO job (id, kind, payload, due_at, cron, timezone, key, metadata,
+                                     created_by, updated_by)
                     VALUES (:id, :kind, CAST(:payload AS jsonb), :due_at, :cron, :timezone,
-                            :key, CAST(:metadata AS jsonb))
+                            :key, CAST(:metadata AS jsonb), :by, :by)
                     ON CONFLICT (key) DO UPDATE SET
                         kind = EXCLUDED.kind, payload = EXCLUDED.payload,
                         due_at = EXCLUDED.due_at, cron = EXCLUDED.cron,
                         timezone = EXCLUDED.timezone, metadata = EXCLUDED.metadata,
-                        attempts = 0, locked_until = NULL, claim_token = NULL
+                        attempts = 0, locked_until = NULL, claim_token = NULL,
+                        updated_at = clock_timestamp(), updated_by = EXCLUDED.updated_by
                     RETURNING {_COLUMNS}
                     """
                     ),
@@ -180,6 +190,7 @@ async def schedule(
                         ),
                         "payload": json.dumps(job.payload),
                         "metadata": json.dumps(job.metadata),
+                        "by": by,
                     },
                 )
             )
@@ -252,7 +263,7 @@ async def claim_due(limit: int) -> list[Job]:
                         FOR UPDATE SKIP LOCKED
                     )
                     UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval),
-                        claim_token = gen_random_uuid()
+                        claim_token = gen_random_uuid(), {_SYSTEM_WRITE}
                     FROM due WHERE job.id = due.id
                     RETURNING {", ".join(f"job.{c.strip()}" for c in _COLUMNS.split(","))}
                     """

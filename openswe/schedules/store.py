@@ -471,7 +471,12 @@ async def _ensure_dashboard_github_token(login: str) -> None:
 
 
 async def _create_cron(
-    automation_id: str, trigger_id: uuid.UUID, cron: str, created_by: str | None
+    automation_id: str,
+    trigger_id: uuid.UUID,
+    cron: str,
+    created_by: str | None,
+    *,
+    by: uuid.UUID | None,
 ) -> str:
     job = await queue.schedule(
         AGENT_SCHEDULE_JOB_KIND,
@@ -484,6 +489,7 @@ async def _create_cron(
             "created_by": created_by,
             **agent_version_metadata(),
         },
+        by=by,
     )
     return str(job.id)
 
@@ -534,7 +540,7 @@ async def adopt_agent_server_cron(
     cron_id: str, automation_id: str, trigger_id: str, schedule: str, created_by: str | None
 ) -> bool:
     """Move the trigger an Agent Server cron fired for onto a job; ``False`` for an orphan."""
-    job_id = await _create_cron(automation_id, uuid.UUID(trigger_id), schedule, created_by)
+    job_id = await _create_cron(automation_id, uuid.UUID(trigger_id), schedule, created_by, by=None)
     async with transaction() as conn:
         held = await conn.scalar(
             text(
@@ -557,14 +563,22 @@ async def _create_crons(
     *,
     enabled: bool,
     created_by: str,
+    saved_by: str,
 ) -> list[str | None]:
     """One cron per schedule trigger of an enabled automation; all or nothing."""
+    saver = await User.for_login("github", saved_by)
     cron_ids: list[str | None] = []
     try:
         for trigger, trigger_id in zip(triggers, trigger_ids, strict=True):
             if enabled and isinstance(trigger, ScheduleTrigger):
                 cron_ids.append(
-                    await _create_cron(automation_id, trigger_id, trigger.cron, created_by)
+                    await _create_cron(
+                        automation_id,
+                        trigger_id,
+                        trigger.cron,
+                        created_by,
+                        by=None if saver is None else saver.id,
+                    )
                 )
             else:
                 cron_ids.append(None)
@@ -673,7 +687,7 @@ async def create_agent_schedule(
     automation_id = str(uuid.uuid4())
     trigger_ids = [uuid.uuid4() for _ in triggers]
     cron_ids = await _create_crons(
-        automation_id, triggers, trigger_ids, enabled=True, created_by=login
+        automation_id, triggers, trigger_ids, enabled=True, created_by=login, saved_by=login
     )
     try:
         async with transaction() as conn:
@@ -779,6 +793,7 @@ async def update_agent_schedule(
             trigger_ids,
             enabled=enabled,
             created_by=existing["created_by"],
+            saved_by=login,
         )
     assignments = ", ".join(f"{key} = :{key}" for key in columns)
     try:
