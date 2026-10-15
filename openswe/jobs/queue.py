@@ -28,7 +28,7 @@ MAX_ATTEMPTS: Final = 5
 _RETRY_BASE: Final = timedelta(seconds=30)
 _RETRY_CAP: Final = timedelta(hours=1)
 
-_COLUMNS: Final = "id, kind, payload, due_at, cron, timezone, key, metadata, attempts"
+_COLUMNS: Final = "id, kind, payload, due_at, cron, timezone, key, metadata, attempts, created_at"
 
 
 class Hold(Enum):
@@ -50,6 +50,7 @@ class Job(BaseModel):
     key: str | None
     metadata: dict[str, JsonValue]
     attempts: int
+    created_at: datetime
 
     @classmethod
     def from_row(cls, row: RowMapping) -> Self:
@@ -144,6 +145,7 @@ async def schedule(
         key=key,
         metadata=dict(metadata or {}),
         attempts=0,
+        created_at=datetime.now(UTC),
     )
     if cron is not None and due_at is None:
         job.due_at = job.next_fire_after(datetime.now(UTC))

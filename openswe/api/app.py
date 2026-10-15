@@ -51,6 +51,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
+    from openswe.jobs.kinds import WORKER as JOB_WORKER
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.transcript import listener as transcript_listener
@@ -96,6 +97,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # stops is hearing about changes made elsewhere.
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
+    JOB_WORKER.start()
     try:
         from openswe.server import warm_agent_build
 
@@ -109,6 +111,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
     finally:
+        await JOB_WORKER.stop()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()

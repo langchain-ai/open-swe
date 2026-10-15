@@ -11,7 +11,6 @@ from openswe.middleware.model_selection import ModelSelectionState, SelectedRout
 from openswe.run_config import RunConfig
 from openswe.thread_feedback import FEEDBACK, Feedback
 from openswe.utils.langsmith import create_langsmith_thread_feedback
-from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
 
