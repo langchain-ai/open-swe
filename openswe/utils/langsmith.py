@@ -7,14 +7,15 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import unquote, urlsplit
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
+from langsmith.address import EnvAddressError, address_from_env
 from langsmith.utils import LangSmithNotFoundError, get_host_url
 
 from openswe.config import ENV
-from openswe.utils.tracing import agent_address, tracing_project
+from openswe.utils.tracing import tracing_project
 
 logger = logging.getLogger(__name__)
 
@@ -161,37 +162,27 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
 
 async def _resolve_tracing_project_id() -> str | None:
     """Project id runs trace into: the configured agent environment's, else the project's."""
-    address = agent_address()
+    try:
+        address = address_from_env()
+    except EnvAddressError:
+        logger.warning("The LANGSMITH_AGENT_* variables cannot address a run", exc_info=True)
+        return None
     if address is None:
         return await _resolve_project_id_by_name(tracing_project())
-    cache_key = (_workspace_key(), f"agent:{address.agent_id}:{address.environment.lower()}")
+    cache_key = (_workspace_key(), f"{address['id']}:{address['environment']}")
     if cache_key in _PROJECT_ID_CACHE:
         return _PROJECT_ID_CACHE[cache_key] or None
-    client = _build_langsmith_client()
-    if client is None:
+    api_key = ENV.LANGSMITH_API_KEY.optional()
+    if not api_key:
         return None
+    client = sync_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get())
     try:
-        response = await client._arequest_with_retries(  # noqa: SLF001
-            "GET", f"/api/v1/agents/{quote(address.agent_id, safe='')}"
-        )
-        environments = response.json().get("environments", [])
+        resolved = str((await client.sessions.resolve(**address)).session_id)
     except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not resolve the LangSmith agent environment",
-            extra={"agent_id": address.agent_id},
-            exc_info=True,
-        )
+        logger.debug("Could not resolve the LangSmith agent environment", exc_info=True)
         return None
-    resolved = next(
-        (
-            str(item["tracer_session_id"])
-            for item in environments
-            if str(item.get("environment", "")).lower() == address.environment.lower()
-        ),
-        "",
-    )
     _PROJECT_ID_CACHE[cache_key] = resolved
-    return resolved or None
+    return resolved
 
 
 async def _project_lookup_start(project_id: str) -> datetime:
