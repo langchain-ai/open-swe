@@ -45,7 +45,9 @@ from openswe.threads.summary import (
     _thread_summary,
     assert_thread_readable,
     run_status_to_agent_status,
+    thread_has_bridge,
     thread_is_owner,
+    thread_is_private,
     thread_source,
 )
 from openswe.transcript.engine import delete_transcript
@@ -336,7 +338,7 @@ async def admin_cancel_dashboard_thread(
     if thread_source(thread_metadata(thread)) == "incidents_agent":
         raise HTTPException(404, "thread not found")
 
-    if thread_metadata(thread).get("visibility", "public") != "public":
+    if thread_is_private(thread_metadata(thread)):
         assert_thread_readable(thread_metadata(thread), login, email)
 
     try:
@@ -440,8 +442,8 @@ async def share_thread_with_workspace(
         raise HTTPException(403, "only the thread owner can share it")
     if metadata.get("visibility") != "private":
         raise HTTPException(409, "thread is not private")
-    if metadata.get("sandbox_bridge_client") == "desktop":
-        raise HTTPException(409, "a thread running on the owner's Mac cannot be shared")
+    if thread_has_bridge(metadata):
+        raise HTTPException(409, "a thread running on a local machine cannot be shared")
     if _thread_is_busy(thread):
         raise HTTPException(409, "stop the run before sharing this thread")
     for status in ("pending", "running"):

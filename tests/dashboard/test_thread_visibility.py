@@ -1,18 +1,22 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
+from openswe.bridge.store import Bridge
 from openswe.threads import (
     access,
     blobs,
     handlers,
     listing,
     plan_api,
+    runs,
     summary,
     workflow_approval_api,
 )
+from openswe.threads.principals import Principal
 from openswe.tools import threads as tools
 
 _ADMINS = {"admin", "admin@example.com"}
@@ -65,6 +69,117 @@ def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(privat
     assert not summary.thread_is_promptable(metadata, "admin")
     assert summary.thread_is_readable({"source": "dashboard"}, "bob")
     assert summary.thread_is_promptable({"source": "dashboard"}, "bob")
+
+
+@pytest.mark.parametrize(
+    "binding", [{"sandbox_kind": "bridge"}, {"sandbox_id": Bridge.sandbox_id_for("local")}]
+)
+async def test_legacy_public_bridge_is_owner_only(private_thread, monkeypatch, binding):
+    thread, client = private_thread
+    metadata = thread["metadata"]
+    metadata.update(visibility="public", **binding)
+    assert summary.thread_is_private(metadata)
+    assert summary.thread_is_readable(metadata, "ALICE")
+    for login in ("bob", "admin", None):
+        assert not summary.thread_is_readable(metadata, login, "admin@example.com")
+        assert not summary.thread_is_promptable(metadata, login)
+    monkeypatch.setattr(listing, "_search_threads_batch", AsyncMock(return_value=[thread]))
+    assert not await listing._collect_thread_candidates(client, [{}], viewer_login="admin")
+    with pytest.raises(HTTPException) as exc:
+        await handlers.cancel_dashboard_thread("private-thread", "bob")
+    assert exc.value.status_code == 404
+    with pytest.raises(HTTPException) as exc:
+        await handlers.admin_cancel_dashboard_thread("private-thread", "admin")
+    assert exc.value.status_code == 404
+    client.runs.cancel_many.assert_not_awaited()
+
+
+@pytest.mark.parametrize("bridge_client", ["cli", "desktop"])
+async def test_local_thread_cannot_be_shared(private_thread, bridge_client):
+    thread, client = private_thread
+    thread["metadata"].update(sandbox_kind="bridge", sandbox_bridge_client=bridge_client)
+    with pytest.raises(HTTPException) as exc:
+        await handlers.share_thread_with_workspace("private-thread", "alice")
+    assert exc.value.status_code == 409
+    client.threads.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("thread_type", ["workspace", "private"])
+async def test_human_bridge_creation_overrides_workspace_visibility(
+    private_thread, monkeypatch, thread_type
+):
+    thread, client = private_thread
+    now = datetime.now(UTC)
+    bridge = Bridge(
+        bridge_id="local",
+        owner_id="github:alice",
+        hostname="local",
+        root_path="/repo",
+        created_at=now,
+        last_heartbeat_at=now,
+    )
+    monkeypatch.setattr(runs, "langgraph_client", lambda: client)
+    monkeypatch.setattr(runs, "_ensure_dashboard_github_token", AsyncMock())
+    monkeypatch.setattr(runs, "_resolve_sandbox_bridge", AsyncMock(return_value=bridge))
+    monkeypatch.setattr(runs, "_resolve_requested_workspace", AsyncMock(return_value="default"))
+    monkeypatch.setattr(
+        runs, "_attributed_run_messages", AsyncMock(return_value=([{}], set(), set()))
+    )
+    monkeypatch.setattr(runs, "_build_dashboard_configurable", AsyncMock(return_value={}))
+    monkeypatch.setattr(runs, "participant_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(runs.postgres, "configured", lambda: False)
+    create = AsyncMock(return_value=thread)
+    monkeypatch.setattr(runs, "create_dashboard_thread_record", create)
+    await runs._enrich_run_start_command(
+        "local-thread",
+        "alice",
+        {
+            "method": "run.start",
+            "params": {
+                "config": {
+                    "configurable": {
+                        "thread_type": thread_type,
+                        "sandbox_bridge_id": "local",
+                    }
+                }
+            },
+        },
+        metadata={},
+        creating=True,
+    )
+    stamped = create.call_args.kwargs
+    assert stamped["visibility"] == "private"
+    assert stamped["extra_metadata"]["visibility"] == "private"
+    assert stamped["extra_metadata"]["sandbox_id"] == bridge.sandbox_id
+
+
+async def test_machine_bridge_thread_is_private_to_its_principal(private_thread, monkeypatch):
+    _, client = private_thread
+    principal = Principal(kind="api_key", workspace="default", started_by_id="api_key:one")
+    now = datetime.now(UTC)
+    bridge = Bridge(
+        bridge_id="local",
+        owner_id=principal.sender_id,
+        hostname="local",
+        root_path="/repo",
+        created_at=now,
+        last_heartbeat_at=now,
+    )
+    monkeypatch.setattr(runs, "langgraph_client", lambda: client)
+    create = AsyncMock()
+    monkeypatch.setattr(runs, "create_thread", create)
+    await runs._create_system_thread_record(
+        "local-thread", principal, prompt="hello", title=None, repo_config={}, sandbox_bridge=bridge
+    )
+    metadata = create.call_args.kwargs["metadata"]
+    assert metadata["visibility"] == "private"
+    assert metadata["sandbox_id"] == bridge.sandbox_id
+    principal.assert_can_read(metadata)
+    principal.assert_can_post(metadata)
+    other = Principal(kind="api_key", workspace="default", started_by_id="api_key:two")
+    with pytest.raises(HTTPException):
+        other.assert_can_read(metadata)
+    assert not summary.thread_is_readable(metadata, "admin")
 
 
 def test_review_chat_is_hidden_without_hiding_normal_pr_threads():

@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from openswe.agent_cost import RUN_COST_KEY_PREFIX
-from openswe.bridge.store import BridgeStore
+from openswe.bridge.store import Bridge, BridgeStore
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
@@ -105,8 +105,15 @@ def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:
     )
 
 
+def thread_has_bridge(metadata: Mapping[str, object]) -> bool:
+    sandbox_id = metadata.get("sandbox_id")
+    return metadata.get("sandbox_kind") == "bridge" or (
+        isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
+    )
+
+
 def thread_is_private(metadata: Mapping[str, Any]) -> bool:
-    return metadata.get("visibility", "public") != "public"
+    return thread_has_bridge(metadata) or metadata.get("visibility", "public") != "public"
 
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
@@ -117,11 +124,13 @@ def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
 def thread_is_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> bool:
-    """Private threads are visible to their immutable owner and to workspace admins.
+    """Private threads admit owners and admins; local machines admit only their owner.
 
     A review chat is readable only by the user it belongs to, so its sidebar row
     can be pinned, archived and marked read.
     """
+    if thread_has_bridge(metadata):
+        return thread_source(metadata) in _SURFACED_SOURCES and thread_is_owner(metadata, login)
     if (review := ReviewSessionMetadata.parse(metadata)) is not None:
         return review.owned_by(login)
     return thread_source(metadata) in _SURFACED_SOURCES and (
@@ -489,7 +498,7 @@ async def _thread_summary(
             else None
         ),
         "adminThread": metadata.get("admin_thread") is True,
-        "visibility": metadata.get("visibility", "public"),
+        "visibility": "private" if thread_is_private(metadata) else "public",
         "transcript": (
             TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None
         ),

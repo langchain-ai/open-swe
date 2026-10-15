@@ -35,6 +35,7 @@ from openswe.threads.summary import (
     metadata_title,
     thread_is_bot_triggered,
     thread_is_owner,
+    thread_is_private,
     thread_is_readable,
     thread_is_unlisted,
     thread_source,
@@ -358,7 +359,7 @@ async def _readable_threads_by_id(
                 thread_id
                 and thread_is_readable(metadata, login, email)
                 and not thread_is_unlisted(metadata)
-                and (include_private or metadata.get("visibility", "public") == "public")
+                and (include_private or not thread_is_private(metadata))
                 and (resolved is None or _is_thread_resolved(metadata) is resolved)
             ):
                 threads_by_id[thread_id] = thread
@@ -614,7 +615,7 @@ async def _collect_thread_candidates(
                 review = ReviewSessionMetadata.parse(metadata)
                 if review is not None and not review.owned_by(viewer_login):
                     continue
-                if metadata.get("visibility", "public") != "public" and (
+                if thread_is_private(metadata) and (
                     not include_private
                     or not thread_is_readable(metadata, viewer_login, viewer_email)
                 ):
