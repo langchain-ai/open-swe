@@ -82,7 +82,7 @@ constraint-dependencies = [
 
 # Temporary: `langchain.mcp.oauth` is unreleased; drop this pin once it ships on PyPI.
 [tool.uv.sources]
-langchain = { git = "https://github.com/langchain-ai/langchain", subdirectory = "libs/langchain_v1", rev = "69404b141948346f6fb3ab71ebcfb855ebdb43b3" }
+langchain = { git = "https://github.com/langchain-ai/langchain", subdirectory = "libs/langchain_v1", rev = "6992104e3770d06a7f0bdd59de817112b9fe7827" }
 
 [build-system]
 requires = ["hatchling"]

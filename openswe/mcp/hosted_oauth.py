@@ -293,21 +293,15 @@ class HostedProvider:
                 )
         else:
             raise MCPOAuthError("Unsupported OAuth request")
-        try:
-            async with asyncio.timeout(30), mcp_http_client(url) as client:
-                async with client.stream(
-                    request.method, url, headers=request.headers, content=request.content
-                ) as response:
-                    chunks = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        chunks.extend(chunk)
-                        if len(chunks) > _MAX_RESPONSE_BYTES:
-                            raise MCPOAuthError("MCP OAuth response exceeded the size limit")
-        except httpx2.ConnectError, httpx2.ConnectTimeout:
-            raise
-        except httpx2.TransportError:
-            # The request may have reached the server, so a rotating refresh token may be spent.
-            raise MCPOAuthError("The MCP authorization server did not finish responding") from None
+        async with asyncio.timeout(30), mcp_http_client(url) as client:
+            async with client.stream(
+                request.method, url, headers=request.headers, content=request.content
+            ) as response:
+                chunks = bytearray()
+                async for chunk in response.aiter_bytes():
+                    chunks.extend(chunk)
+                    if len(chunks) > _MAX_RESPONSE_BYTES:
+                        raise MCPOAuthError("MCP OAuth response exceeded the size limit")
         headers = response.headers.copy()
         headers.pop("content-encoding", None)
         headers.pop("content-length", None)
@@ -386,7 +380,7 @@ async def start_oauth(login: str, record: MCPConnection, session_binding: str) -
     try:
         async with asyncio.timeout(90):
             url = await HostedProvider(record, authorization).begin()
-    except MCPOAuthError:
+    except MCPOAuthError, MCPDiscoveryError:
         logger.warning("Personal MCP OAuth discovery failed", extra={"mcp_name": record.name})
         raise
     except SharedOAuthError as exc:

@@ -1772,7 +1772,7 @@ wheels = [
 [[package]]
 name = "langchain"
 version = "1.4.6"
-source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Flangchain_v1&rev=69404b141948346f6fb3ab71ebcfb855ebdb43b3#69404b141948346f6fb3ab71ebcfb855ebdb43b3" }
+source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Flangchain_v1&rev=6992104e3770d06a7f0bdd59de817112b9fe7827#6992104e3770d06a7f0bdd59de817112b9fe7827" }
 dependencies = [
     { name = "langchain-core" },
     { name = "langgraph" },
@@ -1801,7 +1801,7 @@ wheels = [
 [[package]]
 name = "langchain-core"
 version = "1.6.11"
-source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Fcore&rev=69404b141948346f6fb3ab71ebcfb855ebdb43b3#69404b141948346f6fb3ab71ebcfb855ebdb43b3" }
+source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Fcore&rev=6992104e3770d06a7f0bdd59de817112b9fe7827#6992104e3770d06a7f0bdd59de817112b9fe7827" }
 dependencies = [
     { name = "httpx" },
     { name = "jsonpatch" },
@@ -2529,7 +2529,7 @@ requires-dist = [
     { name = "githubkit-schemas", extras = ["2022-11-28"], specifier = "==26.9.29" },
     { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "langchain", extras = ["mcp"], git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Flangchain_v1&rev=69404b141948346f6fb3ab71ebcfb855ebdb43b3" },
+    { name = "langchain", extras = ["mcp"], git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Flangchain_v1&rev=6992104e3770d06a7f0bdd59de817112b9fe7827" },
     { name = "langchain-anthropic", specifier = ">=1.7.6" },
     { name = "langchain-daytona", marker = "extra == 'sandbox-daytona'", specifier = ">=0.0.8" },
     { name = "langchain-daytona", marker = "extra == 'sandbox-providers'", specifier = ">=0.0.8" },

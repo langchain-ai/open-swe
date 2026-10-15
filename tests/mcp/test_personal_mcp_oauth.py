@@ -333,9 +333,7 @@ async def test_all_oauth_requests_have_bounded_responses_and_private_destination
     assert oauth_server.requests == []
     oauth_server.oversized = True
     with pytest.raises(ValueError, match="size limit"):
-        await provider.send(
-            httpx2.Request("GET", "https://issuer.example/.well-known/oauth-authorization-server")
-        )
+        await hosted.start_oauth("alice", oauth_server.record, "session-binding")
 
     def reject(url):
         raise transport.UnsafeUrlError(url, "private")
