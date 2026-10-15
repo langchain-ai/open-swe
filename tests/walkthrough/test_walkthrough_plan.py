@@ -15,6 +15,7 @@ from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import (
     FileHunks,
     FileRanges,
+    Hunks,
     LineRef,
     Plan,
     PlanChunk,
@@ -251,6 +252,42 @@ def test_a_split_hunk_goes_to_two_chunks_and_each_part_keeps_its_new_lines_after
     assert {"def two():", "def three():"} <= texts[1]
     assert "def three():" not in texts[0]
     assert moved.unplanned(new_changes) == []
+
+
+def test_a_push_keeps_repeated_lines_with_their_own_chunk(repo: Path) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    jobs = "def one():\n    run(1)\n    return\n\n\ndef two():\n    run(2)\n    return\n"
+    head = _commit(repo, {"jobs.py": jobs}, "jobs")
+    changes = _changes(repo, base, head)
+    plan = Plan.start(head, changes)
+    plan.split([LineRef.of(line) for line in changes[0].lines if line.text == "def two():"])
+    _place(plan, changes, "Two", FileHunks(path="jobs.py", hunks=["+6"]))
+    _place(plan, changes, "One", FileHunks(path="jobs.py", hunks=["+1"]))
+
+    new_head = _commit(repo, {"jobs.py": f"import os\n\n\n{jobs}"}, "import")
+    new_changes = _changes(repo, base, new_head)
+    moved = plan.carried_to(new_head, new_changes)
+
+    assert [(c.title, [r.lineno for r in c.lines]) for c in moved.chunks] == [
+        ("Two", [9, 10, 11]),
+        ("One", [1, 2, 3, 4, 5, 6, 7, 8]),
+    ]
+
+
+def test_a_split_that_leaves_only_closing_braces_is_a_fragment(repo: Path) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"link.go": "func a() {\n\tif ok {\n\t\treturn\n\t}\n}\n"}, "go")
+    changes = _changes(repo, base, head)
+    lines = changes[0].lines
+    plan = Plan.start(head, changes)
+    at = {line.text: LineRef.of(line) for line in lines}
+
+    assert Hunks.of(changes, [at["\t}"]]).fragments(plan.hunks(changes), lines) == [
+        ("link.go", "+4")
+    ]
+    assert Hunks.of(changes, [at["\tif ok {"]]).fragments(plan.hunks(changes), lines) == []
 
 
 @pytest.mark.asyncio
