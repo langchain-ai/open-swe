@@ -6,10 +6,15 @@ follow-up queue, routing and the system prompt before each model call, the
 transcript and usage after it, reply nudges after the model, and the end-of-run
 work. Graph state those hooks write rides in ``open_swe_state`` and goes back
 with every call.
+
+Subagents run here too. Their replies and the tools this runtime runs itself,
+such as ``task``, go to the backend as well, so its transcript records them
+under the subagent, as an in-process run does.
 """
 
+import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping, Sequence
 from typing import Annotated, Final, NotRequired
 
 from langchain.agents.middleware.types import (
@@ -20,13 +25,15 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
-from langchain_core.messages import SystemMessage, messages_from_dict
+from langchain_core.messages import SystemMessage, ToolMessage, messages_from_dict
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
+from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
+from langgraph.types import Command
 from pydantic import BaseModel, JsonValue
 
-from rt.backend import BackendCallError, OpenSweBackend, PhaseReply, run_body
+from rt.backend import BackendCallError, OpenSweBackend, PhaseReply, run_body, subagent_of
 from rt.models import ModelSpec, build_model
 from rt.tools import STATE_KEY, run_id
 
@@ -161,24 +168,15 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if call.model is not None:
             request = request.override(model=build_model(call.model, use_gateway=call.use_gateway))
         try:
-            response = await handler(request)
+            return await handler(request)
         except Exception:
             if call.fallback is None:
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            response = await handler(
+            return await handler(
                 request.override(model=build_model(call.fallback, use_gateway=call.use_gateway))
             )
-        observed = await self._backend.model_result(
-            run_body(run_id(), request.state), response.result
-        )
-        if observed:
-            response = ModelResponse(
-                result=messages_from_dict(observed),
-                structured_response=response.structured_response,
-            )
-        return response
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
@@ -191,3 +189,90 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # The backend's completion webhook settles what this run left open.
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None
+
+
+class ReportRepliesMiddleware(AgentMiddleware):
+    """Hand each reply to the backend, where the graph's transcript and usage middleware see it."""
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        response = await handler(request)
+        observed = await self._backend.model_result(
+            run_body(run_id(), request.state), response.result
+        )
+        if not observed:
+            return response
+        return ModelResponse(
+            result=messages_from_dict(observed),
+            structured_response=response.structured_response,
+        )
+
+
+class RuntimeToolsMiddleware(AgentMiddleware):
+    """Report the tool calls this runtime runs itself, such as ``task``, to the backend's transcript.
+
+    The backend records the calls of its own tools as it runs them. A ``task``
+    call's subagent runs here, so every call it makes names the ``task`` call.
+    Reporting is best effort: a call the backend could not record still runs.
+    """
+
+    def __init__(self, backend: OpenSweBackend, served: Collection[str]) -> None:
+        self._backend = backend
+        self._served = frozenset(served)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        name = request.tool_call["name"]
+        tool_call_id = request.tool_call.get("id")
+        if name in self._served or not tool_call_id:
+            return await handler(request)
+        body = run_body(
+            run_id(),
+            request.state,
+            name=name,
+            arguments=request.tool_call["args"],
+            tool_call_id=tool_call_id,
+        )
+        await self._report(self._backend.tool_started(body))
+        try:
+            with subagent_of(tool_call_id):
+                result = await handler(request)
+        except asyncio.CancelledError:
+            # A stopped call stays open, as it does in-process.
+            raise
+        except Exception as exc:
+            failure = ToolMessage(
+                content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
+            )
+            await self._report(self._backend.tool_result(body, failure))
+            raise
+        await self._report(self._backend.tool_result(body, _tool_message(result, tool_call_id)))
+        return result
+
+    @staticmethod
+    async def _report(call: Coroutine[object, object, None]) -> None:
+        try:
+            await call
+        except BackendCallError:
+            logger.warning("The backend did not record a runtime tool call", exc_info=True)
+
+
+def _tool_message(result: ToolMessage | Command, tool_call_id: str) -> ToolMessage:
+    """The message a call answered with; a ``task`` call answers with a command carrying it."""
+    if isinstance(result, ToolMessage):
+        return result
+    update = result.update
+    messages = update.get("messages") if isinstance(update, Mapping) else None
+    for message in messages if isinstance(messages, Sequence) else ():
+        if isinstance(message, ToolMessage) and message.tool_call_id == tool_call_id:
+            return message
+    return ToolMessage(content="", tool_call_id=tool_call_id)

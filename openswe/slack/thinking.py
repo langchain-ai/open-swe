@@ -22,7 +22,7 @@ from openswe.slack.client import (
     stop_slack_stream,
 )
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
-from openswe.slack.mappings import lookup_slack_thread_id, store_slack_run_mapping
+from openswe.slack.records import lookup_slack_thread_id, store_slack_run_mapping
 from openswe.source_context import SourceContext
 from openswe.tasks.store import TaskMembership, sidebar_memberships
 from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY

@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -17,6 +18,7 @@ import pytest
 
 from openswe import store as agent_store
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
+from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
 from openswe.tools import access as tool_access
 from openswe.users.records import UserRecords
@@ -254,17 +256,17 @@ def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
-    bot = {
-        "team_id": "T123",
-        "bot_id": "B123",
-        "user_id": "U123",
-        "app_id": "A123",
-        "name": "Release bot",
-        "created_by": "alice",
-        "created_at": "2026-09-09",
-    }
-    fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
+async def allowed_bot(registry_db: None) -> AllowedSlackBot:
+    bot = AllowedSlackBot(
+        team_id="T123",
+        bot_id="B123",
+        user_id="U123",
+        app_id="A123",
+        name="Release bot",
+        created_by="alice",
+        created_at=datetime(2026, 9, 9, tzinfo=UTC),
+    )
+    await bot.add(None)
     return bot
 
 

@@ -26,7 +26,7 @@ from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
-from openswe.slack.mappings import lookup_slack_thread_id
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,

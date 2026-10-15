@@ -14,7 +14,7 @@ from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from openswe.slack.events import claim_slack_event
-from openswe.slack.mappings import (
+from openswe.slack.records import (
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
     store_slack_run_mapping,
@@ -50,7 +50,7 @@ async def _resolve_stop_target(
     client: LangGraphClient, channel_id: str, message_ts: str
 ) -> tuple[str, str, dict[str, Any], dict[str, Any]] | None:
     mapping = await lookup_slack_run_mapping(channel_id, message_ts)
-    thread_ts = message_ts if mapping is None else mapping.thread_ts
+    thread_ts = (mapping.thread_ts if mapping else None) or message_ts
 
     thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     if not thread_id:

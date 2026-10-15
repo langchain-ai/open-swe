@@ -824,8 +824,14 @@ async def prepare_reviewer_run(
 
     async def _fetch_scoped_agents_md() -> dict[str, str]:
         diff_text, _ = await diff_context_task
+        checkout = await checkout_task
+        if not checkout.repo_ready:
+            return {}
         return await fetch_scoped_agents_md(
-            repo_owner, repo_name, base_sha, changed_files(diff_text), token=github_token
+            checkout.sandbox_backend,
+            f"{checkout.work_dir}/{repo_name}",
+            base_sha,
+            changed_files(diff_text),
         )
 
     async def _fetch_approval_policy() -> str | None:

@@ -36,7 +36,7 @@ from openswe.human_review.notices import NoticeKind, ReviewNotice
 from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
 from openswe.slack.dm import DmOrigin
-from openswe.slack.mappings import lookup_slack_thread_id
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.webhooks.event_log import EventLog, EventRefs

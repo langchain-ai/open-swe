@@ -16,9 +16,9 @@ from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
 from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
-from openswe.slack.mappings import SlackMessageMapping
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.pr_links import SlackPullRequestLink
+from openswe.slack.records import SlackMessage
 from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 
@@ -104,8 +104,8 @@ def _message_update_payload(*, bot_message: bool = False) -> dict[str, Any]:
     }
 
 
-def _delivered(triggering_user_id: str = "U1", agent_thread_id: str = "t1") -> SlackMessageMapping:
-    return SlackMessageMapping(
+def _delivered(triggering_user_id: str = "U1", agent_thread_id: str = "t1") -> SlackMessage:
+    return SlackMessage(
         channel_id="C1",
         message_ts="1786573369.551099",
         run_id="run-1",

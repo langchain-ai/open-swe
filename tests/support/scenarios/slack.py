@@ -4,7 +4,7 @@ Everything Open SWE posts is kept, so a person can click a real button on a real
 the click is the signed ``block_actions`` payload Slack would send, posted to Open SWE's own
 interactivity route. A button that opens a modal is answered with the ``view_submission``
 Slack would send. DMs, their edits and deletions become moments, labelled with the notice
-kind Open SWE recorded for them in the store. Each Slack thread is owned by one agent thread,
+kind Open SWE saved with each DM's origin. Each Slack thread is owned by one agent thread,
 and waking that owner hands the event to the scenario's agent.
 """
 
@@ -24,9 +24,10 @@ from pydantic import JsonValue
 # that play's fakes and keep them after the play ends.
 from openswe.api.app import app
 from openswe.slack import client as slack_client
-from openswe.slack import dm, mappings, thread_owner
+from openswe.slack import dm, records, thread_owner
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackClient
+from openswe.slack.records import SlackMessage
 from openswe.users import User, UserIdentity
 from openswe.users.records import UserRecords
 from openswe.utils import thread_ops
@@ -143,7 +144,7 @@ class Slack:
         self.modals: list[dict[str, JsonValue]] = []
         self.wake: Wake | None = None
         self._last_update: dict[str, str] = {}
-        scenario.langgraph.on_put.append(self._label)
+        self.dm_origins: dict[tuple[str, str], SlackMessage] = {}
 
     # What people do in Slack.
 
@@ -252,15 +253,33 @@ class Slack:
     def _login(self, slack_or_dm: str) -> str:
         return slack_or_dm.removeprefix("U_").removeprefix("D_")
 
-    def _label(self, namespace: tuple[str, ...], key: str, value: dict[str, JsonValue]) -> None:
-        """Name a DM by the notice Open SWE recorded it as; a later re-save does not rename it."""
-        notice = value.get("notice")
-        if namespace[0] != "slack_dm_origin" or not isinstance(notice, dict):
+    async def _save_origin(
+        self,
+        dm_channel_id: str,
+        message_ts: str,
+        channel_id: str,
+        thread_ts: str,
+        subject: str,
+        notice: dict[str, JsonValue] | None = None,
+    ) -> None:
+        """Remember where a DM came from, and name it by the notice Open SWE recorded it as.
+
+        A later re-save does not rename the DM.
+        """
+        self.dm_origins[(dm_channel_id, message_ts)] = SlackMessage(
+            channel_id=dm_channel_id,
+            message_ts=message_ts,
+            origin_channel_id=channel_id,
+            origin_thread_ts=thread_ts,
+            origin_subject=subject,
+            origin_notice=notice,
+        )
+        if notice is None:
             return
         for moment in self.scenario.timeline:
             if (
                 moment.kind == "message"
-                and moment.ref == f"{namespace[1]}/{key}"
+                and moment.ref == f"{dm_channel_id}/{message_ts}"
                 and not moment.label
             ):
                 moment.label = str(notice.get("kind", ""))
@@ -388,7 +407,7 @@ class Slack:
                 computing(lambda channel, ts: f"https://slack.test/{channel}/{ts}"),
             ),
             (
-                mappings.lookup_slack_thread_id,
+                records.lookup_slack_thread_id,
                 computing(lambda channel, ts: self.thread_of(str(channel), str(ts))),
             ),
             (slack_client.get_active_slack_thread, returning(None)),
@@ -403,6 +422,12 @@ class Slack:
         return [
             (common, "SLACK_SIGNING_SECRET", _SIGNING_SECRET),
             (SlackClient, "bot", self._bot),
+            (SlackMessage, "save_origin", self._save_origin),
+            (
+                SlackMessage,
+                "origin",
+                computing(lambda channel, ts: self.dm_origins.get((str(channel), str(ts)))),
+            ),
             (
                 SlackChannel,
                 "load",

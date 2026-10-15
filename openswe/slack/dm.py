@@ -17,16 +17,15 @@ from openswe.human_review.notices import ReviewNotice
 from openswe.prompts import prompt
 from openswe.slack.client import get_slack_permalink, post_slack_top_level_message_with_ts
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
-from openswe.slack.mappings import lookup_slack_thread_id
 from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.records import SlackMessage, lookup_slack_thread_id
 from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
-from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
+from openswe.utils.thread_ops import queue_message_for_thread
 
 logger = logging.getLogger(__name__)
 
 CONCIERGE_TS = "0"
-_DM_ORIGIN_NAMESPACE = "slack_dm_origin"
 
 
 def is_dm_channel(channel_context: SlackChannelContext | None) -> bool:
@@ -105,8 +104,13 @@ class DmOrigin(BaseModel):
                 update={"notice": self.notice.model_copy(update={"text": text})}
             )
         try:
-            await langgraph_client().store.put_item(
-                (_DM_ORIGIN_NAMESPACE, dm_channel_id), message_ts, saved.model_dump()
+            await SlackMessage.save_origin(
+                dm_channel_id,
+                message_ts,
+                saved.channel_id,
+                saved.thread_ts,
+                saved.subject,
+                saved.notice.model_dump(mode="json") if saved.notice is not None else None,
             )
         except Exception:
             logger.warning(
@@ -118,20 +122,25 @@ class DmOrigin(BaseModel):
     @classmethod
     async def of(cls, dm_channel_id: str, message_ts: str) -> Self | None:
         """The thread a bot DM was sent on behalf of; ``None`` for any other message."""
-        item = await langgraph_client().store.get_item(
-            (_DM_ORIGIN_NAMESPACE, dm_channel_id), message_ts
+        message = await SlackMessage.origin(dm_channel_id, message_ts)
+        if message is None or message.origin_channel_id is None:
+            return None
+        notice = None
+        if message.origin_notice is not None:
+            try:
+                notice = ReviewNotice.model_validate(message.origin_notice)
+            except ValidationError:
+                logger.warning(
+                    "A DM's saved review notice is unreadable",
+                    extra={"slack_channel": dm_channel_id, "slack_message_ts": message_ts},
+                    exc_info=True,
+                )
+        return cls(
+            channel_id=message.origin_channel_id,
+            thread_ts=message.origin_thread_ts or "",
+            subject=message.origin_subject or "",
+            notice=notice,
         )
-        if item is None:
-            return None
-        try:
-            return cls.model_validate(item["value"])
-        except ValidationError:
-            logger.warning(
-                "Ignoring an unreadable DM origin",
-                extra={"slack_channel": dm_channel_id, "slack_message_ts": message_ts},
-                exc_info=True,
-            )
-            return None
 
 
 async def _record_in_concierge_thread(

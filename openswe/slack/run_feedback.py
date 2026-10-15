@@ -8,13 +8,13 @@ from openswe.analytics.feedback import record_feedback_submission
 from openswe.slack.blocks import ContextActionsBlock, plain_text
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import slack_thread_mutation_lock
-from openswe.slack.mappings import lookup_slack_run_mapping
 from openswe.slack.payloads import (
     SlackBlockAction,
     SlackInteraction,
     SlackPayload,
     parse_json_object,
 )
+from openswe.slack.records import lookup_slack_run_mapping
 from openswe.utils.langsmith import create_langsmith_feedback
 from openswe.utils.thread_ops import langgraph_client
 

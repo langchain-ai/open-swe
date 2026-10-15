@@ -14,7 +14,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.code_channels import is_code_channel_session
 from openswe.slack.http import SlackRequestError
-from openswe.slack.mappings import (
+from openswe.slack.records import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     lookup_slack_thread_run_mapping,

@@ -23,8 +23,8 @@ def policy() -> IncidentPolicy:
 
 
 @pytest.fixture
-async def record(fake_store, policy):
-    await service.POLICIES.put("default", policy)
+async def record(registry_db, policy):
+    await service.POLICIES.put(policy)
     record = Incident(id="i1", workspace_id="T1", channel_id="C1", thread_id="thread-1")
     await service.INCIDENTS.put(record.id, record)
     return record
@@ -114,9 +114,7 @@ async def test_explicit_turn_interrupts_and_carries_request_and_thread(record, p
     assert "Why are we seeing 500s?" in rendered and "slack:U1" in rendered
 
 
-async def test_completion_reschedules_only_stranded_context(
-    record, policy, platform, fake_store, registry_db
-):
+async def test_completion_reschedules_only_stranded_context(record, policy, platform):
     assert (await turns.handle_run_completion("thread-1", "r1", "success"))["reason"] == (
         "incident turn complete"
     )
