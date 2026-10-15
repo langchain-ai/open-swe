@@ -10,10 +10,11 @@ remaining new or edited lines come back unplanned for a planner to place.
 """
 
 import re
-from collections import Counter
+from bisect import bisect_left
+from collections import Counter, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
-from difflib import SequenceMatcher
+from itertools import pairwise
 from typing import Self
 from uuid import uuid7
 
@@ -61,13 +62,7 @@ class LineRef(BaseModel, frozen=True):
                 new.setdefault((line.path, line.sign), []).append(cls.of(line))
         followed: dict[Self, Self] = {}
         for side, before in old.items():
-            after = new.get(side, [])
-            matcher = SequenceMatcher(
-                None, [r.text for r in before], [r.text for r in after], autojunk=False
-            )
-            for block in matcher.get_matching_blocks():
-                for i in range(block.size):
-                    followed[before[block.a + i]] = after[block.b + i]
+            followed.update(_align(before, new.get(side, [])))
         return followed
 
     @classmethod
@@ -106,6 +101,55 @@ class LineRef(BaseModel, frozen=True):
             )
             for path, lines in by_path.items()
         }
+
+
+def _align[T: LineRef](before: list[T], after: list[T]) -> dict[T, T]:
+    """Pair lines of equal text in order, anchored on lines that appear once on each side.
+
+    A patience-diff alignment: linear apart from sorting, so a large file cannot stall the
+    event loop, and repeated lines such as ``}`` pair in order between their anchors.
+    """
+    counts = Counter(r.text for r in before)
+    later = Counter(r.text for r in after)
+    where = {r.text: j for j, r in enumerate(after) if later[r.text] == 1}
+    unique = [
+        (i, where[r.text]) for i, r in enumerate(before) if counts[r.text] == 1 and r.text in where
+    ]
+    anchors = _increasing(unique)
+    pairs: dict[T, T] = {}
+    edges = [(-1, -1), *anchors, (len(before), len(after))]
+    for (a0, b0), (a1, b1) in pairwise(edges):
+        pool: dict[str, deque[T]] = {}
+        for ref in after[b0 + 1 : b1]:
+            pool.setdefault(ref.text, deque()).append(ref)
+        for ref in before[a0 + 1 : a1]:
+            if bucket := pool.get(ref.text):
+                pairs[ref] = bucket.popleft()
+        if a1 < len(before):
+            pairs[before[a1]] = after[b1]
+    return pairs
+
+
+def _increasing(pairs: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The longest run of ``pairs`` whose second items increase, in order."""
+    tails: list[int] = []
+    ends: list[int] = []
+    previous: list[int] = []
+    for k, (_, j) in enumerate(pairs):
+        at = bisect_left(tails, j)
+        previous.append(ends[at - 1] if at else -1)
+        if at == len(tails):
+            tails.append(j)
+            ends.append(k)
+        else:
+            tails[at] = j
+            ends[at] = k
+    run: list[tuple[int, int]] = []
+    k = ends[-1] if ends else -1
+    while k >= 0:
+        run.append(pairs[k])
+        k = previous[k]
+    return run[::-1]
 
 
 class FileRanges(BaseModel):
