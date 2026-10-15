@@ -27,13 +27,17 @@ MDA_RUNTIME: Final = "mda"
 _configurable = TypeAdapter(dict[str, JsonValue])
 
 
-class RemoteRunContext(TypedDict):
-    """The run context the MDA deployment builds its graph from."""
-
-    graph: HostedGraph
-    run_token: str
-    invocation_id: NotRequired[str]
-    models: NotRequired[dict[str, JsonValue]]
+# The run context the MDA deployment builds its graph from. The token's key is a
+# dunder so it stays out of the trace metadata the Agent Server mirrors context into.
+RemoteRunContext = TypedDict(
+    "RemoteRunContext",
+    {
+        "graph": HostedGraph,
+        "__run_token": str,
+        "invocation_id": NotRequired[str],
+        "models": NotRequired[dict[str, JsonValue]],
+    },
+)
 
 
 class RemoteRuntimeConfigurationError(RuntimeError):
@@ -97,7 +101,7 @@ async def remote_run_context(
     models = await (agent.run_models(cfg) if graph == "agent" else reviewer.run_models(cfg))
     context: RemoteRunContext = {
         "graph": graph,
-        "run_token": token,
+        "__run_token": token,
         "models": models.model_dump(mode="json"),
     }
     if cfg.invocation_id:

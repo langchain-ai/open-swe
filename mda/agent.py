@@ -64,7 +64,8 @@ class OpenSweRunContext(BaseModel):
     # The Agent Server keeps only context keys this schema names, and reads the
     # protocol v2 stream marker from the context it mirrors into configurable.
     event_streaming_v2: bool = Field(default=False, alias="__event_streaming_v2")
-    run_token: str | None = None
+    # Dunder keys stay out of the trace metadata the context is mirrored into.
+    run_token: str | None = Field(default=None, alias="__run_token")
     invocation_id: str | None = None
     # JSON, not RunModels: the gRPC runtime serializes only the context's top level.
     models: dict[str, JsonValue] | None = None
