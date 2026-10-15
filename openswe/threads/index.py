@@ -47,8 +47,22 @@ _status = TypeAdapter(ThreadStatus)
 _store = TypeAdapter(ThreadStore)
 
 
+# PREVIEW ONLY, revert before merging: preview tries the thread store steps by default.
+_PREVIEW_THREAD_STORE: Final = "dual"
+
+
+def _preview() -> bool:
+    return ENV.OPENSWE_ENV.optional() == "preview"
+
+
 def thread_store() -> ThreadStore:
-    return _store.validate_python(ENV.THREAD_STORE.get())
+    return _store.validate_python(
+        ENV.THREAD_STORE.get(_PREVIEW_THREAD_STORE if _preview() else None)
+    )
+
+
+def mda_all_threads() -> bool:
+    return ENV.MDA_ALL_THREADS.get_bool(default=_preview())
 
 
 def index_kept() -> bool:
