@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
+from openswe.slack.routed_work import delegated_work_active
 from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
@@ -442,6 +443,25 @@ async def attach_task_workers(
     experience: DashboardThreadExperience | None = None,
 ) -> None:
     """Attach independently readable task children without recursively expanding them."""
+    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+
+    async def attach_waiting(summary: JsonObject) -> None:
+        summary["waitingForDelegatedWork"] = False
+        if summary.get("status") == "running" or not isinstance(
+            thread_id := summary.get("id"), str
+        ):
+            return
+        async with semaphore:
+            try:
+                summary["waitingForDelegatedWork"] = await delegated_work_active(
+                    client, thread_id, prune=False
+                )
+            except Exception:
+                logger.exception(
+                    "Could not read delegated work status", extra={"thread_id": thread_id}
+                )
+
+    await asyncio.gather(*(attach_waiting(summary) for summary in summaries))
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
     memberships = await sidebar_memberships(ids)
     if not memberships:
