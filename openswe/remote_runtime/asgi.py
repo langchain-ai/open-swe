@@ -1,8 +1,7 @@
 """ASGI plumbing for answering Agent Server requests in middleware or passing them on."""
 
-import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 import httpx
@@ -36,19 +35,19 @@ async def read_body(receive: Receive) -> bytes:
     return b"".join(chunks)
 
 
-def replay(body: bytes) -> Receive:
-    """A ``receive`` that hands an already-read body to the next app."""
+def replay(body: bytes, receive: Receive) -> Receive:
+    """A ``receive`` that hands an already-read body to the next app, then the client's own."""
     sent = False
 
-    async def receive() -> Message:
+    async def replayed() -> Message:
         nonlocal sent
         if sent:
-            # Starlette waits on this for a disconnect while it streams a response.
-            await asyncio.Event().wait()
+            # Later calls wait on the client, so the next app still hears it disconnect.
+            return await receive()
         sent = True
         return {"type": "http.request", "body": body, "more_body": False}
 
-    return receive
+    return replayed
 
 
 def json_body(body: bytes) -> dict[str, JsonValue] | None:
@@ -80,8 +79,8 @@ def remote_path(scope: Scope) -> str:
 
 async def forward(
     http: httpx.AsyncClient, scope: Scope, send: Send, body: bytes, *, path: str | None = None
-) -> int:
-    """Send the request to another deployment, stream its answer back unchanged; its status."""
+) -> None:
+    """Send the request to another deployment, and stream its answer back unchanged."""
     headers = Headers(scope=scope)
     request = http.build_request(
         scope["method"],
@@ -111,19 +110,21 @@ async def forward(
         await send({"type": "http.response.body", "body": b""})
     finally:
         await response.aclose()
-    return response.status_code
 
 
 class StatusRecorder:
-    """A ``send`` that remembers the response status the next app sends."""
+    """A ``send`` that remembers the response status, and acts on a success before its body."""
 
-    def __init__(self, send: Send) -> None:
+    def __init__(self, send: Send, on_success: Callable[[], Awaitable[None]] | None = None) -> None:
         self._send = send
+        self._on_success = on_success
         self.status: int | None = None
 
     async def __call__(self, message: Message) -> None:
         if message["type"] == "http.response.start":
             self.status = int(message["status"])
+            if self.succeeded and self._on_success is not None:
+                await self._on_success()
         await self._send(message)
 
     @property

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -14,18 +15,21 @@ _START = datetime(2026, 10, 1, tzinfo=UTC)
 class _Threads:
     def __init__(self, threads: list[dict[str, Any]]) -> None:
         self.threads = threads
+        self.killed_at: int | None = None
 
     async def search(self, *, limit: int, offset: int, **_kwargs: Any) -> list[dict[str, Any]]:
+        if offset == self.killed_at:
+            raise asyncio.CancelledError
         return self.threads[offset : offset + limit]
 
 
 class _Local:
-    def __init__(self, threads: list[dict[str, Any]]) -> None:
-        self.client = type("Client", (), {"threads": _Threads(threads)})()
+    def __init__(self, threads: _Threads) -> None:
+        self.client = type("Client", (), {"threads": threads})()
 
 
 class _Runtimes:
-    def __init__(self, threads: list[dict[str, Any]]) -> None:
+    def __init__(self, threads: _Threads) -> None:
         self.local = _Local(threads)
 
 
@@ -45,7 +49,7 @@ async def test_the_index_catches_up_with_the_agent_server_after_the_switch_was_o
     monkeypatch.setattr(index_import, "_PAGE", 2)
     threads = [_thread(n, updated=_START, owner_login="ada") for n in range(5)]
     threads[1]["metadata"]["runtime"] = "mda"
-    monkeypatch.setattr(index_import, "RUNTIMES", _Runtimes(threads))
+    monkeypatch.setattr(index_import, "RUNTIMES", _Runtimes(_Threads(threads)))
 
     assert await index_import.import_agent_server_threads() == 5
     first, claimed = await index.get("t0"), await index.get("t1")
@@ -63,3 +67,19 @@ async def test_the_index_catches_up_with_the_agent_server_after_the_switch_was_o
     assert kept is not None and kept.metadata["title"] == "renamed here"
     assert caught_up is not None and caught_up.metadata == {"title": "renamed there"}
     assert memory_event_claims.held == {("threads", "index-current")}
+
+
+async def test_an_import_killed_partway_runs_again_on_the_next_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(index_import, "_PAGE", 2)
+    threads = _Threads([_thread(n, updated=_START) for n in range(5)])
+    threads.killed_at = 2
+    monkeypatch.setattr(index_import, "RUNTIMES", _Runtimes(threads))
+
+    with pytest.raises(asyncio.CancelledError):
+        await index_import.import_agent_server_threads()
+    threads.killed_at = None
+
+    assert await index_import.import_agent_server_threads() == 5
+    assert await index.get("t4") is not None

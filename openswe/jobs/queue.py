@@ -28,14 +28,16 @@ MAX_ATTEMPTS: Final = 5
 _RETRY_BASE: Final = timedelta(seconds=30)
 _RETRY_CAP: Final = timedelta(hours=1)
 
-_COLUMNS: Final = "id, kind, payload, due_at, cron, timezone, key, metadata, attempts, created_at"
+_COLUMNS: Final = (
+    "id, kind, payload, due_at, cron, timezone, key, metadata, attempts, created_at, claim_token"
+)
 
 
 class Hold(Enum):
     """What a running job learns when it renews its claim."""
 
     HELD = "held"
-    # Queued again under its key: this run finishes, and the replacement stays.
+    # Queued again under its key: this run finishes unrenewed, and the replacement stays.
     REPLACED = "replaced"
     CANCELLED = "cancelled"
 
@@ -51,6 +53,8 @@ class Job(BaseModel):
     metadata: dict[str, JsonValue]
     attempts: int
     created_at: datetime
+    # The claim a worker's run holds this job under; ``None`` while it waits.
+    claim_token: uuid.UUID | None = None
 
     @classmethod
     def from_row(cls, row: RowMapping) -> Self:
@@ -65,36 +69,40 @@ class Job(BaseModel):
     async def hold(self) -> Hold:
         """Renew this run's claim, unless the job was replaced or cancelled meanwhile."""
         async with transaction() as conn:
-            row = (
+            renewed = (
                 await conn.execute(
                     text(
-                        "UPDATE job SET locked_until = CASE WHEN locked_until IS NULL "
-                        "THEN NULL ELSE clock_timestamp() + CAST(:ttl AS interval) END "
-                        "WHERE id = :id RETURNING locked_until"
+                        "UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval) "
+                        "WHERE id = :id AND claim_token = :token RETURNING 1"
                     ),
-                    {"id": self.id, "ttl": CLAIM_TTL},
+                    {"id": self.id, "token": self.claim_token, "ttl": CLAIM_TTL},
                 )
             ).first()
-        if row is None:
-            return Hold.CANCELLED
-        return Hold.REPLACED if row[0] is None else Hold.HELD
+            if renewed is not None:
+                return Hold.HELD
+            exists = await conn.scalar(text("SELECT 1 FROM job WHERE id = :id"), {"id": self.id})
+        return Hold.REPLACED if exists else Hold.CANCELLED
 
     async def finish(self) -> None:
         """Delete a one-shot job, or move a cron job to its next fire time."""
         async with transaction() as conn:
-            # A job replaced while it ran is no longer locked, and stays as replaced.
+            # A job queued again while this ran holds no claim of this run's, and stays.
             if self.cron is None:
                 await conn.execute(
-                    text("DELETE FROM job WHERE id = :id AND locked_until IS NOT NULL"),
-                    {"id": self.id},
+                    text("DELETE FROM job WHERE id = :id AND claim_token = :token"),
+                    {"id": self.id, "token": self.claim_token},
                 )
                 return
             await conn.execute(
                 text(
-                    "UPDATE job SET due_at = :due_at, attempts = 0, locked_until = NULL "
-                    "WHERE id = :id AND locked_until IS NOT NULL"
+                    "UPDATE job SET due_at = :due_at, attempts = 0, locked_until = NULL, "
+                    "claim_token = NULL WHERE id = :id AND claim_token = :token"
                 ),
-                {"id": self.id, "due_at": self.next_fire_after(datetime.now(UTC))},
+                {
+                    "id": self.id,
+                    "token": self.claim_token,
+                    "due_at": self.next_fire_after(datetime.now(UTC)),
+                },
             )
 
     async def retry_later(self) -> None:
@@ -115,10 +123,10 @@ class Job(BaseModel):
             await conn.execute(
                 text(
                     "UPDATE job SET due_at = clock_timestamp() + CAST(:delay AS interval), "
-                    "attempts = :attempts, locked_until = NULL "
-                    "WHERE id = :id AND locked_until IS NOT NULL"
+                    "attempts = :attempts, locked_until = NULL, claim_token = NULL "
+                    "WHERE id = :id AND claim_token = :token"
                 ),
-                {"id": self.id, "delay": delay, "attempts": attempts},
+                {"id": self.id, "token": self.claim_token, "delay": delay, "attempts": attempts},
             )
 
 
@@ -162,7 +170,7 @@ async def schedule(
                         kind = EXCLUDED.kind, payload = EXCLUDED.payload,
                         due_at = EXCLUDED.due_at, cron = EXCLUDED.cron,
                         timezone = EXCLUDED.timezone, metadata = EXCLUDED.metadata,
-                        attempts = 0, locked_until = NULL
+                        attempts = 0, locked_until = NULL, claim_token = NULL
                     RETURNING {_COLUMNS}
                     """
                     ),
@@ -206,9 +214,11 @@ async def get(key: str) -> Job | None:
     return None if row is None else Job.from_row(row)
 
 
-async def cancel(job_id: uuid.UUID) -> None:
+async def cancel(job_id: uuid.UUID) -> bool:
+    """Cancel a job; whether there was one."""
     async with transaction() as conn:
-        await conn.execute(text("DELETE FROM job WHERE id = :id"), {"id": job_id})
+        result = await conn.execute(text("DELETE FROM job WHERE id = :id"), {"id": job_id})
+    return bool(result.rowcount)
 
 
 async def cancel_key(key: str) -> None:
@@ -241,7 +251,8 @@ async def claim_due(limit: int) -> list[Job]:
                         LIMIT :limit
                         FOR UPDATE SKIP LOCKED
                     )
-                    UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval)
+                    UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval),
+                        claim_token = gen_random_uuid()
                     FROM due WHERE job.id = due.id
                     RETURNING {", ".join(f"job.{c.strip()}" for c in _COLUMNS.split(","))}
                     """

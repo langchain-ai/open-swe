@@ -142,9 +142,15 @@ async def _thread_status_reconcile(_job: Job) -> object:
     return await reconcile_busy_threads()
 
 
-@_sandbox_work(WAKE_THREAD_JOB)
-async def _wake_thread(job: Job) -> object:
-    return await run_thread_wakeup(job.payload)
+@WORKER.register(WAKE_THREAD_JOB)
+async def _wake_thread(job: Job) -> None:
+    # Never retried: a run the server started before the client saw an error would start twice.
+    try:
+        run_id = await run_thread_wakeup(job.payload)
+    except Exception:
+        logger.exception("Thread wakeup failed", extra={"job_id": str(job.id)})
+        return
+    logger.info("Thread woken", extra={"job_id": str(job.id), "run_id": run_id})
 
 
 async def start_jobs() -> None:

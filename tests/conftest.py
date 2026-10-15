@@ -367,6 +367,9 @@ class MemoryEventClaims:
     async def release(self, scope: str, key: str) -> None:
         self.held.discard((scope, key))
 
+    async def is_held(self, scope: str, key: str) -> bool:
+        return (scope, key) in self.held
+
 
 @pytest.fixture
 def memory_event_claims(monkeypatch: pytest.MonkeyPatch) -> MemoryEventClaims:
@@ -375,4 +378,5 @@ def memory_event_claims(monkeypatch: pytest.MonkeyPatch) -> MemoryEventClaims:
     claims = MemoryEventClaims()
     monkeypatch.setattr(event_claims, "claim", claims.claim)
     monkeypatch.setattr(event_claims, "release", claims.release)
+    monkeypatch.setattr(event_claims, "held", claims.is_held)
     return claims

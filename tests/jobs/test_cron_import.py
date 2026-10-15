@@ -36,10 +36,13 @@ async def test_scheduler_crons_move_to_jobs_once(
 ) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
     await WORKSPACES.set_refresh_cron_id("core", "cron-refresh")
+    await WORKSPACES.create(WorkspaceCreate(name="Docs"), "alice")
+    await WORKSPACES.set_refresh_cron_id("docs", "cron-legacy")
     client = _Client(
         [
             _cron("cron-poll", "* * * * *", task="background_tasks", thread_id="thread-1"),
             _cron("cron-refresh", "0 3 * * *", task="workspace_refresh", workspace_slug="core"),
+            _cron("cron-legacy", "0 4 * * *", task="environment_refresh", environment_slug="docs"),
             _cron("cron-retired", "0 * * * *", task="thread_feedback"),
             _cron("cron-unknown", "0 * * * *", task="something_new"),
             {**_cron("cron-wakeup", "5 4 3 2 *"), "thread_id": "thread-2"},
@@ -47,7 +50,7 @@ async def test_scheduler_crons_move_to_jobs_once(
     )
     monkeypatch.setattr(cron_import, "get_client", lambda: client)
 
-    assert await cron_import.import_agent_server_crons() == 2
+    assert await cron_import.import_agent_server_crons() == 3
 
     poll = await queue.get("background_tasks:thread-1")
     refresh = await queue.get("workspace_refresh:core")
@@ -55,9 +58,10 @@ async def test_scheduler_crons_move_to_jobs_once(
     assert refresh is not None
     workspace = await WORKSPACES.get("core")
     assert workspace is not None and workspace.refresh_cron_id == str(refresh.id)
+    assert await queue.get("workspace_refresh:docs") is not None
     # The cron nothing replaces stays, firing as before, for the next startup to retry.
-    assert client.crons.deleted == ["cron-poll", "cron-refresh", "cron-retired"]
+    assert client.crons.deleted == ["cron-poll", "cron-refresh", "cron-legacy", "cron-retired"]
 
     memory_event_claims.held.clear()
     assert await cron_import.import_agent_server_crons() == 0
-    assert len(await queue.find({})) == 2
+    assert len(await queue.find({})) == 3

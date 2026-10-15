@@ -20,7 +20,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Final, Literal
 
@@ -97,6 +97,13 @@ def _for_mda(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     return copied
 
 
+def _marks_busy(thread_id: str) -> Callable[[], Awaitable[None]]:
+    async def mark() -> None:
+        await index.set_status(thread_id, "busy")
+
+    return mark
+
+
 async def _not_found(send: Send, thread_id: str) -> None:
     await send_json(send, 404, {"detail": f"Thread {thread_id} not found"})
 
@@ -124,6 +131,7 @@ class ThreadRouter:
         path: str = scope["path"]
         method: str = scope["method"]
         body = await read_body(receive)
+        replayed = replay(body, receive)
         if _SEARCH.match(path):
             await self._search(send, body, count=False)
         elif _COUNT.match(path):
@@ -131,21 +139,23 @@ class ThreadRouter:
         elif _THREADS.match(path):
             await self._create(send, body)
         elif _CANCEL_MANY.match(path):
-            await self._cancel_many(scope, send, body)
+            await self._cancel_many(scope, replayed, send, body)
         elif (match := _THREAD.match(path)) is not None:
             thread_id, rest = match["thread_id"], match["rest"] or ""
             if rest in {"", "/"}:
-                await self._thread_itself(scope, send, body, thread_id, method)
+                await self._thread_itself(scope, replayed, send, body, thread_id, method)
             elif method == "POST" and (_CREATE_RUN.match(rest) or rest == _CREATE_CRON):
-                await self._create_run(scope, send, body, thread_id, cron=rest == _CREATE_CRON)
+                await self._create_run(
+                    scope, replayed, send, body, thread_id, cron=rest == _CREATE_CRON
+                )
             elif method == "POST" and rest == "/commands":
-                await self._command(scope, send, body, thread_id)
+                await self._command(scope, replayed, send, body, thread_id)
             elif method == "POST" and rest == "/copy":
                 await self._copy(send, thread_id)
             elif method == "POST" and rest == "/state":
-                await self._write_state(scope, send, body, thread_id)
+                await self._write_state(scope, replayed, send, body, thread_id)
             else:
-                await self._to_runtime(scope, send, body, thread_id)
+                await self._to_runtime(scope, replayed, send, body, thread_id)
 
     async def _thread(self, thread_id: str) -> IndexedThread | None:
         """The indexed thread; one only the Agent Server knows is indexed on first use."""
@@ -203,7 +213,7 @@ class ThreadRouter:
         return thread
 
     async def _thread_itself(
-        self, scope: Scope, send: Send, body: bytes, thread_id: str, method: str
+        self, scope: Scope, receive: Receive, send: Send, body: bytes, thread_id: str, method: str
     ) -> None:
         thread = await self._thread(thread_id)
         if thread is None:
@@ -227,7 +237,7 @@ class ThreadRouter:
             await send({"type": "http.response.start", "status": 204, "headers": []})
             await send({"type": "http.response.body", "body": b""})
         else:
-            await self.app(scope, replay(body), send)
+            await self.app(scope, receive, send)
 
     async def _copy_metadata(self, thread: IndexedThread, patch: Mapping[str, JsonValue]) -> None:
         if not patch:
@@ -294,7 +304,14 @@ class ThreadRouter:
         return claimed
 
     async def _create_run(
-        self, scope: Scope, send: Send, body: bytes, thread_id: str, *, cron: bool
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        body: bytes,
+        thread_id: str,
+        *,
+        cron: bool,
     ) -> None:
         payload = json_body(body)
         if payload is None:
@@ -309,24 +326,24 @@ class ThreadRouter:
         thread = await self._claim_for_mda(
             thread, payload.get("assistant_id"), configurable_of(payload)
         )
+        # Busy before the answer reaches the caller, so a run that ends at once
+        # is not marked busy after its run-complete webhook settled it.
+        recorder = StatusRecorder(send, on_success=None if cron else _marks_busy(thread_id))
         if thread.runtime == "mda":
             mda = self._mda()
             await mda.ensure_remote_thread(thread_id)
             rewritten = await mda.run_payload(thread_id, payload)
-            status = await forward(mda.http, scope, send, json.dumps(rewritten).encode())
-            started = 200 <= status < 300
+            await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
         else:
-            recorder = StatusRecorder(send)
-            await self.app(scope, replay(body), recorder)
-            started = recorder.succeeded
-        if started and not cron:
-            await index.set_status(thread_id, "busy")
+            await self.app(scope, receive, recorder)
 
-    async def _command(self, scope: Scope, send: Send, body: bytes, thread_id: str) -> None:
+    async def _command(
+        self, scope: Scope, receive: Receive, send: Send, body: bytes, thread_id: str
+    ) -> None:
         command = json_body(body)
         thread = await self._thread(thread_id)
         if command is None or thread is None:
-            await self._to_runtime(scope, send, body, thread_id)
+            await self._to_runtime(scope, receive, send, body, thread_id)
             return
         params = command.get("params")
         if command.get("method") == "run.start" and isinstance(params, dict):
@@ -335,24 +352,23 @@ class ThreadRouter:
             )
             if thread.runtime == "mda":
                 reply = await self._mda().start_command_run(thread_id, command, params)
-                await send_json(send, 200, reply)
                 if reply.get("type") == "success":
                     await index.set_status(thread_id, "busy")
+                await send_json(send, 200, reply)
                 return
-            recorder = StatusRecorder(send)
-            await self.app(scope, replay(body), recorder)
-            if recorder.succeeded:
-                await index.set_status(thread_id, "busy")
+            await self.app(scope, receive, StatusRecorder(send, on_success=_marks_busy(thread_id)))
             return
-        await self._to_runtime(scope, send, body, thread_id)
+        await self._to_runtime(scope, receive, send, body, thread_id)
 
-    async def _write_state(self, scope: Scope, send: Send, body: bytes, thread_id: str) -> None:
+    async def _write_state(
+        self, scope: Scope, receive: Receive, send: Send, body: bytes, thread_id: str
+    ) -> None:
         """A first state write (an upload, a fork) decides the runtime as a first run would."""
         thread = await self._thread(thread_id)
         if thread is not None:
             graph = thread.metadata.get("graph_id") or "agent"
             await self._claim_for_mda(thread, graph, {})
-        await self._to_runtime(scope, send, body, thread_id)
+        await self._to_runtime(scope, receive, send, body, thread_id)
 
     async def _copy(self, send: Send, thread_id: str) -> None:
         """Copy a thread on its runtime, and index the copy as the source is."""
@@ -377,19 +393,21 @@ class ThreadRouter:
             await RUNTIMES.local.create(copy_id, copied.metadata)
         await send_json(send, 200, copied.as_langgraph())
 
-    async def _to_runtime(self, scope: Scope, send: Send, body: bytes, thread_id: str) -> None:
+    async def _to_runtime(
+        self, scope: Scope, receive: Receive, send: Send, body: bytes, thread_id: str
+    ) -> None:
         thread = await self._thread(thread_id)
         if thread is not None and thread.runtime == "mda":
             mda = self._mda()
             await mda.ensure_remote_thread(thread_id)
             await forward(mda.http, scope, send, body)
             return
-        await self.app(scope, replay(body), send)
+        await self.app(scope, receive, send)
 
-    async def _cancel_many(self, scope: Scope, send: Send, body: bytes) -> None:
+    async def _cancel_many(self, scope: Scope, receive: Receive, send: Send, body: bytes) -> None:
         payload = json_body(body) or {}
         thread_id = payload.get("thread_id")
         if isinstance(thread_id, str):
-            await self._to_runtime(scope, send, body, thread_id)
+            await self._to_runtime(scope, receive, send, body, thread_id)
             return
-        await self.app(scope, replay(body), send)
+        await self.app(scope, receive, send)

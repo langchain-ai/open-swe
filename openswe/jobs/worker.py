@@ -53,17 +53,35 @@ class JobWorker:
         work = asyncio.create_task(handler(job))
         try:
             while not (await asyncio.wait({work}, timeout=_HEARTBEAT_SECONDS))[0]:
-                if await job.hold() is Hold.CANCELLED:
+                if await self._renew(job) is Hold.CANCELLED:
                     work.cancel()
                     await asyncio.gather(work, return_exceptions=True)
                     logger.info("Job cancelled while it ran", extra=extra)
                     return
+        except asyncio.CancelledError:
+            # Shutdown: the handler stops too, and the job is claimed again once its lease lapses.
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
+            raise
+        try:
             work.result()
         except Exception:
             logger.exception("Job failed", extra=extra)
             await job.retry_later()
             return
         await job.finish()
+
+    async def _renew(self, job: Job) -> Hold:
+        """Renew the job's lease; a failed renewal keeps the lease it has until it lapses."""
+        try:
+            return await job.hold()
+        except Exception:
+            logger.warning(
+                "Could not renew a running job's lease",
+                extra={"job_id": str(job.id), "job_kind": job.kind},
+                exc_info=True,
+            )
+            return Hold.HELD
 
     async def _loop(self, first: Callable[[], Coroutine[object, object, object]] | None) -> None:
         if first is not None:

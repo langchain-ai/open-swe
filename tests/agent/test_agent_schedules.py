@@ -17,6 +17,7 @@ from openswe.dashboard.options import fable_disabled_fallback
 from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from openswe.database.postgres import transaction
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.jobs import queue
 from openswe.jobs.queue import Job
 from openswe.schedules import store as schedules
 from openswe.schedules.store import (
@@ -65,8 +66,9 @@ class _FakeJobs:
         self.created.append(job)
         return job
 
-    async def cancel(self, job_id: uuid.UUID) -> None:
+    async def cancel(self, job_id: uuid.UUID) -> bool:
         self.deleted.append(str(job_id))
+        return any(job.id == job_id for job in self.created)
 
     async def find(self, metadata: dict[str, Any], **_kwargs: Any) -> list[Job]:
         return [
@@ -1218,3 +1220,29 @@ async def test_retrying_a_failed_workspace_delete_finishes_it(
     assert await WORKSPACES.get("core") is None
     assert await schedules.list_agent_schedules() == []
     assert fake_client.jobs.deleted == [_job_id(SCHED_1)]
+
+
+async def test_a_scheduler_cron_adopted_again_keeps_the_job_it_moved_to() -> None:
+    cron_id = str(uuid.uuid4())
+    await _seed(_scheduled_record(cron_id=cron_id))
+    async with transaction() as conn:
+        trigger_id = str(
+            await conn.scalar(
+                text("SELECT id FROM automation_trigger WHERE automation_id = :id"),
+                {"id": uuid.UUID(SCHED_1)},
+            )
+        )
+
+    # A cron whose delete failed after it moved is adopted again on the next start.
+    for _ in range(2):
+        assert await schedules.adopt_agent_server_cron(
+            cron_id, SCHED_1, trigger_id, "0 9 * * 1", "alice"
+        )
+
+    [job] = await queue.find({"schedule_id": SCHED_1})
+    async with transaction() as conn:
+        held = await conn.scalar(
+            text("SELECT cron_id FROM automation_trigger WHERE id = :id"),
+            {"id": uuid.UUID(trigger_id)},
+        )
+    assert held == str(job.id)

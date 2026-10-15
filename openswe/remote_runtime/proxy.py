@@ -386,7 +386,7 @@ class MdaThreadProxy:
         is_search = bool(_SEARCH_PATH.match(path)) and scope["method"] == "POST"
         is_cancel_many = bool(_CANCEL_MANY_PATH.match(path)) and scope["method"] == "POST"
         body = await read_body(receive)
-        replayed = replay(body)
+        replayed = replay(body, receive)
         if is_search:
             await self._search(runtime, scope, replayed, send, body)
         elif is_cancel_many:

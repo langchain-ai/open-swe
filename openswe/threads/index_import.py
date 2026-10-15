@@ -34,13 +34,11 @@ async def import_agent_server_threads() -> int:
     if not await event_claims.claim(_SCOPE, _RUNNING, ttl=timedelta(minutes=30)):
         return 0
     try:
-        if not await event_claims.claim(_SCOPE, _CURRENT, ttl=_CURRENT_FOR):
+        if await event_claims.held(_SCOPE, _CURRENT):
             return 0
-        try:
-            imported = await _import_all()
-        except Exception:
-            await event_claims.release(_SCOPE, _CURRENT)
-            raise
+        # Current only once every page is in: a killed import runs again on the next start.
+        imported = await _import_all()
+        await event_claims.claim(_SCOPE, _CURRENT, ttl=_CURRENT_FOR)
     finally:
         await event_claims.release(_SCOPE, _RUNNING)
     logger.info("Thread index brought up to date", extra={"thread_count": imported})

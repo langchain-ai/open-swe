@@ -357,3 +357,24 @@ async def test_purge_deletes_only_expired_wakeups() -> None:
     assert client.crons.deleted == ["expired-1", "expired-2"]
     # Search is scoped to the thread_wakeup kind so other crons are never seen.
     assert client.crons.search_calls[0]["metadata"] == {"kind": "thread_wakeup"}
+
+
+async def test_a_wakeup_the_worker_reaches_after_its_expiry_starts_no_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[str] = []
+
+    class _Runs:
+        async def create(self, thread_id: str, assistant_id: str, **_kwargs: Any) -> Any:
+            started.append(thread_id)
+            return {"run_id": "run-1"}
+
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: type("C", (), {"runs": _Runs()})())
+    now = datetime.now(UTC)
+    payload: dict[str, Any] = {"thread_id": "t1", "input": {"messages": []}}
+
+    late = {**payload, "expires_at": (now - timedelta(minutes=1)).isoformat()}
+    assert await wakeup_tool.run_thread_wakeup(late) is None
+    on_time = {**payload, "expires_at": (now + timedelta(minutes=1)).isoformat()}
+    assert await wakeup_tool.run_thread_wakeup(on_time) == "run-1"
+    assert started == ["t1"]

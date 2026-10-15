@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
+from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -491,11 +492,20 @@ async def _delete_cron(cron_id: str | None) -> bool:
     if not cron_id:
         return True
     try:
-        await queue.cancel(uuid.UUID(cron_id))
+        if not await queue.cancel(uuid.UUID(cron_id)):
+            # A trigger whose Agent Server cron was never moved to a job still holds it.
+            await _delete_agent_server_cron(cron_id)
     except Exception:
         logger.warning("Could not delete schedule job", extra={"cron_id": cron_id}, exc_info=True)
         return False
     return True
+
+
+async def _delete_agent_server_cron(cron_id: str) -> None:
+    try:
+        await langgraph_client().crons.delete(cron_id)
+    except NotFoundError:
+        return
 
 
 async def _delete_orphan_crons(automation_id: str, keep: set[str]) -> None:
@@ -526,14 +536,15 @@ async def adopt_agent_server_cron(
     """Move the trigger an Agent Server cron fired for onto a job; ``False`` for an orphan."""
     job_id = await _create_cron(automation_id, uuid.UUID(trigger_id), schedule, created_by)
     async with transaction() as conn:
-        adopted = await conn.execute(
+        held = await conn.scalar(
             text(
                 "UPDATE automation_trigger SET cron_id = :job_id "
-                "WHERE id = CAST(:trigger_id AS uuid) AND cron_id = :cron_id"
+                "WHERE id = CAST(:trigger_id AS uuid) AND cron_id IN (:cron_id, :job_id) "
+                "RETURNING 1"
             ),
             {"job_id": job_id, "trigger_id": trigger_id, "cron_id": cron_id},
         )
-    if adopted.rowcount:
+    if held:
         return True
     await _delete_cron(job_id)
     return False

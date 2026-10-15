@@ -12,10 +12,11 @@ from xml.etree import ElementTree
 from langchain_core.messages import BaseMessage
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
+from langgraph_sdk.schema import Config
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
-from openswe.input_messages import build_run_input
+from openswe.input_messages import RunInput, build_run_input
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -25,6 +26,8 @@ from openswe.utils.thread_ops import langgraph_url
 logger = logging.getLogger(__name__)
 
 _json = TypeAdapter(dict[str, JsonValue])
+_run_config = TypeAdapter(Config)
+_run_input = TypeAdapter(RunInput)
 
 _AGENT_ASSISTANT_ID = "agent"
 _MIN_DELAY_SECONDS = 60
@@ -64,7 +67,7 @@ def _build_one_shot_cron(fire_time: datetime) -> str:
     )
 
 
-def _parse_iso(value: Any) -> datetime | None:
+def _parse_iso(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -243,6 +246,7 @@ async def _schedule_wakeup(
             }
         ],
     )
+    expires_at = fire_time + timedelta(seconds=_END_TIME_PADDING_SECONDS)
     job = await queue.schedule(
         WAKE_THREAD_JOB,
         _json.validate_python(
@@ -251,6 +255,7 @@ async def _schedule_wakeup(
                 "input": run_input,
                 "config": run_config,
                 "metadata": run_config["metadata"],
+                "expires_at": expires_at.isoformat(),
             }
         ),
         due_at=fire_time,
@@ -264,24 +269,35 @@ async def _schedule_wakeup(
     }
 
 
+def _object(value: JsonValue | None) -> dict[str, JsonValue] | None:
+    return value if isinstance(value, dict) else None
+
+
 async def run_thread_wakeup(payload: Mapping[str, JsonValue]) -> str | None:
-    """Wake the thread a wakeup job names; the run it started, queued behind any running one."""
+    """Wake the thread a wakeup job names; the run it started, queued behind any running one.
+
+    A wakeup the worker reaches after its expiry is dropped, as its cron's
+    ``end_time`` dropped it before wakeups were jobs.
+    """
     thread_id = payload.get("thread_id")
     if not isinstance(thread_id, str):
         return None
-    kwargs: dict[str, Any] = {
-        "input": payload.get("input"),
-        "config": payload.get("config"),
-        "metadata": payload.get("metadata"),
-        "multitask_strategy": "enqueue",
-    }
-    if COMPLETION_WEBHOOK_URL:
-        kwargs["webhook"] = COMPLETION_WEBHOOK_URL
+    expires_at = _parse_iso(payload.get("expires_at"))
+    if expires_at is not None and expires_at < datetime.now(UTC):
+        logger.info("Thread wakeup expired before it ran", extra={"thread_id": thread_id})
+        return None
+    run_input, config = _object(payload.get("input")), _object(payload.get("config"))
     run = await get_client(url=langgraph_url()).runs.create(
-        thread_id, _AGENT_ASSISTANT_ID, **kwargs
+        thread_id,
+        _AGENT_ASSISTANT_ID,
+        # ty does not match a TypedDict against the SDK's TypedDict-like protocol.
+        input=None if run_input is None else _run_input.validate_python(run_input),  # ty: ignore[invalid-argument-type]
+        config=None if config is None else _run_config.validate_python(config),
+        metadata=_object(payload.get("metadata")),
+        multitask_strategy="enqueue",
+        webhook=COMPLETION_WEBHOOK_URL or None,
     )
-    run_id = run.get("run_id") if isinstance(run, dict) else None
-    return run_id if isinstance(run_id, str) else None
+    return run["run_id"]
 
 
 async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) -> dict[str, Any]:

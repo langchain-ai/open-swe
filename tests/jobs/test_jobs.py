@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from openswe.database.postgres import transaction
 from openswe.jobs import queue
-from openswe.jobs.queue import Job
+from openswe.jobs.queue import Hold, Job
 from openswe.jobs.worker import JobWorker
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -92,6 +92,20 @@ async def test_a_job_replaced_while_it_runs_keeps_its_replacement() -> None:
     await queue.schedule("probe", {"v": "old"}, due_at=_PAST, key="probe:b")
     await worker.run_due()
 
+    [job] = await queue.find({})
+    assert job.payload == {"v": "new"}
+
+
+async def test_a_run_that_ends_after_its_job_was_replaced_and_reclaimed_leaves_it_alone() -> None:
+    await queue.schedule("probe", {"v": "old"}, due_at=_PAST, key="probe:c")
+    [first] = await queue.claim_due(1)
+    await queue.schedule("probe", {"v": "new"}, due_at=_PAST, key="probe:c")
+    [second] = await queue.claim_due(1)
+
+    await first.finish()
+
+    assert await first.hold() == Hold.REPLACED
+    assert await second.hold() == Hold.HELD
     [job] = await queue.find({})
     assert job.payload == {"v": "new"}
 
