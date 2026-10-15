@@ -55,7 +55,7 @@ def _is_secret_query_key(key: str) -> bool:
     return normalized in {"key", "token"} or normalized.endswith(_SECRET_QUERY_SUFFIXES)
 
 
-def _https_url(value: str) -> str:
+def https_mcp_url(value: str) -> str:
     value = value.strip()
     parsed = urlsplit(value)
     if (
@@ -83,7 +83,7 @@ class MCPOAuth(BaseModel):
         "client_secret_post"
     )
 
-    _token_url = field_validator("token_url")(_https_url)
+    _token_url = field_validator("token_url")(https_mcp_url)
 
     @field_validator("client_id")
     @classmethod
@@ -113,8 +113,9 @@ class MCPConnectionUpdate(BaseModel):
     # The header the connection's credential goes in as it is; None sends it as
     # ``Authorization: Bearer <credential>``.
     connection_header: str | None = None
+    auth: Literal["oauth"] | None = None
 
-    _url = field_validator("url")(_https_url)
+    _url = field_validator("url")(https_mcp_url)
 
     @field_validator("headers")
     @classmethod
@@ -176,6 +177,11 @@ class MCPToolDescription(BaseModel):
     description: str = ""
 
 
+class MCPOAuthStatus(BaseModel):
+    status: Literal["not_connected", "connecting", "connected", "reconnect_required", "failed"]
+    error: str | None = None
+
+
 class MCPConnectionPublic(BaseModel):
     """Connection settings safe to return to the dashboard; credentials stay server-side."""
 
@@ -190,6 +196,8 @@ class MCPConnectionPublic(BaseModel):
     oauth: MCPOAuth | None = None
     connection: ConnectionRef | None = None
     connection_header: str | None = None
+    auth: Literal["oauth"] | None = None
+    oauth_status: MCPOAuthStatus | None = None
     revision: str
     updated_at: str
 
@@ -206,6 +214,7 @@ class MCPConnection(MCPConnectionPublic):
         elif (
             self.header_names
             or self.oauth
+            or self.auth
             or self.encrypted_headers
             or self.encrypted_client_secret
         ):
@@ -235,7 +244,7 @@ def _connection_backed(
     update: MCPConnectionUpdate, connection: ConnectionRef, header: str | None, scope: MCPScope
 ) -> MCPConnection:
     """A draft whose credential is an MDA connection, keeping none the previous record saved."""
-    if update.headers or update.oauth:
+    if update.headers or update.oauth or update.auth:
         raise ValueError("Remove the headers and OAuth: the MDA connection holds the credential")
     owner = CONNECTION_OWNERS.get(scope)
     if connection.owner != owner:
@@ -245,7 +254,9 @@ def _connection_backed(
             else "A shared MCP server reads the deployment's MDA connection (owner agent)"
         )
     return MCPConnection(
-        **update.model_dump(exclude={"headers", "oauth", "connection", "connection_header"}),
+        **update.model_dump(
+            exclude={"headers", "oauth", "auth", "connection", "connection_header"}
+        ),
         connection=connection,
         connection_header=header,
         revision=uuid4().hex,
@@ -266,6 +277,7 @@ async def prepare_connection(
         and "connection" not in fields
         and not update.headers
         and update.oauth is None
+        and update.auth is None
     ):
         # An update that names no credential keeps the connection, as one omitting OAuth keeps it.
         if previous.url != update.url:
@@ -287,8 +299,16 @@ async def prepare_connection(
     if update.headers is not None:
         encrypted = encrypt_token(json.dumps(update.headers)) if update.headers else ""
         header_names = sorted(update.headers)
+    auth = update.auth
+    if "auth" not in update.model_fields_set and previous:
+        auth = previous.auth
+    if auth == "oauth":
+        if scope != "user":
+            raise ValueError("Interactive OAuth is available only for personal MCP connections")
+        if update.oauth or any(header.lower() == "authorization" for header in header_names):
+            raise ValueError("Remove other authorization credentials when using interactive OAuth")
     oauth = update.oauth
-    if "oauth" not in update.model_fields_set and previous and previous.oauth:
+    if auth != "oauth" and "oauth" not in update.model_fields_set and previous and previous.oauth:
         oauth = MCPOAuthUpdate(**previous.oauth.model_dump())
     oauth_settings = None
     encrypted_client_secret = ""
@@ -309,7 +329,8 @@ async def prepare_connection(
         if not encrypted_client_secret:
             raise ValueError("Provide a client secret for new or changed OAuth connections")
     return MCPConnection(
-        **update.model_dump(exclude={"headers", "oauth"}),
+        **update.model_dump(exclude={"headers", "oauth", "auth"}),
+        auth=auth,
         encrypted_headers=encrypted,
         header_names=header_names,
         oauth=oauth_settings,

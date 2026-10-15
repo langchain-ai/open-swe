@@ -349,6 +349,8 @@ it("saves personal authentication, discovers tools, and enables only selected to
   fireEvent.change(screen.getByLabelText("Server URL"), {
     target: { value: "https://mcp.incident.io/mcp" },
   })
+  fireEvent.click(screen.getByText("Advanced settings"))
+  await chooseOption("Authentication", "Headers / API key")
   fireEvent.click(screen.getByRole("button", { name: "Add header" }))
   fireEvent.change(screen.getByLabelText("Header 1 name"), {
     target: { value: "Authorization" },
@@ -366,7 +368,7 @@ it("saves personal authentication, discovers tools, and enables only selected to
   const search = await screen.findByRole("checkbox", {
     name: "Allow search",
   })
-  expect(isChecked(search)).toBe(true)
+  expect(isChecked(search)).toBe(false)
   expect(operations).toEqual(["discover", "save"])
   expect(discoveries[0]?.headers).toEqual({
     Authorization: "  Bearer test-secret  ",
@@ -378,8 +380,8 @@ it("saves personal authentication, discovers tools, and enables only selected to
   expect(screen.queryByLabelText("Header 1 value")).toBeNull()
   expect(
     isChecked(screen.getByRole("checkbox", { name: "Allow delete" }))
-  ).toBe(true)
-  expect(screen.getByText("2 of 2 selected")).toBeTruthy()
+  ).toBe(false)
+  expect(screen.getByText("0 of 2 selected")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Hide tools" }))
   expect(screen.queryByRole("checkbox", { name: "Allow search" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Clear all" }))
@@ -426,6 +428,111 @@ it("saves personal authentication, discovers tools, and enables only selected to
     expect(screen.queryByRole("button", { name: "Edit incident" })).toBeNull()
   )
   client.clear()
+})
+
+it("saves no tool permissions before browser consent and refuses an insecure authorization redirect", async () => {
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([])
+  const save = vi
+    .spyOn(api, "saveMyMCP")
+    .mockImplementation(async (update) => ({
+      ...update,
+      header_names: [],
+      revision: "v1",
+      updated_at: "now",
+    }))
+  vi.spyOn(api, "startMyMCPOAuth").mockResolvedValue({
+    authorization_url: "http://example.com/authorize",
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
+  )
+  const add = screen.getByRole("button", { name: "Add MCP server" })
+  await waitFor(() => expect(add.hasAttribute("disabled")).toBe(false))
+  fireEvent.click(add)
+  fireEvent.change(screen.getByLabelText("Connection name"), {
+    target: { value: "hosted" },
+  })
+  fireEvent.change(screen.getByLabelText("Server URL"), {
+    target: { value: "https://example.com/mcp" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "unsupported authorization URL"
+  )
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({ auth: "oauth", allowed_tools: [] })
+  )
+  expect(sessionStorage.getItem("open-swe-mcp-oauth")).toBeNull()
+  client.clear()
+})
+
+it("resumes personal browser consent with no implicit tool permission", async () => {
+  const connection: MCPConnection = {
+    name: "hosted",
+    url: "https://example.com/mcp",
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: [],
+    header_names: [],
+    auth: "oauth",
+    oauth_status: { status: "connected" },
+    revision: "v1",
+    updated_at: "now",
+  }
+  window.history.replaceState(
+    null,
+    "",
+    "/my-settings/connections?mcp_oauth=connected"
+  )
+  sessionStorage.setItem(
+    "open-swe-mcp-oauth",
+    JSON.stringify({ name: connection.name, url: connection.url })
+  )
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([connection])
+  vi.spyOn(api, "getMyMCPOAuthStatus").mockResolvedValue({
+    status: "connected",
+  })
+  vi.spyOn(api, "discoverMyMCP").mockResolvedValue([
+    { name: "search", description: "Search" },
+    { name: "delete", description: "Delete" },
+  ])
+  const save = vi
+    .spyOn(api, "saveMyMCP")
+    .mockImplementation(async (update) => ({
+      ...connection,
+      allowed_tools: update.allowed_tools,
+    }))
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
+  )
+  const search = await screen.findByRole("checkbox", { name: "Allow search" })
+  expect(isChecked(search)).toBe(false)
+  expect(
+    isChecked(screen.getByRole("checkbox", { name: "Allow delete" }))
+  ).toBe(false)
+  expect(save).not.toHaveBeenCalled()
+  fireEvent.click(search)
+  fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+  await waitFor(() =>
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ auth: "oauth", allowed_tools: ["search"] })
+    )
+  )
+  expect(save.mock.calls[0]?.[0].headers).toBeUndefined()
+  client.clear()
+  window.history.replaceState(null, "", "/")
 })
 
 it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
@@ -546,8 +653,9 @@ it("keeps a newly saved connection editable when refreshing the list fails", asy
   )
   await screen.findByRole("alert")
   const search = await screen.findByRole("checkbox", { name: "Allow search" })
-  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
-  expect(isChecked(search)).toBe(true)
+  expect(screen.getByRole("button", { name: "Close" })).toBeTruthy()
+  expect(isChecked(search)).toBe(false)
+  fireEvent.click(search)
   fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
   await screen.findByRole("button", { name: "Add MCP server" })
   expect(writes.at(-1)?.allowed_tools).toEqual(["search"])
@@ -753,6 +861,69 @@ it("reviews imported connections one at a time without writing on import or skip
       ([, init]) => init?.method === "PUT" || init?.method === "POST"
     )
   ).toBe(false)
+  client.clear()
+})
+
+it("saves imported OAuth entries before consent without losing the remaining review queue", async () => {
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([])
+  const save = vi
+    .spyOn(api, "saveMyMCP")
+    .mockImplementation(async (update) => ({
+      ...update,
+      header_names: [],
+      revision: "v1",
+      updated_at: "now",
+    }))
+  const start = vi.spyOn(api, "startMyMCPOAuth")
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
+  )
+  const importButton = screen.getByRole("button", { name: "Import JSON" })
+  await waitFor(() => expect(importButton.hasAttribute("disabled")).toBe(false))
+  fireEvent.click(importButton)
+  fireEvent.change(screen.getByLabelText("MCP configuration JSON"), {
+    target: {
+      value: JSON.stringify({
+        mcpServers: {
+          notion: {
+            url: "https://mcp.notion.com/mcp",
+            auth: "oauth",
+            allowedTools: ["search"],
+          },
+          corridor: {
+            url: "https://app.corridor.dev/api/mcp",
+            headers: { Authorization: "Bearer test-secret" },
+          },
+        },
+      }),
+    },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Review connections" }))
+  expect(screen.queryByRole("button", { name: "Connect" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+  await waitFor(() =>
+    expect(
+      (screen.getByLabelText("Connection name") as HTMLInputElement).value
+    ).toBe("corridor")
+  )
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: "notion",
+      auth: "oauth",
+      allowed_tools: ["search"],
+    })
+  )
+  expect(
+    (screen.getByLabelText("Header 1 value") as HTMLInputElement).value
+  ).toBe("Bearer test-secret")
+  expect(start).not.toHaveBeenCalled()
+  expect(sessionStorage.getItem("open-swe-mcp-oauth")).toBeNull()
   client.clear()
 })
 
