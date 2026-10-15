@@ -126,6 +126,48 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
+async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
+    """Integrations go to MDA's code mode, not the model's schemas; the graph's own stays here."""
+    from langchain.agents import create_agent
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.tools import StructuredTool
+    from langchain_quickjs import CodeInterpreterMiddleware
+
+    from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+
+    def integration(name: str) -> StructuredTool:
+        async def run(query: str) -> str:
+            return query
+
+        return StructuredTool.from_function(coroutine=run, name=name, description=name)
+
+    async def build(config: object, surface: ToolSurface) -> None:
+        surface.dynamic = DynamicToolMiddleware(
+            {"MCP": [integration("mcp_search"), integration("mcp.dotted")]}
+        )
+        middleware = [surface.dynamic, CodeInterpreterMiddleware(ptc=[integration("mcp_search")])]
+        surface.graph = create_agent(FakeListChatModel(responses=[]), middleware=middleware)
+        surface.middleware = middleware
+        choice = ModelChoice("openai:gpt-6.1-sol", {})
+        surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
+
+    async def start_models(cfg: object) -> object:
+        raise AssertionError("not asked for")
+
+    graph = RemoteGraph("agent", build, start_models)
+    catalog = await graph.hook(RUN, "catalog", {"run_id": "run-1"})
+
+    assert isinstance(catalog, dict)
+    tools = catalog["tools"]
+    assert isinstance(tools, list)
+    names = {tool["name"] for tool in tools if isinstance(tool, dict)}
+    assert {"mcp_search", "mcp.dotted"} <= names
+    assert "eval" not in names
+    assert catalog["integrations"] == ["mcp_search"]
+
+
 class _LocalThreads:
     """The local Agent Server's threads, as the MDA proxy reads and claims them."""
 
