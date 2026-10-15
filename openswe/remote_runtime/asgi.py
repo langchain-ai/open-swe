@@ -1,0 +1,131 @@
+"""ASGI plumbing for answering Agent Server requests in middleware or passing them on."""
+
+import asyncio
+import json
+from collections.abc import Mapping
+from typing import Final
+
+import httpx
+from pydantic import JsonValue, TypeAdapter
+from starlette.datastructures import Headers
+from starlette.types import Message, Receive, Scope, Send
+
+_FORWARDED_REQUEST_HEADERS: Final = ("content-type", "accept", "last-event-id")
+_DROPPED_RESPONSE_HEADERS: Final = frozenset(
+    {"content-length", "transfer-encoding", "connection", "content-encoding", "keep-alive"}
+)
+_object = TypeAdapter(dict[str, JsonValue])
+
+
+def configurable_of(container: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """``config.configurable`` of a run-create body, or an empty one."""
+    config = container.get("config")
+    configurable = config.get("configurable") if isinstance(config, dict) else None
+    return _object.validate_python(configurable) if isinstance(configurable, dict) else {}
+
+
+async def read_body(receive: Receive) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        message = await receive()
+        if message["type"] == "http.disconnect":
+            break
+        chunks.append(message.get("body", b""))
+        if not message.get("more_body"):
+            break
+    return b"".join(chunks)
+
+
+def replay(body: bytes) -> Receive:
+    """A ``receive`` that hands an already-read body to the next app."""
+    sent = False
+
+    async def receive() -> Message:
+        nonlocal sent
+        if sent:
+            # Starlette waits on this for a disconnect while it streams a response.
+            await asyncio.Event().wait()
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return receive
+
+
+def json_body(body: bytes) -> dict[str, JsonValue] | None:
+    """The request's JSON object; ``None`` when it is not one."""
+    if not body.strip():
+        return {}
+    try:
+        return _object.validate_json(body)
+    except ValueError:
+        return None
+
+
+async def send_json(send: Send, status: int, payload: object) -> None:
+    body = json.dumps(payload).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+def remote_path(scope: Scope) -> str:
+    path: str = scope["path"]
+    return path.removeprefix("/noauth")
+
+
+async def forward(
+    http: httpx.AsyncClient, scope: Scope, send: Send, body: bytes, *, path: str | None = None
+) -> int:
+    """Send the request to another deployment, stream its answer back unchanged; its status."""
+    headers = Headers(scope=scope)
+    request = http.build_request(
+        scope["method"],
+        path or remote_path(scope),
+        params=scope.get("query_string", b"").decode(),
+        headers={
+            name: value for name in _FORWARDED_REQUEST_HEADERS if (value := headers.get(name))
+        },
+        content=body or None,
+    )
+    response = await http.send(request, stream=True)
+    try:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": response.status_code,
+                "headers": [
+                    (name.encode(), value.encode())
+                    for name, value in response.headers.multi_items()
+                    if name.lower() not in _DROPPED_RESPONSE_HEADERS
+                ],
+            }
+        )
+        # Decoded, since Content-Encoding is not passed on.
+        async for chunk in response.aiter_bytes():
+            await send({"type": "http.response.body", "body": chunk, "more_body": True})
+        await send({"type": "http.response.body", "body": b""})
+    finally:
+        await response.aclose()
+    return response.status_code
+
+
+class StatusRecorder:
+    """A ``send`` that remembers the response status the next app sends."""
+
+    def __init__(self, send: Send) -> None:
+        self._send = send
+        self.status: int | None = None
+
+    async def __call__(self, message: Message) -> None:
+        if message["type"] == "http.response.start":
+            self.status = int(message["status"])
+        await self._send(message)
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status is not None and 200 <= self.status < 300
