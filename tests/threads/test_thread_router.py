@@ -126,7 +126,7 @@ class _Harness:
             run = RemoteRun(
                 thread_id=thread_id, assistant_id=assistant_id, configurable=configurable
             )
-            return {"graph": assistant_id, "run_token": sign_runtime_token(run)}
+            return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
         monkeypatch.setattr(router, "runs_on_mda", runs_on_mda)
         monkeypatch.setattr(proxy, "remote_run_context", context)
@@ -277,7 +277,7 @@ async def test_a_fresh_thread_moves_to_mda_when_its_person_chose_it(
     assert harness.runtimes.local.threads[THREAD]["metadata"] == indexed.metadata
     [(_, sent)] = harness.forwarded
     context = sent["context"]
-    assert isinstance(context, dict) and isinstance(token := context["run_token"], str)
+    assert isinstance(context, dict) and isinstance(token := context["__run_token"], str)
     assert verify_runtime_token(token).configurable["github_login"] == "ada"
 
 
