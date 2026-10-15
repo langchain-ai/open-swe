@@ -19,17 +19,23 @@ def test_investigation_bounds_untrusted_sections_without_mentions_or_unsafe_link
     assert "<!channel>" not in text and "<@U1>" not in text
     assert "&lt;!channel&gt;" in text and "javascript:" not in text
     # Every section is over budget at once, so this is the widest the format can get.
-    assert len(text) < 3200
+    assert len(text) < 6000
     assert all(len(block.get("text", {}).get("text", "")) <= 3000 for block in blocks)
     # Only the three highest-priority steps are published.
     assert "\n4. " not in text
     assert blocks[-1]["text"]["text"].startswith("*TLDR*\n")
-    assert len(blocks[-1]["text"]["text"]) <= 257
+    assert len(blocks[-1]["text"]["text"]) <= 3000
 
 
 def test_investigation_ends_with_tldr_before_sources():
+    summary = (
+        "TTL upgrades are delayed because the ClickHouse upsert of prepared runs repeatedly "
+        "exceeds its context deadline, occupying worker slots while affected batches retry. "
+        "The underlying trigger is still unknown; the earlier worker restart is only a "
+        "correlation, not a confirmed root cause."
+    )
     report = IncidentReport(
-        summary="Uploads time out; root cause still unknown. [tool:1]",
+        summary=f"{summary} [tool:1]",
         problem="Upload failures.",
         cause="Timeouts observed; trigger unproven.",
         next_steps=["Check upload latency."],
@@ -38,7 +44,8 @@ def test_investigation_ends_with_tldr_before_sources():
         ],
     )
     text, blocks = report_message(report, report.summary, None)
-    assert blocks[-2]["text"]["text"] == ("*TLDR*\nUploads time out; root cause still unknown.")
+    assert len(summary) > 250
+    assert blocks[-2]["text"]["text"] == f"*TLDR*\n{summary}"
     assert text.index("*Steps to solve*") < text.index("*TLDR*") < text.index("Sources:")
 
 
