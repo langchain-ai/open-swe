@@ -17,7 +17,6 @@ import {
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Icon } from "@langchain/macaw-components/Icon"
-import { Link } from "@langchain/macaw-components/Link"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
@@ -763,14 +762,20 @@ export function AgentThreadView({
               intent="error"
               action={
                 thread.traceUrl ? (
-                  <Link
-                    href={thread.traceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    variant="sm"
+                  <Button
+                    as={
+                      <a
+                        href={thread.traceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      />
+                    }
+                    color="secondary"
+                    variant="underlined"
+                    size="md"
                   >
                     Open trace
-                  </Link>
+                  </Button>
                 ) : undefined
               }
             >

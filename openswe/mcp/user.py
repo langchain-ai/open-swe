@@ -10,7 +10,6 @@ from openswe.mcp import (
     discover_tools,
     prepare_connection,
 )
-from openswe.mcp.import_records import delete_store_copy
 from openswe.mcp.records import UserMCPConnections
 
 
@@ -40,9 +39,7 @@ async def save_user_mcp(login: str, name: str, update: MCPConnectionUpdate) -> d
 
 
 async def delete_user_mcp(login: str, name: str) -> None:
-    connections = UserMCPConnections(login)
-    await delete_store_copy(connections, name)
-    await connections.delete(name)
+    await UserMCPConnections(login).delete(name)
 
 
 async def discover_user_mcp(

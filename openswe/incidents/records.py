@@ -84,7 +84,6 @@ class IncidentCommandRow(Base):
     incident: Mapped[UUID] = mapped_column(ForeignKey("incident.id", ondelete="CASCADE"))
     action: Mapped[str]
     content_hash: Mapped[str]
-    copied_from_store: Mapped[bool] = mapped_column(default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -183,10 +182,6 @@ class IncidentPolicies:
             await Topic.INCIDENT_SETTINGS.invalidate(session)
         return policy
 
-    async def written_at(self) -> datetime | None:
-        async with postgres.session() as session:
-            return await session.scalar(select(IncidentPolicyRow.updated_at))
-
 
 class Incidents:
     """Every enrolled channel's incident, by incident id."""
@@ -243,12 +238,6 @@ class Incidents:
             query = query.where(IncidentRow.status.in_(statuses))
         async with postgres.session() as session:
             return _readable(Incident, await session.scalars(query))
-
-    async def written_at(self, id: IncidentId) -> datetime | None:
-        async with postgres.session() as session:
-            return await session.scalar(
-                select(IncidentRow.updated_at).where(IncidentRow.external_id == id)
-            )
 
 
 class IncidentReports:
@@ -318,9 +307,7 @@ class CommandReceipts:
             created_at=(row.created_at or datetime.now(UTC)).isoformat(),
         )
 
-    async def claim(
-        self, receipt: CommandReceipt, *, by: str | None = None, store_copy: bool = False
-    ) -> bool:
+    async def claim(self, receipt: CommandReceipt, *, by: str | None = None) -> bool:
         """Write ``receipt`` unless its claim id is taken; whether this call wrote it.
 
         ``by`` is the GitHub login of the responder who sent the command. Raises
@@ -341,7 +328,6 @@ class CommandReceipts:
                     incident=incident,
                     action=receipt.action,
                     content_hash=receipt.content_hash,
-                    copied_from_store=store_copy,
                     created_by=person,
                     updated_by=person,
                 )
@@ -355,31 +341,3 @@ class CommandReceipts:
             await session.execute(
                 delete(IncidentCommandRow).where(IncidentCommandRow.claim_id == claim_id)
             )
-
-    async def written_at(self, claim_id: str) -> datetime | None:
-        async with postgres.session() as session:
-            return await session.scalar(
-                select(IncidentCommandRow.created_at).where(IncidentCommandRow.claim_id == claim_id)
-            )
-
-    async def delete_store_copies(self, present: Collection[str], copied_after: datetime) -> int:
-        """Delete receipts the Store import copied after ``copied_after`` whose Store record,
-        keyed by claim id in ``present``, is gone.
-
-        A replica of the previous release deletes a receipt only from the Store.
-        """
-        async with postgres.session() as session:
-            copies = await session.execute(
-                select(IncidentCommandRow.id, IncidentCommandRow.claim_id).where(
-                    IncidentCommandRow.copied_from_store,
-                    IncidentCommandRow.created_at > copied_after,
-                )
-            )
-            gone = [id for id, claim_id in copies.tuples() if claim_id not in present]
-            if gone:
-                await session.execute(
-                    delete(IncidentCommandRow).where(
-                        IncidentCommandRow.id.in_(gone), IncidentCommandRow.copied_from_store
-                    )
-                )
-            return len(gone)

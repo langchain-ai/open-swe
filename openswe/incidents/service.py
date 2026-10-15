@@ -29,8 +29,8 @@ from openswe.incidents.records import (
 from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackClient
-from openswe.store import now_iso
 from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 POLICIES = IncidentPolicies()

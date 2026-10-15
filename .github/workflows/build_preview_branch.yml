@@ -80,6 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      mda_deployed: ${{ steps.mda-deploy.outcome == 'success' }}
     concurrency:
       group: deploy-preview
       cancel-in-progress: false
@@ -98,3 +100,55 @@ jobs:
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
           LANGSMITH_WORKSPACE_ID: ${{ vars.PREVIEW_WORKSPACE_ID }}
         run: uv run scripts/deploy_preview.py
+      # The Managed Deep Agents runtime the preview backend calls (open-swe-mda-preview),
+      # from the same tree. Last: `mda deploy` runs the tree's code, labeled PRs included.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          path: preview-tree
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check whether the MDA preview is behind
+        id: mda-changed
+        working-directory: preview-tree
+        run: |
+          if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda; then
+            echo "deploy=true" >>"$GITHUB_OUTPUT"
+          fi
+      - name: Install the mda CLI
+        if: steps.mda-changed.outputs.deploy == 'true'
+        # Same version mda/ pins.
+        run: uv tool install managed-deepagents==0.9.1
+      - name: Deploy the MDA preview
+        id: mda-deploy
+        if: steps.mda-changed.outputs.deploy == 'true'
+        working-directory: preview-tree
+        env:
+          # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
+          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+        run: |
+          # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
+          printf 'OPEN_SWE_BACKEND_URL=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" >mda/.env
+          mda deploy mda \
+            --name open-swe-mda-preview \
+            --deployment-type prod \
+            --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
+            --context-strategy overwrite \
+            --yes
+
+  # A job of its own: the deploy job ran the tree's code, so it never holds a token that can write.
+  record-mda:
+    name: Record what the MDA preview runs
+    needs: [build, deploy]
+    if: needs.deploy.outputs.mda_deployed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Move mda-deployed/preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.build.outputs.sha }}
+        run: |
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/mda-deployed/preview" \
+            -f sha="$SHA" -F force=true >/dev/null

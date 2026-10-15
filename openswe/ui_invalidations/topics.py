@@ -111,7 +111,7 @@ class Topic(BaseTopic):
 
         With ``conn`` it takes effect when that transaction commits, so call it
         last there. Without, it follows a write Postgres had no part in, such as
-        the Store, and never raises.
+        one to the Agent Server, and never raises.
         """
         await self._publish(conn, self.name)
 
@@ -168,7 +168,7 @@ async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[s
 
 
 async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
-    # The repository listing reaches the Store, which imports this module.
+    # Imported on use: most of the app imports this module, which stays light.
     from openswe.github.repos import accessible_repo_full_names
 
     try:
@@ -186,7 +186,7 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
 
 
 async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
-    # Thread summaries reach the Store, which imports this module.
+    # Thread summaries import this module.
     from openswe.threads.summary import thread_is_readable
     from openswe.utils.json_types import thread_metadata
     from openswe.utils.thread_ops import langgraph_client

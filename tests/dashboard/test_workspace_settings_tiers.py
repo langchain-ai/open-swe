@@ -13,7 +13,6 @@ from openswe.dashboard.workspace_settings import (
     upsert_workspace_overrides,
 )
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import FakeStore
 
 
 async def test_an_override_applies_to_its_workspace_only(registry_db) -> None:
@@ -121,9 +120,7 @@ async def test_a_failed_store_read_is_not_cached(
     ] == "internal only"
 
 
-async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(
-    fake_store: FakeStore, registry_db
-) -> None:
+async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(registry_db) -> None:
     """A name the store could never hold is a bad request; a name it does not hold is 404."""
     with pytest.raises(HTTPException) as refused:
         await workspace_settings.api_get_workspace_settings(
@@ -137,9 +134,7 @@ async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(
     assert missing.value.status_code == 404
 
 
-async def test_workspace_settings_api_round_trips_overrides(
-    fake_store: FakeStore, registry_db
-) -> None:
+async def test_workspace_settings_api_round_trips_overrides(registry_db) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
     await upsert_instance_settings(WorkspaceSettingsUpdate(review_draft_prs=True))
 

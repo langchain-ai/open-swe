@@ -16,7 +16,6 @@ import httpx
 import httpx2
 import pytest
 
-from openswe import store as agent_store
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
@@ -53,67 +52,6 @@ def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) 
         raise AttributeError(f"no dashboard thread module defines {name!r}")
     for module in modules:
         monkeypatch.setattr(module, name, value)
-
-
-class _FakeStoreNotFoundError(Exception):
-    status_code = 404
-
-
-class FakeStore:
-    """In-memory stand-in for the LangGraph Store, in the SDK's item shape.
-
-    Backs the real ``openswe.store`` code path, so values round-trip through
-    ``model_dump``/``model_validate`` the way they do in production.
-    """
-
-    def __init__(self) -> None:
-        self.items: dict[tuple[str, ...], dict[str, dict[str, Any]]] = {}
-
-    def seed(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
-        self.items.setdefault(tuple(namespace), {})[key] = dict(value)
-
-    def values(self, namespace: Sequence[str]) -> dict[str, dict[str, Any]]:
-        return self.items.get(tuple(namespace), {})
-
-    async def get_item(self, namespace: Sequence[str], key: str) -> dict[str, Any]:
-        value = self.values(namespace).get(key)
-        if value is None:
-            raise _FakeStoreNotFoundError
-        return {"value": dict(value)}
-
-    async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
-        self.seed(namespace, key, value)
-
-    async def delete_item(self, namespace: Sequence[str], key: str) -> None:
-        self.values(namespace).pop(key, None)
-
-    async def search_items(
-        self,
-        namespace: Sequence[str],
-        *,
-        filter: dict[str, Any] | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        matches = [
-            {"key": key, "value": dict(value)}
-            for key, value in self.values(namespace).items()
-            if all(value.get(k) == expected for k, expected in (filter or {}).items())
-        ]
-        return {"items": matches[offset : offset + limit]}
-
-
-class FakeStoreClient:
-    def __init__(self) -> None:
-        self.store = FakeStore()
-
-
-@pytest.fixture
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
-    """Route every ``openswe.store`` access to an in-memory store for this test."""
-    client = FakeStoreClient()
-    monkeypatch.setattr(agent_store, "store_client", lambda: client)
-    return client.store
 
 
 class FakeUserRecords:
@@ -376,7 +314,7 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
     The dashboard's opt-in list (loaded by :func:`openswe.review.enabled_repos.is_review_repo_enabled`)
-    is empty in the test environment because there is no live LangGraph Store.
+    is empty in the test environment.
 
     Tests targeting the automatic-review gate should override this fixture or set
     ``monkeypatch.setattr(webhook_common, "is_review_repo_enabled", ...)`` to a stricter stub.
