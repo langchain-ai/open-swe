@@ -259,6 +259,12 @@ async def github_webhook(
         return {"status": "accepted", "message": "Processing review finding reply"}
 
     if not common.mentions_open_swe(comment_body):
+        if is_pull_request_comment and comment_body.lstrip().startswith("!"):
+            common.logger.debug(
+                "Ignoring untagged GitHub workflow command",
+                extra={"github_event": event_type},
+            )
+            return {"status": "ignored", "reason": "Untagged workflow command"}
         agent_thread_id = await service.untagged_agent_pr_thread_id(payload, event_type)
         if agent_thread_id is not None:
             gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
