@@ -20,7 +20,7 @@ from openswe.mcp.managed import (
 from openswe.middleware.require_user_reply import current_reply_surface
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, actions, block_payload, button, context, section
-from openswe.slack.tools.reply import slack_reply
+from openswe.slack.tools.reply import send_slack_reply
 from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
 
 
@@ -124,7 +124,7 @@ async def connect_managed_tools(
         # A Slack call ends the turn, so the person must hear something.
         if surface != "slack":
             return None
-        posted = await slack_reply(
+        posted = await send_slack_reply(
             text, "final", blocks=block_payload(blocks) if blocks else None, state=state
         )
         if posted.get("success") is not True:
