@@ -119,6 +119,22 @@ async def ensure_refresh_cron(slug: str) -> str | None:
     return str(job.id)
 
 
+async def adopt_agent_server_cron(slug: str, cron_id: str) -> bool:
+    """Move a workspace's daily Agent Server cron onto a job; ``False`` if it no longer owns it."""
+    record = await WORKSPACES.get(slug)
+    if record is None or record.refresh_cron_id != cron_id:
+        return False
+    job = await queue.schedule(
+        REFRESH_TASK,
+        {"workspace_slug": slug},
+        cron=daily_schedule(slug),
+        key=f"{REFRESH_TASK}:{slug}",
+        metadata={"kind": REFRESH_TASK, "workspace": slug},
+    )
+    await WORKSPACES.set_refresh_cron_id(slug, str(job.id))
+    return True
+
+
 async def remove_refresh_cron(record: Workspace | None) -> None:
     """Delete the daily refresh job of a workspace record, if any."""
     if record is None or not record.refresh_cron_id:

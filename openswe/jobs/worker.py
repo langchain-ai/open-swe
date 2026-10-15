@@ -65,7 +65,12 @@ class JobWorker:
             return
         await job.finish()
 
-    async def _loop(self) -> None:
+    async def _loop(self, first: Callable[[], Coroutine[object, object, object]] | None) -> None:
+        if first is not None:
+            try:
+                await first()
+            except Exception:
+                logger.exception("Job worker startup work failed")
         while not self._stop.is_set():
             started = 0
             try:
@@ -84,11 +89,14 @@ class JobWorker:
             except TimeoutError:
                 pass
 
-    def start(self) -> None:
+    def start(
+        self, *, first: Callable[[], Coroutine[object, object, object]] | None = None
+    ) -> None:
+        """Start polling; ``first`` runs once in the background before the first poll."""
         if not configured() or (self._task is not None and not self._task.done()):
             return
         self._stop.clear()
-        self._task = asyncio.create_task(self._loop(), name="job-worker")
+        self._task = asyncio.create_task(self._loop(first), name="job-worker")
 
     async def stop(self) -> None:
         self._stop.set()

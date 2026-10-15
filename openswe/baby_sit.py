@@ -272,6 +272,16 @@ async def _ensure_watch_job(key: str) -> str:
     return str(job.id)
 
 
+async def adopt_agent_server_cron(key: str) -> bool:
+    """Move an active watch's Agent Server cron onto a job; ``False`` once it has stopped."""
+    watch = await WATCHES.get(key)
+    if watch is None or not watch.active:
+        return False
+    watch.cron_id = await _ensure_watch_job(key)
+    await WATCHES.save(watch)
+    return True
+
+
 async def start_watch(
     *,
     pr_ref: GitHubPrRef,
