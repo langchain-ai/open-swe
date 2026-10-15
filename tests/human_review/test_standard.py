@@ -427,7 +427,11 @@ def test_pending_checks_and_unresolved_threads_do_not_block_the_request() -> Non
         ({"mergeable": False, "mergeable_state": "dirty"}, "merge conflicts"),
         ({"state": "closed"}, "closed"),
         (
-            {"check_state": "failure", "mergeable_state": "blocked", "failing_checks": ["lint"]},
+            {
+                "check_state": "failure",
+                "mergeable_state": "blocked",
+                "failing_required_checks": ["lint"],
+            },
             "required checks are failing: lint",
         ),
     ],
@@ -438,14 +442,55 @@ def test_requests_are_refused_while_the_pull_request_is_not_reviewable(
     assert any(blocker in reason for reason in request_blockers(_snapshot(**overrides)))
 
 
-def test_a_failing_check_github_does_not_require_does_not_block_the_request() -> None:
-    snapshot = _snapshot(
-        check_state="failure",
-        mergeable_state="unstable",
-        failures_are_required=False,
-        failing_checks=["x"],
+@pytest.mark.parametrize(
+    ("failures", "available", "blockers"),
+    [
+        (["optional"], True, []),
+        (["unit"], True, ["required checks are failing: unit"]),
+        (["optional", "unit"], True, ["required checks are failing: unit"]),
+        (["optional"], False, None),
+    ],
+)
+async def test_only_required_failures_block_the_request(
+    failures: list[str], available: bool, blockers: list[str] | None
+) -> None:
+    from openswe.github.ci import CommitChecks, RequiredCheck
+    from openswe.github.pull_request_status import PullRequestClient
+    from openswe.human_review.standard import review_blockers
+
+    pull = MagicMock(spec=PullRequestClient, repo=MagicMock())
+    pull.pull.return_value = {
+        "state": "open",
+        "head": {"sha": "abc"},
+        "base": {"ref": "main"},
+        "user": {"login": "ada"},
+        "mergeable": True,
+        "mergeable_state": "blocked",
+    }
+    pull.unresolved_threads.return_value = []
+    pull.reviews.return_value = []
+    pull.mergeability.return_value = None
+    checks = CommitChecks(
+        runs=[
+            {
+                "name": name,
+                "status": "completed",
+                "conclusion": "failure" if name in failures else "success",
+            }
+            for name in ("unit", "optional")
+        ],
+        statuses=[],
     )
-    assert request_blockers(snapshot) == []
+    with (
+        patch.object(CommitChecks, "read", AsyncMock(return_value=checks)),
+        patch.object(
+            RequiredCheck,
+            "for_branch",
+            AsyncMock(return_value={RequiredCheck("unit")} if available else None),
+        ),
+        patch.object(User, "for_login", AsyncMock(return_value=User())),
+    ):
+        assert await review_blockers(pull) == blockers
 
 
 @pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
