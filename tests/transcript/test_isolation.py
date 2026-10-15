@@ -13,7 +13,6 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
 
-from openswe import completion
 from openswe.database import postgres
 from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.engine import Command, append, delete_transcript
@@ -527,11 +526,23 @@ async def test_a_settled_turn_is_not_reopened_by_a_later_settlement(registry_db:
     assert await _turn_state(thread_id, turn) == "interrupted"
 
 
-async def test_a_run_interrupted_by_a_follow_up_closes_only_its_own_turn(registry_db: None) -> None:
-    """A run superseded by an interrupting follow-up left its turn, and the thread, running."""
+async def test_a_follow_up_run_closes_the_turn_its_interrupted_predecessor_left_running(
+    registry_db: None,
+) -> None:
+    """A run replaced by an interrupting follow-up never reports its end."""
     thread_id = str(uuid7())
     await _create(thread_id)
-    turn_a, turn_b = uuid7(), uuid7()
+    turn_a, turn_b, turn_c = uuid7(), uuid7(), uuid7()
+
+    def started(turn: object, run_id: str) -> Command:
+        return Command(
+            command_id=f"turn:{turn}:started:{run_id}",
+            event=TurnStarted(turn_id=turn, run_id=run_id),  # type: ignore[arg-type]
+            actor_kind="agent",
+            run_id=run_id,
+            turn_id=turn,  # type: ignore[arg-type]
+        )
+
     await append(
         thread_id,
         [
@@ -541,25 +552,21 @@ async def test_a_run_interrupted_by_a_follow_up_closes_only_its_own_turn(registr
                 actor_kind="user",
                 turn_id=turn_a,
             ),
+            started(turn_a, "run-a"),
             Command(
-                command_id=f"turn:{turn_a}:started:run-a",
-                event=TurnStarted(turn_id=turn_a, run_id="run-a"),
-                actor_kind="agent",
-                run_id="run-a",
-                turn_id=turn_a,
-            ),
-            Command(
-                command_id=f"turn:{turn_b}:requested",
-                event=_requested(turn_b, "m-b", "second"),
+                command_id=f"turn:{turn_c}:requested",
+                event=_requested(turn_c, "m-c", "queued"),
                 actor_kind="user",
-                turn_id=turn_b,
+                turn_id=turn_c,
             ),
         ],
     )
 
-    await completion._settle_transcript_turn(thread_id, "run-unstarted", "interrupted")
-    assert await _turn_state(thread_id, turn_b) == "requested"
+    # A follow-up that takes the turn over keeps it open.
+    await append(thread_id, [started(turn_a, "run-b")])
+    assert await _turn_state(thread_id, turn_a) == "running"
 
-    await completion._settle_transcript_turn(thread_id, "run-a", "interrupted")
+    await append(thread_id, [started(turn_b, "run-c")])
     assert await _turn_state(thread_id, turn_a) == "interrupted"
-    assert await _turn_state(thread_id, turn_b) == "requested"
+    assert await _turn_state(thread_id, turn_b) == "running"
+    assert await _turn_state(thread_id, turn_c) == "requested"

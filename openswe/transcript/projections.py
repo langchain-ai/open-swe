@@ -282,8 +282,26 @@ async def _turn_started(
             "started_at": occurred_at,
         },
     )
-    if result.scalar_one_or_none() is not None:
-        await _set_thread_status(conn, thread_id, status="running")
+    if result.scalar_one_or_none() is None:
+        return
+    # A thread runs one run at a time, so a turn another run left running died
+    # with it: a follow-up that interrupted it never reports its end.
+    await conn.execute(
+        text(
+            """
+            UPDATE thread_turn SET state = 'interrupted', completed_at = :started_at
+            WHERE thread_id = :thread_id AND state = 'running'
+              AND turn_id <> :turn_id AND run_id IS DISTINCT FROM :run_id
+            """
+        ),
+        {
+            "turn_id": event.turn_id,
+            "thread_id": thread_id,
+            "run_id": event.run_id,
+            "started_at": occurred_at,
+        },
+    )
+    await _set_thread_status(conn, thread_id, status="running")
 
 
 async def _turn_checkpoint(
