@@ -29,6 +29,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from openswe.config import ENV
+from openswe.jobs import queue
 from openswe.remote_runtime.asgi import (
     StatusRecorder,
     configurable_of,
@@ -60,6 +61,7 @@ _THREAD: Final = re.compile(r"^(?:/noauth)?/threads/(?P<thread_id>[0-9a-fA-F-]{3
 _CANCEL_MANY: Final = re.compile(r"^(?:/noauth)?/runs/cancel$")
 _CREATE_RUN: Final = re.compile(r"^/runs(?:/stream|/wait)?$")
 _CREATE_CRON: Final = "/runs/crons"
+THREAD_SYNC_JOB: Final = "thread_index_sync"
 
 
 def _routed(scope: Scope) -> bool:
@@ -403,8 +405,8 @@ class ThreadIndexMirror:
     With ``THREAD_STORE=dual`` the Agent Server, behind ``MdaThreadProxy``, still
     answers every thread call. Once it has made a change, the thread is copied
     here as the Agent Server now has it, and a started run marks it busy, so
-    moving reads to the index finds it current. A failed copy is logged; the
-    caller already has the Agent Server's answer.
+    moving reads to the index finds it current. A copy that fails is retried
+    from a job; the caller already has the Agent Server's answer.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -428,7 +430,7 @@ class ThreadIndexMirror:
             recorder = StatusRecorder(send)
             await self.app(scope, receive, recorder)
             if recorder.succeeded:
-                await (self._forget(thread_id) if method == "DELETE" else self._copy(thread_id))
+                await _sync_soon(thread_id)
         elif method == "POST" and rest == "/copy":
             await self._made(scope, receive, send)
         elif method == "POST" and _CREATE_RUN.match(rest):
@@ -450,35 +452,40 @@ class ThreadIndexMirror:
         made = json_body(recorder.body) if recorder.succeeded else None
         thread_id = made.get("thread_id") if made else None
         if isinstance(thread_id, str):
-            await self._copy(thread_id)
+            await _sync_soon(thread_id)
 
     def _started(self, thread_id: str) -> Callable[[], Awaitable[None]]:
         async def started() -> None:
-            await self._copy(thread_id, busy=True)
+            if await _sync_soon(thread_id):
+                await index.set_status(thread_id, "busy")
 
         return started
 
-    async def _copy(self, thread_id: str, *, busy: bool = False) -> None:
-        try:
-            thread = await RUNTIMES.local.indexed(thread_id)
-            if thread is None:
-                return
-            await index.mirror(thread)
-            if busy:
-                await index.set_status(thread_id, "busy")
-        except Exception:
-            logger.warning(
-                "Copying a thread change to the index failed",
-                extra={"thread_id": thread_id},
-                exc_info=True,
-            )
 
-    async def _forget(self, thread_id: str) -> None:
-        try:
-            await index.delete(thread_id)
-        except Exception:
-            logger.warning(
-                "Deleting a thread from the index failed",
-                extra={"thread_id": thread_id},
-                exc_info=True,
-            )
+async def sync_thread(thread_id: str) -> None:
+    """Index a thread as the local Agent Server has it now, or drop it once it is gone there."""
+    await index.sync(thread_id, lambda: RUNTIMES.local.indexed(thread_id))
+
+
+async def _sync_soon(thread_id: str) -> bool:
+    """Sync a thread now, or, when that fails, from a job that retries; whether it synced now."""
+    try:
+        await sync_thread(thread_id)
+        return True
+    except Exception:
+        logger.warning(
+            "Copying a thread change to the index failed; retrying from a job",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
+    try:
+        await queue.schedule(
+            THREAD_SYNC_JOB, {"thread_id": thread_id}, key=f"{THREAD_SYNC_JOB}:{thread_id}"
+        )
+    except Exception:
+        logger.error(
+            "Could not queue a retry for a thread change; the index misses it",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
+    return False

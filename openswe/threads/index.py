@@ -9,7 +9,7 @@ streams stay with the thread's runtime.
 """
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Final, Literal, Self, get_args
 from uuid import uuid7
@@ -252,13 +252,26 @@ async def import_newer(threads: Sequence[IndexedThread]) -> None:
         )
 
 
-async def mirror(thread: IndexedThread) -> None:
-    """Index a thread as the Agent Server just wrote it: its metadata and runtime, not status.
+async def sync(thread_id: str, read: Callable[[], Awaitable[IndexedThread | None]]) -> None:
+    """Index a thread as ``read`` finds it on the Agent Server now, or drop it once gone.
 
-    Its status here follows runs as they start and end, which the Agent Server
-    does not know for threads that run on MDA.
+    Syncs of one thread take turns, each reading inside its turn, so a sync that
+    read an older copy can never land after one that read a newer copy. The
+    status here is kept, since it follows runs the Agent Server does not see
+    for threads that run on MDA.
     """
     async with transaction() as conn:
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"thread_index:{thread_id}"},
+        )
+        thread = await read()
+        if thread is None:
+            await conn.execute(
+                text("DELETE FROM thread_index WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id},
+            )
+            return
         await conn.execute(
             text(
                 """

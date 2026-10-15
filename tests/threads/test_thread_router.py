@@ -7,6 +7,7 @@ import pytest
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
+from openswe.jobs import queue
 from openswe.remote_runtime import proxy
 from openswe.remote_runtime.proxy import MdaRuntime
 from openswe.remote_runtime.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
@@ -40,11 +41,14 @@ class _Threads:
     def __init__(self) -> None:
         self.threads: dict[str, dict[str, JsonValue]] = {}
         self.client = _Client(self)
+        self.reachable = True
 
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         return self.threads.get(thread_id)
 
     async def indexed(self, thread_id: str) -> index.IndexedThread | None:
+        if not self.reachable:
+            raise httpx.ConnectError("Agent Server unreachable")
         thread = self.threads.get(thread_id)
         return None if thread is None else index.IndexedThread.from_agent_server(thread)
 
@@ -377,3 +381,27 @@ async def test_with_dual_writes_each_agent_server_change_reaches_the_index(
 
     await harness.request("DELETE", f"/threads/{THREAD}")
     assert await index.get(THREAD) is None
+
+
+async def test_with_dual_writes_a_failed_copy_is_retried_from_a_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    local = harness.runtimes.local
+    await local.create(THREAD, {"title": "Fix it"})
+
+    async def agent_server(scope: Scope, receive: Receive, send: Send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    harness.router = router.ThreadIndexMirror(agent_server)
+    local.reachable = False
+    await harness.request("PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Fix it"}})
+    assert await index.get(THREAD) is None
+
+    local.reachable = True
+    [retry] = await queue.find({})
+    assert retry.payload == {"thread_id": THREAD}
+    await router.sync_thread(THREAD)
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.metadata == {"title": "Fix it"}

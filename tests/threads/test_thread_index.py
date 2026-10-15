@@ -1,9 +1,10 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from openswe.threads import index
-from openswe.threads.index import ThreadExistsError, ThreadSearch
+from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -91,3 +92,38 @@ async def test_a_status_change_restarts_its_clock_but_a_repeat_does_not() -> Non
     assert await index.busy_since(later) == []
     assert await index.delete("t1")
     assert not await index.delete("t1")
+
+
+async def test_a_sync_that_read_an_older_copy_never_lands_after_a_newer_one() -> None:
+    agent_server = {"title": "old"}
+    first_read, release = asyncio.Event(), asyncio.Event()
+
+    def copy() -> IndexedThread:
+        return IndexedThread(
+            thread_id="t1",
+            runtime="local",
+            metadata=dict(agent_server),
+            status="idle",
+            created_at=_DAY,
+            updated_at=_DAY,
+        )
+
+    async def slow_read() -> IndexedThread:
+        read = copy()
+        first_read.set()
+        await release.wait()
+        return read
+
+    async def read() -> IndexedThread:
+        return copy()
+
+    slow = asyncio.create_task(index.sync("t1", slow_read))
+    await first_read.wait()
+    agent_server["title"] = "new"
+    fast = asyncio.create_task(index.sync("t1", read))
+    await asyncio.sleep(0.1)
+    release.set()
+    await asyncio.gather(slow, fast)
+
+    synced = await index.get("t1")
+    assert synced is not None and synced.metadata == {"title": "new"}

@@ -33,6 +33,7 @@ from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_ag
 from openswe.session_cost import run_session_cost_refresh
 from openswe.threads.index import index_kept
 from openswe.threads.index_import import import_agent_server_threads, mark_index_stale
+from openswe.threads.router import THREAD_SYNC_JOB, sync_thread
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
@@ -151,6 +152,13 @@ async def _wake_thread(job: Job) -> None:
         logger.exception("Thread wakeup failed", extra={"job_id": str(job.id)})
         return
     logger.info("Thread woken", extra={"job_id": str(job.id), "run_id": run_id})
+
+
+@WORKER.register(THREAD_SYNC_JOB)
+async def _thread_index_sync(job: Job) -> None:
+    thread_id = _text(job, "thread_id")
+    if thread_id is not None:
+        await sync_thread(thread_id)
 
 
 async def start_jobs() -> None:
