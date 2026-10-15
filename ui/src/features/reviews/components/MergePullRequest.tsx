@@ -48,7 +48,7 @@ export function MergePullRequest({
       choice,
       options.length === 1 ? options[0] : null,
       preferred,
-      "squash",
+      "squash" as const,
     ].find(
       (candidate): candidate is MergeMethod =>
         !!candidate && options.includes(candidate)
