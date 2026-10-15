@@ -366,8 +366,7 @@ def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
     return SLACK_ASK_EXCLUDED_TOOLS
 
 
-# Reading a Slack channel takes an explicit channel id and nothing from the run's
-# source context, so it survives every gate the thread-bound Slack tools do not.
+# Channel history also serves source-free requests; its own policy gates access.
 SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_messages"})
 
 
