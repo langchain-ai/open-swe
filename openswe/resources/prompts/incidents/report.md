@@ -46,9 +46,12 @@ Fill every field the investigation covered, because they are published as named 
 problem, previous_occurrence, impact, cause, and next_steps as the steps to solve. Keep
 each to one or two sentences. State previous_occurrence explicitly even when the search
 came back empty, so a responder can see the check happened. Answer the directed question
-in summary, and otherwise use summary for a one-sentence headline of the current verdict;
-it is what the dashboard and the completion notice show. Preserve replay/test context and
-uncertainty. Keep detailed hypotheses, checks, and open questions in their own fields.
+in summary, and otherwise use summary for a one-sentence TLDR of the current verdict.
+Keep it under 250 characters so a paged developer can grasp what is happening immediately:
+state the failure and its confirmed root cause, or explicitly say the root cause is still
+unknown. Never present a suspected trigger as confirmed. This summary also appears as the
+final TLDR section of the Slack message, in the dashboard, and in the completion notice.
+Preserve replay/test context and uncertainty. Keep detailed hypotheses, checks, and open questions in their own fields.
 Consolidate repeated access failures into one gap per source. Use next_steps for up to
 three concrete recommendations, highest priority first, citing the observations motivating
 each; these are proposed actions, never claims of completed work. Leave next_steps empty

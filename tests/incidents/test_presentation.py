@@ -23,6 +23,23 @@ def test_investigation_bounds_untrusted_sections_without_mentions_or_unsafe_link
     assert all(len(block.get("text", {}).get("text", "")) <= 3000 for block in blocks)
     # Only the three highest-priority steps are published.
     assert "\n4. " not in text
+    assert blocks[-1]["text"]["text"].startswith("*TLDR*\n")
+    assert len(blocks[-1]["text"]["text"]) <= 257
+
+
+def test_investigation_ends_with_tldr_before_sources():
+    report = IncidentReport(
+        summary="Uploads time out; root cause still unknown. [tool:1]",
+        problem="Upload failures.",
+        cause="Timeouts observed; trigger unproven.",
+        next_steps=["Check upload latency."],
+        evidence=[
+            Evidence(id="tool:1", source="tool", summary="Timeouts", url="https://example.com")
+        ],
+    )
+    text, blocks = report_message(report, report.summary, None)
+    assert blocks[-2]["text"]["text"] == ("*TLDR*\nUploads time out; root cause still unknown.")
+    assert text.index("*Steps to solve*") < text.index("*TLDR*") < text.index("Sources:")
 
 
 @pytest.mark.parametrize("character", ["&", "<", ">"])
