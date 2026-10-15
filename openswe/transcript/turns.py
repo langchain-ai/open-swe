@@ -176,6 +176,24 @@ async def run_turn(thread_id: str, run_id: str) -> RunTurn | None:
     return None if row is None else RunTurn(row["turn_id"], row["state"] in _OPEN_STATES)
 
 
+async def superseded_turns(
+    thread_id: str, run_id: str, turn_id: UUID
+) -> list[tuple[UUID, str | None]]:
+    """Turns other runs left running, with their runs; a thread runs one run at a time."""
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT turn_id, run_id FROM thread_turn
+                WHERE thread_id = :thread_id AND state = 'running'
+                  AND turn_id <> :turn_id AND run_id IS DISTINCT FROM :run_id
+                """
+            ),
+            {"thread_id": thread_id, "run_id": run_id, "turn_id": turn_id},
+        )
+        return [(row.turn_id, row.run_id) for row in result]
+
+
 async def recorded_message_ids(thread_id: str, message_ids: Sequence[str]) -> set[str]:
     """Which of ``message_ids`` the thread's transcript already holds."""
     if not message_ids:
