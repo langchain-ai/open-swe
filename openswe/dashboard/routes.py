@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 
 from openswe.analytics.routes import router as analytics_router
+from openswe.announcements.routes import router as announcements_router
 from openswe.api_keys.routes import router as api_keys_router
 from openswe.audit_logs.routes import router as audit_logs_router
 from openswe.bridge.routes import router as bridge_router
@@ -10,7 +11,6 @@ from openswe.dashboard.agent_instructions import router as agent_instructions_ro
 from openswe.dashboard.auth_routes import router as auth_router
 from openswe.dashboard.client_errors import router as client_errors_router
 from openswe.dashboard.langsmith_routes import router as langsmith_router
-from openswe.dashboard.notion_routes import router as notion_router
 from openswe.dashboard.oauth import require_same_origin_for_mutations
 from openswe.dashboard.options_routes import router as options_router
 from openswe.dashboard.profiles import router as profiles_router
@@ -22,7 +22,6 @@ from openswe.github.pull_request_dashboard_routes import router as pull_requests
 from openswe.human_review.routes import router as human_review_router
 from openswe.incidents.document_routes import router as incident_documents_router
 from openswe.incidents.routes import router as incidents_router
-from openswe.mcp.cli_tools import router as cli_mcp_tools_router
 from openswe.mcp.routes import router as mcp_router
 from openswe.review.conversation import router as review_conversation_router
 from openswe.review.routes import router as review_router
@@ -49,12 +48,11 @@ router.include_router(user_preferences_router)
 router.include_router(options_router)
 router.include_router(profiles_router)
 router.include_router(users_router)
-router.include_router(notion_router)
+router.include_router(announcements_router)
 router.include_router(langsmith_router)
 router.include_router(slack_router)
 router.include_router(workspace_settings_router)
 router.include_router(mcp_router)
-router.include_router(cli_mcp_tools_router)
 router.include_router(workspaces_router)
 router.include_router(repos_router)
 router.include_router(pull_requests_router)

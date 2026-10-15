@@ -8,16 +8,18 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe.slack.client import (
     append_slack_web_link_footer,
-    bind_slack_thread_id,
-    delete_slack_thread_associations,
     get_active_slack_thread,
-    lookup_slack_thread_run_mapping,
     post_slack_top_level_message_with_ts,
     slack_thread_mutation_lock,
-    store_slack_run_mapping,
 )
 from openswe.slack.code_channels import is_code_channel_session
 from openswe.slack.http import SlackRequestError
+from openswe.slack.records import (
+    bind_slack_thread_id,
+    delete_slack_thread_associations,
+    lookup_slack_thread_run_mapping,
+    store_slack_run_mapping,
+)
 from openswe.slack.thinking import release_slack_location_status, sync_slack_background_status
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.utils.dashboard_links import dashboard_thread_url
@@ -82,28 +84,18 @@ async def _restore_binding(client: LangGraphClient, thread_id: str, previous: Js
     return True
 
 
-async def _carry_run_mapping(
-    client: LangGraphClient, source: SlackThreadRef, destination: SlackThreadRef
-) -> None:
-    source_run = await lookup_slack_thread_run_mapping(client, source.channel_id, source.thread_ts)
-    if not isinstance(source_run, Mapping):
-        return
-    run_id = source_run.get("run_id")
-    if not isinstance(run_id, str) or not run_id:
+async def _carry_run_mapping(source: SlackThreadRef, destination: SlackThreadRef) -> None:
+    source_run = await lookup_slack_thread_run_mapping(source.channel_id, source.thread_ts)
+    if source_run is None:
         return
     await store_slack_run_mapping(
-        client,
         destination.channel_id,
         destination.thread_ts,
-        run_id,
+        source_run.run_id,
         message_ts=(
             None if is_code_channel_session(destination.thread_ts) else destination.thread_ts
         ),
-        triggering_user_id=(
-            str(source_run.get("triggering_user_id"))
-            if source_run.get("triggering_user_id")
-            else None
-        ),
+        triggering_user_id=source_run.triggering_user_id,
     )
 
 
@@ -130,10 +122,10 @@ async def rebind_slack_thread(
                 SlackThreadRef.model_validate(locked_active).location if locked_active else None
             )
             if current == target_location:
-                await bind_slack_thread_id(client, *target_location, thread_id)
+                await bind_slack_thread_id(*target_location, thread_id)
             elif current == source_location:
                 metadata = thread_metadata(await client.threads.get(thread_id))
-                await bind_slack_thread_id(client, *target_location, thread_id)
+                await bind_slack_thread_id(*target_location, thread_id)
                 bound_here = True
                 previous = {key: metadata[key] for key in _BINDING_KEYS if key in metadata}
                 await client.threads.update(
@@ -154,7 +146,7 @@ async def rebind_slack_thread(
         if bound_here:
             try:
                 await delete_slack_thread_associations(
-                    client, *target_location, expected_thread_id=thread_id
+                    *target_location, expected_thread_id=thread_id
                 )
             except Exception:
                 logger.warning(
@@ -165,12 +157,10 @@ async def rebind_slack_thread(
         raise SlackRebindError(str(exc), moved=False) from exc
 
     try:
-        await _carry_run_mapping(client, source, destination)
+        await _carry_run_mapping(source, destination)
         await release_slack_location_status(*source_location)
         await sync_slack_background_status(client, thread_id, resume=True)
-        await delete_slack_thread_associations(
-            client, *source_location, expected_thread_id=thread_id
-        )
+        await delete_slack_thread_associations(*source_location, expected_thread_id=thread_id)
     except Exception as exc:
         raise SlackRebindError(str(exc), moved=True) from exc
 

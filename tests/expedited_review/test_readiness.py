@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -7,9 +7,10 @@ from openswe.expedited_review.readiness import (
     Readiness,
     _latest_reviews_by_user,
     _resolve_mergeability,
-    assess_readiness,
     readiness_blockers,
 )
+from openswe.github.ci import RequiredCheck
+from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import Mergeability, PullRequestClient
 
 
@@ -96,8 +97,9 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
         else []
     )
     with (
-        patch(
-            "openswe.expedited_review.readiness.fetch_pr",
+        patch.object(
+            PullRequestClient,
+            "pull",
             AsyncMock(
                 return_value={
                     "state": "open",
@@ -109,27 +111,25 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
                 }
             ),
         ),
-        patch(
-            "openswe.expedited_review.readiness.list_check_runs",
+        patch.object(
+            RepoClient,
+            "check_runs",
             AsyncMock(
                 return_value=[
-                    {"name": "Open SWE Review", "status": "completed", "conclusion": "neutral"}
+                    {"name": "Open SWE Review", "status": "in_progress"},
+                    {"name": "unit", "status": "completed", "conclusion": "success"},
                 ]
             ),
         ),
-        patch(
-            "openswe.expedited_review.readiness.list_commit_statuses", AsyncMock(return_value=[])
-        ),
-        patch(
-            "openswe.expedited_review.readiness.fetch_required_checks",
-            AsyncMock(return_value=set()),
-        ),
-        patch("openswe.github.http.github_client"),
+        patch.object(RepoClient, "commit_statuses", AsyncMock(return_value=[])),
+        patch.object(RequiredCheck, "for_branch", AsyncMock(return_value=set())),
         patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
         patch.object(PullRequestClient, "reviews", AsyncMock(return_value=live_reviews)),
         patch.object(PullRequestClient, "mergeability", AsyncMock(return_value=None)),
     ):
-        result = await assess_readiness(owner="lc", repo="repo", pr_number=7, token="t")
+        result = await Readiness.assess(
+            GitHubClient(MagicMock()).repo("lc", "repo").pull_request(7)
+        )
 
     assert result is not None
     assert result.snapshot.check_state == "success"

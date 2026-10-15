@@ -23,14 +23,14 @@ from langsmith.schemas import Example
 
 from evals.reviewer.costs import print_summary, record_experiment_costs
 from evals.reviewer.judge import aggregate_pr, judge_match
-from evals.reviewer.store_reporter import StoreReporter, is_enabled
+from evals.reviewer.status_reporter import StatusReporter, is_enabled
 from evals.reviewer.target import (
     drain_thread_ids,
     get_completed_count,
     get_langgraph_url,
     review_pr,
 )
-from openswe.review.eval_store import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
+from openswe.review.eval_report import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -371,7 +371,7 @@ async def main() -> None:
     else:
         data = dataset_name
 
-    reporter: StoreReporter | None = None
+    reporter: StatusReporter | None = None
     heartbeat: asyncio.Task[None] | None = None
     log_handler: logging.Handler | None = None
     original_stdout = sys.stdout
@@ -383,11 +383,8 @@ async def main() -> None:
         )
         logging.getLogger().addHandler(log_handler)
         sys.stdout = _TeeStream(original_stdout, capture)
-        reporter = StoreReporter(
-            config=dict(config),
-            limit=args.limit,
+        reporter = StatusReporter(
             total=_resolve_total(dataset_name, data),
-            created_by=None,
             completed_getter=get_completed_count,
             tail_getter=capture.tail,
             experiment_url_getter=capture.url,

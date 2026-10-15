@@ -65,6 +65,7 @@ def _clear_slack_state_cookie(response: Response) -> None:
 
 @router.get("/slack/login")
 async def slack_login(
+    redirect_to: str | None = None,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     _session: dict[str, Any] = SESSION_DEP,
@@ -75,7 +76,9 @@ async def slack_login(
     redirect_uri = f"{slack_base_url()}/dashboard/api/slack/callback"
     nonce = new_state_nonce()
     state = issue_state(
-        redirect_to=f"{frontend_base_url()}/my-settings/connections",
+        redirect_to=sanitize_redirect_to(redirect_to)
+        if redirect_to
+        else f"{frontend_base_url()}/my-settings/connections",
         nonce_hash=hash_state_nonce(nonce),
         handoff_challenge=valid_handoff_challenge(desktop_handoff),
         handoff_port=desktop_port,
@@ -102,8 +105,8 @@ async def slack_callback(
     handoff = desktop_handoff_from_state(state_payload)
 
     if handoff is not None:
-        # Same as the Notion flow: hand the verified identity back over the
-        # loopback port, for the app to redeem under the session it holds.
+        # Hand the verified identity back over the loopback port, for the app
+        # to redeem under the session it holds.
         challenge, port = handoff
         identity = await _verified_slack_identity(code)
         handoff_code = issue_connect_handoff(
@@ -156,24 +159,15 @@ async def _verified_slack_identity(code: str) -> SlackIdentity:
 async def _link_slack_identity(
     session: dict[str, Any], *, slack_user_id: str, email: str, team_id: str
 ) -> None:
-    """Attach the Slack account to the person the session belongs to.
-
-    Sessions minted before the ``user_id`` claim existed fall back to the
-    GitHub login; one without a users row is left unlinked.
-    """
+    """Attach the Slack account to the person the session belongs to."""
     github_login = session["sub"]
-    user_id = session_user_id(session)
-    user = (
-        await User.get(user_id)
-        if user_id is not None
-        else await User.for_login("github", github_login)
-    )
+    user = await User.for_session(session_user_id(session), github_login)
     if user is None:
-        logger.info(
+        logger.warning(
             "Slack identity not linked: no user for this GitHub login",
             extra={"github_login": github_login},
         )
-        return
+        raise HTTPException(409, "no Open SWE account for your GitHub login — sign in again")
     await user.link("slack", slack_user_id, email=email, team_id=team_id)
 
 

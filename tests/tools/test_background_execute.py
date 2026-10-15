@@ -469,10 +469,11 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
 
 
 @pytest.mark.parametrize(
-    ("tracking_failure", "worker"), [(False, False), (True, False), (False, True)]
+    ("tracking_failure", "worker", "private"),
+    [(False, False, False), (True, False, False), (False, True, False), (False, False, True)],
 )
 async def test_reconcile_enqueues_one_claimed_completion(
-    monkeypatch: pytest.MonkeyPatch, tracking_failure: bool, worker: bool
+    monkeypatch: pytest.MonkeyPatch, tracking_failure: bool, worker: bool, private: bool
 ) -> None:
     task = {
         "task_id": "task-1",
@@ -494,15 +495,18 @@ async def test_reconcile_enqueues_one_claimed_completion(
             "running_background_tasks": ["task-1"],
         }
     }
-    if worker:
+    if worker or private:
         client.threads.get.return_value["metadata"].update(
             source="dashboard",
             source_context={},
-            task_id=str(uuid.uuid4()),
-            sandbox_host_thread_id="coordinator",
+            visibility="private" if private else "public",
             owner_type="user",
             owner_login="worker-owner",
         )
+        if worker:
+            client.threads.get.return_value["metadata"].update(
+                task_id=str(uuid.uuid4()), sandbox_host_thread_id="coordinator"
+            )
         monkeypatch.setattr(task_service, "langgraph_client", lambda: client)
         monkeypatch.setattr(task_service, "enforce_github_login_gate", AsyncMock())
         monkeypatch.setattr(
@@ -534,10 +538,20 @@ async def test_reconcile_enqueues_one_claimed_completion(
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
     configurable = dispatch.await_args.args[2]
-    source = "dashboard" if worker else "slack"
+    source = "dashboard" if worker or private else "slack"
     assert configurable["source"] == source
     assert configurable["background_task_completion"] is True
     assert dispatch.await_args.kwargs["source"] == source
+    if private:
+        from openswe.credential_scope import private_owner_login
+        from openswe.run_config import RunConfig
+
+        assert (
+            private_owner_login(
+                RunConfig.parse(configurable), client.threads.get.return_value["metadata"]
+            )
+            == "worker-owner"
+        )
     if worker:
         config = {"configurable": configurable}
         monkeypatch.setattr(threads, "get_config", lambda: config)
@@ -638,7 +652,7 @@ async def test_reconcile_uses_fresh_state_for_concurrent_launch(
 async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     monkeypatch: pytest.MonkeyPatch, slack: bool, run_active: bool
 ) -> None:
-    from openswe import dispatch, thread_feedback
+    from openswe import dispatch
 
     client = AsyncMock()
     stored: dict[str, object] = {
@@ -666,7 +680,6 @@ async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
     monkeypatch.setattr(dispatch, "dispatch_client", lambda: client)
-    monkeypatch.setattr(thread_feedback, "note_feedback_activity", AsyncMock())
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(
         background_tasks,

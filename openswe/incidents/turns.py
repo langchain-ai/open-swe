@@ -5,6 +5,7 @@ import logging
 from typing import Any, Literal
 
 import httpx
+from langgraph_sdk import get_client
 
 from openswe.dashboard.options import normalize_model_choice
 from openswe.dispatch import create_durable_run
@@ -19,13 +20,13 @@ from openswe.input_messages import (
     system_input,
     system_introduction,
 )
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
     slack_message_bot_id,
     slack_message_bot_name,
 )
-from openswe.store import store_client
 from openswe.ui_invalidations import Topic
 from openswe.utils.thread_ops import queue_message_for_thread
 
@@ -105,9 +106,7 @@ async def queue_context(record: Incident, message: dict[str, Any]) -> bool:
 
 async def _runs(thread_id: str, status: Literal["pending", "running"]) -> list[dict[str, Any]]:
     try:
-        return [
-            dict(run) for run in await store_client().runs.list(thread_id, status=status) if run
-        ]
+        return [dict(run) for run in await get_client().runs.list(thread_id, status=status) if run]
     except Exception:  # noqa: BLE001
         logger.debug("Could not list %s runs for %s", status, thread_id, exc_info=True)
         return []
@@ -130,7 +129,7 @@ async def cancel_active_runs(thread_id: str, *, keep_run_id: str = "") -> None:
         if run.get("run_id") and str(run["run_id"]) != keep_run_id
     ]
     if run_ids:
-        await store_client().runs.cancel_many(
+        await get_client().runs.cancel_many(
             thread_id=thread_id, run_ids=run_ids, action="interrupt"
         )
 
@@ -138,20 +137,22 @@ async def cancel_active_runs(thread_id: str, *, keep_run_id: str = "") -> None:
 async def queued_context_count(thread_id: str) -> int:
     """Count of messages waiting to reach this thread's agent.
 
-    Combines the legacy in-run injection queue (``queue_context`` /
-    ``queue_message_for_thread``, still used by Slack context and the
-    ``send_dashboard_message`` agent tool) with genuine pending runs
+    Combines the in-run injection queue (``queue_context`` /
+    ``queue_message_for_thread``, used by Slack context and steered
+    follow-ups) with genuine pending runs
     (a composer follow-up enqueued via the server-backed queue adapter is a
     real LangGraph run, not a KV-store entry, and would otherwise be
     invisible here).
     """
     try:
-        item = await store_client().store.get_item(("queue", thread_id), "pending_messages")
+        kv_count = len(await QueuedMessage.for_thread(thread_id))
     except Exception:  # noqa: BLE001
-        item = None
-    value = item.get("value") if isinstance(item, dict) else None
-    messages = value.get("messages") if isinstance(value, dict) else None
-    kv_count = len(messages) if isinstance(messages, list) else 0
+        logger.warning(
+            "Could not count queued messages",
+            exc_info=True,
+            extra={"incident": {"thread_id": thread_id}},
+        )
+        kv_count = 0
     return kv_count + len(await _runs(thread_id, "pending"))
 
 
@@ -289,8 +290,7 @@ async def schedule_automatic_turn(record: Incident, policy: IncidentPolicy) -> b
 
 async def handle_run_completion(thread_id: str, run_id: str | None, status: str) -> dict[str, str]:
     """Follow up a finished incident run: reschedule stranded context or note a failure."""
-    records = await service.INCIDENTS.search(filter={"thread_id": thread_id})
-    record = records[0] if records else None
+    record = await service.INCIDENTS.for_thread(thread_id)
     if record is None:
         return {"status": "ignored", "reason": "unknown incident thread"}
     await Topic.INCIDENTS.invalidate(key=record.id)

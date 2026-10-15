@@ -1,28 +1,18 @@
-from typing import Any
+"""The threads each person pinned to the top of their dashboard sidebar."""
 
-from openswe.store import delete_value, put_value, search_values
+from openswe.users.records import UserRecords
 
-THREAD_PINS_NAMESPACE = "thread_pins"
-
-
-def _namespace(login: str) -> list[str]:
-    return [THREAD_PINS_NAMESPACE, login]
+THREAD_PINS = UserRecords("thread_pin")
 
 
 async def list_thread_pin_ids(login: str) -> list[str]:
-    records = await search_values(_namespace(login), limit=1000)
-    return [
-        thread_id
-        for record in records
-        if isinstance((thread_id := record.get("thread_id")), str) and thread_id
-    ]
+    """The person's pinned thread IDs, oldest pin first."""
+    return await THREAD_PINS.keys(login)
 
 
-async def pin_thread(login: str, thread_id: str) -> dict[str, Any]:
-    record = {"thread_id": thread_id}
-    await put_value(_namespace(login), thread_id, record)
-    return record
+async def pin_thread(login: str, thread_id: str) -> None:
+    await THREAD_PINS.add(login, {}, key=thread_id)
 
 
 async def unpin_thread(login: str, thread_id: str) -> None:
-    await delete_value(_namespace(login), thread_id)
+    await THREAD_PINS.delete(login, key=thread_id)

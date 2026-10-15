@@ -70,6 +70,8 @@ export interface GhosttyTheme {
   readonly cursor: GhosttyColor
   /** CSS color the renderer overlays on selected cells; not sent to Ghostty. */
   readonly selectionBackground?: string
+  /** The 16 ANSI colors; the rest of the 256-color palette keeps its defaults. */
+  readonly ansi?: ReadonlyArray<GhosttyColor>
 }
 
 export interface GhosttyCell {
@@ -398,6 +400,16 @@ export class GhosttyTerminalCore {
       this.runtime.call("ghostty_terminal_set", this.terminal, option, color)
     }
     this.runtime.free(color, 3)
+    if (theme.ansi) this.setAnsiPalette(theme.ansi)
+  }
+
+  private setAnsiPalette(ansi: ReadonlyArray<GhosttyColor>): void {
+    const palette = this.runtime.alloc(256 * 3)
+    this.runtime.call("ghostty_terminal_get", this.terminal, 25, palette)
+    const bytes = this.runtime.bytes(palette, 256 * 3)
+    ansi.forEach(({ r, g, b }, index) => bytes.set([r, g, b], index * 3))
+    this.runtime.call("ghostty_terminal_set", this.terminal, 14, palette)
+    this.runtime.free(palette, 256 * 3)
   }
 
   scroll(deltaRows: number): void {

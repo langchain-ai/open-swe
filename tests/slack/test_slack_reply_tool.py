@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack.http import SlackRequestError
+from openswe.slack.records import SlackThread
 
 slack_reply_tool = importlib.import_module("openswe.slack.tools.reply")
 
@@ -21,6 +22,16 @@ def _patch_slack_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", AsyncMock())
 
 
+class _Threads:
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        raise LookupError(thread_id)
+
+
+class _Client:
+    def __init__(self) -> None:
+        self.threads = _Threads()
+
+
 def _config() -> dict[str, Any]:
     return {
         "configurable": {
@@ -32,13 +43,12 @@ def _config() -> dict[str, Any]:
     }
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.parametrize("breakout", [False, True])
 async def test_kickoff_stays_until_a_subsequent_reply_posts(
     monkeypatch: pytest.MonkeyPatch,
     breakout: bool,
 ) -> None:
-    from tests.slack.test_slack_thread_mapping import _Client
-
     client = _Client()
     monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
@@ -63,7 +73,10 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
         yield type("Slack", (), {"chat_delete": deleted})()
 
     monkeypatch.setattr(slack_reply_tool.SlackClient, "bot", bot)
-    assert await slack_reply_tool.slack_reply("Investigating", "progress") == {"success": True}
+    assert await slack_reply_tool.slack_reply("Investigating", "progress") == {
+        "success": True,
+        "message_ts": "1.1",
+    }
     assert await slack_reply_tool.slack_reply("Update", "final") == {
         "success": False,
         "error": "rate_limited",
@@ -72,21 +85,26 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
         "hint": slack_reply_tool._slack_reply_failure_hint("rate_limited"),
     }
     deleted.assert_not_awaited()
-    assert await slack_reply_tool.slack_reply("Update", "progress") == {"success": True}
-    assert await slack_reply_tool.slack_reply("Done", "final") == {"success": True}
+    assert await slack_reply_tool.slack_reply("Update", "progress") == {
+        "success": True,
+        "message_ts": "1.2",
+    }
+    assert await slack_reply_tool.slack_reply("Done", "final") == {
+        "success": True,
+        "message_ts": "1.3",
+    }
     if breakout:
         deleted.assert_not_awaited()
     else:
         deleted.assert_awaited_once_with(channel="C1", ts="1.1")
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_kickoff_delete_failure_does_not_interrupt_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tests.slack.test_slack_thread_mapping import _Client
-
     client = _Client()
-    await client.store.put_item(("slack_kickoff", "C1"), "1.0", {"kickoff_ts": "1.1"})
+    await SlackThread.record_kickoff("C1", "1.0", "1.1")
     monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
         slack_reply_tool,
@@ -108,15 +126,14 @@ async def test_kickoff_delete_failure_does_not_interrupt_update(
         yield type("Slack", (), {"chat_delete": deleted})()
 
     monkeypatch.setattr(slack_reply_tool.SlackClient, "bot", bot)
-    assert await slack_reply_tool.slack_reply("Update", "final") == {"success": True}
-    assert (await client.store.get_item(("slack_kickoff", "C1"), "1.0"))["value"] == {
-        "kickoff_ts": "1.1"
-    }
-    assert await slack_reply_tool.slack_reply("Another update", "final") == {"success": True}
+    posted = {"success": True, "message_ts": "1.2"}
+    assert await slack_reply_tool.slack_reply("Update", "final") == posted
+    thread = await SlackThread.find("C1", "1.0")
+    assert thread is not None and thread.kickoff_ts == "1.1"
+    assert await slack_reply_tool.slack_reply("Another update", "final") == posted
     assert deleted.await_count == 2
-    assert (await client.store.get_item(("slack_kickoff", "C1"), "1.0"))["value"] == {
-        "removed": True
-    }
+    thread = await SlackThread.find("C1", "1.0")
+    assert thread is not None and thread.kickoff_recorded and thread.kickoff_ts is None
 
 
 async def test_slack_reply_holds_mutation_lock_while_posting(
@@ -141,19 +158,19 @@ async def test_slack_reply_holds_mutation_lock_while_posting(
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("hello", "final") == {"success": True}
+    assert await slack_reply_tool.slack_reply("hello", "final") == {
+        "success": True,
+        "message_ts": "2.0",
+    }
     assert lock_held is False
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_freshness_conflicts_survive_offloaded_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    from tests.slack.test_slack_thread_mapping import _Client
-
-    client = _Client()
-    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
     latest = {"human_timestamps": ["1.0", "2.0"], "formatted": "new request"}
     monkeypatch.setattr(slack_reply_tool, "fetch_and_format_thread", AsyncMock(return_value=latest))
     messages = [HumanMessage(content='<input-message timestamp="1.0">request</input-message>')]
@@ -209,7 +226,10 @@ async def test_code_channel_reply_stays_in_user_started_thread(
     monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", active_thread)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("threaded", "final") == {"success": True}
+    assert await slack_reply_tool.slack_reply("threaded", "final") == {
+        "success": True,
+        "message_ts": "10.000",
+    }
 
 
 @pytest.mark.parametrize("slack_error", ["channel_not_found", "not_in_channel"])
@@ -255,7 +275,8 @@ async def test_only_final_reply_has_feedback_for_its_run(
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
     assert await slack_reply_tool.slack_reply("Answer", response_type, options=options) == {
-        "success": True
+        "success": True,
+        "message_ts": "2.0",
     }
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
@@ -288,7 +309,10 @@ async def test_long_reply_retains_all_text_alongside_feedback(
     post = AsyncMock(return_value="2.0")
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("x" * 12001, "final") == {"success": True}
+    assert await slack_reply_tool.slack_reply("x" * 12001, "final") == {
+        "success": True,
+        "message_ts": "2.0",
+    }
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
     assert "".join(block["text"]["text"] for block in blocks[:-1]) == "x" * 12001
@@ -304,7 +328,10 @@ async def test_slack_reply_keeps_code_highlighted_over_native_limit(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply(message, "progress") == {"success": True}
+    assert await slack_reply_tool.slack_reply(message, "progress") == {
+        "success": True,
+        "message_ts": "2.0",
+    }
     assert post.await_args.args[2].startswith("*Heading*\n")
     blocks = post.await_args.kwargs["blocks"]
     [code] = [block for block in blocks if block["type"] == "rich_text"]

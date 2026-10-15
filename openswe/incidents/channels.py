@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException
+from langgraph_sdk import get_client
 
 from openswe.config import ENV
 from openswe.incidents import service, turns
@@ -16,13 +17,12 @@ from openswe.slack.client import (
     fetch_slack_thread_messages,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
-    resolve_slack_thread_id,
     slack_message_bot_id,
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SlackClient, SlackRequestError
+from openswe.slack.records import resolve_slack_thread_id
 from openswe.source_context import SlackThreadRef, SourceContext
-from openswe.store import store_client
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_incident_url
 from openswe.webhooks.common import post_account_link_prompt, upsert_agent_thread_metadata
@@ -175,7 +175,7 @@ async def enroll_channel(
             return record
         record.channel_name = str(info.get("name") or channel_name)
         record.title = record.channel_name
-        client = store_client()
+        client = get_client()
         record.thread_id = await resolve_slack_thread_id(client, channel_id, turns.SESSION_TS)
         persisted = await upsert_agent_thread_metadata(
             record.thread_id,
@@ -257,7 +257,7 @@ async def apply_control(
     else:
         raise ValueError(f"unknown incident control {action!r}")
     service.note(record, "control", text.split("\n", 1)[0])
-    await service.save(record)
+    await service.save(record, by=service.actor_login(actor))
     await _post(record, text, blocks=blocks)
     if action in {"resume", "reopen"} and await turns.queued_context_count(record.thread_id):
         await turns.schedule_automatic_turn(record, policy)

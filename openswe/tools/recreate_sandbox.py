@@ -4,6 +4,7 @@ import logging
 from collections.abc import Mapping
 from typing import NotRequired, TypedDict
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import SandboxRecreationStopError, SandboxSource
 from openswe.tools.access import Policy, access
@@ -27,6 +28,7 @@ def _switches_workspace(args: Mapping[str, object]) -> Policy | None:
     return Policy(trusted="admin_surface", actor="admin")
 
 
+@audit_tool()
 @access(Policy(trusted="anywhere"), per_call=_switches_workspace)
 async def recreate_sandbox(
     source: SandboxSource = "workspace",

@@ -1,27 +1,23 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { createFileRoute } from "@tanstack/react-router"
+import { useMemo } from "react"
 
-import type { PrReviewComment } from "@/lib/api"
-import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewCommentsMenu"
-import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
-import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
-import { useSidebarControls } from "@/components/sidebar-layout"
-import {
-  markReviewViewed,
-  reviewChatQuery,
-} from "@/features/agents/lib/queries"
-import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
-import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
-import { pageTitle } from "@/lib/pageTitle"
+import { ReviewPage } from "@/features/reviews/page/ReviewPage"
+import { warmReviewPage } from "@/features/reviews/page/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
+  // Runs on hover intent too: the shell's data and the highlighter warm up
+  // before the click lands. Never awaited, so navigation is never held.
+  loader: ({ context, params }) =>
+    warmReviewPage(context.queryClient, {
+      owner: params.owner,
+      repo: params.repo,
+      number: Number(params.number),
+    }),
   head: ({
     params,
   }: {
@@ -35,157 +31,23 @@ export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
 
 function ReviewDetailPage() {
   const { owner, repo, number } = Route.useParams()
-  const prNumber = Number(number)
   const session = useSession()
-  const sidebar = useSidebarControls()
-  const sidebarCollapsed = sidebar?.collapsed ?? false
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  // A comment picked from the dropdown, shown inline in the diff (not GitHub).
-  const [activeComment, setActiveComment] = useState<PrReviewComment | null>(
-    null
+  const pr = useMemo(
+    () => ({ owner, repo, number: Number(number) }),
+    [owner, repo, number]
   )
-  const closeActiveComment = useCallback(() => setActiveComment(null), [])
-  const updateActiveComment = useCallback(
-    (comment: PrReviewComment) =>
-      setActiveComment((current) =>
-        current?.id === comment.id ? comment : current
-      ),
-    []
-  )
-
-  // Collapse the global nav by default while viewing a review (roomy diff),
-  // restoring the prior preference on leave. Runs once for the page's lifetime.
-  const sidebarRef = useRef(sidebar)
-  const openedFromSidebar = useRef(
-    reviewOpenedFromSidebar({ owner, repo, number: prNumber })
-  )
-  useEffect(() => {
-    sidebarRef.current = sidebar
-  }, [sidebar])
-  useEffect(() => {
-    const controls = sidebarRef.current
-    if (!controls || controls.collapsed || openedFromSidebar.current) return
-    controls.setCollapsed(true)
-    return () => controls.setCollapsed(false)
-  }, [])
-  const detail = useQuery({
-    queryKey: ["review", owner, repo, prNumber],
-    queryFn: () => api.getReview(owner, repo, prNumber),
-    enabled: !!session.data && Number.isFinite(prNumber),
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ||
-      query.state.data?.walkthrough_running
-        ? 5000
-        : false,
-  })
-  const diff = useQuery({
-    queryKey: ["reviewDiff", owner, repo, prNumber],
-    queryFn: () => api.getReviewDiff(owner, repo, prNumber),
-    enabled: !!session.data && Number.isFinite(prNumber),
-  })
-
-  const queryClient = useQueryClient()
-  const headSha = detail.data?.head_sha
-  const seenShaRef = useRef(headSha)
-  const prTitle = detail.data?.pr.title
-  const documentTitle = pageTitle(prTitle ?? `${owner}/${repo} #${prNumber}`)
-  useEffect(() => {
-    document.title = documentTitle
-  }, [documentTitle])
-  useEffect(() => {
-    if (headSha && seenShaRef.current && headSha !== seenShaRef.current) {
-      void queryClient.invalidateQueries({
-        queryKey: ["reviewDiff", owner, repo, prNumber],
-      })
-    }
-    if (headSha) seenShaRef.current = headSha
-  }, [headSha, queryClient, owner, repo, prNumber])
-
-  const reviewChatThreadId = useQuery({
-    ...reviewChatQuery({ owner, repo, number: prNumber }),
-    enabled: !!session.data && Number.isFinite(prNumber),
-  }).data?.thread_id
-  // Re-marked when a walkthrough lands, since its arrival is what made the row unread.
-  const walkthroughSha = detail.data?.walkthrough?.head_sha
-  useEffect(() => {
-    if (!reviewChatThreadId) return
-    markReviewViewed(
-      queryClient,
-      { owner, repo, number: prNumber },
-      reviewChatThreadId
-    )
-  }, [queryClient, owner, repo, prNumber, reviewChatThreadId, walkthroughSha])
-
-  if (session.isLoading) {
+  if (session.isLoading)
     return (
-      <main className="p-6">
+      <main className="p-space-6">
         <Skeleton className="h-64 w-full" />
       </main>
     )
-  }
   if (!session.data) return <RequireLogin />
-
-  return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
-      <header
-        data-desktop-drag-region=""
-        className={cn(
-          "flex h-12 shrink-0 items-center gap-3 border-b border-border pr-4 text-xs",
-          // Clear room for the fixed collapse toggle when the sidebar is hidden.
-          sidebarCollapsed ? (isDesktop ? "pl-32" : "pl-14") : "pl-4"
-        )}
-      >
-        <Link
-          to="/agents/reviews"
-          className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeftIcon className="size-3.5" />
-          Reviews
-        </Link>
-        <span className="text-muted-foreground">/</span>
-        <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
-          <GitPullRequestIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate font-medium">
-            {owner}/{repo}
-            <span className="ml-1.5 font-normal text-muted-foreground">
-              #{number}
-            </span>
-            {detail.data ? ` ${detail.data.pr.title}` : ""}
-          </span>
-        </span>
-        {Number.isFinite(prNumber) && (
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            <ReviewCommentsMenu
-              owner={owner}
-              repo={repo}
-              number={prNumber}
-              onSelect={setActiveComment}
-            />
-            <SubmitReviewPopover owner={owner} repo={repo} number={prNumber} />
-          </div>
-        )}
-      </header>
-
-      {detail.error ? (
-        <div className="p-6 text-xs text-destructive">
-          {detail.error.message}
-        </div>
-      ) : !detail.data ? (
-        <div className="space-y-3 p-6">
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-96 w-full" />
-        </div>
-      ) : (
-        <ReviewMainBody
-          key={detail.data.head_sha}
-          detail={detail.data}
-          diffFiles={diff.data?.files ?? null}
-          openComment={activeComment}
-          onUpdateOpenComment={updateActiveComment}
-          onCloseOpenComment={closeActiveComment}
-        />
-      )}
-    </div>
-  )
+  if (!Number.isFinite(pr.number))
+    return (
+      <main className="p-space-6 text-xs text-error-secondary">
+        {number} is not a pull request number.
+      </main>
+    )
+  return <ReviewPage key={`${owner}/${repo}/${number}`} pr={pr} />
 }

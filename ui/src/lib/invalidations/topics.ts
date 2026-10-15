@@ -4,9 +4,13 @@
  * `meta.invalidatedBy`; an invalidation of any of them refetches it, so it
  * never needs a `refetchInterval`.
  */
-type Topic = "workspaces" | "incident-settings"
+type Topic = "workspaces" | "incident-settings" | "announcements"
 /** Topics whose records each have one of their own, `<topic>/<key>`. */
-type KeyedTopic = "review-styles" | "incidents"
+type KeyedTopic =
+  | "review-styles"
+  | "incidents"
+  | "pull-requests"
+  | "thread-queues"
 
 export type InvalidationTopic = string
 

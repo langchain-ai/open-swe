@@ -3,34 +3,29 @@
 from collections.abc import Mapping
 
 from openswe.dashboard.feature_flags import feature_flag_names
-from openswe.dashboard.options import default_model_pair
 from openswe.dashboard.profiles import (
-    PROFILES_NAMESPACE,
+    PROFILES,
     ProfileUpdate,
     get_profile,
     normalize_profile_for_response,
 )
 from openswe.dashboard.user_preferences import (
-    USER_PREFERENCES_NAMESPACE,
+    USER_PREFERENCES,
     UserPreferencesUpdate,
     set_user_preferences,
 )
-from openswe.store import get_value, now_iso, put_value
 from openswe.users import User, UserPreferencesPatch
+from openswe.utils.time import now_iso
 
 SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
 
 PROFILE_SETTING_KEYS = frozenset(
     {
-        "default_model",
-        "reasoning_effort",
-        "default_subagent_model",
-        "subagent_reasoning_effort",
         "default_repo",
         "base_branch",
         "branch_prefix",
         "auto_fix_ci",
-        "model_routing_enabled",
+        "auto_human_review_enabled",
         "recent_thread_context_enabled",
         "draft_prs",
         "review_draft_prs",
@@ -39,7 +34,6 @@ PROFILE_SETTING_KEYS = frozenset(
 PREFERENCE_SETTING_KEYS = frozenset(
     {
         "default_visibility",
-        "local_tracing_project",
         "default_workspace",
         "follow_up_behavior",
     }
@@ -73,10 +67,7 @@ async def patch_personal_settings(
     preferences = None
     if profile_patch:
         profile = await get_profile(login) or {}
-        model, effort = default_model_pair()
         merged = {
-            "default_model": model,
-            "reasoning_effort": effort,
             **{
                 key: value
                 for key, value in normalize_profile_for_response(profile).items()
@@ -85,21 +76,12 @@ async def patch_personal_settings(
             **profile_patch,
         }
         update = ProfileUpdate.model_validate(merged)
-        update.validate_pairing()
         validated = update.model_dump()
         profile_patch = {key: validated[key] for key in profile_patch}
         if "draft_prs" in profile_patch and profile_patch["draft_prs"] is None:
             profile_patch["draft_prs"] = profile.get("draft_prs", True)
-        for model_key, effort_key in (
-            ("default_model", "reasoning_effort"),
-            ("default_subagent_model", "subagent_reasoning_effort"),
-        ):
-            if model_key in profile_patch or effort_key in profile_patch:
-                for key in (model_key, effort_key):
-                    if validated[key] != profile.get(key):
-                        profile_patch[key] = validated[key]
     if preferences_patch:
-        existing = await get_value(USER_PREFERENCES_NAMESPACE, login) or {}
+        existing = await USER_PREFERENCES.get(login) or {}
         preferences = UserPreferencesUpdate.model_validate(
             {
                 "default_visibility": "private",
@@ -114,10 +96,8 @@ async def patch_personal_settings(
             raise ValueError("No Open SWE user record for this login yet")
         result.update({key: getattr(saved_sql, key) for key in sql_patch})
     if profile is not None:
-        await put_value(
-            PROFILES_NAMESPACE,
-            login,
-            {**profile, **profile_patch, "login": login, "updated_at": now_iso()},
+        await PROFILES.put(
+            login, {**profile, **profile_patch, "login": login, "updated_at": now_iso()}
         )
         result.update(profile_patch)
     if preferences is not None:

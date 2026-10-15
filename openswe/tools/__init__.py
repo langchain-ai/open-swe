@@ -8,6 +8,8 @@ _TOOL_MODULES = {
     "auto_assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
+    "code_channel_set_view": ".code_channel_set_view",
+    "connect_managed_tools": ".connect_managed_tools",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
@@ -29,6 +31,7 @@ _TOOL_MODULES = {
     "link_pull_request": ".open_pull_request",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "switch_to_performance_model": ".switch_to_performance_model",
     "manage_code_channel": "openswe.slack.tools.manage_code_channel",
     "manage_incident": "openswe.incidents.tools",
     "manage_thread": ".threads",
@@ -36,8 +39,8 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
+    "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
-    "read_store_item": ".read_store_item",
     "read_repo_file": "openswe.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
@@ -47,7 +50,7 @@ _TOOL_MODULES = {
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
-    "request_service_connection": ".request_service_connection",
+    "request_rollout_check": ".request_rollout_check",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -60,6 +63,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
+    "send_announcement": ".send_announcement",
     "search_repo_code": "openswe.github.tools.search_repo_code",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
@@ -73,6 +77,7 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_reply": "openswe.slack.tools.reply",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
+    "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
@@ -87,6 +92,8 @@ __all__ = [
     "auto_assign_human_reviewer",
     "background_execute",
     "background_task",
+    "code_channel_set_view",
+    "connect_managed_tools",
     "create_automation",
     "create_sandbox_file_download_url",
     "delete_automation",
@@ -108,6 +115,7 @@ __all__ = [
     "link_pull_request",
     "list_threads",
     "manage_baby_sit",
+    "switch_to_performance_model",
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
@@ -115,8 +123,8 @@ __all__ = [
     "open_pull_request",
     "output_iframe",
     "publish_review",
+    "write_database_rows",
     "read_only_sql",
-    "read_store_item",
     "read_repo_file",
     "read_user_settings",
     "record_human_input",
@@ -126,7 +134,7 @@ __all__ = [
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
-    "request_service_connection",
+    "request_rollout_check",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -139,6 +147,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_pull_requests",
+    "send_announcement",
     "search_repo_code",
     "start_thread",
     "slack_add_reaction",
@@ -152,6 +161,7 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_reply",
     "slack_breakout_thread",
+    "slack_start_review_channel",
     "submit_thread_feedback",
     "suggest_task",
     "trigger_automation",
@@ -179,6 +189,7 @@ if TYPE_CHECKING:
     from openswe.slack.tools.reply import slack_reply
     from openswe.slack.tools.request_pr_review import request_pr_review
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
+    from openswe.slack.tools.start_review_channel import slack_start_review_channel
     from openswe.tools.add_finding import add_finding
     from openswe.tools.automations import (
         create_automation,
@@ -189,6 +200,8 @@ if TYPE_CHECKING:
     )
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
+    from openswe.tools.code_channel_set_view import code_channel_set_view
+    from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
@@ -205,10 +218,10 @@ if TYPE_CHECKING:
     from openswe.tools.output_iframe import output_iframe
     from openswe.tools.publish_review import publish_review
     from openswe.tools.read_only_sql import read_only_sql
-    from openswe.tools.read_store_item import read_store_item
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
+    from openswe.tools.repair_data import write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
     from openswe.tools.request_human_review import (
@@ -218,15 +231,17 @@ if TYPE_CHECKING:
         get_human_review_status,
         request_human_review,
     )
-    from openswe.tools.request_service_connection import request_service_connection
+    from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
     from openswe.tools.save_plan import save_plan
     from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from openswe.tools.search_pull_requests import search_pull_requests
+    from openswe.tools.send_announcement import send_announcement
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
+    from openswe.tools.switch_to_performance_model import switch_to_performance_model
     from openswe.tools.threads import get_thread, list_threads, manage_thread, start_thread
     from openswe.tools.update_finding import update_finding
     from openswe.tools.user_skills import delete_user_skill, save_user_skill

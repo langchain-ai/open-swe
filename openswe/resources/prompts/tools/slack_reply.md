@@ -33,9 +33,20 @@ message with `options` must stay within 12,000 characters so its buttons are
 not hidden; shorten it or share the body as an artifact.
 If supplying explicit `blocks`, use the formatting required by each block type.
 
-To ask a user to choose from predefined options, pass `options`. Slack will
-render interactive buttons and the web UI will render the same choices.
-The user can still reply manually in the Slack thread.
+When asking a user to choose among concrete answers or actions, pass `options`
+to offer one-click answer buttons, including for blocking questions and approvals.
+Slack renders interactive buttons and the web UI renders the same choices.
+Use short, concrete button labels. In `message`, explain exactly what each
+button means and what choosing it will do; never rely on the short label alone.
+Name the specific change and its scope rather than vague actions like "Save rule".
+For example: "Block PRs" prevents PR creation in concierge DMs and requires a
+separate work thread; "Keep PRs allowed" leaves PR creation in concierge DMs enabled.
+Offer only options that provide a concrete answer or trigger meaningful work; one
+button is enough when there is only one useful action. Do not add no-op options
+such as "Just discussing", "Do nothing", or "Ignore" — the user can simply ignore
+the offer. Do not add options such as "Reply in Slack" or "Tell me more" that merely
+ask the user to type a reply; they can already reply manually.
+Do not invent choices for open-ended questions.
 
 To mention/tag a user, use Slack's mention format: <@USER_ID>.
 You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).

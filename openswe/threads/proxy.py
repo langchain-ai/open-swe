@@ -1,8 +1,10 @@
 """Pass-through endpoints between the dashboard and the LangGraph HTTP API."""
 
 import asyncio
+import copy
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -30,10 +32,14 @@ from openswe.threads.runs import (
     steer_running_thread,
 )
 from openswe.threads.summary import (
+    TRANSCRIPT_VERSION,
     _assert_thread_postable,
     _now_ms,
     _thread_is_busy,
 )
+from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from openswe.utils.thread_ops import langgraph_client, langgraph_url
@@ -95,6 +101,8 @@ async def stream_thread_events(
     headers = langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
     try:
+        # Its own client, not the shared pool: the stream stays open for as long as
+        # a tab watches the thread, and open tabs must not starve other requests.
         async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream("POST", url, content=body, headers=headers) as response:
                 if response.status_code >= 400:
@@ -157,11 +165,13 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
     principal: Principal | None = None,
+    relayed_from: str | None = None,
 ) -> tuple[int, bytes, str | None]:
     """Forward one command, enriched for whoever sent it.
 
     ``principal`` is how a machine gets in. Without one the sender is the person
     named by ``login``, which is what the dashboard and the agent's own tools pass.
+    ``relayed_from`` names the agent thread that sent it on that person's behalf.
     """
     received_at_ms = _now_ms()
     principal = principal or Principal.of_login(login, email)
@@ -184,7 +194,7 @@ async def proxy_dashboard_thread_commands(
     method = parsed.get("method")
     try:
         thread = await langgraph_client().threads.get(thread_id)
-    except Exception:  # noqa: BLE001
+    except NotFoundError:
         thread = None
 
     creating = False
@@ -207,25 +217,43 @@ async def proxy_dashboard_thread_commands(
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
     start_params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
+    start_params.pop(RELAYED_FROM_KEY, None)
+    if relayed_from and method == "run.start":
+        start_params[RELAYED_FROM_KEY] = relayed_from
+        parsed["params"] = start_params
     # The client's queue-or-steer choice rides the run's multitask strategy.
     # LangGraph's commands endpoint does not take it, so it is consumed here.
     enqueue = start_params.pop("multitask_strategy", None) == "enqueue"
+    offloading = offload_requested(start_params)
+    transcribed = metadata.get("transcript") == TRANSCRIPT_VERSION
     if method == "run.start" and thread_busy:
-        if offload_requested(start_params):
+        if offloading:
             raise HTTPException(409, "offloading requires an idle conversation")
         # Queueing and steering both attribute the message to a person, which a
         # machine has none of; it retries instead.
         if principal.machine:
             raise HTTPException(409, "thread is already running")
         # A follow-up while a run is live either waits for that run as a queued
-        # run of its own, or joins it. Either reply keeps the protocol's shape
-        # so the client cannot tell them from a plain start.
+        # run of its own, or joins the open turn. With no open turn the run has
+        # closed it and is about to end, so the follow-up waits for it. Either
+        # reply keeps the protocol's shape so the client cannot tell them from a
+        # plain start. See docs/tla/SteerRace.tla.
+        turn = await steer_target(thread_id) if transcribed and not enqueue else None
         handled = await (
-            queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
-            if enqueue
-            else steer_running_thread(thread_id, login, parsed, metadata=metadata, email=email)
+            steer_running_thread(
+                thread_id, login, parsed, metadata=metadata, turn=turn, email=email
+            )
+            if not enqueue and (turn is not None or not transcribed)
+            else queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
         )
         return 200, json.dumps(handled).encode(), "application/json"
+    # Enrichment rewrites the command in place; a start that loses the thread
+    # to another run is queued from the command as sent.
+    requeueable = (
+        copy.deepcopy(parsed)
+        if method == "run.start" and not creating and not principal.machine and not offloading
+        else None
+    )
 
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = langgraph_proxy_headers(content_type=content_type)
@@ -259,7 +287,9 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
-    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+    ) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
     try:
@@ -274,9 +304,15 @@ async def proxy_dashboard_thread_commands(
         and response_payload.get("type") == "success"
         and run_id is not None
     )
-    if run_start_succeeded and not creating:
+    if requeueable is not None and not run_start_succeeded:
+        requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
+        if requeued is not None:
+            return 200, json.dumps(requeued).encode(), "application/json"
+        if response.status_code >= 400:
+            await _fail_requested_turn(thread_id, enriched)
+    if run_start_succeeded and not creating and not relayed_from:
         try:
-            await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
+            await _notify_slack_web_handoff(thread_id, metadata)
         except Exception:
             logger.exception(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id
@@ -312,6 +348,47 @@ async def proxy_dashboard_thread_commands(
     return response.status_code, response.content, media_type
 
 
+async def _queue_if_thread_turned_busy(
+    thread_id: str, login: str, command: dict[str, Any], *, email: str | None
+) -> dict[str, Any] | None:
+    """Queue a start that a run begun after the busy check made LangGraph refuse.
+
+    The completion hook starts a run for follow-ups steered into a run that was
+    ending, so a start sent right after can find the thread taken.
+    """
+    try:
+        thread = await langgraph_client().threads.get(thread_id)
+    except Exception:
+        logger.warning(
+            "Could not re-read a thread after a refused start",
+            exc_info=True,
+            extra={"start": {"thread_id": thread_id}},
+        )
+        return None
+    if not _thread_is_busy(thread):
+        return None
+    return await queue_follow_up_run(
+        thread_id, login, command, metadata=thread_metadata(thread), email=email
+    )
+
+
+async def _fail_requested_turn(thread_id: str, enriched: dict[str, Any]) -> None:
+    """Close the turn a refused start requested, so no later follow-up joins it."""
+    turn_id = enriched["params"]["config"]["configurable"].get("transcript_turn_id")
+    if not isinstance(turn_id, str):
+        return
+    try:
+        await fail_unstarted_turn(
+            thread_id, uuid.UUID(turn_id), error="the message could not be started"
+        )
+    except Exception:
+        logger.warning(
+            "Could not close the turn of a refused start",
+            exc_info=True,
+            extra={"start": {"thread_id": thread_id, "turn_id": turn_id}},
+        )
+
+
 async def proxy_dashboard_thread_history(
     thread_id: str,
     login: str,
@@ -335,7 +412,9 @@ async def proxy_dashboard_thread_history(
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = langgraph_proxy_headers(content_type=content_type)
-    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+    ) as client:
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
@@ -368,7 +447,9 @@ async def proxy_dashboard_thread_runs_list(
         params.append(("status", status))
     for field in select or []:
         params.append(("select", field))
-    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+    ) as client:
         response = await client.get(url, headers=headers, params=params)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
@@ -474,7 +555,9 @@ async def proxy_dashboard_thread_run_cancel(
         raise HTTPException(403, "only its sender can withdraw a queued follow-up")
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = langgraph_proxy_headers()
-    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+    ) as client:
         response = await client.post(
             url,
             headers=headers,

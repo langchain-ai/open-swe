@@ -8,12 +8,14 @@ from langgraph_sdk.client import LangGraphClient
 from openswe.slack.client import slack_thread_mutation_lock
 from openswe.slack.http import SlackClient
 from openswe.slack.payloads import SlackMessage
-from openswe.utils.json_types import JsonObject
+from openswe.slack.records import SlackThread
 
 logger = logging.getLogger(__name__)
 
-_NAMESPACE = "slack_solo_threads"
 _MAX_HISTORY_PAGES = 5
+# A mention's tracking runs after its webhook answers; a follow-up in the same
+# thread waits for it so it is judged against what the mention recorded.
+_mention_tracking: dict[tuple[str, str], asyncio.Task[bool]] = {}
 
 
 async def _thread_is_solo(channel_id: str, thread_ts: str, user_id: str) -> bool | None:
@@ -59,33 +61,31 @@ async def allow_solo_thread_followup(
     explicit_mention: bool,
 ) -> bool:
     """Track human participation and fail closed when solo routing cannot be verified."""
-    namespace = (_NAMESPACE, channel_id)
     try:
         timestamp = float(message_ts)
         if not explicit_mention:
-            existing = await client.store.get_item(namespace, thread_ts)
-            if not existing:
+            if (pending := _mention_tracking.get((channel_id, thread_ts))) is not None:
+                await asyncio.shield(pending)
+            thread = await SlackThread.find(channel_id, thread_ts)
+            if thread is None or not thread.solo_tracked:
                 return False
         async with (
             asyncio.timeout(2),
             slack_thread_mutation_lock(client, channel_id, thread_ts, purpose="solo-followups"),
         ):
-            item = await client.store.get_item(namespace, thread_ts)
-            value = item.get("value", {}) if item else {}
-            if value.get("blocked"):
+            thread = await SlackThread.find(channel_id, thread_ts)
+            if thread is not None and thread.solo_blocked:
                 return False
-            owner = value.get("user_id")
-            if owner and owner != user_id:
-                await client.store.put_item(namespace, thread_ts, {"blocked": True})
+            owner = None if thread is None else thread.solo_user_id
+            if owner is not None and owner != user_id:
+                await SlackThread.block_solo(channel_id, thread_ts)
                 return False
-            last_seen = value.get("last_seen")
-            if not explicit_mention and (
-                not isinstance(last_seen, (int, float)) or timestamp < last_seen
-            ):
+            last_seen = None if thread is None else thread.solo_last_seen
+            if not explicit_mention and (last_seen is None or timestamp < last_seen):
                 return False
             solo = await _thread_is_solo(channel_id, thread_ts, user_id)
             if solo is False:
-                await client.store.put_item(namespace, thread_ts, {"blocked": True})
+                await SlackThread.block_solo(channel_id, thread_ts)
                 return False
             if solo is None:
                 logger.warning(
@@ -93,13 +93,12 @@ async def allow_solo_thread_followup(
                     extra={"slack_channel_id": channel_id, "slack_thread_ts": thread_ts},
                 )
                 return False
-            updated: JsonObject = {
-                "user_id": user_id,
-                "last_seen": max(timestamp, last_seen)
-                if isinstance(last_seen, (int, float))
-                else timestamp,
-            }
-            await client.store.put_item(namespace, thread_ts, updated)
+            await SlackThread.track_solo(
+                channel_id,
+                thread_ts,
+                user_id,
+                timestamp if last_seen is None else max(timestamp, last_seen),
+            )
             return not explicit_mention
     except Exception:
         logger.warning(
@@ -108,3 +107,31 @@ async def allow_solo_thread_followup(
             exc_info=True,
         )
         return False
+
+
+def track_explicit_mention(
+    client: LangGraphClient, *, channel_id: str, thread_ts: str, message_ts: str, user_id: str
+) -> None:
+    """Record an @mention's sender for solo routing without holding up the reply.
+
+    The mention is answered either way; the record only decides whether later
+    untagged messages in the thread count as addressed to Open SWE.
+    """
+    task = asyncio.create_task(
+        allow_solo_thread_followup(
+            client,
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            message_ts=message_ts,
+            user_id=user_id,
+            explicit_mention=True,
+        )
+    )
+    key = (channel_id, thread_ts)
+    _mention_tracking[key] = task
+
+    def forget(done: asyncio.Task[bool]) -> None:
+        if _mention_tracking.get(key) is done:
+            del _mention_tracking[key]
+
+    task.add_done_callback(forget)

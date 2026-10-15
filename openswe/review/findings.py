@@ -36,7 +36,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.run_config import RunConfig
+from openswe.ui_invalidations import Topic
 from openswe.users.models import UserIdentity
 
 logger = logging.getLogger(__name__)
@@ -968,8 +970,20 @@ async def mutate_findings(
         for removed in rows_by_id.values():
             await session.delete(removed)
         await _link_interaction_authors(session, written)
+        await _invalidate_review_page(session, pull_request_id)
     await _record_finding_telemetry(thread_id, changed)
     return findings
+
+
+async def _invalidate_review_page(session: AsyncSession, pull_request_id: UUID) -> None:
+    # pull_requests imports this module.
+    from openswe.github.pull_requests import PullRequest
+
+    pull = await session.get(PullRequest, pull_request_id)
+    if pull is not None:
+        await Topic.PULL_REQUESTS.invalidate(
+            session, key=PullRequestKey.of(pull.owner, pull.repo, pull.number)
+        )
 
 
 def _current_fingerprint(finding: Finding) -> str:

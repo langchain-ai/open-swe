@@ -44,7 +44,6 @@ from openswe.github.checks import (  # noqa: F401
     complete_review_check_run,
     create_review_check_run,
 )
-from openswe.github.ci import fetch_open_pr_for_branch as github_fetch_open_pr_for_branch
 from openswe.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
@@ -60,6 +59,7 @@ from openswe.github.comments import (
     sanitize_github_comment_body,  # noqa: F401
     verify_github_signature,
 )
+from openswe.github.http import GitHubClient
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from openswe.github.pull_requests import PullRequestEvent
 from openswe.github.thread_token import (
@@ -85,6 +85,7 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from openswe.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from openswe.rollout_events import ROLLOUT_CHECK_REQUESTED, subscribe_merged_thread
 from openswe.run_config import Repo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -95,16 +96,12 @@ from openswe.slack.client import (
     get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
-    lookup_slack_run_mapping,  # noqa: F401
-    lookup_slack_thread_id,  # noqa: F401
     parse_slack_ts,  # noqa: F401
     post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
-    resolve_slack_thread_id,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
-    store_slack_run_mapping,  # noqa: F401
     strip_bot_mention,  # noqa: F401
     update_slack_message,
     verify_slack_signature,
@@ -129,6 +126,12 @@ from openswe.slack.feedback import (
     process_slack_reaction_removed,
 )
 from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.records import (  # noqa: F401
+    lookup_slack_run_mapping,
+    lookup_slack_thread_id,
+    resolve_slack_thread_id,
+    store_slack_run_mapping,
+)
 from openswe.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread, ensure_titled_thread
@@ -144,7 +147,8 @@ from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
-from openswe.utils.json_types import ThreadLike, as_thread_dict
+from openswe.utils.http_pool import pooled_transport
+from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict, thread_metadata
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.multimodal import (
     dedupe_urls,  # noqa: F401
@@ -820,6 +824,52 @@ async def get_slack_repo_config(
     return SlackRepoResolution(Repo.model_validate(repo_config), explicit)
 
 
+@dataclass(frozen=True)
+class ThreadRecord:
+    """One read of a thread, for everything a webhook asks before dispatching to it."""
+
+    exists: bool
+    metadata: JsonObject
+
+    @classmethod
+    async def read(cls, thread_id: str) -> ThreadRecord:
+        """A thread that does not exist yet reads as an empty record; other failures raise."""
+        try:
+            thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
+        except Exception as exc:
+            if is_not_found_error(exc):
+                return cls(exists=False, metadata={})
+            raise
+        return cls(exists=True, metadata=thread_metadata(thread))
+
+    def authorize(self, github_login: str) -> JsonObject:
+        """Reject a private-thread follow-up from someone who may not prompt it."""
+        if thread_is_private(self.metadata) and not thread_is_promptable(
+            self.metadata, github_login
+        ):
+            raise HTTPException(404, "thread not found")
+        return self.metadata
+
+    @property
+    def model_choice(self) -> tuple[str, str] | None:
+        """The model the thread was explicitly pinned to, if any."""
+        if self.metadata.get("model_selection") != "explicit":
+            return None
+        model_id, effort = normalize_model_choice(
+            self.metadata.get("model"), self.metadata.get("effort")
+        )
+        return (model_id, effort) if model_id and effort else None
+
+    @property
+    def workspace(self) -> str | None:
+        """The workspace the thread was created in; ``environment`` is the pre-workspace key."""
+        for key in ("workspace", "environment"):
+            value = self.metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+
 async def thread_exists(thread_id: str) -> bool:
     """Return whether a LangGraph thread already exists."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -846,40 +896,25 @@ async def ensure_thread_exists_for_metadata(
 
 async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
     """Return the explicit model choice persisted for a thread, if any."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
-        thread = await langgraph_client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        if not is_not_found_error(exc):
-            logger.warning("Failed to fetch model metadata for thread %s", thread_id)
+        record = await ThreadRecord.read(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to fetch model metadata for thread %s", thread_id)
         return None
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    if not isinstance(metadata, dict) or metadata.get("model_selection") != "explicit":
-        return None
-    model_id, effort = normalize_model_choice(metadata.get("model"), metadata.get("effort"))
-    return (model_id, effort) if model_id and effort else None
+    return record.model_choice
 
 
 async def get_thread_workspace(thread_id: str) -> str | None:
-    """The workspace a thread was created in; ``environment`` is the pre-workspace key."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    """The workspace a thread was created in."""
     try:
-        thread = await langgraph_client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        if not is_not_found_error(exc):
-            logger.warning(
-                "Failed to fetch workspace metadata for thread",
-                extra={"agent_thread_id": thread_id},
-            )
+        record = await ThreadRecord.read(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to fetch workspace metadata for thread",
+            extra={"agent_thread_id": thread_id},
+        )
         return None
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    if not isinstance(metadata, dict):
-        return None
-    for key in ("workspace", "environment"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    return record.workspace
 
 
 async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
@@ -1044,18 +1079,9 @@ def build_github_issue_comments_text(
     return "\n\n## Comments:\n" + "".join(lines)
 
 
-async def authorize_github_thread(thread_id: str, github_login: str) -> dict[str, Any]:
+async def authorize_github_thread(thread_id: str, github_login: str) -> JsonObject:
     """Reject private-thread follow-ups before reading credentials or dispatching."""
-    try:
-        thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
-    except Exception as exc:
-        if is_not_found_error(exc):
-            return {}
-        raise
-    metadata = as_thread_dict(thread).get("metadata") or {}
-    if thread_is_private(metadata) and not thread_is_promptable(metadata, github_login):
-        raise HTTPException(404, "thread not found")
-    return metadata
+    return (await ThreadRecord.read(thread_id)).authorize(github_login)
 
 
 async def trigger_or_queue_run(
@@ -1074,13 +1100,12 @@ async def trigger_or_queue_run(
     ``token_repositories`` is recorded if this creates the thread; a thread that
     must be narrowed but could not record it is not started.
     """
-    await authorize_github_thread(thread_id, github_login)
+    record = await ThreadRecord.read(thread_id)
+    record.authorize(github_login)
     # An existing thread keeps the workspace it started in even if its
     # repository has since moved: the settings and MCP connections a
     # conversation began with must not change under it.
-    workspace = await get_thread_workspace(thread_id) or await workspace_for_repo_config(
-        repo_config
-    )
+    workspace = record.workspace or await workspace_for_repo_config(repo_config)
     persisted = await upsert_agent_thread_metadata(
         thread_id,
         source="github",
@@ -1125,7 +1150,9 @@ async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[s
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{pr_ref.owner}/{pr_ref.repo}/pulls/{pr_ref.number}",
@@ -1316,12 +1343,10 @@ async def fetch_open_pr_for_branch(
     repo_config: dict[str, str], head_ref: str, *, token: str
 ) -> dict[str, Any] | None:
     """Find the open PR whose head ref matches ``head_ref``, if one exists."""
-    return await github_fetch_open_pr_for_branch(
-        owner=repo_config.get("owner", ""),
-        repo=repo_config.get("name", ""),
-        branch=head_ref,
-        token=token,
-    )
+    async with GitHubClient.connect(token=token) as github:
+        return await github.repo(
+            repo_config.get("owner", ""), repo_config.get("name", "")
+        ).open_pull_for_branch(head_ref)
 
 
 def _normalized_diff_hash(diff_text: str) -> str:
@@ -1346,7 +1371,9 @@ async def _fetch_compare_diff(
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/compare/{base}...{head}",
@@ -1451,6 +1478,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         thread_ids = list(await pull_request.discover_threads() or [])
 
     for thread_id in thread_ids:
+        metadata: dict[str, Any] | None = None
+        newly_merged = False
         try:
             async with agent_thread_pr_state_lock(langgraph_client, thread_id):
                 current = await langgraph_client.threads.get(thread_id)
@@ -1480,6 +1509,11 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if not updated_pull_requests and metadata.get("pr_url") == pr_url:
                     previous_state = metadata.get("pr_state")
                 state_changed = previous_state != new_state
+                newly_merged = (
+                    state_changed
+                    and new_state == "merged"
+                    and bool((event.pull_request.merge_commit_sha or "").strip())
+                )
                 if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
                     metadata_update["pr_state"] = new_state
 
@@ -1522,13 +1556,25 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
             await task_marked_complete(thread_id, source="github", auto=True)
             await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
-            from openswe.thread_feedback import schedule_pr_feedback
-
-            await schedule_pr_feedback(thread_id, metadata, pr_url)
         elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
             from openswe.analytics.emitter import task_rework
 
             await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
+        if (
+            newly_merged
+            and event.identity is not None
+            and isinstance(metadata, dict)
+            and metadata.get(ROLLOUT_CHECK_REQUESTED) is True
+        ):
+            owner, repo, number = event.identity
+            await subscribe_merged_thread(
+                thread_id,
+                owner=owner,
+                repo=repo,
+                number=number,
+                sha=event.pull_request.merge_commit_sha or "",
+                metadata=metadata if isinstance(metadata, dict) else {},
+            )
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:

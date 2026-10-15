@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
+import { Banner } from "@langchain/macaw-components/Banner"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
 import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
@@ -582,8 +583,8 @@ export function AgentsHome({
             contentWidthClass="max-w-3xl"
           />
         ) : (
-          <div className="flex min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-6">
+          <div className="flex min-h-0 flex-1 overflow-y-auto px-space-3 py-space-5 sm:px-space-5 sm:py-space-6">
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-space-5">
               <img
                 src={`${import.meta.env.BASE_URL}logo-mark.png`}
                 alt=""
@@ -597,9 +598,9 @@ export function AgentsHome({
         )}
         <AgentComposerDock>
           {localError && (
-            <div className="mb-3 w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <Banner intent="error" className="mb-space-3 w-full">
               {localError}
-            </div>
+            </Banner>
           )}
           <AgentPromptBar
             activeRun={

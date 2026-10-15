@@ -7,35 +7,17 @@ from openswe.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from openswe.slack.records import SlackMessage, store_slack_run_mapping
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
-        return self.items.get((namespace, key))
-
-    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
-        self.items[(namespace, key)] = {"value": value}
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.store = _FakeStore()
-
-
-def _store_message_mapping(
-    client: _FakeClient,
-    channel_id: str,
-    message_ts: str,
-    *,
-    triggering_user_id: str | None = "U123",
+async def _store_message_mapping(
+    channel_id: str, message_ts: str, *, triggering_user_id: str | None = "U123"
 ) -> None:
-    value: dict[str, Any] = {"run_id": "run-1", "thread_ts": "1.000"}
-    if triggering_user_id:
-        value["triggering_user_id"] = triggering_user_id
-    client.store.items[(("slack_run_map", channel_id), f"message:{message_ts}")] = {"value": value}
+    await store_slack_run_mapping(
+        channel_id, "1.000", "run-1", message_ts=message_ts, triggering_user_id=triggering_user_id
+    )
 
 
 def _reaction_event(reaction: str = "thumbsup") -> dict[str, Any]:
@@ -51,16 +33,8 @@ def _reaction_event(reaction: str = "thumbsup") -> dict[str, Any]:
 async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
-    _store_message_mapping(client, "C123", "2.000")
-    client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")] = {
-        "value": {
-            "run_id": "run-1",
-            "user_id": "U123",
-            "message_ts": "2.000",
-            "reactions": ["thumbsup"],
-        }
-    }
+    await _store_message_mapping("C123", "2.000")
+    await SlackMessage.toggle_reaction("C123", "2.000", "U123", "thumbsup", added=True)
     deleted: dict[str, str] = {}
 
     async def fake_delete_feedback(run_id: str, key: str) -> bool:
@@ -68,27 +42,22 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
         deleted["key"] = key
         return True
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
     monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", fake_delete_feedback)
 
     await process_slack_reaction_removed(_reaction_event(), event_id="Ev2")
 
     assert deleted == {"run_id": "run-1", "key": "slack_reaction:C123:U123:2.000"}
-    state = client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")]
-    assert state["value"]["reactions"] == []
 
 
 @pytest.mark.asyncio
 async def test_reaction_from_non_triggering_user_is_ignored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
-    _store_message_mapping(client, "C123", "2.000", triggering_user_id="UTRIGGER")
+    await _store_message_mapping("C123", "2.000", triggering_user_id="UTRIGGER")
 
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("non-triggering user should not create feedback")
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -98,16 +67,8 @@ async def test_reaction_from_non_triggering_user_is_ignored(
 async def test_conflicting_reactions_clear_feedback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
-    _store_message_mapping(client, "C123", "2.000")
-    client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")] = {
-        "value": {
-            "run_id": "run-1",
-            "user_id": "U123",
-            "message_ts": "2.000",
-            "reactions": ["thumbsup"],
-        }
-    }
+    await _store_message_mapping("C123", "2.000")
+    await SlackMessage.toggle_reaction("C123", "2.000", "U123", "thumbsup", added=True)
     deleted: dict[str, str] = {}
 
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
@@ -118,7 +79,6 @@ async def test_conflicting_reactions_clear_feedback(
         deleted["key"] = key
         return True
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
     monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", fake_delete_feedback)
 

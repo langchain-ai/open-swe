@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage } from "@/components/AppShell"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
+import { ManagedToolsGatewaySection } from "@/features/settings/components/ManagedToolsGatewaySection"
+import { MdaRuntimeSection } from "@/features/settings/components/MdaRuntimeSection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import {
   DefaultRepoSection,
@@ -39,6 +41,8 @@ function AdminDefaultsPage() {
       <LLMGatewaySection scope={INSTANCE_SCOPE} />
       <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
       <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
+      <MdaRuntimeSection scope={INSTANCE_SCOPE} />
+      <ManagedToolsGatewaySection />
     </SettingsPage>
   )
 }

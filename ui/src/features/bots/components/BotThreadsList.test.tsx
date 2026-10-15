@@ -91,7 +91,7 @@ describe("BotThreadsList", () => {
       bot: BOT_KEY,
     })
     expect(screen.getByText(/No bot threads yet/)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "← Bots" }))
+    fireEvent.click(screen.getByRole("button", { name: "Bots" }))
     expect(onBotChange).toHaveBeenCalledWith(undefined)
   })
 

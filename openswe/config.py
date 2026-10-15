@@ -204,6 +204,22 @@ ENV.var(
     default="http://localhost:2024",
 )
 ENV.var(
+    "MDA_RUNTIME_URL",
+    "Managed Deep Agents deployment (mda/) that runs the agent and reviewer graphs "
+    "for people who turn on run_on_mda; unset keeps every run on LANGGRAPH_URL.",
+)
+ENV.var(
+    "MDA_RUNTIME_API_KEY",
+    "LangSmith key the backend uses to call MDA_RUNTIME_URL; defaults to LANGSMITH_API_KEY.",
+    secret=True,
+)
+ENV.var(
+    "REMOTE_RUNTIME_TOKEN_SECRET",
+    "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
+    "comma-separated, the first signs and every one verifies.",
+    secret=True,
+)
+ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."
 )
 ENV.var(
@@ -321,11 +337,6 @@ ENV.var(
 )
 ENV.var("CONFIGURED_ADMINS", "Comma-separated GitHub logins or emails with admin access.")
 ENV.var(
-    "NOTION_MCP_CLIENT_NAME",
-    "Client name registered with the Notion MCP OAuth server.",
-    default="Open SWE",
-)
-ENV.var(
     "LANGSMITH_CONNECTION_URL",
     "LangSmith API origin people connect their own accounts to (Sign in with LangSmith).",
     default="https://api.smith.langchain.com",
@@ -339,6 +350,11 @@ ENV.var(
     "LANGSMITH_OAUTH_CLIENT_SECRET",
     "Client secret of the LANGSMITH_OAUTH_CLIENT_ID application. Unset hides the connection.",
     secret=True,
+)
+ENV.var(
+    "LMT_TENANT_ID",
+    "Optional LangSmith workspace to pin Managed Tools to. Unset uses the workspace each "
+    "person chose when connecting LangSmith.",
 )
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")
@@ -397,7 +413,6 @@ ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
 )
 ENV.var("DEFAULT_PROMPT_PATH", "Path to a default prompt file.")
-ENV.var("TOOL_LOADER_TIMEOUT_SECONDS", "Timeout for loading optional tool integrations.")
 ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
 
 # --- Sandboxes ---------------------------------------------------------------------------------
@@ -465,21 +480,7 @@ ENV.var("E2B_API_KEY", "E2B API key.", secret=True)
 ENV.var("E2B_TEMPLATE", "E2B template new sandboxes boot from.")
 ENV.var("RUNLOOP_API_KEY", "Runloop API key.", secret=True)
 
-# --- Desktop, local auth and debugging -------------------------------------------------------
-ENV.var(
-    "OPEN_SWE_LOCAL_PROJECTS_FILE", "Allowlist file of local projects the desktop agent may open."
-)
-ENV.var("OPEN_SWE_LOCAL_WORKTREES_DIR", "Directory for desktop worktrees.")
-ENV.var("OPEN_SWE_LOCAL_ARTIFACTS_DIR", "Directory for desktop artifacts.")
-ENV.var("OPEN_SWE_LOCAL_AUTH_TOKEN", "Bearer token the desktop backend requires.", secret=True)
-ENV.var(
-    "OPEN_SWE_OPENAI_OAUTH_BROKER_URL", "Broker the desktop app uses to obtain OpenAI OAuth tokens."
-)
-ENV.var(
-    "OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN",
-    "Token authenticating to the OpenAI OAuth broker.",
-    secret=True,
-)
+# --- Debugging -------------------------------------------------------
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")

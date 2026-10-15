@@ -9,7 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import now_iso
+from openswe.utils.time import now_iso
 
 _BLOCKED_HEADERS = {
     "host",
@@ -145,6 +145,13 @@ class MCPConnection(MCPConnectionPublic):
 
     def public(self) -> dict[str, Any]:
         return self.model_dump(exclude={"encrypted_headers", "encrypted_client_secret"})
+
+    def allows_tool(self, name: str) -> bool:
+        return name in self.allowed_tools
+
+    @property
+    def offers_tools(self) -> bool:
+        return bool(self.allowed_tools)
 
     def connection_headers(self) -> dict[str, str]:
         if not self.encrypted_headers:

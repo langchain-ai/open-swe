@@ -4,11 +4,13 @@ Replaces the per-site ``runs.create`` calls (plus the ``is_thread_active``
 busy-check and the custom store-queue) with one function that uses:
 
 - ``multitask_strategy="interrupt"`` by default — a follow-up halts the active run
-  (progress preserved by the sync checkpoint) and resumes the agent with full
+  (progress preserved by its checkpoints) and resumes the agent with full
   history + the new message; on an idle thread it just starts. Background
   follow-ups such as `/baby-sit` can opt into ``enqueue`` instead.
-- ``durability="sync"`` — checkpoint before each step so a crash/recycle
-  resumes from the last checkpoint instead of losing all work.
+- ``durability="async"`` — checkpoint every step, written while the next one
+  runs, so a crash/recycle resumes from at most a step back instead of losing
+  all work. ``"sync"`` made every step wait on its write (~0.3s per model/tool
+  step in prod); dashboard-started runs already use the platform's async default.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
 - ``stream_resumable=True`` — the run's event stream is retained so a client that
@@ -27,14 +29,17 @@ busy-check and the custom store-queue) with one function that uses:
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Self
 from urllib.parse import urlparse
 
+from langgraph.types import Durability
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
+from pydantic import BaseModel, ConfigDict
 
 from openswe.config import ENV
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -48,12 +53,33 @@ from openswe.invocation import new_invocation_id, resolve_invocation_id, with_in
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
+from openswe.ui_invalidations import Topic
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
 LangGraphRunConfig = dict[str, Any]
+
+
+_PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
+
+
+class RunMetadata(BaseModel):
+    """What ``create_durable_run`` records on a run and the run-complete webhook reads back."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    pull_request: PullRequestKey | None = None
+    """The pull request whose review page shows this run; its start and end refresh it."""
+
+    @classmethod
+    def of_run(cls, assistant_id: str, config: LangGraphRunConfig | None) -> Self:
+        cfg = RunConfig.from_config(config)
+        if assistant_id not in _PULL_REQUEST_GRAPHS or cfg.repo is None or cfg.pr_number is None:
+            return cls()
+        return cls(pull_request=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number))
+
 
 # The server's legacy-named compatibility marker selects the v3 stream path.
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
@@ -75,9 +101,7 @@ async def _dispatch_input(
     content: ContentBlocks, source: str, configurable: dict[str, Any]
 ) -> RunInput:
     surface: Surface = (
-        source
-        if source in {"slack", "linear", "github", "web", "desktop", "eval"}
-        else "automation"
+        source if source in {"slack", "linear", "github", "web", "eval"} else "automation"
     )  # type: ignore[assignment]
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
@@ -236,6 +260,30 @@ def _slack_channel_metadata(configurable: object) -> dict[str, str]:
     return {key: value for key, value in values.items() if value}
 
 
+def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
+    """The workspace a thread's follow-up run carries; ``environment`` is the pre-workspace key."""
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
+    """Config for a system-started run that continues a thread where its last run left off."""
+    configurable: dict[str, Any] = {"thread_id": thread_id}
+    for key in ("source", "repo", "github_login", "triggering_user_email"):
+        value = metadata.get(key)
+        if value is not None:
+            configurable["user_email" if key == "triggering_user_email" else key] = value
+    workspace = thread_workspace(metadata)
+    if workspace is not None:
+        configurable["workspace"] = workspace
+        configurable["environment"] = workspace
+    configurable.update(SourceContext.from_metadata(metadata).dump())
+    return configurable
+
+
 def prepare_run_config(
     config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
@@ -269,7 +317,7 @@ async def _run_user_id(
     if cfg.background_task_completion:
         return None
     try:
-        if (source or cfg.source) in {"dashboard", "web", "desktop"} and cfg.github_login:
+        if (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
         elif cfg.slack_thread and cfg.slack_thread.triggering_user_id:
             user = await User.for_identity("slack", cfg.slack_thread.triggering_user_id)
@@ -298,7 +346,7 @@ async def create_durable_run(
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
-    durability: str = "sync",
+    durability: Durability = "async",
     if_not_exists: str = "create",
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
@@ -307,12 +355,15 @@ async def create_durable_run(
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread.
+    means the caller already created and titled the thread. With MDA_RUNTIME_URL
+    set, threads of people who chose Managed Deep Agents run there; the request
+    goes here regardless and ``openswe.remote_runtime.proxy`` routes it.
     """
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
-    run_metadata = dict(metadata or {})
+    recorded = RunMetadata.of_run(assistant_id, config)
+    run_metadata = dict(metadata or {}) | recorded.model_dump(exclude_none=True)
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
@@ -342,6 +393,8 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    if recorded.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=recorded.pull_request)
     cfg = RunConfig.from_config(run_config)
     if assistant_id == "agent" and cfg.slack_ask is not True:
         from openswe.slack.thinking import sync_slack_background_status
@@ -400,10 +453,6 @@ async def dispatch_agent_run(
             else await _dispatch_input(content, source, configurable)
         )
     client = client or dispatch_client()
-    if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:
-        from openswe.thread_feedback import note_feedback_activity
-
-        await note_feedback_activity(thread_id, client=client)
     return await create_durable_run(
         thread_id,
         assistant_id,

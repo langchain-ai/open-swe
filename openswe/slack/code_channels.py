@@ -3,15 +3,13 @@ channel is one agent session rather than a Slack thread.
 """
 
 import logging
-from collections.abc import Mapping
 from typing import Any, Literal
 from urllib.parse import quote
-
-from langgraph_sdk.client import LangGraphClient
 
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SLACK_BOT_TOKEN
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
+from openswe.slack.records import SlackViewSuggestion
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +51,6 @@ _CONTEXT_ICONS = frozenset(
         "lock",
     }
 )
-_VIEW_SUGGESTIONS_NAMESPACE = "slack_code_channel_view_suggestions"
 
 
 def is_code_channel_session(thread_ts: str | None) -> bool:
@@ -283,33 +280,18 @@ def block_suggestions_error(suggestions: dict[str, list[dict[str, Any]]]) -> str
 
 
 async def store_block_suggestions(
-    client: LangGraphClient,
-    channel_id: str,
-    view_id: str,
-    suggestions: dict[str, list[dict[str, Any]]],
+    channel_id: str, view_id: str, suggestions: dict[str, list[dict[str, Any]]]
 ) -> None:
     if error := block_suggestions_error(suggestions):
         raise ValueError(error)
-    await client.store.put_item(
-        (_VIEW_SUGGESTIONS_NAMESPACE, channel_id, view_id),
-        "suggestions",
-        {"actions": suggestions},
-    )
+    await SlackViewSuggestion(channel_id=channel_id, view_id=view_id, actions=suggestions).save()
 
 
 async def get_block_suggestions(
-    client: LangGraphClient,
-    channel_id: str,
-    view_id: str,
-    action_id: str,
-    query: str,
+    channel_id: str, view_id: str, action_id: str, query: str
 ) -> list[dict[str, Any]]:
-    item = await client.store.get_item(
-        (_VIEW_SUGGESTIONS_NAMESPACE, channel_id, view_id), "suggestions"
-    )
-    value = item.get("value") if isinstance(item, Mapping) else None
-    actions = value.get("actions") if isinstance(value, dict) else None
-    options = actions.get(action_id) if isinstance(actions, dict) else None
+    actions = await SlackViewSuggestion.actions_for(channel_id, view_id)
+    options = actions.get(action_id)
     if not isinstance(options, list):
         return []
     normalized_query = query.casefold().strip()
@@ -329,10 +311,8 @@ async def get_block_suggestions(
     ][:100]
 
 
-async def delete_block_suggestions(client: LangGraphClient, channel_id: str, view_id: str) -> None:
-    await client.store.delete_item(
-        (_VIEW_SUGGESTIONS_NAMESPACE, channel_id, view_id), "suggestions"
-    )
+async def delete_block_suggestions(channel_id: str, view_id: str) -> None:
+    await SlackViewSuggestion.discard(channel_id, view_id)
 
 
 async def set_view(
@@ -348,10 +328,12 @@ async def set_view(
     head_branch: str = "",
     name: str = "",
     csp: dict[str, list[str]] | None = None,
+    agent_content_hash: str = "",
 ) -> dict[str, Any]:
     if view_type not in {"html", "diff", "block_kit", "canvas"}:
         raise SlackRequestError("invalid_view_type")
-    if view_type != "diff" and not 1 <= len(view_key) <= 256:
+    # A diff view may go unkeyed; every other view needs a key.
+    if (view_type != "diff" or view_key) and not 1 <= len(view_key) <= 256:
         raise SlackRequestError("invalid_view_key")
     if name and len(name) > 256:
         raise SlackRequestError("invalid_name")
@@ -372,10 +354,12 @@ async def set_view(
             raise SlackRequestError("invalid_access_level")
         payload.update({"canvas_id": canvas_id, "access_level": access_level})
 
-    if view_type != "diff":
+    if view_key:
         payload["view_key"] = view_key
     if name:
         payload["name"] = name
+    if agent_content_hash:
+        payload["agent_content_hash"] = agent_content_hash
     if view_type == "diff":
         if len(base_branch) > 255 or len(head_branch) > 255:
             raise SlackRequestError("invalid_branch_name")

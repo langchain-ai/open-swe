@@ -19,6 +19,7 @@ from openswe.slack.blocks import (
     MESSAGE_MAX_BLOCKS,
     SECTION_TEXT_MAX_CHARS,
     block_payload,
+    option_actions,
     section,
 )
 from openswe.slack.client import (
@@ -28,7 +29,6 @@ from openswe.slack.client import (
     remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
-    store_slack_message_run_mapping,
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
@@ -38,6 +38,7 @@ from openswe.slack.orphan import (
     move_thread_to_dashboard,
     slack_thread_detached,
 )
+from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run_mapping
 from openswe.slack.run_feedback import feedback_block
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
@@ -161,7 +162,6 @@ async def slack_reply(
                     if is_code_channel_session(str(thread_ts))
                     else str(thread_id or "") or None
                 ),
-                langgraph_client=client,
                 run_id=run_id,
                 triggering_user_id=_triggering_user_id(cfg),
             )
@@ -181,7 +181,6 @@ async def slack_reply(
         if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
             try:
                 await _handle_kickoff(
-                    client,
                     str(channel_id),
                     str(thread_ts),
                     message_ts,
@@ -196,7 +195,7 @@ async def slack_reply(
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
-    return {"success": True}
+    return {"success": True, "message_ts": message_ts}
 
 
 async def _stale_reply_guard(
@@ -205,18 +204,7 @@ async def _stale_reply_guard(
     messages = state.get("messages")
     if not isinstance(messages, list):
         return None
-    client = get_langgraph_client()
-    namespace = ("slack_reply_freshness", run_id)
-    item = await client.store.get_item(namespace, "progress")
-    progress = item.get("value", {}) if item else {}
-    stored_seen = progress.get("seen", [])
-    seen = (
-        {ts for ts in stored_seen if isinstance(ts, str)}
-        if isinstance(stored_seen, list)
-        else set()
-    )
-    stored_conflicts = progress.get("conflicts", 0)
-    conflicts = stored_conflicts if isinstance(stored_conflicts, int) else 0
+    seen, conflicts = await SlackRun.reply_progress(channel_id, run_id)
     for message in messages:
         if not isinstance(message, BaseMessage):
             continue
@@ -242,13 +230,11 @@ async def _stale_reply_guard(
         isinstance(ts, str) and ts not in seen and ts > max(seen) for ts in timestamps
     ):
         return None
-    await client.store.put_item(
-        namespace,
-        "progress",
-        {
-            "seen": sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
-            "conflicts": conflicts + 1,
-        },
+    await SlackRun.record_reply_conflict(
+        channel_id,
+        thread_ts,
+        run_id,
+        sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
     )
     return {
         "success": False,
@@ -261,7 +247,6 @@ async def _stale_reply_guard(
 
 
 async def _handle_kickoff(
-    client: LangGraphClient,
     channel_id: str,
     thread_ts: str,
     update_ts: str,
@@ -269,16 +254,13 @@ async def _handle_kickoff(
     response_type: Literal["progress", "final"],
     eligible: bool,
 ) -> None:
-    namespace = ("slack_kickoff", channel_id)
-    item = await client.store.get_item(namespace, thread_ts)
-    value = item.get("value") if isinstance(item, dict) else None
-    if isinstance(value, dict) and value.get("removed") is True:
+    thread = await SlackThread.find(channel_id, thread_ts)
+    if thread is None or not thread.kickoff_recorded:
+        if eligible and response_type == "progress" and update_ts != thread_ts:
+            await SlackThread.record_kickoff(channel_id, thread_ts, update_ts)
         return
-    kickoff_ts = value.get("kickoff_ts") if isinstance(value, dict) else None
-    if not kickoff_ts and eligible and response_type == "progress" and update_ts != thread_ts:
-        await client.store.put_item(namespace, thread_ts, {"kickoff_ts": update_ts})
-        return
-    if not isinstance(kickoff_ts, str) or not kickoff_ts or kickoff_ts == update_ts:
+    kickoff_ts = thread.kickoff_ts
+    if kickoff_ts is None or kickoff_ts == update_ts:
         return
     try:
         async with SlackClient.bot() as slack:
@@ -293,7 +275,7 @@ async def _handle_kickoff(
             },
         )
         return
-    await client.store.put_item(namespace, thread_ts, {"removed": True})
+    await SlackThread.record_kickoff(channel_id, thread_ts, None)
 
 
 async def _by_the_way_reply(
@@ -489,31 +471,11 @@ def _reply_blocks(
     message: str, options: list[str] | None, *, reserve: int
 ) -> list[dict[str, Any]] | None:
     """``message`` then option buttons; ``None`` when they cannot fit in one message."""
-    actions = _option_actions(options)
+    actions = option_actions(options)
     body = markdown_blocks(message)
     if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
         return None
     return [*block_payload(body), *actions]
-
-
-def _option_actions(options: list[str] | None) -> list[dict[str, Any]]:
-    clean_options = [option.strip() for option in options or [] if option.strip()]
-    if not clean_options:
-        return []
-    return [
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": option[:75], "emoji": True},
-                    "value": json.dumps({"type": "open_swe_option", "response": option}),
-                    "action_id": f"open_swe_option_select_{index}",
-                }
-                for index, option in enumerate(clean_options[:5])
-            ],
-        }
-    ]
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
@@ -582,7 +544,6 @@ async def _post_and_store_mapping(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
-    langgraph_client: Any | None = None,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
@@ -596,9 +557,7 @@ async def _post_and_store_mapping(
         agent_thread_id=agent_thread_id,
     )
     if message_ts:
-        resolved_client = langgraph_client or get_langgraph_client()
         await store_slack_message_run_mapping(
-            resolved_client,
             channel_id,
             thread_ts,
             message_ts,

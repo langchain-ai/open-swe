@@ -9,24 +9,21 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from openswe.config import ENV
-from openswe.dispatch import dispatch_agent_run
+from openswe.dispatch import dispatch_agent_run, thread_workspace
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import (
+from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
+from openswe.slack.events import claim_slack_event
+from openswe.slack.records import (
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
     store_slack_run_mapping,
 )
-from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
-from openswe.slack.events import claim_slack_event
 from openswe.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
-_QUEUE_RECORDS = (
-    (("queue",), "pending_messages"),
-    (("autofix",), "pending_event"),
-)
 
 
 def _mapping_value(value: object, key: str) -> object:
@@ -52,16 +49,10 @@ def _matching_slack_context(
 async def _resolve_stop_target(
     client: LangGraphClient, channel_id: str, message_ts: str
 ) -> tuple[str, str, dict[str, Any], dict[str, Any]] | None:
-    mapping = await lookup_slack_run_mapping(client, channel_id, message_ts)
-    if mapping is None:
-        thread_ts = message_ts
-    else:
-        mapped_thread_ts = mapping.get("thread_ts")
-        if not isinstance(mapped_thread_ts, str) or not mapped_thread_ts:
-            return None
-        thread_ts = mapped_thread_ts
+    mapping = await lookup_slack_run_mapping(channel_id, message_ts)
+    thread_ts = (mapping.thread_ts if mapping else None) or message_ts
 
-    thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+    thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     if not thread_id:
         return None
     try:
@@ -101,20 +92,6 @@ async def _active_run_ids(client: LangGraphClient, thread_id: str) -> list[str]:
     return sorted(run_ids)
 
 
-async def _clear_deferred_work(client: LangGraphClient, thread_id: str) -> None:
-    for namespace_prefix, key in _QUEUE_RECORDS:
-        await client.store.delete_item((*namespace_prefix, thread_id), key)
-
-
-def _thread_workspace(metadata: Mapping[str, Any]) -> str | None:
-    """The workspace to carry into the stop-summary run; ``environment`` is the pre-workspace key."""
-    for key in ("workspace", "environment"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
 def _summary_configurable(
     metadata: Mapping[str, Any], slack_thread: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -142,7 +119,7 @@ def _summary_configurable(
         if isinstance(value, str) and value:
             configurable[config_key] = value
 
-    workspace = _thread_workspace(metadata)
+    workspace = thread_workspace(metadata)
     if workspace is not None:
         configurable["workspace"] = workspace
         configurable["environment"] = workspace
@@ -194,7 +171,7 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
             run_ids=run_ids,
             action="interrupt",
         )
-    await _clear_deferred_work(client, thread_id)
+    await QueuedMessage.clear(thread_id)
     await client.threads.update(
         thread_id=thread_id,
         metadata={
@@ -217,7 +194,6 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
     if isinstance(summary_run_id, str) and summary_run_id:
         triggering_user_id = slack_thread.get("triggering_user_id")
         await store_slack_run_mapping(
-            client,
             channel_id,
             thread_ts,
             summary_run_id,
@@ -241,7 +217,7 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     if not isinstance(channel_id, str) or not channel_id:
         return
     client = get_client(url=LANGGRAPH_URL)
-    thread_id = await lookup_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS)
+    thread_id = await lookup_slack_thread_id(channel_id, CODE_CHANNEL_SESSION_TS)
     if not thread_id:
         return
     try:
@@ -261,7 +237,7 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     run_ids = await _active_run_ids(client, thread_id)
     if run_ids:
         await client.runs.cancel_many(thread_id=thread_id, run_ids=run_ids, action="interrupt")
-    await _clear_deferred_work(client, thread_id)
+    await QueuedMessage.clear(thread_id)
     await client.threads.update(
         thread_id=thread_id,
         metadata={

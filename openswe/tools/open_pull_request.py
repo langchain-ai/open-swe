@@ -13,6 +13,7 @@ from langgraph_sdk import get_client
 
 from openswe.act_as.gate import require_consent
 from openswe.analytics.usage import record_agent_pr_usage
+from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
     PrAuthorNotAParticipant,
     pr_author_login,
@@ -35,10 +36,12 @@ from openswe.slack.code_channels import (
     set_context_bar,
     set_view,
 )
+from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.run_usage import summarize_run_usage
 
@@ -527,17 +530,6 @@ def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[s
     repo = record.get("repo_full_name")
     number = record.get("number")
     url = record.get("url")
-    for item in existing:
-        if (
-            isinstance(item, dict)
-            and (
-                (item.get("repo_full_name") == repo and item.get("number") == number)
-                or item.get("url") == url
-            )
-            and isinstance(item.get("slack_feedback"), dict)
-        ):
-            record = {**record, "slack_feedback": item["slack_feedback"]}
-            break
     return [
         item
         for item in existing
@@ -716,7 +708,16 @@ async def _record_pr_telemetry(
             await _record_pr_opened_feedback(
                 thread_id, pr_url=pr_url if isinstance(pr_url, str) else ""
             )
-        if isinstance(thread_id, str) and thread_id:
+        if (
+            isinstance(thread_id, str)
+            and thread_id
+            and not (
+                cfg.slack_thread
+                and is_concierge_thread(
+                    cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts
+                )
+            )
+        ):
             repo_private = None
             base_repo = details.get("base", {}).get("repo")
             if isinstance(base_repo, dict) and isinstance(base_repo.get("private"), bool):
@@ -756,11 +757,6 @@ async def _record_pr_telemetry(
                 "resolves_thread": resolves_thread,
             }
             run_id = config.get("run_id") or cfg.run_id
-            if run_id and cfg.slack_thread and cfg.slack_thread.channel_id:
-                record["slack_feedback"] = {
-                    "run_id": str(run_id),
-                    "channel_id": cfg.slack_thread.channel_id,
-                }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
@@ -1065,7 +1061,7 @@ async def _open_pull_request(
             failed_step="resolve_pr_author_token",
         )
 
-    async with httpx2.AsyncClient(timeout=30.0) as client:
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
         if (
             kind == "user"
             and await private_credential_login() is None
@@ -1202,6 +1198,7 @@ async def _open_pull_request(
         )
 
 
+@audit_tool()
 async def open_pull_request(
     owner: str,
     repo: str,
@@ -1237,15 +1234,24 @@ def _ref_name(pr: dict[str, Any], side: str) -> str:
     return ref if isinstance(ref, str) else ""
 
 
+@audit_tool()
 async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
     """Implement the `link_pull_request` tool."""
+    cfg = RunConfig.from_runtime()
+    if cfg.slack_thread and is_concierge_thread(
+        cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts
+    ):
+        return {
+            "success": False,
+            "error": "PRs cannot be attached to concierge DM threads. Start a separate thread for PR work.",
+        }
     ref = parse_github_pr_url(pr_url)
     if ref is None:
         return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}
     token, kind = await _resolve_pr_author_token()
     if not token:
         return {"success": False, "error": "No GitHub token was available to read the PR"}
-    async with httpx2.AsyncClient(timeout=30.0) as client:
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
         if (
             kind == "user"
             and await private_credential_login() is None

@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { cleanup, render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
@@ -52,8 +53,6 @@ const stub = vi.hoisted(() => {
       addProject: fn(),
       removeProject: fn(),
     },
-    localThreads: { data: [] },
-    activity: {},
     session: { data: { login: "octocat" } },
     theme: { toggleTheme: fn() },
   }
@@ -114,14 +113,6 @@ vi.mock("@/features/agents/lib/prChecks", () => ({
 
 vi.mock("@/features/agents/lib/useRunCompletionNotifier", () => ({
   useRunCompletionNotifier: () => {},
-}))
-
-vi.mock("@/features/agents/lib/legacyLocal", async (actual) => ({
-  ...((await actual()) as object),
-  useLegacyLocalThreads: () => stub.localThreads,
-  useLegacyLocalActivity: () => stub.activity,
-  useRefreshLegacyLocalThreads: () => stub.noop,
-  useMarkLegacyLocalThreadViewed: () => stub.noop,
 }))
 
 vi.mock("@/features/agents/lib/desktopProjects", () => ({
@@ -213,16 +204,17 @@ it("opens asynchronous workers as real conversations and expands the selected wo
   const client = new QueryClient()
   render(
     <QueryClientProvider client={client}>
-      <SidebarThreadRow
-        item={cloudSidebarThread(parent)}
-        isActive={false}
-        activeThreadId="worker"
-        pinned={false}
-        archived={false}
-        onDeleteLocal={stub.noop}
-        onTogglePin={stub.noop}
-        onToggleArchived={stub.noop}
-      />
+      <TooltipProvider>
+        <SidebarThreadRow
+          item={cloudSidebarThread(parent)}
+          isActive={false}
+          activeThreadId="worker"
+          pinned={false}
+          archived={false}
+          onTogglePin={stub.noop}
+          onToggleArchived={stub.noop}
+        />
+      </TooltipProvider>
     </QueryClientProvider>
   )
   const workerLink = screen.getByRole("link", { name: /Implement change/ })

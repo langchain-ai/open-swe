@@ -50,11 +50,6 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             new_callable=AsyncMock,
             return_value={"instructions": "Be concise."},
         ),
-        patch(
-            "openswe.tools.read_user_settings.get_notion_status",
-            new_callable=AsyncMock,
-            return_value={"notion": {"connected": True}},
-        ),
     ):
         result = await read_user_settings()
 
@@ -63,14 +58,8 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
         "participants": [
             {
                 "login": "octocat",
-                "profile": {
-                    "default_model": "openai:gpt-6.1-sol",
-                    "reasoning_effort": "high",
-                },
+                "profile": {"auto_human_review_enabled": True},
                 "instructions": "Be concise.",
-                "connections": {
-                    "notion": {"connected": True},
-                },
             }
         ],
         "unresolved_participant_count": 1,
