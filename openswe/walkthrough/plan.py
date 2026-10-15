@@ -228,6 +228,10 @@ class PlanChunk(BaseModel):
     # The chunk's code as a reader sees it, rendered at the plan's head.
     code: str = ""
 
+    def message(self, number: int, total: int, *, code: str | None = None) -> str:
+        header = f"*{number}/{total} · {self.title}*"
+        return f"{header}\n{self.explanation}\n\n{self.code if code is None else code}".strip()
+
 
 class PlannedChunk(BaseModel):
     number: int

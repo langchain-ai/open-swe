@@ -19,6 +19,7 @@ from openswe.review_guide.messages import Stage, refresh_progress, retire
 from openswe.review_guide.sessions import GuideMode
 from openswe.review_guide.walk import OnScreen, Reader, Walk
 from openswe.run_config import RunConfig
+from openswe.slack.blocks import MARKDOWN_TEXT_MAX_CHARS
 from openswe.slack.code_channels import archive_code_channel, set_session_status_result
 from openswe.slack.http import SlackRequestError
 from openswe.slack.tools.reply import slack_reply
@@ -101,6 +102,13 @@ class _State:
 
     async def post(self, shown: OnScreen) -> dict[str, Any]:
         """Put ``shown`` on screen with its "Next" button, replacing what was there."""
+        if len(shown.message_text) > MARKDOWN_TEXT_MAX_CHARS:
+            return {
+                "success": False,
+                "retry": False,
+                "error": "chunk exceeds Slack's 12000-character limit; split it with "
+                "`walkthrough_plan_chunk` or show smaller ranges with `walkthrough_show_lines`",
+            }
         posted = await slack_reply(shown.message_text, "progress", options=[NEXT])
         if posted["success"] is not True:
             return posted
@@ -131,9 +139,15 @@ async def walkthrough_show_chunk(number: int | None = None) -> dict[str, Any]:
             else "no planned chunk is left for the reader; place the next one with `walkthrough_plan_chunk`"
         )
         return {"success": False, "error": error, **state.report()}
-    if not state.reader.remaining(chunk.lines):
+    lines = state.reader.remaining(chunk.lines)
+    if not lines:
         return {"success": False, "error": "the reader already approved or skipped that chunk"}
-    return await state.post(state.reader.show(chunk))
+    code = (
+        await state.ctx.workspace.checkout.render(lines, state.ctx.workspace.changes)
+        if lines != chunk.lines
+        else chunk.code
+    )
+    return await state.post(state.reader.show(chunk, code=code))
 
 
 @_one_at_a_time

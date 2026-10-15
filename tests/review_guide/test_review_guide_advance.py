@@ -129,3 +129,20 @@ async def test_looks_good_during_a_turn_is_recorded_when_its_own_turn_starts(
     dispatch = advance_module.dispatch_guide_run
     assert isinstance(dispatch, AsyncMock) and dispatch.await_args is not None
     assert dispatch.await_args.kwargs["approve_ts"] == "1.0"
+
+
+async def test_partly_reviewed_chunk_hands_rendering_back_to_the_guide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan(3)
+    plan.chunks[1].lines += plan.chunks.pop().lines
+    session = _session(monkeypatch, plan, complete=True)
+    session.walk.skip("Already discussed", plan.chunks[1].lines[:1])
+
+    await advance_module.advance("C1", "1.0")
+
+    assert session.walk.on_screen is None
+    assert isinstance(advance_module.post_with_buttons, AsyncMock)
+    advance_module.post_with_buttons.assert_not_awaited()
+    assert isinstance(advance_module.dispatch_guide_run, AsyncMock)
+    advance_module.dispatch_guide_run.assert_awaited_once()

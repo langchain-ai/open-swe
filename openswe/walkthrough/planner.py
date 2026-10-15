@@ -16,6 +16,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
+from openswe.slack.blocks import MARKDOWN_TEXT_MAX_CHARS
 from openswe.walkthrough.checkout import PinnedCheckout
 from openswe.walkthrough.diff import FileChange
 from openswe.walkthrough.plan import (
@@ -183,6 +184,13 @@ class PlanWorkspace:
             position = after
             if replaced and position is None:
                 position = next(i for i, c in enumerate(plan.chunks) if c.id in replaced)
+            total = len(plan.chunks) - len(replaced) + 1
+            number = total if position is None else max(0, min(position, total - 1)) + 1
+            if len(chunk.message(number, total)) > MARKDOWN_TEXT_MAX_CHARS:
+                raise RangeError(
+                    "chunk exceeds Slack's 12000-character limit; split the hunk "
+                    "with `walkthrough_split_hunks` or include fewer hunks"
+                )
             plan.chunks = [c for c in plan.chunks if c.id not in replaced]
             plan.add_other(to_other)
             number = plan.add_chunk(chunk, after=position)
