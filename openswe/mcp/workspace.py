@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from openswe.mcp import MCPConnection, MCPConnectionUpdate, MCPSource, prepare_connection
-from openswe.mcp.import_records import delete_store_copy
 from openswe.mcp.records import SharedMCPConnections
 
 logger = logging.getLogger(__name__)
@@ -90,9 +89,7 @@ async def save_workspace_mcp(
 
 
 async def delete_workspace_mcp(workspace: str, name: str) -> None:
-    connections = _connections(workspace)
-    await delete_store_copy(connections, name)
-    await connections.delete(name)
+    await _connections(workspace).delete(name)
 
 
 def workspace_mcp_source(workspace: str) -> MCPSource:

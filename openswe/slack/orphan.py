@@ -12,10 +12,10 @@ from langgraph_sdk.client import LangGraphClient
 from openswe.slack.client import SLACK_DETACHED_AT_KEY, SLACK_DETACHED_FROM_KEY
 from openswe.slack.records import delete_slack_thread_associations
 from openswe.source_context import SourceContext
-from openswe.store import now_iso
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import JsonObject, thread_metadata
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 

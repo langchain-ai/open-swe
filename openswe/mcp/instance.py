@@ -9,7 +9,6 @@ from openswe.mcp import (
     discover_tools,
     prepare_connection,
 )
-from openswe.mcp.import_records import delete_store_copy
 from openswe.mcp.records import INSTANCE_CONNECTIONS
 
 
@@ -39,7 +38,6 @@ async def save_instance_mcp(name: str, update: MCPConnectionUpdate) -> dict[str,
 
 
 async def delete_instance_mcp(name: str) -> None:
-    await delete_store_copy(INSTANCE_CONNECTIONS, name)
     await INSTANCE_CONNECTIONS.delete(name)
 
 

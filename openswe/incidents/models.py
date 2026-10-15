@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-from openswe.store import now_iso
+from openswe.utils.time import now_iso
 
 IncidentId = NewType("IncidentId", str)
 

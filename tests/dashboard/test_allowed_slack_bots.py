@@ -30,7 +30,6 @@ def app() -> FastAPI:
 @pytest.fixture
 async def client(
     registry_db: None,
-    fake_store: Any,
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
     directory: dict[str, Any],

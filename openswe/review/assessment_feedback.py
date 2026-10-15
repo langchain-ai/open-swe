@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal, Self
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 from sqlalchemy import BigInteger, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
@@ -13,17 +13,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.database.store_imports import StoreImport, run_store_import
 from openswe.review.publish import ReviewAssessment
-from openswe.store import delete_value, now_iso, search_all_entries, search_entries
-from openswe.users.records import UnknownUser, UserRecords
+from openswe.users.records import UserRecords
 from openswe.utils.json_types import JsonObject
 from openswe.utils.langsmith import create_langsmith_feedback
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
-
-_ASSESSMENTS_NAMESPACE = ["review_assessments"]
-_FEEDBACK_NAMESPACE = ["review_assessment_feedback"]
 
 
 class AssessmentRow(Base):
@@ -42,29 +38,6 @@ class FeedbackSubmission(BaseModel):
 class AssessmentFeedback(FeedbackSubmission):
     login: str
     updated_at: str
-
-    @classmethod
-    async def import_store(cls) -> StoreImport:
-        """Move feedback, kept per assessment and keyed by login; a login with no user waits."""
-        moved = waiting = 0
-        for entry in await search_all_entries(_FEEDBACK_NAMESPACE):
-            namespace = entry.namespace or []
-            if len(namespace) != 2:
-                continue
-            review_id = namespace[1]
-            try:
-                if await _FEEDBACK.get(entry.key, review_id) is None:
-                    await _FEEDBACK.put(entry.key, entry.value, review_id)
-            except UnknownUser:
-                logger.warning(
-                    "Store review feedback waits for its users row",
-                    extra={"github_login": entry.key},
-                )
-                waiting += 1
-                continue
-            await delete_value(namespace, entry.key)
-            moved += 1
-        return StoreImport(moved, waiting)
 
 
 # One record per person and assessment, keyed by the GitHub review id.
@@ -158,39 +131,3 @@ class PublishedAssessment(ReviewAssessment):
                     extra={"review_id": self.review_id},
                 )
         return feedback
-
-    @classmethod
-    async def import_store(cls) -> StoreImport:
-        """Drain published assessments from the Store a page at a time; PostgreSQL wins."""
-        moved = 0
-        while page := await search_entries(_ASSESSMENTS_NAMESPACE):
-            for entry in page:
-                try:
-                    assessment = cls.model_validate(entry.value)
-                except ValidationError:
-                    logger.warning(
-                        "Dropping unreadable review assessment from the Store",
-                        extra={"store_key": entry.key},
-                        exc_info=True,
-                    )
-                else:
-                    async with postgres.session() as session:
-                        await session.execute(
-                            insert(AssessmentRow)
-                            .values(
-                                github_review_id=assessment.review_id,
-                                value=assessment.model_dump(mode="json"),
-                            )
-                            .on_conflict_do_nothing()
-                        )
-                await delete_value(_ASSESSMENTS_NAMESPACE, entry.key)
-            moved += len(page)
-        return StoreImport(moved=moved)
-
-
-async def run_assessment_import() -> None:
-    """Drain assessments from the Store in the background, so a backlog never delays startup."""
-    try:
-        await run_store_import("review_assessments", PublishedAssessment.import_store)
-    except Exception:
-        logger.exception("Importing review assessments from the LangGraph Store failed")

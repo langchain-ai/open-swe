@@ -8,7 +8,7 @@ from openswe.incidents import service
 from openswe.incidents.document_models import IncidentHistory
 from openswe.incidents.models import Incident, IncidentId, IncidentReport
 from openswe.incidents.records import IncidentHistories, IncidentPostmortems
-from openswe.store import now_iso
+from openswe.utils.time import now_iso
 
 HISTORY = IncidentHistories()
 POSTMORTEMS = IncidentPostmortems()

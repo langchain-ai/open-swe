@@ -262,13 +262,13 @@ connections or reveal saved credentials.
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
 2. Choose **Headers / API key** or **OAuth client credentials** for authentication.
    For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY`
-   in the LangGraph Store; normal dashboard responses only return header names.
+   in PostgreSQL; normal dashboard responses only return header names.
    Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
    then the crossed-out eye to clear them from the editor. Entered or imported
    values also have an eye icon to show or hide them. Use headers
    for credentials, rather than URL query parameters.
    For OAuth, enter the token URL, client ID, client secret, scopes, and the
-   provider's client authentication method. The secret is encrypted in the Store
+   provider's client authentication method. The secret is encrypted in PostgreSQL
    and is never returned to the browser. Leave it blank when editing to keep it.
 3. Choose **Save and discover tools**. For new connections, all discovered tools
    are selected by default. Review the selection, then choose **Save connection**
@@ -419,8 +419,8 @@ Investigate graphs.
 
 Any signed-in user can connect remote MCP servers with their own credentials under
 **Settings → Connections → MCP servers**. The form, JSON import, OAuth, header handling, and
-tool discovery work exactly like workspace connections. Records live in the Store
-under `["user_mcps", <trimmed lowercase github login>]`, so one user's connections and credentials are
+tool discovery work exactly like workspace connections. Records live in PostgreSQL under the
+person's `users` row, so one user's connections and credentials are
 never visible to, reused by, or revealed to another user. The dashboard API is
 `/dashboard/api/my-mcps` and requires only a signed-in session.
 

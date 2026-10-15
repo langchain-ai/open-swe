@@ -32,7 +32,7 @@ async def stored(name: str) -> JsonObject:
     return value
 
 
-async def test_generic_connection_roundtrip_redacts_and_preserves_headers(registry_db, fake_store):
+async def test_generic_connection_roundtrip_redacts_and_preserves_headers(registry_db):
     update = MCPConnectionUpdate(
         name="incident",
         url="https://mcp.incident.io/mcp",
@@ -207,9 +207,7 @@ def test_invalid_connection_is_rejected(fields):
         MCPConnectionUpdate(**values)
 
 
-async def test_workspace_mcp_routes_are_admin_only_and_same_origin(
-    registry_db, fake_store, monkeypatch
-):
+async def test_workspace_mcp_routes_are_admin_only_and_same_origin(registry_db, monkeypatch):
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     app = FastAPI()
