@@ -149,12 +149,18 @@ async def _wake_thread(job: Job) -> object:
 
 async def start_jobs() -> None:
     """Startup work: move old scheduler crons over, and keep the standing jobs in place."""
-    await import_agent_server_crons()
+    steps: list[Callable[[], Awaitable[object]]] = [import_agent_server_crons]
     if thread_store_postgres():
-        await import_agent_server_threads()
-        await queue.schedule(
-            THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
-        )
+        steps += [
+            import_agent_server_threads,
+            lambda: queue.schedule(
+                THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
+            ),
+        ]
     else:
-        await mark_index_stale()
-        await queue.cancel_key(THREAD_STATUS_RECONCILE)
+        steps += [mark_index_stale, lambda: queue.cancel_key(THREAD_STATUS_RECONCILE)]
+    for step in steps:
+        try:
+            await step()
+        except Exception:
+            logger.exception("Job startup step failed")

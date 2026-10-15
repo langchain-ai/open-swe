@@ -24,7 +24,6 @@ from openswe.workspaces.refresh import adopt_agent_server_cron as adopt_refresh
 
 logger = logging.getLogger(__name__)
 
-_SCHEDULER: Final = "scheduler"
 _PAGE: Final = 100
 # Kinds whose crons nothing needs: retired features and one-time cleanups.
 _RETIRED: Final = frozenset(
@@ -81,10 +80,16 @@ async def import_agent_server_crons() -> int:
         return 0
     client = get_client()
     crons: list[_AgentServerCron] = []
-    while page := await client.crons.search(
-        assistant_id=_SCHEDULER, limit=_PAGE, offset=len(crons)
-    ):
-        crons.extend(_AgentServerCron.model_validate(dict(cron)) for cron in page)
+    offset = 0
+    # Searched without an assistant: the Agent Server only filters by assistant UUID.
+    while page := await client.crons.search(limit=_PAGE, offset=offset):
+        offset += len(page)
+        # A thread-bound cron is a thread wakeup, which fires once and goes on its own.
+        crons.extend(
+            _AgentServerCron.model_validate(dict(cron))
+            for cron in page
+            if not cron.get("thread_id")
+        )
         if len(page) < _PAGE:
             break
     adopted = 0
