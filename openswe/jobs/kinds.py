@@ -6,10 +6,12 @@ before it starts the worker.
 
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from typing import Final
 
 from pydantic import JsonValue
 
+from openswe import event_claims
 from openswe.agent_cost import run_agent_cost_refresh
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
@@ -45,6 +47,7 @@ logger = logging.getLogger(__name__)
 AGENT_COST: Final = "agent_cost"
 SESSION_COST: Final = "session_cost"
 RECONCILE: Final = "reconcile"
+_FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 
 def _text(job: Job, key: str) -> str | None:
@@ -101,12 +104,20 @@ async def _workspace_refresh(job: Job) -> object:
     return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind)
 
 
-@_sandbox_work(AGENT_SCHEDULE_JOB_KIND)
-async def _agent_schedule(job: Job) -> object:
+@WORKER.register(AGENT_SCHEDULE_JOB_KIND)
+async def _agent_schedule(job: Job) -> None:
     schedule_id = _text(job, "schedule_id")
     if schedule_id is None:
-        return None
-    return await launch_scheduled_agent_run(schedule_id, _text(job, "trigger_id"))
+        return
+    # Once per fire: a job claimed again after a deploy or crash may have launched it already.
+    fire = f"{job.id}:{job.due_at.isoformat()}"
+    if not await event_claims.claim(AGENT_SCHEDULE_JOB_KIND, fire, ttl=_FIRE_CLAIM_TTL):
+        logger.info("Automation fire already launched", extra={"job_id": str(job.id)})
+        return
+    result = await launch_scheduled_agent_run(schedule_id, _text(job, "trigger_id"))
+    logger.info(
+        "Job ran", extra={"job_kind": job.kind, "job_id": str(job.id), "job_result": result}
+    )
 
 
 @_sandbox_work(SESSION_COST)

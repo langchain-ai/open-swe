@@ -141,3 +141,27 @@ async def test_cancelling_a_running_job_stops_its_handler(monkeypatch: pytest.Mo
     async with asyncio.timeout(2):
         await running
     assert finished == []
+
+
+@pytest.mark.usefixtures("memory_event_claims")
+async def test_an_automation_fire_claimed_again_after_a_crash_launches_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.jobs import kinds
+
+    launched: list[str] = []
+
+    async def launch(schedule_id: str, trigger_id: str | None) -> dict[str, str]:
+        launched.append(schedule_id)
+        return {"status": "started"}
+
+    monkeypatch.setattr(kinds, "launch_scheduled_agent_run", launch)
+    job = await queue.schedule("agent_schedule", {"schedule_id": "a1"}, cron="0 9 * * *")
+
+    # The first run launched, then its worker stopped before finishing the job.
+    await kinds._agent_schedule(job)
+    await kinds._agent_schedule(job)
+    next_fire = job.model_copy(update={"due_at": job.next_fire_after(job.due_at)})
+    await kinds._agent_schedule(next_fire)
+
+    assert launched == ["a1", "a1"]
