@@ -430,6 +430,16 @@ export type MCPOAuthUpdate = MCPOAuth & {
   client_secret?: string | null
 }
 
+export interface MCPOAuthStatus {
+  status:
+    | "not_connected"
+    | "connecting"
+    | "connected"
+    | "reconnect_required"
+    | "failed"
+  error?: string | null
+}
+
 export interface MCPConnection {
   name: string
   url: string
@@ -438,6 +448,8 @@ export interface MCPConnection {
   allowed_tools: string[]
   header_names: string[]
   oauth?: MCPOAuth | null
+  auth?: "oauth" | null
+  oauth_status?: MCPOAuthStatus | null
   revision: string
   updated_at: string
 }
@@ -450,6 +462,7 @@ export interface MCPConnectionUpdate {
   allowed_tools: string[]
   headers?: Record<string, string> | null
   oauth?: MCPOAuthUpdate | null
+  auth?: "oauth" | null
 }
 
 export interface LangSmithConnectionStatus {
@@ -1728,6 +1741,19 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) }
     ),
   getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
+  startMyMCPOAuth: (name: string) =>
+    request<{ authorization_url: string }>(
+      `/my-mcps/${encodeURIComponent(name)}/oauth/start`,
+      { method: "POST" }
+    ),
+  getMyMCPOAuthStatus: (name: string) =>
+    request<MCPOAuthStatus>(
+      `/my-mcps/${encodeURIComponent(name)}/oauth/status`
+    ),
+  disconnectMyMCPOAuth: (name: string) =>
+    request<void>(`/my-mcps/${encodeURIComponent(name)}/oauth/disconnect`, {
+      method: "POST",
+    }),
   revealMyMCPHeaders: (name: string) =>
     request<Record<string, string>>(
       `/my-mcps/${encodeURIComponent(name)}/headers/reveal`,

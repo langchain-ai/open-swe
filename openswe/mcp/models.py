@@ -35,7 +35,7 @@ def _is_secret_query_key(key: str) -> bool:
     return normalized in {"key", "token"} or normalized.endswith(_SECRET_QUERY_SUFFIXES)
 
 
-def _https_url(value: str) -> str:
+def https_mcp_url(value: str) -> str:
     value = value.strip()
     parsed = urlsplit(value)
     if (
@@ -63,7 +63,7 @@ class MCPOAuth(BaseModel):
         "client_secret_post"
     )
 
-    _token_url = field_validator("token_url")(_https_url)
+    _token_url = field_validator("token_url")(https_mcp_url)
 
     @field_validator("client_id")
     @classmethod
@@ -87,8 +87,9 @@ class MCPConnectionUpdate(BaseModel):
     headers: dict[str, str] | None = Field(default=None, repr=False)
     allowed_tools: list[str] = Field(default_factory=list)
     oauth: MCPOAuthUpdate | None = Field(default=None, repr=False)
+    auth: Literal["oauth"] | None = None
 
-    _url = field_validator("url")(_https_url)
+    _url = field_validator("url")(https_mcp_url)
 
     @field_validator("headers")
     @classmethod
@@ -123,6 +124,11 @@ class MCPToolDescription(BaseModel):
     description: str = ""
 
 
+class MCPOAuthStatus(BaseModel):
+    status: Literal["not_connected", "connecting", "connected", "reconnect_required", "failed"]
+    error: str | None = None
+
+
 class MCPConnectionPublic(BaseModel):
     """Connection settings safe to return to the dashboard; credentials stay server-side."""
 
@@ -135,6 +141,8 @@ class MCPConnectionPublic(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     header_names: list[str] = Field(default_factory=list)
     oauth: MCPOAuth | None = None
+    auth: Literal["oauth"] | None = None
+    oauth_status: MCPOAuthStatus | None = None
     revision: str
     updated_at: str
 
@@ -163,7 +171,7 @@ class MCPConnection(MCPConnectionPublic):
 
 
 async def prepare_connection(
-    update: MCPConnectionUpdate, previous: MCPConnection | None = None
+    update: MCPConnectionUpdate, previous: MCPConnection | None = None, *, personal: bool = False
 ) -> MCPConnection:
     """Resolve a draft's credentials using only the previous record in the same scope."""
     if previous and previous.name != update.name:
@@ -175,8 +183,16 @@ async def prepare_connection(
     if update.headers is not None:
         encrypted = encrypt_token(json.dumps(update.headers)) if update.headers else ""
         header_names = sorted(update.headers)
+    auth = update.auth
+    if "auth" not in update.model_fields_set and previous:
+        auth = previous.auth
+    if auth == "oauth":
+        if not personal:
+            raise ValueError("Interactive OAuth is available only for personal MCP connections")
+        if update.oauth or any(header.lower() == "authorization" for header in header_names):
+            raise ValueError("Remove other authorization credentials when using interactive OAuth")
     oauth = update.oauth
-    if "oauth" not in update.model_fields_set and previous and previous.oauth:
+    if auth != "oauth" and "oauth" not in update.model_fields_set and previous and previous.oauth:
         oauth = MCPOAuthUpdate(**previous.oauth.model_dump())
     oauth_settings = None
     encrypted_client_secret = ""
@@ -197,7 +213,8 @@ async def prepare_connection(
         if not encrypted_client_secret:
             raise ValueError("Provide a client secret for new or changed OAuth connections")
     return MCPConnection(
-        **update.model_dump(exclude={"headers", "oauth"}),
+        **update.model_dump(exclude={"headers", "oauth", "auth"}),
+        auth=auth,
         encrypted_headers=encrypted,
         header_names=header_names,
         oauth=oauth_settings,
