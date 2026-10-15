@@ -1,12 +1,12 @@
 name: Deploy Managed Deep Agents
 
 # Deploys mda/ to the open-swe-mda-* deployments the backends' MDA_RUNTIME_URL
-# points at. Staging and preview follow main; prod follows the promotion to prod.
+# points at. Staging follows main and prod follows the promotion to prod; preview
+# follows the preview tree, which build_preview_branch.yml deploys after the backend.
 # A deployment is skipped when nothing it runs changed since its mda-deployed/<env>
 # tag, which a successful deploy moves, so a failed one is retried next time.
 # Only commits already on main are deployed: `mda deploy` can run project code
-# while it holds the workspace deploy key, so the preview tree's labeled PRs never
-# reach this workflow.
+# while it holds the workspace deploy key.
 
 on:
   push:
@@ -19,7 +19,7 @@ on:
       environment:
         description: Deployment to update (deploys the selected ref)
         type: choice
-        options: [staging, preview, prod]
+        options: [staging, prod]
         required: true
   workflow_call:
     inputs:
@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: ${{ fromJSON(inputs.environment && format('["{0}"]', inputs.environment) || '["staging", "preview"]') }}
+        environment: ${{ fromJSON(inputs.environment && format('["{0}"]', inputs.environment) || '["staging"]') }}
     concurrency:
       group: deploy-mda-${{ matrix.environment }}
       cancel-in-progress: false

@@ -40,7 +40,6 @@ def _config() -> RunnableConfig:
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("fake_store")
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
 @pytest.mark.parametrize("github_login", ["octocat", None])
 async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
@@ -180,7 +179,6 @@ async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
     code_mode, ordinary = await server._mcp_code_mode(
         "thread",
         tools,
-        local_run=False,
         additional_tools=[
             "http_request",
             "read_file",

@@ -27,7 +27,7 @@ from openswe.sandboxes.tool_access import (
     sandbox_host_thread_id,
 )
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import bind_slack_thread_id, invite_to_slack_channel
+from openswe.slack.client import invite_to_slack_channel
 from openswe.slack.code_channels import (
     CODE_CHANNEL_SESSION_TS,
     archive_code_channel,
@@ -37,6 +37,7 @@ from openswe.slack.code_channels import (
     set_session_status,
 )
 from openswe.slack.http import SlackRequestError
+from openswe.slack.records import bind_slack_thread_id
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
@@ -127,7 +128,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             owner_login=login,
         ):
             raise GuideStartError("could not create the review thread")
-        await bind_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
+        await bind_slack_thread_id(channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
         await ReviewGuideSession.create(
             thread_id=thread_id,
             pull_request=pull_request,

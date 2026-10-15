@@ -7,10 +7,9 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.config import ENV
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.store import now_iso
 from openswe.users.records import UserRecords
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,6 @@ FollowUpBehavior = Literal["queue", "steer"]
 
 class UserPreferencesUpdate(BaseModel):
     default_visibility: ThreadVisibility
-    local_tracing_project: str | None = None
     default_workspace: str | None = None
     # What Enter does while a run is live: hold the message until the run ends,
     # or steer the live run. Omitted keeps the stored value.
@@ -31,14 +29,12 @@ class UserPreferencesUpdate(BaseModel):
 
 def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
     visibility = (record or {}).get("default_visibility")
-    project = (record or {}).get("local_tracing_project")
     workspace = (record or {}).get("default_workspace")
     normalized_workspace = (
         workspace.strip().lower() if isinstance(workspace, str) and workspace.strip() else None
     )
     return {
         "default_visibility": visibility if visibility in ("public", "private") else "private",
-        "local_tracing_project": project if isinstance(project, str) and project.strip() else None,
         "default_workspace": normalized_workspace,
         "follow_up_behavior": (
             "queue" if (record or {}).get("follow_up_behavior") == "queue" else "steer"
@@ -62,9 +58,6 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
         **existing,
         "login": login,
         "default_visibility": update.default_visibility,
-        "local_tracing_project": update.local_tracing_project.strip()
-        if update.local_tracing_project
-        else None,
         "default_workspace": update.default_workspace.strip().lower()
         if update.default_workspace and update.default_workspace.strip()
         else None,
@@ -87,10 +80,7 @@ router = APIRouter(tags=["user-preferences"])
 async def api_get_my_preferences(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    return {
-        **await get_user_preferences(session["sub"]),
-        "default_local_tracing_project": ENV.LANGSMITH_PROJECT.get(),
-    }
+    return await get_user_preferences(session["sub"])
 
 
 @router.put("/me/preferences")
@@ -99,7 +89,4 @@ async def api_put_my_preferences(
     body: UserPreferencesUpdate,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    return {
-        **await set_user_preferences(session["sub"], body),
-        "default_local_tracing_project": ENV.LANGSMITH_PROJECT.get(),
-    }
+    return await set_user_preferences(session["sub"], body)

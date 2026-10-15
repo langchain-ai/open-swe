@@ -28,7 +28,7 @@ def update(**fields):
     return MCPConnectionUpdate(name="linear", url="https://mcp.linear.app/mcp", **fields)
 
 
-async def test_saved_credentials_are_reused_only_from_the_same_user(people, fake_store):
+async def test_saved_credentials_are_reused_only_from_the_same_user(people):
     await mcps.save_user_mcp("bob", "linear", update(headers={"Authorization": "bob-secret"}))
     await workspace_mcps.save_workspace_mcp(
         "default",
@@ -53,7 +53,7 @@ async def test_saved_credentials_are_reused_only_from_the_same_user(people, fake
     assert await mcps.list_user_mcps("alice") == []
 
 
-async def test_routes_serve_only_the_signed_in_users_connections(people, fake_store, monkeypatch):
+async def test_routes_serve_only_the_signed_in_users_connections(people, monkeypatch):
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     app = FastAPI()
     app.include_router(routes.router)

@@ -11,6 +11,7 @@ from pydantic.alias_generators import to_camel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
+from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
@@ -33,6 +34,7 @@ from openswe.review.chat import (
 )
 from openswe.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from openswe.review.eval_jobs import (
+    ReviewerEvalStatus,
     ScoreMode,
     Severity,
     get_reviewer_eval_status,
@@ -67,6 +69,7 @@ from openswe.review.styles import (
     ReviewStylePromptUpdate,
 )
 from openswe.threads.handlers import mark_review_session_viewed
+from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
 
 router = APIRouter(tags=["review"])
@@ -99,7 +102,7 @@ async def api_set_enabled_review_repo(
 @router.get("/admin/evals/reviewer")
 async def admin_get_reviewer_eval(
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> dict[str, Any]:
+) -> ReviewerEvalStatus:
     """Status of the latest reviewer eval."""
     return await get_reviewer_eval_status()
 
@@ -126,12 +129,14 @@ class ReviewerEvalStart(BaseModel):
 async def admin_start_reviewer_eval(
     body: ReviewerEvalStart,
     session: dict[str, Any] = ADMIN_DEP,
-) -> dict[str, Any]:
+) -> ReviewerEvalStatus:
     """Launch the reviewer eval in a LangSmith sandbox with the given run config."""
     config = resolve_eval_config()
     config.update(body.model_dump(exclude={"limit"}))
     try:
-        return await start_reviewer_eval(config, body.limit, session.get("email") or session["sub"])
+        return await start_reviewer_eval(
+            config, body.limit, session_user_id(session) or user_id_for_login(session["sub"])
+        )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 

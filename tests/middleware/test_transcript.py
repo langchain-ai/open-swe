@@ -547,3 +547,91 @@ async def test_a_cancelled_subagent_tool_leaves_the_parent_running(
 
     assert "turn.interrupted" not in engine.types
     assert engine.types[-1] == "turn.completed"
+
+
+async def test_an_mda_subagent_is_recorded_under_its_task_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
+    from langchain.agents import create_agent
+    from langchain_core.messages import messages_to_dict
+    from langchain_core.tools import tool
+
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.remote_runtime.tokens import RemoteRun
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+
+    @tool
+    def read_file(path: str) -> str:
+        """Read a file."""
+        return f"contents of {path}"
+
+    async def build(config: Any, surface: ToolSurface) -> None:
+        middleware = [mw.TranscriptMiddleware()]
+        surface.graph = create_agent(
+            GenericFakeChatModel(messages=iter([])), tools=[read_file], middleware=middleware
+        )
+        surface.middleware = middleware
+
+    async def start_models(cfg: Any) -> Any:
+        raise AssertionError("not asked for")
+
+    graph = RemoteGraph("agent", build, start_models)
+    run = RemoteRun(thread_id=THREAD_ID, assistant_id="agent", configurable={})
+    asked = HumanMessage(content="do the thing", id="human-1")
+    delegated = AIMessage(
+        content="",
+        id="ai-1",
+        tool_calls=[{"name": "task", "args": {"description": "look"}, "id": "task-1"}],
+    )
+    root = messages_to_dict([asked, delegated])
+    looked = AIMessage(
+        content="",
+        id="sub-ai-1",
+        tool_calls=[{"name": "read_file", "args": {"path": "a.py"}, "id": "sub-call-1"}],
+    )
+    nested = messages_to_dict([HumanMessage(content="look", id="sub-human"), looked])
+    answer = AIMessage(content="found it", id="sub-ai-2")
+
+    await graph.hook(run, "prepare", {"run_id": RUN_ID, "messages": root[:1]})
+    task = {"name": "task", "arguments": {"description": "look"}, "tool_call_id": "task-1"}
+    await graph.hook(run, "tool_started", {"run_id": RUN_ID, "messages": root, **task})
+    inside = {"run_id": RUN_ID, "messages": nested, "namespace": ["task-1"]}
+    await graph.hook(
+        run,
+        "call",
+        {
+            **inside,
+            "name": "read_file",
+            "arguments": {"path": "a.py"},
+            "tool_call_id": "sub-call-1",
+        },
+    )
+    await graph.hook(run, "model_result", {**inside, "response": messages_to_dict([answer])})
+    result = ToolMessage(content="found it", tool_call_id="task-1")
+    await graph.hook(
+        run,
+        "tool_result",
+        {"run_id": RUN_ID, "messages": root, **task, "result": messages_to_dict([result])[0]},
+    )
+
+    recorded = [
+        (
+            c.event.type,
+            getattr(c.event, "tool_call_id", None) or c.event.message_id,
+            c.event.namespace,
+        )
+        for c in engine.commands
+        if c.event.type in {"tool.started", "tool.completed", "message.completed"}
+    ]
+    assert recorded == [
+        ("tool.started", "task-1", []),
+        ("tool.started", "sub-call-1", ["task-1"]),
+        ("tool.completed", "sub-call-1", ["task-1"]),
+        ("message.completed", "sub-ai-2", ["task-1"]),
+        ("tool.completed", "task-1", []),
+    ]
+    [task_started] = [c for c in engine.commands if c.command_id == "tool:task-1:started"]
+    assert task_started.event.message_id == "ai-1"

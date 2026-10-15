@@ -8,9 +8,14 @@ graph's tools, subagents and models from the backend's catalog for the run, and
 middleware there. The run token in the context authenticates every call.
 """
 
+from collections.abc import Collection
 from typing import Final, Literal
 
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ModelRetryMiddleware,
+)
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from managed_deepagents import (
@@ -20,7 +25,12 @@ from managed_deepagents import (
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
-from rt.middleware import BackendRunMiddleware, ServedToolsMiddleware
+from rt.middleware import (
+    BackendRunMiddleware,
+    ReportRepliesMiddleware,
+    RuntimeToolsMiddleware,
+    ServedToolsMiddleware,
+)
 from rt.models import RunModels, build_model
 from rt.tools import backend_tool
 
@@ -60,6 +70,13 @@ class OpenSweRunContext(BaseModel):
     models: dict[str, JsonValue] | None = None
 
 
+def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
+    """The backend's transcript and usage see every reply, and every tool call."""
+    return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
+
+
+# `mda build` reads the agent's name without running this factory, so its body
+# stays assignments and one `return define_deep_agent(...)`.
 async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     execution = runtime.execution_runtime
     context = OpenSweRunContext.model_validate(
@@ -84,6 +101,12 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     tools = [backend_tool(spec, backend) for spec in catalog.tools]
     by_name = {tool.name: tool for tool in tools}
     excluded = frozenset(catalog.excluded)
+    subagent_tools = {
+        subagent.name: tools
+        if subagent.tools is None
+        else [by_name[name] for name in subagent.tools if name in by_name]
+        for subagent in catalog.subagents
+    }
     return define_deep_agent(
         name="open-swe",
         model=model,
@@ -98,11 +121,10 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 "description": subagent.description,
                 "system_prompt": subagent.system_prompt,
                 "model": subagent_model,
-                "tools": tools
-                if subagent.tools is None
-                else [by_name[name] for name in subagent.tools if name in by_name],
+                "tools": subagent_tools[subagent.name],
                 "middleware": [
-                    ServedToolsMiddleware(tools, excluded),
+                    *_backend_reports(backend, by_name.keys()),
+                    ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
                     ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ],
             }
@@ -110,6 +132,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ],
         middleware=[
             BackendRunMiddleware(backend, context.invocation_id),
+            *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(tools, excluded),
             *(
                 [CodeInterpreterMiddleware(ptc=_REVIEWER_PTC_TOOLS)]

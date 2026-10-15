@@ -10,7 +10,7 @@ from openswe.mcp.models import MCPConnectionUpdate
 from openswe.mcp.records import INSTANCE_MCPS_NAMESPACE
 from openswe.mcp.workspace import list_workspace_mcps, save_workspace_mcp
 
-pytestmark = pytest.mark.usefixtures("registry_db", "fake_store")
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 def _update(name: str) -> MCPConnectionUpdate:

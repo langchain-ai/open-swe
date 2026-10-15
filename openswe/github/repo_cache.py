@@ -4,8 +4,7 @@ Building the picker payload fans out to ``/user/installations`` plus a
 paginated ``/user/installations/{id}/repositories`` sweep per installation,
 which takes 10s+ for users whose App is installed across hundreds of repos.
 Installations change rarely, so the payload is cached per person in
-``user_record`` and served stale-while-revalidate. The cache once lived in the
-LangGraph Store; those entries are abandoned and rebuilt on the next load.
+``user_record`` and served stale-while-revalidate.
 
 Keys are derived from the authenticated session login only, so a cached
 payload is never served to a different user. Only the picker listing reads

@@ -22,17 +22,15 @@ from openswe.slack import webhook as slack_webhooks
 from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import FakeStore
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
-# Workspaces are rows; workspace settings are still Store records, so the tests that
-# read one keep the store double as well.
+# Workspaces are rows.
 _needs_workspace_rows = pytest.mark.usefixtures("registry_db")
 
 
 @_needs_workspace_rows
 async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An image in a bound channel is checked against that workspace's model.
 
@@ -107,7 +105,6 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
 @pytest.mark.parametrize("inherited_workspace", [None, "oss"])
 async def test_a_bound_channel_outranks_a_named_repository(
     monkeypatch: pytest.MonkeyPatch,
-    fake_store: FakeStore,
     inherited_workspace: str | None,
 ) -> None:
     captured: dict[str, Any] = {}

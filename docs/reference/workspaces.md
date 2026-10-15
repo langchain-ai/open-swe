@@ -83,12 +83,12 @@ workspace prefers. Existing GitHub user and installation access checks remain in
 
 ### Storage, run context, and API
 
-Workspaces, and the repository and Slack-channel bindings that route to them, live in PostgreSQL,
-not the LangGraph Store: a `workspace` table (one row per workspace, slug unique) plus
+Workspaces, and the repository and Slack-channel bindings that route to them, live in PostgreSQL:
+a `workspace` table (one row per workspace, slug unique) plus
 `workspace_repository` and `workspace_slack_channel`, which key on the bound resource
 (`repository_id`, referencing the `repository` table, and `channel_id`), so the database itself
-enforces that a repository is preferred by, and a Slack channel bound to, at most one workspace. Settings and MCP connections stay exactly where this design places
-them: in the LangGraph Store, keyed by workspace slug. `Workspace`, `WorkspaceCreate`, and
+enforces that a repository is preferred by, and a Slack channel bound to, at most one workspace. Settings and MCP connections live in
+their own PostgreSQL tables, keyed by workspace slug. `Workspace`, `WorkspaceCreate`, and
 `WorkspaceUpdate` remain the domain and API shape that the dashboard, the agent tools, and routing
 read and write; the tables are an implementation detail behind `WorkspaceStore`, swappable again
 without touching a caller.
@@ -153,9 +153,9 @@ settings and MCP connections become the `default` workspace's. Existing threads 
 workspace read as `default`. The `environment` key in thread metadata and run configuration is
 read as an alias for `workspace` so in-flight threads keep working.
 
-Workspaces live only in PostgreSQL. The one-time import of environment records from the
-LangGraph Store (`["workspaces"]` and the legacy `["environments"]` namespace) has been removed; a
-deployment still holding such records must import them with an earlier release first. A migration
+Workspaces live only in PostgreSQL. Open SWE no longer reads the LangGraph Store; a deployment
+still holding records there must move them with an earlier release first (see
+[Upgrading from the LangGraph Store](../INSTALLATION.md#upgrading-from-the-langgraph-store)). A migration
 seeds the `default` workspace, so pickers always offer it.
 
 ### Non-goals

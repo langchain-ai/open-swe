@@ -6,11 +6,13 @@ point a call elsewhere. Every call is ``POST /remote-runtime/hooks/{hook}``.
 """
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Final, Literal
 
 import httpx2
-from langchain_core.messages import BaseMessage, messages_to_dict
+from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from rt.models import ModelSpec, RunModels
@@ -31,9 +33,24 @@ Hook = Literal[
     "after_model",
     "after_agent",
     "call",
+    "tool_started",
+    "tool_result",
 ]
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
+
+# The ``task`` calls whose subagent is running right now; empty for the agent itself.
+_namespace: ContextVar[tuple[str, ...]] = ContextVar("open_swe_namespace", default=())
+
+
+@contextmanager
+def subagent_of(tool_call_id: str) -> Iterator[None]:
+    """Name ``tool_call_id`` in the block's calls, as the ``task`` call its subagent runs in."""
+    token = _namespace.set((*_namespace.get(), tool_call_id))
+    try:
+        yield
+    finally:
+        _namespace.reset(token)
 
 
 class BackendCallError(RuntimeError):
@@ -86,7 +103,7 @@ class ToolReply(BaseModel):
 def run_body(
     run_id: str | None, state: Mapping[str, object], **extra: JsonValue
 ) -> dict[str, JsonValue]:
-    """The run's identity and the graph state the backend's hooks read."""
+    """The run's identity, the graph state the backend's hooks read, and the subagent calling."""
     messages = state.get("messages")
     held = state.get("open_swe_state")
     forwarded = {key: state[key] for key in _FORWARDED_STATE_KEYS if key in state}
@@ -95,6 +112,7 @@ def run_body(
             "run_id": run_id,
             "messages": messages_to_dict(_messages(messages)),
             "state": {**(held if isinstance(held, dict) else {}), **forwarded},
+            "namespace": list(_namespace.get()),
             **extra,
         }
     )
@@ -159,3 +177,10 @@ class OpenSweBackend:
         )
         observed = reply.get("response")
         return [m for m in observed if isinstance(m, dict)] if isinstance(observed, list) else []
+
+    async def tool_started(self, body: Mapping[str, JsonValue]) -> None:
+        await self.call("tool_started", body)
+
+    async def tool_result(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
+        [message] = _json_list.validate_python(messages_to_dict([result]))
+        await self.call("tool_result", {**body, "result": message})

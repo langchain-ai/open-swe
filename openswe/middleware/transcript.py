@@ -20,7 +20,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -30,7 +30,7 @@ from uuid import UUID
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.callbacks.manager import AsyncCallbackManager, CallbackManager
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
@@ -92,6 +92,16 @@ _namespace: ContextVar[tuple[str, ...]] = ContextVar("transcript_namespace", def
 def current_namespace() -> list[str]:
     """The subagent namespace for events emitted right now (``[]`` at the root)."""
     return list(_namespace.get())
+
+
+@contextlib.contextmanager
+def within_namespace(namespace: Sequence[str]) -> Iterator[None]:
+    """Emit the block's events under ``namespace``, for a subagent running in another process."""
+    token = _namespace.set(tuple(namespace))
+    try:
+        yield
+    finally:
+        _namespace.reset(token)
 
 
 def paragraph_boundary(text: str) -> int:
@@ -1015,28 +1025,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             return await handler(request)
 
         namespace = current_namespace()
-        name = tool_call.get("name") or "tool"
-        try:
-            state.enqueue(
-                Command(
-                    command_id=f"tool:{tool_call_id}:started",
-                    event=ToolStarted(
-                        type="tool.started",
-                        turn_id=state.turn_id,
-                        tool_call_id=tool_call_id,
-                        message_id=_issuing_message_id(state, request, tool_call_id),
-                        name=name,
-                        input=_json_object(tool_call.get("args")),
-                        namespace=namespace,
-                    ),
-                    actor_kind="agent",
-                    run_id=state.run_id,
-                    turn_id=state.turn_id,
-                )
-            )
-        except Exception:
-            logger.warning("Transcript tool start failed", exc_info=True, extra={"tool_name": name})
-
+        messages = request.state.get("messages") if isinstance(request.state, Mapping) else None
+        self._start_tool(state, tool_call, tool_call_id, messages, namespace)
         token = _namespace.set((*_namespace.get(), tool_call_id))
         try:
             result = await handler(request)
@@ -1064,6 +1054,54 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             _namespace.reset(token)
         self._complete_tool(state, tool_call_id, namespace, *_result_output(result, tool_call_id))
         return result
+
+    async def atool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
+        """Record a tool call that another process runs, such as a remote runtime's ``task``."""
+        state = _lookup_state()
+        tool_call_id = tool_call.get("id")
+        if state.enabled and tool_call_id:
+            self._start_tool(state, tool_call, tool_call_id, messages, current_namespace())
+
+    async def atool_finished(self, result: ToolMessage) -> None:
+        """Record how a tool call ``atool_started`` recorded ended."""
+        state = _lookup_state()
+        if state.enabled:
+            self._complete_tool(
+                state,
+                result.tool_call_id,
+                current_namespace(),
+                *_result_output(result, result.tool_call_id),
+            )
+
+    def _start_tool(
+        self,
+        state: RunState,
+        tool_call: ToolCall,
+        tool_call_id: str,
+        messages: object,
+        namespace: list[str],
+    ) -> None:
+        name = tool_call.get("name") or "tool"
+        try:
+            state.enqueue(
+                Command(
+                    command_id=f"tool:{tool_call_id}:started",
+                    event=ToolStarted(
+                        type="tool.started",
+                        turn_id=state.turn_id,
+                        tool_call_id=tool_call_id,
+                        message_id=_issuing_message_id(state, messages, tool_call_id),
+                        name=name,
+                        input=_json_object(tool_call.get("args")),
+                        namespace=namespace,
+                    ),
+                    actor_kind="agent",
+                    run_id=state.run_id,
+                    turn_id=state.turn_id,
+                )
+            )
+        except Exception:
+            logger.warning("Transcript tool start failed", exc_info=True, extra={"tool_name": name})
 
     def _complete_tool(
         self,
@@ -1226,8 +1264,7 @@ def _turn_requested(
     )
 
 
-def _issuing_message_id(state: RunState, request: ToolCallRequest, tool_call_id: str) -> str | None:
-    candidates = request.state.get("messages") if isinstance(request.state, Mapping) else None
+def _issuing_message_id(state: RunState, candidates: object, tool_call_id: str) -> str | None:
     if not isinstance(candidates, Sequence):
         return None
     for message in reversed(candidates):

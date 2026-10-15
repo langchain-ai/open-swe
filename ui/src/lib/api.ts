@@ -764,8 +764,6 @@ export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
-  local_tracing_project: string | null
-  default_local_tracing_project: string
   default_workspace: string | null
   follow_up_behavior: FollowUpBehavior
 }
@@ -1406,7 +1404,6 @@ export interface ReviewerEvalProgress {
 }
 
 export interface ReviewerEvalStatus {
-  name: string
   status: "idle" | "starting" | "running" | "completed" | "failed"
   run_name?: string
   langsmith_project: string
@@ -1415,15 +1412,11 @@ export interface ReviewerEvalStatus {
   started_at: string | null
   finished_at: string | null
   created_by: string | null
-  pid: number | null
-  exit_code: number | null
   experiment_url: string | null
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
   worker_id?: string | null
-  trigger?: string | null
-  updated_at: string
 }
 
 export interface HumanReviewRequestResult {

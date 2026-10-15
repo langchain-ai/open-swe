@@ -109,7 +109,7 @@ def _run_process(
     )
 
 
-def test_linear_follow_up_keeps_the_threads_workspace(fake_store: Any) -> None:
+def test_linear_follow_up_keeps_the_threads_workspace() -> None:
     configurable, upsert, _email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -120,7 +120,7 @@ def test_linear_follow_up_keeps_the_threads_workspace(fake_store: Any) -> None:
     assert upsert["workspace"] == "core"
 
 
-def test_linear_new_thread_lands_in_the_repositorys_preferred_workspace(fake_store: Any) -> None:
+def test_linear_new_thread_lands_in_the_repositorys_preferred_workspace() -> None:
     configurable, _upsert, _email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -129,7 +129,7 @@ def test_linear_new_thread_lands_in_the_repositorys_preferred_workspace(fake_sto
     assert configurable["workspace"] == "oss"
 
 
-def test_linear_comment_images_stay_with_their_comments(fake_store: Any) -> None:
+def test_linear_comment_images_stay_with_their_comments() -> None:
     issue = _full_issue()
     issue["comments"]["nodes"] = [
         {
