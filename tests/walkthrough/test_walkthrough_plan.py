@@ -3,6 +3,7 @@ import subprocess
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
 
@@ -10,6 +11,7 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.review_guide.walk import Reader, Walk
+from openswe.tools import review_walkthrough
 from openswe.walkthrough.checkout import HEAD_REF, PinnedCheckout
 from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import (
@@ -312,3 +314,69 @@ async def test_head_files_read_together_keep_each_files_lines(repo: Path) -> Non
     assert await checkout.head_files(list(files)) == {
         path: content.splitlines() for path, content in files.items()
     }
+
+
+@pytest.mark.parametrize("replace", [None, [1]])
+async def test_oversized_chunk_is_rejected_without_changing_the_plan(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, replace: list[int] | None
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"large.py": "x" * 12000 + "\n"}, "large")
+    changes = _changes(repo, base, head)
+    plan = Plan.start(head, changes)
+    hunks = [FileHunks(path="large.py", hunks=["+1"])]
+    if replace:
+        _place(plan, changes, "Existing", *hunks)
+    original = plan.model_copy(deep=True)
+    checkout = PinnedCheckout(cast(SandboxBackendProtocol, _ShellBackend()), str(repo))
+    _git(repo, "update-ref", HEAD_REF, head)
+    workspace = PlanWorkspace(AsyncMock(), checkout, head, changes, plan)
+
+    async def edit(change: Callable[[Plan], object]) -> None:
+        change(plan)
+
+    monkeypatch.setattr(workspace, "_edit", edit)
+    with pytest.raises(RangeError, match="12000-character limit"):
+        await workspace.plan_chunk(title="Large", show=hunks, explanation="", replace=replace)
+    assert plan == original
+
+
+async def test_partly_reviewed_chunk_renders_only_remaining_lines(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"large.py": "x" * 12000 + "\nremaining = 1\n"}, "large")
+    changes = _changes(repo, base, head)
+    plan = Plan.start(head, changes)
+    chunk = _place(plan, changes, "Large", FileHunks(path="large.py", hunks=["+1"]))
+    _git(repo, "update-ref", HEAD_REF, head)
+    checkout = PinnedCheckout(cast(SandboxBackendProtocol, _ShellBackend()), str(repo))
+    chunk.code = await checkout.render(chunk.lines, changes)
+    reader = Reader.of(Walk(head_sha=head), plan, Counter({changes[0].lines[0].key: 1}))
+    posted = AsyncMock(return_value={"success": True})
+    state = SimpleNamespace(
+        reader=reader,
+        shown_this_turn=lambda: False,
+        ctx=SimpleNamespace(workspace=SimpleNamespace(checkout=checkout, changes=changes)),
+        post=posted,
+    )
+    monkeypatch.setattr(review_walkthrough._State, "load", AsyncMock(return_value=state))
+    monkeypatch.setattr(
+        review_walkthrough.RunConfig,
+        "from_runtime",
+        lambda: SimpleNamespace(thread_id="partial-test"),
+    )
+    await review_walkthrough.walkthrough_show_chunk(1)
+    assert posted.await_args is not None
+    shown = posted.await_args.args[0]
+    assert len(shown.message_text) < 12000
+    assert "remaining = 1" in shown.message_text
+    assert "x" * 12000 not in shown.message_text
+    assert shown.lines == chunk.lines[1:]
+
+    _git(repo, "update-ref", "-d", HEAD_REF)
+    posted.reset_mock()
+    result = await review_walkthrough.walkthrough_show_chunk(1)
+    assert result["success"] is False
+    assert result["error"]
+    posted.assert_not_awaited()

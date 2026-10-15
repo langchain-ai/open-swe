@@ -226,15 +226,14 @@ class Reader:
             return False
         return bool(self.remaining(self.plan.other) or self.other_files_left)
 
-    def show(self, chunk: PlanChunk) -> OnScreen:
+    def show(self, chunk: PlanChunk, *, code: str | None = None) -> OnScreen:
         lines = self.remaining(chunk.lines)
         number = self.plan.number_of(chunk.id)
-        header = f"*{number}/{len(self.plan.chunks)} · {chunk.title}*"
         return OnScreen(
             chunk_id=chunk.id,
             title=chunk.title,
             lines=lines,
-            message_text=f"{header}\n{chunk.explanation}\n\n{chunk.code}".strip(),
+            message_text=chunk.message(number or 1, len(self.plan.chunks), code=code),
         )
 
     def show_other(self) -> OnScreen:

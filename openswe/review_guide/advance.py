@@ -94,6 +94,9 @@ async def advance(channel_id: str, message_ts: str) -> None:
     reader = Reader.of(walk, stored.plan, await session.seen_lines())
     upcoming = reader.next_chunk()
     if upcoming is not None:
+        if reader.remaining(upcoming.lines) != upcoming.lines:
+            await _guide_turn(session)
+            return
         shown = reader.show(upcoming)
     elif stored.complete and reader.other_pending:
         shown = reader.show_other()
