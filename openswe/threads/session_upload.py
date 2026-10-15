@@ -80,7 +80,7 @@ UPLOAD_REQUEST_BODY: dict[str, object] = {
         "required": True,
         "description": (
             "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. "
-            "Authorized by the upload code the upload_session MCP tool returned, as a bearer token."
+            "Authorized by the upload_token the upload_session MCP tool returned, as a bearer token."
         ),
         "content": {"application/x-ndjson": {"schema": {"type": "string"}}},
     }
@@ -262,13 +262,13 @@ def _upload_note(target: _Target) -> list[HumanMessage]:
 
 
 class SessionReservation(BaseModel):
-    """A thread waiting for its transcript, and the one-time code ``oswe upload`` fills it with."""
+    """A thread waiting for its transcript, and where and with which one-time token to post it."""
 
     thread_id: str
     url: str | None
-    upload_code: str
+    upload_url: str
+    upload_token: str
     expires_in_seconds: int
-    command: str
 
 
 async def reserve_session_upload(
@@ -300,8 +300,8 @@ async def reserve_session_upload(
         "branch_name": target.branch,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
-        "model": profile.get("default_model") or "Default",
-        "effort": profile.get("reasoning_effort"),
+        "model": "Default",
+        "effort": None,
         "resolved_model": resolved_model,
         "resolved_effort": resolved_effort,
         "uploaded_session_type": header.type,
@@ -325,13 +325,12 @@ async def reserve_session_upload(
     code = issue_upload_ticket(
         login=login, email=email, user_id=str(user.id) if user else None, thread_id=thread_id
     )
-    backend = dashboard_api_base_url()
     return SessionReservation(
         thread_id=thread_id,
         url=dashboard_thread_url(thread_id),
-        upload_code=code,
+        upload_url=f"{dashboard_api_base_url()}/dashboard/api/threads/uploads",
+        upload_token=code,
         expires_in_seconds=UPLOAD_TICKET_TTL_SECONDS,
-        command=f"oswe upload --backend {backend} {code} <transcript_path>",
     )
 
 
@@ -357,8 +356,11 @@ class _ReservedThread(BaseModel):
         )
 
 
-async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str, Any]:
-    """Seed a reserved thread with the session's history; no run starts until the person sends one."""
+async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str, Any] | None:
+    """Seed a reserved thread with the session's history once; ``None`` when it already was.
+
+    No run starts until the person sends one.
+    """
     client = langgraph_client()
     try:
         thread = await client.threads.get(ticket.thread_id)
@@ -368,8 +370,10 @@ async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str
         reserved = _ReservedThread.model_validate(thread_metadata(thread))
     except ValidationError as exc:
         raise HTTPException(409, "this thread was not reserved for a session upload") from exc
-    if reserved.owner_login.lower() != ticket.sub.lower() or not reserved.session_upload_pending:
-        raise HTTPException(409, "this upload code was already used")
+    if reserved.owner_login.lower() != ticket.sub.lower():
+        raise HTTPException(409, "this upload code is for another person's thread")
+    if not reserved.session_upload_pending:
+        return None
     transcript = ClaudeTranscript()
     async for line in stream.lines():
         transcript.add(line)

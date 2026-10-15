@@ -77,14 +77,14 @@ const NAV: Array<NavGroup> = [
     items: [
       {
         to: "/review",
-        label: "Code review",
+        label: "Code Review",
         icon: GitPullRequestIcon,
         childPrefix: "/review/repositories/",
       },
-      { to: "/review/styles", label: "Review styles", icon: PaintBrushIcon },
+      { to: "/review/styles", label: "Review Styles", icon: PaintBrushIcon },
       {
         to: "/agents/instructions",
-        label: "Repository instructions",
+        label: "Repository Instructions",
         icon: FileTextIcon,
       },
       { to: "/workspaces", label: "Workspaces", icon: CubeRegularIcon },
@@ -105,7 +105,7 @@ const NAV: Array<NavGroup> = [
       { to: "/admin/operations", label: "Operations", icon: PulseIcon },
       {
         to: "/admin/audit-logs",
-        label: "Audit logs",
+        label: "Audit Logs",
         icon: ArticleRegularIcon,
       },
       { to: "/admin/users", label: "Users", icon: UsersIcon },
@@ -130,7 +130,7 @@ function isActive(item: NavItem, pathname: string): boolean {
 }
 
 const LINK_CLASS =
-  "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-secondary transition-colors hover:bg-surface-level-2-hover hover:text-primary"
+  "flex items-center gap-space-3 rounded-md px-space-2 py-space-1 text-xs/relaxed text-secondary transition-colors hover:bg-surface-level-2-hover hover:text-primary"
 
 const ACTIVE_LINK_PROPS = {
   className: "bg-surface-level-2-hover text-primary font-medium",
@@ -141,14 +141,14 @@ function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
   const workspaces = options.data?.workspaces ?? []
   if (workspaces.length === 0) return null
   return (
-    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-default pl-2">
+    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-default pl-space-2">
       {workspaces.map((workspace) => (
         <Link
           key={workspace.slug}
           to="/workspaces/$slug"
           params={{ slug: workspace.slug }}
           onClick={onNavigate}
-          className={cn(LINK_CLASS, "py-1")}
+          className={cn(LINK_CLASS, "py-space-1")}
           activeProps={ACTIVE_LINK_PROPS}
         >
           <span className="truncate">{workspace.name}</span>
@@ -172,13 +172,13 @@ export function AppSidebar({ user }: { user: SessionUser }) {
     >
       <div
         className={cn(
-          "flex items-center justify-between px-4 pb-4",
-          isDesktop ? "pt-13" : "pt-5"
+          "flex items-center justify-between px-space-4 pb-space-4",
+          isDesktop ? "pt-13" : "pt-space-4"
         )}
       >
         <Link
           {...hrefLinkOptions(getLastAppLocation())}
-          className={cn(LINK_CLASS, "-mx-2.5 font-medium")}
+          className={cn(LINK_CLASS, "-mx-space-2 font-medium")}
           onClick={layout.closeOnMobile}
         >
           <ArrowLeftIcon size={16} weight="regular" />
@@ -187,11 +187,11 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 
-      <nav className="flex flex-1 flex-col gap-5 overflow-y-auto px-2">
+      <nav className="flex flex-1 flex-col gap-space-5 overflow-y-auto px-space-2">
         {NAV.filter((group) => !group.adminOnly || user.is_admin).map(
           (group) => (
             <div key={group.heading} className="flex flex-col gap-0.5">
-              <span className="px-2.5 pb-1 text-xxs font-medium tracking-wide text-tertiary uppercase">
+              <span className="px-space-2 pb-space-1 text-xxs font-medium tracking-wide text-tertiary uppercase">
                 {group.heading}
               </span>
               {group.items.map((item) => {
@@ -220,7 +220,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         )}
       </nav>
 
-      <div className="p-2">
+      <div className="p-space-2">
         <SidebarUserMenu user={user} />
       </div>
     </SidebarFrame>

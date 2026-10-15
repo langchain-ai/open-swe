@@ -1,3 +1,15 @@
+diff --git a/dist/components/VirtualizedFileDiff.js b/dist/components/VirtualizedFileDiff.js
+index 0d9ee99e6779ad118718f12fa940ec3ab72eecac..8013182bb7c5d7a6df1c00c2bde6f45587a0a0b3 100644
+--- a/dist/components/VirtualizedFileDiff.js
++++ b/dist/components/VirtualizedFileDiff.js
+@@ -537,6 +537,7 @@ var VirtualizedFileDiff = class extends FileDiff {
+ 		const headerRegion = getVirtualFileHeaderRegion(this.metrics, disableFileHeader);
+ 		this.height += headerRegion;
+ 		if (collapsed) {
++			if (!disableFileHeader) this.height = this.metrics.diffHeaderHeight;
+ 			this.layoutDirty = false;
+ 			return;
+ 		}
 diff --git a/dist/renderers/DiffHunksRenderer.js b/dist/renderers/DiffHunksRenderer.js
 index db8dd4a89fca6d1d18294a8be8deafe9ba0783ab..07b21b81d564603093b153283067e9c3c2c0bd57 100644
 --- a/dist/renderers/DiffHunksRenderer.js

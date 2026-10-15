@@ -1,11 +1,14 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { act, cleanup, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ThinkingSpinner } from "./ThinkingSpinner"
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe("ThinkingSpinner", () => {
   it("shows one live activity label and disappears when work settles", () => {
@@ -22,6 +25,23 @@ describe("ThinkingSpinner", () => {
     )
 
     expect(screen.queryByText("Exploring · AgentTurn.tsx")).toBeNull()
+  })
+
+  it("keeps elapsed seconds across activity changes and resets after stopping", () => {
+    vi.useFakeTimers()
+    const { rerender } = render(<ThinkingSpinner isActive />)
+    expect(screen.getByText("0s")).toBeTruthy()
+    act(() => vi.advanceTimersByTime(3000))
+    rerender(<ThinkingSpinner isActive label="Exploring…" />)
+    expect(screen.getByText("3s")).toBeTruthy()
+    act(() => vi.advanceTimersByTime(576_000))
+    expect(screen.getByText("9m 39s")).toBeTruthy()
+    act(() => vi.advanceTimersByTime(3_022_000))
+    expect(screen.getByText("1h 0m 1s")).toBeTruthy()
+    rerender(<ThinkingSpinner isActive={false} />)
+    expect(vi.getTimerCount()).toBe(0)
+    rerender(<ThinkingSpinner isActive />)
+    expect(screen.getByText("0s")).toBeTruthy()
   })
 
   it("prioritizes sandbox setup status", () => {

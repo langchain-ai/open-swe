@@ -8,7 +8,13 @@ overrides:
   '@langchain/macaw-tokens': file:ui/vendor/macaw/langchain-macaw-tokens-2.0.0-alpha.0.tgz
   '@hono/node-server': 2.1.3
   '@pierre/trees>@pierre/theming': 1.0.1
+  brace-expansion@>=1.0.0 <2.0.0: 1.1.21
   brace-expansion@2.1.1: 2.1.7
+  lodash-es: 4.18.1
+  seroval: 1.6.8
+  shell-quote: 1.11.0
+  source-map-js: 1.2.2
+  tinypool: 2.1.2
   crossws: 0.4.12
   brace-expansion@>=5.0.0: 5.0.12
   dompurify: 3.4.16
@@ -25,7 +31,7 @@ overrides:
 
 patchedDependencies:
   '@electron/osx-sign@1.3.3': 086e476aefd85ed72d3d2b9b8580fbf7724951c4c36914c4f662e9182da7e9e2
-  '@pierre/diffs@1.3.6': 5ba3f70b126cccc58ad0042f8d5e537e78275d7e0a4ca1ed04f3065d00faebc8
+  '@pierre/diffs@1.3.6': a778510c0e1cf298f72226d804fe0b263d149709f9b19ea8af8d0fea3d4254a3
 
 importers:
 
@@ -143,7 +149,7 @@ importers:
         version: 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@pierre/diffs':
         specifier: ^1.3.6
-        version: 1.3.6(patch_hash=5ba3f70b126cccc58ad0042f8d5e537e78275d7e0a4ca1ed04f3065d00faebc8)(@shikijs/themes@4.4.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 1.3.6(patch_hash=a778510c0e1cf298f72226d804fe0b263d149709f9b19ea8af8d0fea3d4254a3)(@shikijs/themes@4.4.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@pierre/trees':
         specifier: 1.0.0-beta.6
         version: 1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.4.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(shiki@4.4.3)
@@ -4000,8 +4006,8 @@ packages:
     resolution: {integrity: sha512-d0II/GO9uf9lfUHH2BQsjxzRJZBdsjgsBiW4BvhWk/3qoKwQFjIDVN19PfX8F2D/r9PCMTtLWjYVCFrpeYUzsw==}
     deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
-  brace-expansion@1.1.18:
-    resolution: {integrity: sha512-Edep/X9fGqVNmzKBVsDYIOtD+z1tuezV70LBjdCst9Tqu76lsnvRiZ6oTic1n+/BIwX6QDGAO94PN4N2SADvtw==}
+  brace-expansion@1.1.21:
+    resolution: {integrity: sha512-9zeA+KLZNNzglF2TPKRQEDyx6Yby7daAkuy8MiPzpXPsYDWi/DRM8jmwUDxokQjYqBpv5DgPiwD4h4ZZSy1Ujw==}
 
   brace-expansion@2.1.7:
     resolution: {integrity: sha512-uZbew1NqdmPDTMJ8ah1y+b+9QEJrfkXFk3RcTQw3X0jW/xRUvFKsg1CfQdSYGdTbXZWExtU3J3ccxtnfw1Fi0g==}
@@ -5272,9 +5278,6 @@ packages:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
 
-  lodash-es@4.17.23:
-    resolution: {integrity: sha512-kVI48u3PZr38HdYz98UmfPnXl2DXrpdctLrFLCd3kOx1xUkOmpFPx7gCWWM5MPkL/fD8zb+Ph0QzjGFs4+hHWg==}
-
   lodash-es@4.18.1:
     resolution: {integrity: sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A==}
 
@@ -6083,17 +6086,13 @@ packages:
     resolution: {integrity: sha512-HXuLAX2pu/UByPpaeo/TaMfvMIi+1QqIoPJYCcAtU8QkVNwgR6MPlGuCQTErV1JwraaMbYaWVIBX7mppzGLATQ==}
     engines: {node: '>=10'}
     peerDependencies:
-      seroval: ^1.0
+      seroval: 1.6.8
 
   seroval-plugins@1.6.8:
     resolution: {integrity: sha512-N7mWAMydj89EnYTHtRpS3LBrAz3J9O6oVrqpuXuvlAHfAUG8WEKqtbAd7SBiJNY5NfCAFhSdyAh7wI4Shjqy4g==}
     engines: {node: '>=10'}
     peerDependencies:
-      seroval: ^1.0
-
-  seroval@1.5.6:
-    resolution: {integrity: sha512-rVQVWjjSvlINzaQPZH5JFqsqEsIWdTxY3iJZCnTL/5gQbXIRooVZKI60tVCkOVfzcRPejboxO2t0P89dg5mQaA==}
-    engines: {node: '>=10'}
+      seroval: 1.6.8
 
   seroval@1.6.8:
     resolution: {integrity: sha512-HlSgSAkTk4EqHcje1ptJjfZi1YDv5KbhVJ/d3P7T/nAXua2VmDu+AKDX5VTdFfZf48nDkWB2TKYt0DrCSa+3wg==}
@@ -6107,8 +6106,8 @@ packages:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
 
-  shell-quote@1.10.0:
-    resolution: {integrity: sha512-w1aiOKwKuRgtwAReIIj89puqg+I7GvX4IbLrvmhXbzQsj1+Zwi4VO3+fa6ZF91TWSjIxoEkKnMeHcLEODK5ZXA==}
+  shell-quote@1.11.0:
+    resolution: {integrity: sha512-JdxDPD0DBTyu08pq0kPC0xSNet/qsU07qT6IsX1AS8oO2ICNRY4ldNa8OAI6PuwAH8tG3lxEhbqmyp4Dw4036g==}
     engines: {node: '>= 0.4'}
 
   shiki@4.4.3:
@@ -6138,8 +6137,8 @@ packages:
       '@types/react':
         optional: true
 
-  source-map-js@1.2.1:
-    resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
+  source-map-js@1.2.2:
+    resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
 
   source-map-support@0.5.21:
@@ -6284,8 +6283,8 @@ packages:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
 
-  tinypool@2.1.0:
-    resolution: {integrity: sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw==}
+  tinypool@2.1.2:
+    resolution: {integrity: sha512-9YodfrxS9g9IbFr/KOjE5bAeJ0p61n3bW6mqvy0jtoeKd1kTW1Cxm0oulm6KX2lyM9Gl6WIe8nEbY7LWv5ZJww==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
   tinyrainbow@3.1.1:
@@ -6985,12 +6984,12 @@ snapshots:
     dependencies:
       '@chevrotain/gast': 11.1.2
       '@chevrotain/types': 11.1.2
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
 
   '@chevrotain/gast@11.1.2':
     dependencies:
       '@chevrotain/types': 11.1.2
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
 
   '@chevrotain/regexp-to-ast@11.1.2': {}
 
@@ -8218,7 +8217,7 @@ snapshots:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
-  '@pierre/diffs@1.3.6(patch_hash=5ba3f70b126cccc58ad0042f8d5e537e78275d7e0a4ca1ed04f3065d00faebc8)(@shikijs/themes@4.4.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@pierre/diffs@1.3.6(patch_hash=a778510c0e1cf298f72226d804fe0b263d149709f9b19ea8af8d0fea3d4254a3)(@shikijs/themes@4.4.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@pierre/theme': 2.0.0
       '@pierre/theming': 1.0.1(@pierre/theme@2.0.0)(@shikijs/themes@4.4.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(shiki@4.4.3)
@@ -9329,7 +9328,7 @@ snapshots:
       jiti: 2.7.0
       lightningcss: 1.32.0
       magic-string: 0.30.21
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
       tailwindcss: 4.3.3
 
   '@tailwindcss/oxide-android-arm64@4.3.3':
@@ -10507,7 +10506,7 @@ snapshots:
   boolean@3.2.0:
     optional: true
 
-  brace-expansion@1.1.18:
+  brace-expansion@1.1.21:
     dependencies:
       balanced-match: 1.0.2
       concat-map: 0.0.1
@@ -10607,7 +10606,7 @@ snapshots:
       '@chevrotain/regexp-to-ast': 11.1.2
       '@chevrotain/types': 11.1.2
       '@chevrotain/utils': 11.1.2
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
 
   chokidar@5.0.0:
     dependencies:
@@ -10721,7 +10720,7 @@ snapshots:
   css-tree@3.2.1:
     dependencies:
       mdn-data: 2.27.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   csstype@3.2.3: {}
 
@@ -11761,7 +11760,7 @@ snapshots:
   launch-editor@2.14.1:
     dependencies:
       picocolors: 1.1.1
-      shell-quote: 1.10.0
+      shell-quote: 1.11.0
 
   layout-base@1.0.2: {}
 
@@ -11889,8 +11888,6 @@ snapshots:
   locate-path@6.0.0:
     dependencies:
       p-locate: 5.0.0
-
-  lodash-es@4.17.23: {}
 
   lodash-es@4.18.1: {}
 
@@ -12331,7 +12328,7 @@ snapshots:
 
   minimatch@3.1.5:
     dependencies:
-      brace-expansion: 1.1.18
+      brace-expansion: 1.1.21
 
   minimatch@5.1.9:
     dependencies:
@@ -12503,7 +12500,7 @@ snapshots:
 
   oxfmt@0.65.0:
     dependencies:
-      tinypool: 2.1.0
+      tinypool: 2.1.2
     optionalDependencies:
       '@oxfmt/binding-android-arm-eabi': 0.65.0
       '@oxfmt/binding-android-arm64': 0.65.0
@@ -12649,7 +12646,7 @@ snapshots:
     dependencies:
       nanoid: 3.3.19
       picocolors: 1.1.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   postject@1.0.0-alpha.6:
     dependencies:
@@ -13093,15 +13090,13 @@ snapshots:
       type-fest: 0.13.1
     optional: true
 
-  seroval-plugins@1.5.6(seroval@1.5.6):
+  seroval-plugins@1.5.6(seroval@1.6.8):
     dependencies:
-      seroval: 1.5.6
+      seroval: 1.6.8
 
   seroval-plugins@1.6.8(seroval@1.6.8):
     dependencies:
       seroval: 1.6.8
-
-  seroval@1.5.6: {}
 
   seroval@1.6.8: {}
 
@@ -13111,7 +13106,7 @@ snapshots:
 
   shebang-regex@3.0.0: {}
 
-  shell-quote@1.10.0: {}
+  shell-quote@1.11.0: {}
 
   shiki@4.4.3:
     dependencies:
@@ -13135,8 +13130,8 @@ snapshots:
   solid-js@1.9.14:
     dependencies:
       csstype: 3.2.3
-      seroval: 1.5.6
-      seroval-plugins: 1.5.6(seroval@1.5.6)
+      seroval: 1.6.8
+      seroval-plugins: 1.5.6(seroval@1.6.8)
 
   sonner@2.0.8(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
@@ -13145,7 +13140,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.18
 
-  source-map-js@1.2.1: {}
+  source-map-js@1.2.2: {}
 
   source-map-support@0.5.21:
     dependencies:
@@ -13296,7 +13291,7 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.5)
       picomatch: 4.0.5
 
-  tinypool@2.1.0: {}
+  tinypool@2.1.2: {}
 
   tinyrainbow@3.1.1: {}
 

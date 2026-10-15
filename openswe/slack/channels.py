@@ -12,6 +12,7 @@ from typing import Any, Self
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.config import ENV
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 PAYLOAD_TTL = timedelta(seconds=300)
+_NEVER_FETCHED = datetime.fromtimestamp(0, UTC)
 HISTORY_MAX_MESSAGES = 100
 
 _MENTION = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]*)?>$")
@@ -94,6 +96,20 @@ class SlackChannel(Base):
                         "fetched_at": func.clock_timestamp(),
                     },
                 )
+            )
+
+    @classmethod
+    async def ensure(cls, session: AsyncSession, *channel_ids: str) -> None:
+        """Give each channel a row for other rows to reference, inside ``session``.
+
+        A new row is a stub that never counts as ``fresh`` and matches no name,
+        so its details load from Slack on first use.
+        """
+        if ids := sorted(set(channel_ids)):
+            await session.execute(
+                insert(cls)
+                .values([{"id": channel_id, "fetched_at": _NEVER_FETCHED} for channel_id in ids])
+                .on_conflict_do_nothing(index_elements=[cls.id])
             )
 
     @classmethod

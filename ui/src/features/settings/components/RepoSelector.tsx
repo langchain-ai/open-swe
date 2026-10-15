@@ -131,7 +131,7 @@ export function RepoSelector({
               label="Show archived"
               checked={showArchived}
               onCheckedChange={(checked) => setShowArchived(checked === true)}
-              containerClassName="border-b border-default px-space-2 py-1.5"
+              containerClassName="border-b border-default px-space-2 py-space-1"
               labelClassName="text-secondary"
             />
           )}
@@ -144,7 +144,7 @@ export function RepoSelector({
                 setQuery("")
               }}
               className={cn(
-                "flex w-full items-center px-space-2 py-1.5 text-left transition-colors hover:bg-elevated-hover",
+                "flex w-full items-center px-space-2 py-space-1 text-left transition-colors hover:bg-elevated-hover",
                 selectedRepo ? "text-secondary" : "text-primary"
               )}
             >
@@ -159,7 +159,7 @@ export function RepoSelector({
               )}
             </button>
             {filteredRepos.length === 0 ? (
-              <div className="px-space-2 py-1.5 text-secondary">
+              <div className="px-space-2 py-space-1 text-secondary">
                 {noMatchesLabel}
               </div>
             ) : (
@@ -176,11 +176,11 @@ export function RepoSelector({
                       setQuery("")
                     }}
                     className={cn(
-                      "flex w-full items-center gap-space-2 px-space-2 py-1.5 text-left transition-colors hover:bg-elevated-hover",
+                      "flex w-full items-center gap-space-2 px-space-2 py-space-1 text-left transition-colors hover:bg-elevated-hover",
                       selected ? "text-primary" : "text-secondary"
                     )}
                   >
-                    <span className="min-w-0 flex-1 truncate">
+                    <span className="min-w-0 flex-1 break-words">
                       {repo.full_name}
                     </span>
                     {repo.private !== undefined && (

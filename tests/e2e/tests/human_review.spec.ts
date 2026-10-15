@@ -414,6 +414,21 @@ test.describe("Human review in Slack", () => {
       `https://github.com/${REPO.owner}/${REPO.repo}/pull/${seeded.number}`,
     );
     await shootCard(page, "open");
+    await loginAs(page, ALICE);
+    await page.goto(
+      `/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
+    );
+    const reviewRequested = page.getByRole("button", {
+      name: "Review requested",
+      exact: true,
+    });
+    await expect(reviewRequested).toBeEnabled();
+    const popupPromise = page.waitForEvent("popup");
+    await reviewRequested.click();
+    const slackPage = await popupPromise;
+    await expect(slackPage).toHaveURL(`${HARNESS}/mock/slack`);
+    await slackPage.close();
+    expect(await reviewRequests(request)).toHaveLength(1);
 
     // Asked in the same thread, the agent corrects the card's summary in place.
     await control(request, "/mock/slack/send", {
@@ -449,6 +464,8 @@ test.describe("Human review in Slack", () => {
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toMatch(/<@U_ALICE>.*reviewing[\s\S]*<@U_BOB>.*reviewing/);
+    await page.reload();
+    await expect(reviewRequested).toBeEnabled();
 
     // 3. Alice approves. With Bob still reviewing, it waits for him.
     await approveOnGitHub(request, seeded.number, ALICE.login);
@@ -615,6 +632,40 @@ test.describe("Human review in Slack", () => {
     await expect(
       row.getByRole("button", { name: "Request review in Slack" }),
     ).toHaveCount(0);
+  });
+
+  test("unreviewable pull requests explain why a review can't be requested", async ({
+    page,
+    request,
+  }) => {
+    await setReviewChannel(request);
+    await loginAs(page, ALICE);
+    await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Conflicted change",
+      author: ALICE.login,
+      mergeable: false,
+      mergeable_state: "dirty",
+      check_runs: GREEN,
+    });
+    await page.goto("/agents/reviews");
+    const row = page
+      .getByRole("listitem")
+      .filter({ hasText: "Conflicted change" });
+    await expect(
+      row.getByRole("button", { name: "Request review in Slack" }),
+    ).toBeDisabled();
+    await row
+      .getByRole("button", { name: "Why a review can't be requested" })
+      .click();
+    await expect(
+      page.getByText(
+        "A review can't be requested yet: it has merge conflicts.",
+      ),
+    ).toBeVisible();
+    await page.screenshot({
+      path: "test-results/human-review-blocked-reason.png",
+    });
   });
 
   test("requested from the dashboard; nobody signs up, so the agent picks a reviewer, DMs them without posting in the channel, and it merges on their approval", async ({

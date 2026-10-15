@@ -7,16 +7,17 @@ from time import time_ns
 from typing import Literal, TypedDict, cast
 
 from fastapi import APIRouter, Response
-from langgraph_sdk.client import LangGraphClient
 
 from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
+from openswe.human_review import offer as review_offer
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
 from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
+from openswe.slack import suggested_actions
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -59,12 +60,8 @@ from openswe.slack.responses import (
     ignored,
 )
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
-from openswe.slack.solo_threads import allow_solo_thread_followup
+from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
 from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
-from openswe.slack.thread_feedback import (
-    handle_slack_feedback_interaction,
-    is_slack_feedback_payload,
-)
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -139,10 +136,7 @@ async def _queue_code_channel_turn(
     )
 
     async def dispatch() -> WebhookResponse:
-        client = get_langgraph_client()
-        thread_id = await common.lookup_slack_thread_id(
-            client, channel_id, common.CODE_CHANNEL_SESSION_TS
-        )
+        thread_id = await common.lookup_slack_thread_id(channel_id, common.CODE_CHANNEL_SESSION_TS)
         if not thread_id:
             return ignored("Code channel is not associated")
         if not await common.claim_slack_event(event_id, channel_id, event_ts):
@@ -187,11 +181,8 @@ async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
     Nothing is being asked, so this must not start a run of its own; the queue
     is drained before the next model call, whatever triggers it.
     """
-    client = get_langgraph_client()
     try:
-        thread_id = await common.lookup_slack_thread_id(
-            client, channel_id, common.CODE_CHANNEL_SESSION_TS
-        )
+        thread_id = await common.lookup_slack_thread_id(channel_id, common.CODE_CHANNEL_SESSION_TS)
     except common.SlackThreadMappingError:
         return
     if not thread_id or not text.strip():
@@ -212,36 +203,30 @@ async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
 
 
 async def _lookup_delivered_message_update(
-    langgraph_client: LangGraphClient,
-    channel_id: str,
-    thread_ts: str,
-    message_ts: str,
-    user_id: str,
-) -> tuple[str | None, JsonObject | None]:
+    channel_id: str, thread_ts: str, message_ts: str, user_id: str
+) -> str | None:
+    """The thread of a delivered message its sender edited, once both are recorded."""
     for delay in (*_MESSAGE_UPDATE_RETRY_DELAYS, None):
-        thread_id = await common.lookup_slack_thread_id(langgraph_client, channel_id, thread_ts)
-        delivered_message = await common.lookup_slack_run_mapping(
-            langgraph_client, channel_id, message_ts
-        )
+        thread_id = await common.lookup_slack_thread_id(channel_id, thread_ts)
+        delivered_message = await common.lookup_slack_run_mapping(channel_id, message_ts)
         if thread_id and delivered_message:
             if (
-                delivered_message.get("thread_ts") != thread_ts
-                or delivered_message.get("triggering_user_id") != user_id
-                or delivered_message.get("agent_thread_id") != thread_id
+                delivered_message.thread_ts != thread_ts
+                or delivered_message.triggering_user_id != user_id
+                or delivered_message.agent_thread_id != thread_id
             ):
-                return None, None
+                return None
             if await common.thread_exists(thread_id):
-                return thread_id, delivered_message
+                return thread_id
         if delay is None:
             break
         await asyncio.sleep(delay)
-    return None, None
+    return None
 
 
 async def _process_slack_message_update(request: SlackRequest) -> None:
     try:
-        thread_id, delivered_message = await _lookup_delivered_message_update(
-            get_langgraph_client(),
+        thread_id = await _lookup_delivered_message_update(
             request.channel_id,
             request.thread_ts,
             request.original_message_ts,
@@ -257,7 +242,7 @@ async def _process_slack_message_update(request: SlackRequest) -> None:
             },
         )
         return
-    if not thread_id or not delivered_message:
+    if not thread_id:
         common.logger.info(
             "Ignoring undelivered Slack message update channel=%s message=%s",
             request.channel_id,
@@ -346,7 +331,7 @@ async def slack_webhook(
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
 
-    await SlackPullRequestLink.record(envelope)
+    new_pr_links = await SlackPullRequestLink.record(envelope)
 
     from openswe.incidents import channels as incidents
 
@@ -547,21 +532,44 @@ async def slack_webhook(
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
 
-    # Watching a review channel post never takes over the message's own routing, and a post
-    # that mentions Open SWE is the agent's to handle, or both would open a review request.
-    if (
+    # Watching a person's pull request post or suggesting a review never takes over the
+    # message's own routing, and a post the agent will handle anyway is left to it, or both
+    # would open a review request.
+    person_post = (
         not is_message_update
         and allowed_bot is None
         and not in_code_channel
         and not in_dm_channel
         and event.type == "message"
+        and bool(user_id)
+        and not (bot_user_id and f"<@{bot_user_id}>" in text)
+    )
+    if (
+        person_post
         and event.subtype in {"", "file_share"}
         and not reply_thread_ts
-        and user_id
         and "/pull/" in text
-        and not (bot_user_id and f"<@{bot_user_id}>" in text)
     ):
         background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
+    reviewable_link = (
+        new_pr_links[0]
+        if person_post
+        and event.subtype in {"", "file_share", "thread_broadcast"}
+        and len(new_pr_links) == 1
+        else None
+    )
+
+    def suggest_review() -> None:
+        # Queued after the watch, which may already count the post as the review request.
+        if reviewable_link is not None:
+            background_tasks.add_task(
+                review_offer.offer_review,
+                channel_id,
+                thread_ts,
+                reply_thread_ts,
+                user_id,
+                reviewable_link,
+            )
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     explicit_mention = bool(
@@ -575,6 +583,7 @@ async def slack_webhook(
         and leading_mention
         and leading_mention.group(1) != bot_user_id
     ):
+        suggest_review()
         return ignored("Message addressed to another user")
 
     message = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
@@ -596,14 +605,25 @@ async def slack_webhook(
         and event.subtype in {"", "file_share", "thread_broadcast"}
         and (reply_thread_ts or explicit_mention)
     ):
-        solo_followup = await allow_solo_thread_followup(
-            get_langgraph_client(),
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-            message_ts=original_message_ts,
-            user_id=user_id,
-            explicit_mention=explicit_mention,
-        )
+        if explicit_mention:
+            track_explicit_mention(
+                get_langgraph_client(),
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                message_ts=original_message_ts,
+                user_id=user_id,
+            )
+        else:
+            solo_followup = await allow_solo_thread_followup(
+                get_langgraph_client(),
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                message_ts=original_message_ts,
+                user_id=user_id,
+                explicit_mention=False,
+            )
+    if not (in_kitchen_channel or solo_followup):
+        suggest_review()
     if not (
         explicit_mention
         or is_message_update
@@ -878,8 +898,6 @@ async def slack_interactivity(
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
-    if is_slack_feedback_payload(payload):
-        return await handle_slack_feedback_interaction(payload, background_tasks)
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
@@ -909,7 +927,6 @@ async def slack_interactivity(
         if not (interaction.channel_id and interaction.container.view_id and interaction.action_id):
             return {"options": []}
         options = await common.get_block_suggestions(
-            get_langgraph_client(),
             interaction.channel_id,
             interaction.container.view_id,
             interaction.action_id,
@@ -990,6 +1007,8 @@ async def slack_interactivity(
             return await expedited_review.handle_button(interaction, button, background_tasks)
         if button.type == human_review.BUTTON_TYPE:
             return await human_review.handle_button(interaction, button, background_tasks)
+        if button.type == suggested_actions.BUTTON_TYPE:
+            return await suggested_actions.handle_button(interaction, button, background_tasks)
 
         if button.type == act_as.BUTTON_TYPE:
             return await act_as.handle_button(interaction, button, background_tasks)
@@ -998,9 +1017,7 @@ async def slack_interactivity(
             if not channel_id or not thread_ts or not button.fingerprint:
                 return ignored("Missing workflow approval context")
 
-            thread_id = await common.lookup_slack_thread_id(
-                get_langgraph_client(), channel_id, thread_ts
-            )
+            thread_id = await common.lookup_slack_thread_id(channel_id, thread_ts)
             if not thread_id:
                 return ignored("Slack thread is not associated")
             if button.action not in {"approve", "reject"}:
@@ -1081,9 +1098,7 @@ async def slack_interactivity(
         if not channel_id or not option_thread_ts or not action_ts or not user_id:
             return ignored("Missing Slack action context")
 
-        thread_id = await common.lookup_slack_thread_id(
-            get_langgraph_client(), channel_id, option_thread_ts
-        )
+        thread_id = await common.lookup_slack_thread_id(channel_id, option_thread_ts)
         if not thread_id:
             return ignored("Slack thread is not associated")
         # A review guide's "Next" is recorded by the server, never by the model, and

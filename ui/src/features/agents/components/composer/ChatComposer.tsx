@@ -4,7 +4,6 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -40,6 +39,7 @@ import type {
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
+import { DropdownMenuItem } from "@/components/MenuItem"
 import type {
   DesktopProject,
   DesktopProjectRef,
@@ -126,11 +126,6 @@ export interface ChatComposerProps {
     images: Array<ImageChunk>,
     options?: SubmitOptions
   ) => void | Promise<void>
-  /**
-   * Enter on an empty composer while a run is live. The thread view uses it to
-   * send the next queued message now.
-   */
-  onEmptySubmit?: () => void
   /** What a message sent while a run is live does; drives copy only. */
   followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
@@ -272,7 +267,6 @@ export const ChatComposer = memo(function ChatComposer({
   activeRun,
   onStop,
   onSubmit,
-  onEmptySubmit,
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
@@ -557,16 +551,6 @@ export const ChatComposer = memo(function ChatComposer({
       if (key === "Enter" && !event.shiftKey) {
         if (canSubmit) {
           void handleSubmit({ alternate: event.metaKey || event.ctrlKey })
-        } else if (
-          composerEmpty &&
-          busy &&
-          !disabled &&
-          !isSubmitting &&
-          onEmptySubmit
-        ) {
-          // Only a truly empty composer sends the queue head. A draft that
-          // cannot be sent (images on a text-only model) must stay put.
-          onEmptySubmit()
         }
         // Swallow it either way: a bare Enter must never insert a newline in a
         // composer whose Enter means "send".
@@ -576,15 +560,10 @@ export const ChatComposer = memo(function ChatComposer({
     },
     [
       activeItem,
-      busy,
       canSubmit,
       commandItems,
-      composerEmpty,
-      disabled,
       handleSubmit,
-      isSubmitting,
       menuOpen,
-      onEmptySubmit,
       selectCommandItem,
       triggerKey,
     ]
@@ -769,18 +748,21 @@ export const ChatComposer = memo(function ChatComposer({
   return (
     <div
       className={cn(
-        "relative w-full font-sans text-[13px]",
+        "relative w-full font-sans text-xs",
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
       {composerError && (
-        <div className="mb-2 px-1 text-xs text-error-secondary" role="alert">
+        <div
+          className="mb-space-2 px-space-1 text-xs text-error-secondary"
+          role="alert"
+        >
           {composerError}
         </div>
       )}
 
       {!selectedModelSupportsImages && (
-        <Banner className="mb-2" intent="warning">
+        <Banner className="mb-space-2" intent="warning">
           {`The selected model does not accept image input. Remove the image${
             pendingImages.length > 1 ? "s" : ""
           } or switch to a vision-enabled model to send.`}
@@ -790,7 +772,7 @@ export const ChatComposer = memo(function ChatComposer({
       <div
         data-chat-composer
         className={cn(
-          "relative z-10 flex flex-col rounded-xl border bg-elevated px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-slow hover:shadow-lg",
+          "relative z-floating-bar flex flex-col rounded-xl border bg-elevated px-space-3 py-space-2 shadow-md transition-[border-color,box-shadow] duration-slow hover:shadow-lg",
           compact ? "min-h-[88px]" : "min-h-[106px]",
           dragKind ? "border-brand" : "border-default"
         )}
@@ -810,8 +792,8 @@ export const ChatComposer = memo(function ChatComposer({
         )}
 
         {dragKind && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-elevated/80 backdrop-blur-sm">
-            <span className="rounded-md bg-brand-subtle px-3 py-1.5 text-xs font-medium text-brand-primary">
+          <div className="pointer-events-none absolute inset-0 z-drag-overlay flex items-center justify-center rounded-xl bg-elevated/80 backdrop-blur-sm">
+            <span className="rounded-md bg-brand-subtle px-space-3 py-space-1 text-xs font-medium text-brand-primary">
               {dragKind === "path"
                 ? "Drop to mention this file"
                 : "Drop images here"}
@@ -829,7 +811,7 @@ export const ChatComposer = memo(function ChatComposer({
         />
 
         {pendingImages.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="mb-space-2 flex flex-wrap gap-space-2">
             {pendingImages.map((image, index) => (
               <div
                 className="group relative"
@@ -881,7 +863,7 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-secondary">
+        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-space-1 pt-space-2 text-xs text-secondary">
           <DropdownMenu onOpenChange={setExtrasMenuOpen}>
             <DropdownMenuTrigger asChild>
               <IconButton
@@ -899,7 +881,7 @@ export const ChatComposer = memo(function ChatComposer({
               sideOffset={7}
             >
               <DropdownMenuItem
-                className="gap-space-2 text-xs"
+                className="text-xs"
                 disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
                 onSelect={() => fileInputRef.current?.click()}
                 size="sm"
@@ -913,7 +895,7 @@ export const ChatComposer = memo(function ChatComposer({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-space-1">
             {models.length > 0 && (
               <ModelPicker
                 models={models}
@@ -923,12 +905,12 @@ export const ChatComposer = memo(function ChatComposer({
                 requireImageSupport={pendingImages.length > 0}
                 routed={routed}
                 selection={selection}
-                triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"
+                triggerClassName="h-7 max-w-full rounded-md px-space-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"
               />
             )}
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-space-1">
             <ContextWindowMeter {...contextUsage} />
           </div>
 
@@ -947,7 +929,7 @@ export const ChatComposer = memo(function ChatComposer({
       </div>
 
       {targetControls && (
-        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 px-3 text-xs">
+        <div className="mt-space-2 flex min-w-0 flex-wrap items-center gap-x-space-5 gap-y-space-2 px-space-3 text-xs">
           {targetControls}
         </div>
       )}

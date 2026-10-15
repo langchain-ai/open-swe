@@ -1,8 +1,8 @@
 import { CheckIcon } from "@langchain/macaw-components/icons"
-import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 import { SplitButton } from "@/components/SplitButton"
@@ -43,9 +43,13 @@ export function MergePullRequest({
     : mergeMethods.filter((option) =>
         (allowed.data?.mergeMethods ?? []).includes(option)
       )
-  // Never guess between allowed methods: the viewer's pick, the only one, or the last one used here.
   const method =
-    [choice, options.length === 1 ? options[0] : null, preferred].find(
+    [
+      choice,
+      options.length === 1 ? options[0] : null,
+      preferred,
+      "squash" as const,
+    ].find(
       (candidate): candidate is MergeMethod =>
         !!candidate && options.includes(candidate)
     ) ?? null
@@ -77,7 +81,7 @@ export function MergePullRequest({
             role="menuitemradio"
             aria-checked={option === method}
             onSelect={() => setChoice(option)}
-            className="w-72 items-start gap-space-2"
+            className="w-72 items-start"
           >
             <CheckIcon
               aria-hidden

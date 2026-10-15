@@ -4,13 +4,16 @@ import logging
 from typing import Literal
 
 import httpx2
+from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
+from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GITHUB_API_BASE, github_client, github_request
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.sandbox_access import workspace_token
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import thread_token_repositories
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_preference import sandbox_only
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,7 @@ class _SearchResult(BaseModel):
     items: list[_PullRequest]
 
 
+@expose_mcp()
 @sandbox_only
 async def search_pull_requests(
     query: str,
@@ -61,16 +65,25 @@ async def search_pull_requests(
         return {"success": False, "error": "Search query must not be empty."}
     if not 1 <= per_page <= 100 or page < 1 or (page - 1) * per_page >= 1000:
         return {"success": False, "error": "Use per_page 1–100 and a page within 1,000 results."}
-    if not cfg.thread_id:
-        return {"success": False, "error": "Thread context unavailable."}
-    allowed = await thread_token_repositories(cfg.thread_id)
-    if allowed is not None and repository.casefold() not in {name.casefold() for name in allowed}:
-        return {"success": False, "error": "Repository is outside this thread's GitHub access."}
-    access = await workspace_token(
-        cfg.workspace, repositories=[repository], permissions={"pull_requests": "read"}
-    )
-    if not access.token:
-        return {"success": False, "error": "Repository is not accessible to the GitHub App."}
+    if caller := cfg.mcp_caller:
+        try:
+            token = await require_repo_access_for_user(caller, repository)
+        except HTTPException as exc:
+            return {"success": False, "error": f"You cannot access {repository}: {exc.detail}"}
+    else:
+        if not cfg.thread_id:
+            return {"success": False, "error": "Thread context unavailable."}
+        allowed = await thread_token_repositories(cfg.thread_id)
+        if allowed is not None and repository.casefold() not in {
+            name.casefold() for name in allowed
+        }:
+            return {"success": False, "error": "Repository is outside this thread's GitHub access."}
+        access = await workspace_token(
+            cfg.workspace, repositories=[repository], permissions={"pull_requests": "read"}
+        )
+        if not access.token:
+            return {"success": False, "error": "Repository is not accessible to the GitHub App."}
+        token = access.token
     params: dict[str, str | int] = {
         "q": f"{query.strip()} is:pr repo:{repository} in:title,body,comments",
         "per_page": per_page,
@@ -81,7 +94,7 @@ async def search_pull_requests(
         params["sort"] = sort
     try:
         async with github_client(
-            token=access.token, headers={"Accept": "application/vnd.github.text-match+json"}
+            token=token, headers={"Accept": "application/vnd.github.text-match+json"}
         ) as client:
             response = await github_request(
                 client, "GET", f"{GITHUB_API_BASE}/search/issues", params=params

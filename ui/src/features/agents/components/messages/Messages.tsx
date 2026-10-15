@@ -1,8 +1,4 @@
-import {
-  ArrowUpIcon,
-  CaretDownIcon,
-  XIcon,
-} from "@langchain/macaw-components/icons"
+import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useEffect, useMemo } from "react"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
@@ -23,31 +19,27 @@ import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLive
 
 function QueuedMessages({
   queuedMessages,
-  onSteer,
   onRemove,
 }: {
   queuedMessages: NonNullable<MessagesProps["queuedMessages"]>
-  onSteer?: (id: string) => void
   onRemove?: (id: string) => void
 }) {
   if (queuedMessages.length === 0) return null
 
   return (
-    <div className="mb-3 space-y-2" data-testid="queued-messages">
+    <div className="mb-space-3 space-y-space-2" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
         const imageCount = message.images?.length ?? 0
         const statusLabel = message.waitsForAgent
           ? "Held for the agent. It reads this before its next step, and it starts no run of its own."
           : index === 0
-            ? "Sends when the run ends. Send now, or Enter on an empty composer, steers the run with it instead."
+            ? "Sends when the run ends."
             : "Waits for the message ahead of it."
         const status = message.waitsForAgent
           ? "Waiting for the agent"
           : "Queued"
         const actionable =
-          (onSteer || onRemove) &&
-          message.mine !== false &&
-          !message.waitsForAgent
+          onRemove && message.mine !== false && !message.waitsForAgent
         return (
           <div
             key={message.id}
@@ -79,32 +71,17 @@ function QueuedMessages({
               {message.sender && <span>from {message.sender}</span>}
               {actionable && (
                 <div className="ml-auto flex items-center gap-0.5">
-                  {onSteer && (
-                    <IconButton
-                      icon={ArrowUpIcon}
-                      label="Send now"
-                      size="sm"
-                      color="secondary"
-                      variant="plain"
-                      onPointerDown={(event) => event.preventDefault()}
-                      onClick={() => onSteer(message.id)}
-                      disabled={message.pending}
-                      data-testid="queued-message-send-now"
-                    />
-                  )}
-                  {onRemove && (
-                    <IconButton
-                      icon={XIcon}
-                      label="Cancel and return to the composer"
-                      size="sm"
-                      color="secondary"
-                      variant="plain"
-                      onPointerDown={(event) => event.preventDefault()}
-                      onClick={() => onRemove(message.id)}
-                      disabled={message.pending}
-                      data-testid="queued-message-cancel"
-                    />
-                  )}
+                  <IconButton
+                    icon={XIcon}
+                    label="Cancel and return to the composer"
+                    size="sm"
+                    color="secondary"
+                    variant="plain"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => onRemove(message.id)}
+                    disabled={message.pending}
+                    data-testid="queued-message-cancel"
+                  />
                 </div>
               )}
             </div>
@@ -125,7 +102,6 @@ export const Messages = memo(function MessagesComponent({
   footer,
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
-  onSteerQueuedMessage,
   onRemoveQueuedMessage,
   isStreaming,
   streamIsLoading,
@@ -135,7 +111,7 @@ export const Messages = memo(function MessagesComponent({
   reconnectLabel = null,
   localRepo,
   contentWidthClass = "max-w-[42rem]",
-  contentPaddingClass = "px-6",
+  contentPaddingClass = "px-space-5",
   bottomInset = 0,
   loadEarlier = null,
   scrollButtonSlot = "internal",
@@ -213,7 +189,7 @@ export const Messages = memo(function MessagesComponent({
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-space-3 w-full rounded-sm py-1.5 text-center text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
+                className="mb-space-3 w-full rounded-sm py-space-1 text-center text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
@@ -261,7 +237,6 @@ export const Messages = memo(function MessagesComponent({
             )}
             <QueuedMessages
               queuedMessages={queuedMessages}
-              onSteer={onSteerQueuedMessage}
               onRemove={onRemoveQueuedMessage}
             />
             {footer}
@@ -296,7 +271,7 @@ export const Messages = memo(function MessagesComponent({
             color="secondary"
             variant="outlined"
             onClick={scrollToBottom}
-            className="absolute left-1/2 z-30 -translate-x-1/2 shadow-md"
+            className="absolute left-1/2 z-floating-bar -translate-x-1/2 shadow-md"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
           />
         )}

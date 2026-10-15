@@ -41,7 +41,12 @@ button means and what choosing it will do; never rely on the short label alone.
 Name the specific change and its scope rather than vague actions like "Save rule".
 For example: "Block PRs" prevents PR creation in concierge DMs and requires a
 separate work thread; "Keep PRs allowed" leaves PR creation in concierge DMs enabled.
-The user can still reply manually. Do not invent choices for open-ended questions.
+Offer only options that provide a concrete answer or trigger meaningful work; one
+button is enough when there is only one useful action. Do not add no-op options
+such as "Just discussing", "Do nothing", or "Ignore" — the user can simply ignore
+the offer. Do not add options such as "Reply in Slack" or "Tell me more" that merely
+ask the user to type a reply; they can already reply manually.
+Do not invent choices for open-ended questions.
 
 To mention/tag a user, use Slack's mention format: <@USER_ID>.
 You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).

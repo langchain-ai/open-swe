@@ -29,7 +29,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
   if ((!html && !markdown) || query.data?.dismissed) return null
 
   return (
-    <div className="group relative mt-4">
+    <div className="group relative mt-space-4">
       <button
         type="button"
         data-testid="inline-plan-artifact"
@@ -49,15 +49,15 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
             className="pointer-events-none h-[250px]"
           />
         ) : (
-          <div className="pointer-events-none h-[250px] overflow-hidden p-5">
+          <div className="pointer-events-none h-[250px] overflow-hidden p-space-4">
             <Markdown content={markdown} />
           </div>
         )}
         <span
           data-testid="inline-plan-fade"
-          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-surface-level-1/75 to-surface-level-1 p-3"
+          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-surface-level-1/75 to-surface-level-1 p-space-3"
         >
-          <span className="inline-flex items-center gap-space-1 rounded-md bg-brand px-2.5 py-1.5 text-xs font-medium text-brand-on-fill shadow-sm">
+          <span className="inline-flex items-center gap-space-1 rounded-md bg-brand px-space-2 py-space-1 text-xs font-medium text-brand-on-fill shadow-sm">
             Open artifact
             <ArrowUpRightIcon size={14} weight="regular" />
           </span>
@@ -71,7 +71,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         variant="outlined"
         disabled={dismiss.isPending}
         onClick={() => dismiss.mutate()}
-        className="absolute top-2 right-2 z-10"
+        className="absolute top-2 right-2 z-floating-bar"
       />
     </div>
   )

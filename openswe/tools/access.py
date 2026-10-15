@@ -12,7 +12,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal, ParamSpec, TypeVar, cast
 
-import langgraph_sdk
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.config import ENV
@@ -28,6 +27,7 @@ from openswe.utils.thread_participants import (
     PARTICIPANT_LOGINS_KEY,
     participant_logins,
 )
+from openswe.utils.thread_reads import read_thread
 
 logger = logging.getLogger(__name__)
 
@@ -149,20 +149,11 @@ def direct_user_run(cfg: RunConfig) -> bool:
     )
 
 
-def external_caller_run(cfg: RunConfig) -> bool:
-    """Whether a signed-in person called this tool over MCP, outside any thread.
-
-    Every graph run carries a thread id, so only the MCP server builds such a config;
-    the results go back to that person alone, as in a private thread they own.
-    """
-    return cfg.source == "mcp" and not cfg.thread_id
-
-
 async def _metadata(thread_id: str | None) -> dict[str, object]:
     if not thread_id:
         return {}
     try:
-        return thread_metadata(await langgraph_sdk.get_client().threads.get(thread_id))
+        return thread_metadata(await read_thread(thread_id))
     except Exception:
         logger.warning("Could not read thread metadata for access", exc_info=True)
         return {}
@@ -234,7 +225,7 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
     """Resolve the current run's access from its config and saved thread metadata."""
     cfg = cfg or configurable()
     login = login or cfg.github_login
-    if external_caller_run(cfg):
+    if cfg.mcp_caller:
         admin = bool(login) and await actor_is_admin(cfg, login=login)
         return Access(
             private=True,

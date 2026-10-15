@@ -32,13 +32,16 @@ export function PendingReviewCommentCard({
     )
   }
   return (
-    <div className="px-2 py-1 font-sans" data-testid="pending-review-comment">
-      <div className="rounded-md border border-default bg-surface-level-1 px-3 py-2 text-xs">
-        <div className="mb-1.5 flex items-center gap-2">
+    <div
+      className="px-space-2 py-space-1 font-sans"
+      data-testid="pending-review-comment"
+    >
+      <div className="rounded-md border border-default bg-surface-level-1 px-space-3 py-space-2 text-xs">
+        <div className="mb-space-1 flex items-center gap-space-2">
           <Badge size="sm" color="warning">
             Pending
           </Badge>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-space-1">
             {!editing && (
               <Button
                 size="xs"

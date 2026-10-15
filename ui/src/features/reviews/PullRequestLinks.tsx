@@ -1,6 +1,5 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
-import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
@@ -9,6 +8,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { SplitButton } from "@/components/SplitButton"
 import { api } from "@/lib/api"
 

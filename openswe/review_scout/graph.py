@@ -21,6 +21,7 @@ from langchain.agents.middleware.types import (
     ModelResponse,
     hook_config,
 )
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
@@ -60,6 +61,7 @@ from openswe.tools.plan_walkthrough import (
     walkthrough_describe_other,
     walkthrough_move_to_other,
     walkthrough_plan_chunk,
+    walkthrough_split_hunks,
 )
 from openswe.tools.record_human_input import record_human_input
 from openswe.ui_invalidations import Topic
@@ -273,7 +275,13 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     thread_id = cfg.thread_id
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
+        return create_deep_agent(
+            system_prompt="",
+            tools=[],
+            middleware=[
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
+            ],
+        ).with_config(bindable_config(config))
 
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = settings.review_scout_model
@@ -300,6 +308,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
         tools=apply_tool_descriptions(
             [
                 walkthrough_plan_chunk,
+                walkthrough_split_hunks,
                 walkthrough_move_to_other,
                 walkthrough_describe_other,
                 record_human_input,
@@ -310,6 +319,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),

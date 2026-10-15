@@ -254,7 +254,7 @@ def test_private_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch) -> None
         _open()
 
 
-def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch, fake_store) -> None:
+def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,
         {"source": "slack", "github_login": "bob"},
@@ -646,23 +646,6 @@ async def test_link_pull_request_rejects_concierge_before_github(
     assert result["success"] is False
     assert "concierge DM" in result["error"]
     token.assert_not_awaited()
-
-
-def test_updating_pr_preserves_original_feedback_run() -> None:
-    original = {
-        "url": "https://github.com/lc/repo/pull/7",
-        "repo_full_name": "lc/repo",
-        "number": 7,
-        "slack_feedback": {"run_id": "original-run", "channel_id": "C1"},
-    }
-    updated = {
-        **original,
-        "state": "open",
-        "slack_feedback": {"run_id": "later-run", "channel_id": "C2"},
-    }
-    result = opr._upsert_pull_request([original], updated)
-    assert result[0]["slack_feedback"] == original["slack_feedback"]
-    assert result[0]["state"] == "open"
 
 
 def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, user_records) -> None:

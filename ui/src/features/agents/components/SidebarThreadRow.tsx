@@ -34,7 +34,7 @@ import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
+import { Link, useSearch } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import type { SVGProps } from "react"
 
@@ -48,7 +48,6 @@ import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
-import { useMarkLegacyLocalThreadViewed } from "@/features/agents/lib/legacyLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   markAgentThreadViewed,
@@ -62,7 +61,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { cn, formatRelativeTime } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
-import { reportError } from "@/lib/errorReporting"
 
 /** Phosphor has no Linear mark; this is Linear's own logo. */
 function LinearLogoIcon({
@@ -98,6 +96,14 @@ const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
     linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },
     schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
   }
+
+const THIS_MAC_META = { icon: LaptopRegularIcon, label: "Runs on this Mac" }
+
+function sourceMeta(item: SidebarThreadItem) {
+  if (item.source && item.source !== "dashboard")
+    return SOURCE_META[item.source]
+  return runsOnAMac(item.thread) ? THIS_MAC_META : null
+}
 
 type PrState = NonNullable<AgentThread["pr"]>["state"]
 
@@ -231,12 +237,12 @@ function sidebarRowClassName({
   archived: boolean
 }): string {
   return cn(
-    "flex items-center gap-2 rounded-lg pr-2.5 transition-colors",
+    "flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
     paddingLeft,
     // Only ever on screen while "Show archived" is on; without this an
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
-    compact ? "h-7 gap-1.5" : "h-8",
+    compact ? "h-7 gap-space-2" : "h-8",
     "text-primary",
     active
       ? "bg-selected group-hover/row:bg-selected-hover"
@@ -307,7 +313,6 @@ export function SidebarThreadRow({
   compact = false,
   indent = false,
   onNavigate,
-  onDeleteLocal,
   onTogglePin,
   onToggleArchived,
 }: {
@@ -321,19 +326,14 @@ export function SidebarThreadRow({
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
-  onDeleteLocal: (threadId?: string) => void
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
-  const navigate = useNavigate()
   const chat = useChatRoutes()
   const queryClient = useQueryClient()
-  const markLocalViewed = useMarkLegacyLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
-  const worktreeThread =
-    useLocalThread(item.id) ?? (item.location === "local" ? item.thread : null)
+  const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deletingLocal, setDeletingLocal] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
@@ -344,7 +344,7 @@ export function SidebarThreadRow({
       select: (search) => search.subagent,
     }) ?? null
 
-  const thread = item.location === "cloud" ? item.thread : null
+  const thread = item.thread
   const subagents = (item.subagents ?? []).filter(
     (subagent) => subagent.status !== "completed"
   )
@@ -371,8 +371,7 @@ export function SidebarThreadRow({
   const rowIsActive =
     (isActive && (!activeSubagent || subagentsCollapsed)) ||
     (Boolean(activeWorkerId) && !workersExpanded)
-  const source =
-    item.source && item.source !== "dashboard" ? SOURCE_META[item.source] : null
+  const source = sourceMeta(item)
   const SourceIcon = source?.icon
   // Strictly an unread marker, not a "finished" one: any thread the user has
   // not opened since its latest run shows the dot. The focused thread is being
@@ -380,16 +379,11 @@ export function SidebarThreadRow({
   // optimistic cache patch, which a list refetch can overwrite.
   const unread = !item.viewed && !isActive
   const isDeleting =
-    deletingLocal ||
-    (item.location === "cloud" &&
-      deleteThread.isPending &&
-      deleteThread.variables === item.id)
+    deleteThread.isPending && deleteThread.variables === item.id
 
   const markViewed = () => {
     if (item.reviewPage) markReviewViewed(queryClient, item.reviewPage, item.id)
-    else if (item.location === "cloud")
-      markAgentThreadViewed(queryClient, item.id)
-    else markLocalViewed(item.id)
+    else markAgentThreadViewed(queryClient, item.id)
   }
 
   // Covers every way a row becomes active — click, command palette, keyboard
@@ -399,27 +393,9 @@ export function SidebarThreadRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, item.viewed])
 
-  const onConfirmDelete = async () => {
+  const onConfirmDelete = () => {
     if (isDeleting) return
-    if (item.location === "cloud") {
-      deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
-      return
-    }
-    setDeletingLocal(true)
-    try {
-      const deleted =
-        (await window.openSweDesktop?.deleteLegacyLocalThread(item.id)) ?? false
-      if (!deleted) throw new Error("Local Open SWE thread not found")
-      onDeleteLocal(item.id)
-      setDeleteOpen(false)
-      if (isActive) {
-        onNavigate?.()
-        void navigate({ to: "/agents" })
-      }
-    } catch (error) {
-      reportError({ title: "Couldn't delete thread", error })
-    }
-    setDeletingLocal(false)
+    deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
   }
 
   const onArchiveClick = (event: React.MouseEvent) => {
@@ -500,9 +476,9 @@ export function SidebarThreadRow({
       )}
       <SidebarRowTitle marquee={marquee} title={item.title} />
 
-      <span className="flex shrink-0 items-center gap-1.5 group-hover/row:hidden">
+      <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
-        {thread?.automationActionPosted && (
+        {thread.automationActionPosted && (
           <SlackLogoIcon
             size={ICON_SIZE}
             weight="regular"
@@ -575,11 +551,11 @@ export function SidebarThreadRow({
     paddingLeft:
       hasSubagents || workers.length > 0
         ? indent
-          ? "pl-4"
-          : "pl-2"
+          ? "pl-space-4"
+          : "pl-space-2"
         : indent
-          ? "pl-6"
-          : "pl-2.5",
+          ? "pl-space-5"
+          : "pl-space-2",
     archived,
   })
 
@@ -596,20 +572,10 @@ export function SidebarThreadRow({
     >
       {rowContent}
     </Link>
-  ) : item.location === "cloud" ? (
+  ) : (
     <Link
       to={chat.thread}
       params={{ threadId: item.id }}
-      onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
-    >
-      {rowContent}
-    </Link>
-  ) : (
-    <Link
-      to="/agents/local/$sessionId"
-      params={{ sessionId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
       className={rowClassName}
@@ -640,7 +606,6 @@ export function SidebarThreadRow({
           <ThreadMenuItems
             menu="context"
             thread={thread}
-            localThread={item.location === "local" ? item.thread : undefined}
             pinned={pinned}
             archived={archived}
             isDeleting={isDeleting}
@@ -685,11 +650,11 @@ export function SidebarThreadRow({
         onOpenChange={setDeleteOpen}
         threadTitle={item.title}
         isDeleting={isDeleting}
-        onConfirm={() => void onConfirmDelete()}
+        onConfirm={onConfirmDelete}
         detail={
           !worktreeThread
             ? undefined
-            : worktreeThread.ownedWorktrees?.length
+            : worktreeThread.ownedWorktrees.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
         }
@@ -734,7 +699,7 @@ function SidebarSubagentRow({
         paddingLeft: nested
           ? indent
             ? "pl-18"
-            : "pl-16"
+            : "pl-space-9"
           : indent
             ? "pl-13.5"
             : "pl-11.5",
@@ -742,7 +707,7 @@ function SidebarSubagentRow({
       })}
     >
       <SidebarRowTitle marquee={marquee} title={subagent.title} />
-      <span className="flex shrink-0 items-center gap-1.5">
+      <span className="flex shrink-0 items-center gap-space-2">
         {subagent.status === "error" && (
           <ErrorIndicator label="Subagent failed" />
         )}
@@ -768,7 +733,7 @@ function SidebarSubagentRow({
 }
 
 function pendingWakeupAt(item: SidebarThreadItem): number | null {
-  if (item.location !== "cloud" || item.status === "running") return null
+  if (item.status === "running") return null
   const at = item.thread.nextWakeupAt
   return at && at > Date.now() ? at : null
 }
@@ -803,18 +768,18 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const onAMac = item.location === "local" || runsOnAMac(item.thread)
+  const onAMac = runsOnAMac(item.thread)
   const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
   const wakeupAt = pendingWakeupAt(item)
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-start gap-2">
+    <div className="flex min-w-0 flex-col gap-space-2">
+      <div className="flex items-start gap-space-2">
         <span className="min-w-0 flex-1 text-xs font-medium text-primary">
           {item.title}
         </span>
-        {item.location === "cloud" && item.thread.visibility === "private" && (
+        {item.thread.visibility === "private" && (
           <LockIcon
             size={ICON_SIZE}
             weight="regular"
@@ -828,12 +793,12 @@ function ThreadHoverCard({
           className="mt-0.5 shrink-0 text-icon-secondary"
           aria-label={locationLabel}
         />
-        <span className="mt-px shrink-0 text-[11px] text-secondary">
+        <span className="mt-px shrink-0 text-xxs text-secondary">
           {compactAge(item.updatedAt)}
         </span>
       </div>
       {item.repoLabel && (
-        <div className="flex min-w-0 items-center gap-1.5 text-secondary">
+        <div className="flex min-w-0 items-center gap-space-2 text-secondary">
           <FolderIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
           <span className="min-w-0 truncate text-xxs">{item.repoLabel}</span>
         </div>
@@ -856,7 +821,7 @@ function ThreadHoverCard({
           target="_blank"
           rel="noreferrer"
           onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto -mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+          className="pointer-events-auto -mx-space-1 flex min-w-0 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
         >
           <PullRequestIcon state={item.pr.state} live={live} />
           <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
@@ -868,8 +833,8 @@ function ThreadHoverCard({
 
 function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-start gap-2">
+    <div className="flex min-w-0 flex-col gap-space-2">
+      <div className="flex items-start gap-space-2">
         <span className="min-w-0 flex-1 text-xs font-medium text-primary">
           {subagent.title}
         </span>
@@ -889,11 +854,11 @@ function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
             aria-label="Subagent finished"
           />
         )}
-        <span className="mt-px shrink-0 text-[11px] text-secondary">
+        <span className="mt-px shrink-0 text-xxs text-secondary">
           {compactAge(subagent.endedAt ?? subagent.startedAt)}
         </span>
       </div>
-      <div className="flex min-w-0 items-center gap-1.5 text-secondary">
+      <div className="flex min-w-0 items-center gap-space-2 text-secondary">
         <RobotIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
         <span className="min-w-0 truncate text-xxs">
           {subagent.subagentType}
@@ -999,7 +964,7 @@ function SidebarTaskWorkerRow({
           aria-label="Asynchronous task worker"
         />
         <SidebarRowTitle marquee={marquee} title={worker.title} />
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-secondary">
+        <span className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary">
           {worker.status === "running" && (
             <RunningIndicator label="Worker running" />
           )}

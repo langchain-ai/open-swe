@@ -87,7 +87,7 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
 
 
 class UploadTicket(BaseModel):
-    """Who may fill which reserved session-upload thread, as ``oswe upload`` presents it."""
+    """Who may fill which reserved session-upload thread, as its upload URL carries it."""
 
     sub: str = Field(min_length=1)
     email: str | None = None
@@ -212,7 +212,7 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
 
 
 def validate_github_login_allowlist() -> None:
-    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or allowed_orgs() or allowed_logins():
+    if allowed_orgs() or allowed_logins():
         return
     message = "ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured"
     logger.error(message)

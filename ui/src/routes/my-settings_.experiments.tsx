@@ -1,11 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { Switch } from "@langchain/macaw-components/Switch"
 
-import {
-  SettingsPage,
-  SettingsRow,
-  SettingsSection,
-} from "@/components/AppShell"
+import { SettingsPage, SettingsSection } from "@/components/AppShell"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
@@ -27,19 +22,10 @@ function ExperimentsPage() {
         <AssistantUiPreference />
       </SettingsSection>
       <SettingsSection title="Agent">
-        <SettingsRow
-          htmlFor="experimental_task_coordination"
-          label="Asynchronous task coordination (experimental) — ALWAYS DISABLED"
-          description="Disabled for everyone, regardless of your saved preference."
-          control={
-            <Switch
-              id="experimental_task_coordination"
-              aria-label="Asynchronous task coordination (experimental)"
-              checked={profile.data?.experimental_task_coordination ?? false}
-              onChange={() => {}}
-              disabled
-            />
-          }
+        <ProfileSwitchRow
+          field="experimental_task_coordination"
+          label="Asynchronous task coordination (experimental)"
+          description="Let your agent delegate to workers that run independently. Turning this off prevents new workers; existing workers can finish and remain available to message or cancel."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"
@@ -47,10 +33,22 @@ function ExperimentsPage() {
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
         />
         <ProfileSwitchRow
+          field="experimental_mcp_ptc"
+          label="Code Mode (Experimental)"
+          description="Let the agent call integrations and supported tools from JavaScript, combining calls and filtering results before they enter its context. Separate from sandbox tool routing; not available for local runs. Applies on the next run."
+        />
+        <ProfileSwitchRow
           field="prefer_tools_in_sandbox"
           label="Prefer tools through the sandbox"
           description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint so it can filter their output. Applies to threads you start afterwards."
         />
+        {profile.data?.mda_available && (
+          <ProfileSwitchRow
+            field="run_on_mda"
+            label="Run on Managed Deep Agents"
+            description="Your agent and review threads run their model loop on the Managed Deep Agents deployment instead of this server. Applies to threads you start afterwards; existing threads stay where they are."
+          />
+        )}
         <ProfileSwitchRow
           field="experimental_act_as_approval"
           label="Approve PRs opened as you"

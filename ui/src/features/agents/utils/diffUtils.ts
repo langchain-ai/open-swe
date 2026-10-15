@@ -158,6 +158,10 @@ export const DIFF_UNSAFE_CSS = `
   border-bottom: 1px solid var(--border-default) !important;
 }
 
+[data-code] {
+  scrollbar-gutter: auto;
+}
+
 [data-separator] {
   background-color: var(--bg-surface-level-1-hover) !important;
   color: var(--text-secondary) !important;
@@ -181,6 +185,11 @@ export const DIFF_FIXED_LINE_HEIGHT_CSS = `
 }
 `
 
+const lineDiffOptions = {
+  lineDiffType: "word-alt" as const,
+  maxLineDiffLength: 4096,
+}
+
 export const diffOptions = {
   theme: DIFF_THEME,
   themeType: "system" as const,
@@ -189,8 +198,7 @@ export const diffOptions = {
   disableFileHeader: true,
   unsafeCSS: `${DIFF_UNSAFE_CSS}${DIFF_FIXED_LINE_HEIGHT_CSS}`,
   collapsedContextThreshold: 4,
-  lineDiffType: "word-alt" as const,
-  maxLineDiffLength: 800,
+  ...lineDiffOptions,
   tokenizeMaxLineLength: 1200,
   tokenizeMaxLength: 120_000,
 }
@@ -255,8 +263,7 @@ export const DIFF_WORKER_POOL_OPTIONS = {
 
 export const DIFF_WORKER_HIGHLIGHTER_OPTIONS = {
   theme: DIFF_THEME,
-  lineDiffType: "word-alt",
-  maxLineDiffLength: 800,
+  ...lineDiffOptions,
   tokenizeMaxLineLength: 1200,
   langs: ["text"],
 } satisfies WorkerInitializationRenderOptions

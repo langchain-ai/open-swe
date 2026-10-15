@@ -1,7 +1,4 @@
-import {
-  LaptopRegularIcon,
-  MagnifyingGlassRegularIcon,
-} from "@langchain/macaw-components/icons"
+import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   Command,
@@ -28,9 +25,7 @@ import type { AppCommand } from "@/lib/appCommands"
 import type { PullRequestSearchResult } from "@/lib/api"
 import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearch"
 import type { AgentThread } from "@/features/agents/lib/types"
-import type { DesktopLegacyLocalThread } from "@/desktop"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
-import { useLegacyLocalThreads } from "@/features/agents/lib/legacyLocal"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { useChatRoutes } from "@/lib/chatRoutes"
@@ -49,13 +44,6 @@ interface CloudThreadResult {
   thread: AgentThread
 }
 
-interface LocalThreadResult {
-  id: string
-  kind: "local-thread"
-  label: string
-  thread: DesktopLegacyLocalThread
-}
-
 interface PullRequestResult {
   id: string
   kind: "pull-request"
@@ -63,11 +51,7 @@ interface PullRequestResult {
   pr: PullRequestSearchResult
 }
 
-type PaletteResult =
-  | CommandResult
-  | CloudThreadResult
-  | LocalThreadResult
-  | PullRequestResult
+type PaletteResult = CommandResult | CloudThreadResult | PullRequestResult
 
 function ShortcutHint({ shortcut }: { shortcut: string }) {
   const label = useShortcutLabel(shortcut)
@@ -84,7 +68,6 @@ function commandMatches(command: AppCommand, query: string): boolean {
 export function buildPaletteResults(
   commands: ReadonlyArray<AppCommand>,
   cloudThreads: ReadonlyArray<AgentThread>,
-  localThreads: ReadonlyArray<DesktopLegacyLocalThread>,
   query: string
 ): Array<PaletteResult> {
   const normalizedQuery = query.trim().toLowerCase()
@@ -128,23 +111,7 @@ export function buildPaletteResults(
       label: thread.title,
       thread,
     }))
-  const localResults: Array<LocalThreadResult> = localThreads
-    .filter(
-      (thread) =>
-        !actionsOnly &&
-        (!searchQuery ||
-          [thread.title, thread.cwd]
-            .join(" ")
-            .toLowerCase()
-            .includes(searchQuery))
-    )
-    .map((thread) => ({
-      id: `local:${thread.id}`,
-      kind: "local-thread",
-      label: thread.title,
-      thread,
-    }))
-  return [...commandResults, ...cloudResults, ...localResults]
+  return [...commandResults, ...cloudResults]
 }
 
 export function AppCommandPalette({
@@ -160,8 +127,6 @@ export function AppCommandPalette({
   const chat = useChatRoutes()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   useEffect(() => {
     if (!open) {
@@ -182,7 +147,6 @@ export function AppCommandPalette({
     },
     { enabled: open, staleWhileRevalidate: true }
   )
-  const localThreads = useLegacyLocalThreads({ enabled: open && isDesktop })
   const pullRequests = usePullRequestSearch(
     query,
     open && !query.trim().startsWith(">")
@@ -192,7 +156,6 @@ export function AppCommandPalette({
       ...buildPaletteResults(
         commands,
         cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
-        localThreads.data ?? [],
         query
       ),
       ...(open && !query.trim().startsWith(">")
@@ -206,14 +169,7 @@ export function AppCommandPalette({
           ) ?? [])
         : []),
     ],
-    [
-      cloudThreads.data?.pages,
-      commands,
-      localThreads.data,
-      query,
-      open,
-      pullRequests.data,
-    ]
+    [cloudThreads.data?.pages, commands, query, open, pullRequests.data]
   )
   const resultGroups = useMemo(() => {
     const grouped = new Map<string, Array<PaletteResult>>()
@@ -223,9 +179,7 @@ export function AppCommandPalette({
           ? result.command.group
           : result.kind === "cloud-thread"
             ? "Threads"
-            : result.kind === "pull-request"
-              ? "Pull requests"
-              : "This Mac"
+            : "Pull requests"
       grouped.set(group, [...(grouped.get(group) ?? []), result])
     }
     return [...grouped]
@@ -242,18 +196,13 @@ export function AppCommandPalette({
         to: chat.thread,
         params: { threadId: result.thread.id },
       })
-    } else if (result.kind === "pull-request") {
+    } else {
       const [owner, repo] = result.pr.repo.split("/")
       if (owner && repo) {
         void navigate(
           reviewPageRoute({ owner, repo, number: result.pr.number })
         )
       }
-    } else {
-      void navigate({
-        to: "/agents/local/$sessionId",
-        params: { sessionId: result.thread.id },
-      })
     }
   }
 
@@ -300,16 +249,16 @@ export function AppCommandPalette({
           />
           <CommandList className="max-h-none min-h-20 flex-1 p-space-2">
             {showLoading ? (
-              <div className="flex items-center justify-center gap-space-2 py-10 text-xs text-secondary">
+              <div className="flex items-center justify-center gap-space-2 py-space-7 text-xs text-secondary">
                 <Spinner size="xs" />
                 Searching threads and pull requests…
               </div>
             ) : showError ? (
-              <p className="py-10 text-center text-xs text-error-secondary">
+              <p className="py-space-7 text-center text-xs text-error-secondary">
                 Thread search is unavailable.
               </p>
             ) : results.length === 0 ? (
-              <p className="py-10 text-center text-xs text-secondary">
+              <p className="py-space-7 text-center text-xs text-secondary">
                 No commands, threads, or pull requests found.
               </p>
             ) : (
@@ -322,11 +271,9 @@ export function AppCommandPalette({
                       const Icon =
                         result.kind === "command"
                           ? CommandIcon
-                          : result.kind === "local-thread"
-                            ? LaptopRegularIcon
-                            : result.kind === "pull-request"
-                              ? GitPullRequestIcon
-                              : ChatCircleIcon
+                          : result.kind === "pull-request"
+                            ? GitPullRequestIcon
+                            : ChatCircleIcon
                       return (
                         <CommandItem
                           className="gap-space-3 rounded-md px-space-3 py-space-2 text-primary"
@@ -342,7 +289,7 @@ export function AppCommandPalette({
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
                             {result.kind === "pull-request" && (
-                              <span className="ml-2 text-xs text-secondary">
+                              <span className="ml-space-2 text-xs text-secondary">
                                 {result.pr.repo} #{result.pr.number} ·{" "}
                                 {result.pr.state}
                               </span>

@@ -159,22 +159,6 @@ Piped input is attached below the prompt inside `<stdin>` tags, or is the whole
 prompt when no arguments are given. Stdin is only read when it is a pipe or a
 redirected file, so a CI runner's open stdin never blocks a run.
 
-## Uploading a local session
-
-Agents reach Open SWE's tools through its remote MCP server at
-`<backend>/oswe/mcp`. Its `upload_session` tool moves a local coding session
-into a new Open SWE thread in two steps: the tool creates the thread and returns
-a one-time upload code, then `oswe upload` sends the transcript from this
-machine.
-
-```sh
-oswe upload --backend https://openswe.example.com CODE ~/.claude/projects/<cwd>/<session id>.jsonl
-```
-
-The code is the only credential, so no `oswe login` is needed. It is valid for
-one upload, for an hour. The command prints the thread's dashboard URL; no run
-starts until someone sends a message there.
-
 ## Environment the agent gets
 
 The child shell inherits your environment minus anything whose name ends in

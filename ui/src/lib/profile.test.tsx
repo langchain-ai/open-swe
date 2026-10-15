@@ -25,8 +25,6 @@ interface Pending {
 function mockServer() {
   let stored: Profile = {
     login: "alice",
-    default_model: "openai:test",
-    reasoning_effort: "medium",
     draft_prs: true,
     review_draft_prs: null,
   }
@@ -41,7 +39,6 @@ function mockServer() {
             stored = {
               ...body,
               login: "alice",
-              model_routing_enabled: body.model_routing_enabled ?? undefined,
             }
             resolve(stored)
           },
@@ -75,8 +72,8 @@ it("chains a second page's save behind the first and keeps both fields", async (
   await waitFor(() => expect(result.current.profile.data).toBeDefined())
 
   act(() => {
-    result.current.a.patch({ draft_prs: false }, "m", "e")
-    result.current.b.patch({ review_draft_prs: true }, "m", "e")
+    result.current.a.patch({ draft_prs: false })
+    result.current.b.patch({ review_draft_prs: true })
   })
 
   await waitFor(() => expect(requests).toHaveLength(1))
@@ -107,8 +104,8 @@ it("does not resend a failed save's field with the next one", async () => {
   await waitFor(() => expect(result.current.profile.data).toBeDefined())
 
   act(() => {
-    result.current.a.patch({ draft_prs: false }, "m", "e")
-    result.current.b.patch({ review_draft_prs: true }, "m", "e")
+    result.current.a.patch({ draft_prs: false })
+    result.current.b.patch({ review_draft_prs: true })
   })
   await waitFor(() => expect(requests).toHaveLength(1))
 

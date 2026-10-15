@@ -72,7 +72,7 @@ function ActivityLine({
   steps: number
 }) {
   return (
-    <div className="mt-space-1 flex min-w-0 items-center gap-1.5 border-t border-default pt-1.5">
+    <div className="mt-space-1 flex min-w-0 items-center gap-space-2 border-t border-default pt-space-1">
       {status === "completed" ? (
         <CheckIcon
           size={12}

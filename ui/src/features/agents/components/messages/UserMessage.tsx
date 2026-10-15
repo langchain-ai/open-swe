@@ -60,7 +60,7 @@ function StandardUserMessage({ message }: { message: Message }) {
       {hasBody && (
         <div
           className={cn(
-            "relative overflow-hidden rounded-xl p-space-3",
+            "relative max-w-full overflow-hidden rounded-xl p-space-3",
             isSystem
               ? "mt-space-1 border border-default bg-surface-level-2"
               : "bg-surface-level-2"
@@ -93,7 +93,7 @@ function StandardUserMessage({ message }: { message: Message }) {
             <div
               ref={textRef}
               className={cn(
-                "text-sm leading-[1.6] break-words whitespace-pre-wrap text-primary",
+                "text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-primary",
                 !isSystem && !expanded && "overflow-hidden"
               )}
               style={
@@ -135,7 +135,7 @@ function StandardUserMessage({ message }: { message: Message }) {
   return (
     <div
       className={cn(
-        "group/turn my-4 flex flex-col gap-space-1",
+        "group/turn my-space-4 flex flex-col gap-space-1",
         isSystem ? "items-start" : "items-end"
       )}
       data-testid="user-message"
@@ -144,7 +144,12 @@ function StandardUserMessage({ message }: { message: Message }) {
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
     >
-      <div className="max-w-[80%]">
+      <div
+        className={cn(
+          "flex max-w-[80%] flex-col",
+          isSystem ? "items-start" : "items-end"
+        )}
+      >
         {!isSystem &&
           (message.structuredSenderName ||
             isSlack ||

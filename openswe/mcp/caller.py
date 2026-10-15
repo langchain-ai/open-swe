@@ -30,7 +30,6 @@ _TOOL_MODULES: Final = (
     "openswe.tools.manage_review_approval_mode",
     "openswe.tools.manage_review_repos",
     "openswe.tools.read_only_sql",
-    "openswe.tools.read_store_item",
     "openswe.tools.fetch_url",
     "openswe.tools.http_request",
     "openswe.tools.web_search",
@@ -41,6 +40,13 @@ _TOOL_MODULES: Final = (
     "openswe.tools.report_platform_issue",
     "openswe.tools.upload_session",
     "openswe.slack.tools.request_pr_review",
+    "openswe.tools.request_human_review",
+    "openswe.tools.expedite_pr_approval",
+    "openswe.tools.read_user_settings",
+    "openswe.tools.search_pull_requests",
+    "openswe.tools.list_review_findings",
+    "openswe.tools.repair_data",
+    "openswe.tools.send_announcement",
 )
 
 
@@ -50,24 +56,14 @@ class UnknownTool(LookupError):
 
 @cache
 def _exposed() -> dict[str, tuple[BaseTool, Access]]:
-    from langchain_core.tools import StructuredTool
-
     from openswe.prompts import apply_tool_descriptions
     from openswe.tools.mcp_exposure import EXPOSED_TOOLS
 
     for module in _TOOL_MODULES:
         import_module(module)
     names = list(EXPOSED_TOOLS)
-    functions = apply_tool_descriptions([func for func, _ in EXPOSED_TOOLS.values()])
-    return {
-        name: (
-            StructuredTool.from_function(
-                coroutine=func, name=name, description=func.__doc__ or name
-            ),
-            EXPOSED_TOOLS[name][1],
-        )
-        for name, func in zip(names, functions, strict=True)
-    }
+    tools = apply_tool_descriptions([func for func, _ in EXPOSED_TOOLS.values()], mcp=True)
+    return {name: (tool, EXPOSED_TOOLS[name][1]) for name, tool in zip(names, tools, strict=True)}
 
 
 @dataclass(frozen=True)

@@ -103,7 +103,7 @@ def _auth() -> AuthProvider | None:
             client_id=client_id,
             client_secret=client_secret,
             base_url=dashboard_api_base_url() + AUTH_PATH,
-            resource_base_url=ENV.LANGGRAPH_URL.get().rstrip("/") + PREFIX,
+            resource_base_url=dashboard_api_base_url() + PREFIX,
             redirect_path=GITHUB_CALLBACK_PATH.removeprefix(AUTH_PATH),
             client_storage=SealedStore(),
             cache_ttl_seconds=_GITHUB_CACHE_SECONDS,

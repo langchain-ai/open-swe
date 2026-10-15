@@ -4,17 +4,14 @@ import json
 import logging
 from time import perf_counter
 from typing import Annotated, Any, Literal
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
-from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
@@ -25,7 +22,6 @@ from openswe.threads.diffs import (
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_working_tree_diff,
 )
-from openswe.threads.feedback import feedback_router
 from openswe.threads.files import (
     WorkspaceFileIndex,
     WorkspacePath,
@@ -76,23 +72,11 @@ from openswe.threads.runs import (
     create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
-from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
-router.include_router(feedback_router)
-
-
-@router.get("/me/local-trace-url/{thread_id}")
-async def api_get_local_trace_url(
-    thread_id: UUID,
-    session: dict[str, str] = SESSION_DEP,
-) -> dict[str, str | None]:
-    preferences = await get_user_preferences(session["sub"])
-    project = preferences["local_tracing_project"] or ENV.LANGSMITH_PROJECT.get()
-    return {"trace_url": await get_langsmith_trace_url(str(thread_id), project_name=project)}
 
 
 @router.get("/threads")
@@ -147,15 +131,18 @@ async def api_create_session(
     return {"thread_id": thread_id}
 
 
-@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
+@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY, response_model=None)
 @audit_endpoint
-async def api_upload_session(request: Request) -> dict[str, Any]:
+async def api_upload_session(request: Request) -> dict[str, Any] | Response:
     code = bearer_github_token(request)
     if code is None:
-        raise HTTPException(401, "send the upload code as a bearer token")
+        raise HTTPException(401, "send the upload token as a bearer token")
     ticket = decode_upload_ticket(code)
     bind_audit_session(request, {"sub": ticket.sub, "user_id": ticket.user_id})
-    return await upload_session(UploadStream(request), ticket)
+    summary = await upload_session(UploadStream(request), ticket)
+    if summary is None:
+        return Response(status_code=204)
+    return summary
 
 
 @router.post("/threads/resolve-all")

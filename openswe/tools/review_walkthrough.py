@@ -21,7 +21,7 @@ from openswe.review_guide.walk import OnScreen, Reader, Walk
 from openswe.run_config import RunConfig
 from openswe.slack.code_channels import archive_code_channel, set_session_status_result
 from openswe.slack.http import SlackRequestError
-from openswe.slack.tools.reply import slack_reply
+from openswe.slack.tools.reply import send_slack_reply
 from openswe.tools.approve_pull_request import approve_pull_request
 from openswe.tools.mark_pull_request_ready import mark_pull_request_ready
 from openswe.tools.plan_walkthrough import PLANNING_ERRORS
@@ -29,7 +29,9 @@ from openswe.tools.record_author_feedback import record_author_feedback
 from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
     MAX_TITLE_CHARS,
+    FileHunks,
     FileRanges,
+    FileSplits,
     LineRef,
     claim,
 )
@@ -79,7 +81,9 @@ class _State:
         return {
             "success": True,
             **result,
-            "walkthrough": self.reader.status(self.ctx.unplanned).model_dump(),
+            "walkthrough": self.reader.status(
+                self.ctx.unplanned_lines, self.ctx.workspace.hunks
+            ).model_dump(),
         }
 
     def shown_this_turn(self) -> bool:
@@ -97,7 +101,7 @@ class _State:
 
     async def post(self, shown: OnScreen) -> dict[str, Any]:
         """Put ``shown`` on screen with its "Next" button, replacing what was there."""
-        posted = await slack_reply(shown.message_text, "progress", options=[NEXT])
+        posted = await send_slack_reply(shown.message_text, "progress", options=[NEXT])
         if posted["success"] is not True:
             return posted
         replaced = self.walk.withdraw()
@@ -239,22 +243,34 @@ async def _plan(
 @_one_at_a_time
 async def walkthrough_plan_chunk(
     title: str,
-    show: list[FileRanges],
+    show: list[FileHunks],
     explanation: str,
-    other: list[FileRanges] | None = None,
+    other: list[FileHunks] | None = None,
     after: int | None = None,
+    replace: list[int] | None = None,
 ) -> dict[str, Any]:
     """Implement the `walkthrough_plan_chunk` tool."""
     return await _plan(
         lambda ctx: ctx.workspace.plan_chunk(
-            title=title, show=show, explanation=explanation, other=other, after=after
+            title=title,
+            show=show,
+            explanation=explanation,
+            other=other,
+            after=after,
+            replace=replace,
         )
     )
 
 
 @_one_at_a_time
+async def walkthrough_split_hunks(files: list[FileSplits]) -> dict[str, Any]:
+    """Implement the `walkthrough_split_hunks` tool."""
+    return await _plan(lambda ctx: ctx.workspace.split(files))
+
+
+@_one_at_a_time
 async def walkthrough_move_to_other(
-    files: list[FileRanges], restore: bool = False
+    files: list[FileHunks], restore: bool = False
 ) -> dict[str, Any]:
     """Implement the `walkthrough_move_to_other` tool."""
     return await _plan(lambda ctx: ctx.workspace.move_to_other(files, restore=restore))
@@ -288,7 +304,7 @@ async def walkthrough_end(message: str = "", archive: bool = False) -> dict[str,
         part for part in (message.strip(), f"_{state.walk.coverage()}_" if finished else "") if part
     )
     if body or options:
-        posted = await slack_reply(body, "progress", options=options or None)
+        posted = await send_slack_reply(body, "progress", options=options or None)
         if posted["success"] is not True:
             warnings.append(f"could not post the message: {posted['error']}")
     await state.retire(state.walk.withdraw(), "The walkthrough ended")
@@ -325,6 +341,7 @@ def walkthrough_tools(mode: GuideMode) -> list[Callable[..., Awaitable[Any]]]:
         walkthrough_show_other,
         walkthrough_skip_changes,
         walkthrough_plan_chunk,
+        walkthrough_split_hunks,
         walkthrough_move_to_other,
         walkthrough_describe_other,
         walkthrough_end,

@@ -110,10 +110,10 @@ export function WorkspaceProxySection({
 
   return (
     <SettingsSection
-      title="Sandbox proxy"
+      title="Sandbox Proxy"
       description="Configure host-matched headers and sandbox environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged."
     >
-      <div className="space-y-3 px-space-4 py-3.5 text-primary">
+      <div className="space-y-space-3 px-space-4 py-space-3 text-primary">
         <div
           role="tablist"
           aria-label="Proxy editor view"
@@ -170,7 +170,7 @@ export function WorkspaceProxySection({
           ) : (
             <fieldset
               disabled={!canEdit || save.isPending}
-              className="space-y-4"
+              className="space-y-space-4"
             >
               {rules.length === 0 && (
                 <p className="text-sm text-secondary">
@@ -200,7 +200,7 @@ export function WorkspaceProxySection({
                 return (
                   <div
                     key={index}
-                    className="space-y-3 rounded-md border border-default p-space-3"
+                    className="space-y-space-3 rounded-md border border-default p-space-3"
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">
@@ -309,7 +309,7 @@ export function WorkspaceProxySection({
                             }
                             onChange={(value) => update({ ...header, value })}
                           />
-                          <div className="space-y-1">
+                          <div className="space-y-space-1">
                             <FieldLabel
                               label="Type"
                               description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Open SWE still persists this workspace configuration: opaque is not a way to store secrets here."

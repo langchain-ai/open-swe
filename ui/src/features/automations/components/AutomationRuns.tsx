@@ -1,4 +1,5 @@
 import { ClockCounterClockwiseRegularIcon } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
 import { Link } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -39,7 +40,7 @@ export function AutomationRuns({
     return (
       <div
         role="status"
-        className="flex items-center justify-center gap-space-2 rounded-xl border border-dashed border-default px-6 py-12 text-xs text-secondary"
+        className="flex items-center justify-center gap-space-2 rounded-xl border border-dashed border-default px-space-5 py-space-8 text-xs text-secondary"
       >
         <Spinner size="xs" />
         Loading automation runs…
@@ -76,18 +77,20 @@ export function AutomationRuns({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-space-5">
       {grouped.map((group) => (
         <section key={group.id}>
           {!automationId && (
-            <div className="mb-2 flex items-center gap-2 px-1">
-              <h2 className="text-xs font-medium text-primary">{group.name}</h2>
+            <div className="mb-space-2 flex items-center gap-space-2 px-space-1">
+              <Text as="h2" variant="sm" weight="medium" color="primary">
+                {group.name}
+              </Text>
               <span className="text-xxs text-secondary">
                 {group.runs.length}
               </span>
             </div>
           )}
-          <div className="space-y-2">
+          <div className="space-y-space-2">
             {group.runs.map((run) => (
               <AutomationRunRow key={run.id} run={run} />
             ))}
@@ -130,7 +133,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
     <Link
       to="/agents/$threadId"
       params={{ threadId: run.id }}
-      className="flex items-center gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:bg-surface-level-1-hover"
+      className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3 transition-colors hover:bg-surface-level-1-hover"
     >
       {run.status === "running" ? (
         <Spinner size="xs" className="shrink-0 text-icon-brand" />
@@ -148,12 +151,12 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
       )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-primary">{run.title}</p>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-tertiary">
+        <div className="mt-space-1 flex flex-wrap gap-x-space-3 gap-y-space-1 text-xs text-tertiary">
           <span>{STATUS_LABELS[run.status]}</span>
           <span>{isTest ? "Test run" : "Scheduled run"}</span>
           {run.automationActionPosted && (
             <span
-              className="flex items-center gap-1 text-success-secondary"
+              className="flex items-center gap-space-1 text-success-secondary"
               aria-label="Action posted to Slack"
             >
               <SlackLogoIcon size={14} weight="regular" />

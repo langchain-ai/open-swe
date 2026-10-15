@@ -10,11 +10,9 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Kbd } from "@langchain/macaw-components/Kbd"
@@ -30,6 +28,7 @@ import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
@@ -88,21 +87,12 @@ import {
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
-import {
-  useLegacyLocalThreads,
-  useLegacyLocalActivity,
-  useRefreshLegacyLocalThreads,
-} from "@/features/agents/lib/legacyLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
-  applyRepoKeyAliases,
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByRepo,
-  localSidebarThread,
   sidebarRepoKey,
-  sidebarRepoOptions,
   sortSidebarThreads,
   sidebarItemContains,
   withoutNestedWorkers,
@@ -115,13 +105,11 @@ import {
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
-import { reportError } from "@/lib/errorReporting"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
   user: SessionUser
   activeThreadId?: string
-  activeLocalSessionId?: string
   layout: SidebarLayout
 }
 
@@ -133,7 +121,7 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
 }
 
 const NAV_ROW_CLASS =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-surface-level-2-hover"
+  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm font-medium text-primary transition-colors hover:bg-surface-level-2-hover"
 
 /** Threads shown per repo before the group needs a "Show more". */
 const REPO_PREVIEW_COUNT = 5
@@ -192,7 +180,6 @@ function useScrollEdges() {
 export function AgentsSidebar({
   user,
   activeThreadId,
-  activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
@@ -226,7 +213,6 @@ export function AgentsSidebar({
     prefs,
     setCompact,
     setFilters,
-    toggleLocalPin,
     toggleRepoPin,
     toggleRepoCollapsed,
     toggleSectionCollapsed,
@@ -286,10 +272,6 @@ export function AgentsSidebar({
   const workspaceMode =
     workspaceOrganize &&
     (workspaceOptionsQuery.data?.workspaces.length ?? 0) > 1
-  const localThreads = useLegacyLocalThreads({ enabled: isDesktop })
-  const localSessions = localThreads.data ?? []
-  const activity = useLegacyLocalActivity()
-  const refreshLocalThreads = useRefreshLegacyLocalThreads()
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const pendingPins = usePendingVariables<{ threadId: string }>(
@@ -330,36 +312,19 @@ export function AgentsSidebar({
   const activeThread = useSidebarActiveThread({
     activeThreadId,
     loadedThreads: [...pinnedThreads, ...pageThreads],
-    includeResolved: prefs.filters.includeResolved,
     enabled: true,
   })
   const activeInRepo = Boolean(repoMode && activeThread?.repoFullName.trim())
   const recentThreads = [
-    ...(activeThread && !activeInRepo ? [activeThread] : []),
+    ...(activeThread && !activeInRepo && !cloudPinnedIds.has(activeThread.id)
+      ? [activeThread]
+      : []),
     ...pageThreads.filter((thread) => thread.id !== activeThread?.id),
   ]
   const visibleThreads = [...pinnedThreads, ...recentThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
-  const repoByPath = new Map(localRepos.map((repo) => [repo.cwd, repo]))
-  const localPinnedIds = new Set(prefs.pinnedLocalIds)
-  const localItems = localSessions
-    // Removing a repo has to remove its threads too, otherwise they linger
-    // and re-derive the repo from the cwd basename.
-    .filter((thread) => repoByPath.has(thread.cwd))
-    .map((thread) =>
-      localSidebarThread(
-        thread,
-        repoByPath.get(thread.cwd),
-        activity[thread.id]
-      )
-    )
-    // Cloud threads are omitted server-side unless includeResolved; local
-    // archiving is client-side, so it has to honour the same switch here.
-    .filter((item) => prefs.filters.includeResolved || !item.resolved)
-  // Fold a local checkout into the cloud repo of the same name so the repo
-  // renders as one folder; repo keys are otherwise full identities.
   const serverRepos = sidebarReposQuery.data ?? []
   const activeRepo: SidebarRepo | undefined = activeThread?.repoFullName.trim()
     ? {
@@ -387,40 +352,22 @@ export function AgentsSidebar({
     return key ? [{ repo, key }] : []
   })
   const aliases = cloudRepoAliases(cloudRepos)
-  const alignedLocalItems = applyRepoKeyAliases(localItems, aliases)
-  const pinnedItems = [
-    ...pinnedThreadShortcuts(pinnedThreads).map(cloudSidebarThread),
-    ...alignedLocalItems.filter((item) => localPinnedIds.has(item.id)),
-  ]
-  const threadItems: Array<SidebarThreadItem> = [
-    ...recentThreads.map(cloudSidebarThread),
-    ...(repoMode
-      ? []
-      : alignedLocalItems.filter((item) => !localPinnedIds.has(item.id))),
-  ]
+  const pinnedItems =
+    pinnedThreadShortcuts(pinnedThreads).map(cloudSidebarThread)
+  const threadItems = recentThreads.map(cloudSidebarThread)
   const allItems = [...pinnedItems, ...threadItems]
   const filteredPinnedItems = sortSidebarThreads(
-    filterThreads(pinnedItems, prefs.filters),
+    filterThreads(
+      pinnedItems,
+      { ...prefs.filters, includeResolved: true },
+      activeThreadId
+    ),
     prefs.sortPinned
   )
   const recents = sortSidebarThreads(
-    filterThreads(threadItems, prefs.filters),
+    filterThreads(threadItems, prefs.filters, activeThreadId),
     prefs.sortChats
   )
-  const unpinnedLocalItems = alignedLocalItems.filter(
-    (item) => !localPinnedIds.has(item.id)
-  )
-  const localGroups = repoMode
-    ? groupSidebarThreadsByRepo(
-        filterThreads(unpinnedLocalItems, prefs.filters),
-        sidebarRepoOptions(unpinnedLocalItems, localRepos).map((repo) => ({
-          ...repo,
-          key: aliases.get(repo.label.trim().toLowerCase()) ?? repo.key,
-        })),
-        prefs.sortChats,
-        true
-      ).repos
-    : []
   const repoGroups: Array<HydratedRepoGroup> = repoMode
     ? [
         ...keyedCloudRepos.map(({ repo, key }) => {
@@ -435,22 +382,28 @@ export function AgentsSidebar({
                 repo.repoFullName.toLowerCase()
                 ? activeThread
                 : undefined,
-            threads:
-              localGroups.find((group) => group.key === key)?.threads ?? [],
+            threads: [],
           }
         }),
-        ...localGroups
-          .filter(
-            (group) => !keyedCloudRepos.some(({ key }) => key === group.key)
-          )
-          .map((group) => ({
-            ...group,
-            repoFullName: null,
-            localRepoPath: localRepos.find(
-              (repo) => sidebarRepoKey(repo.cwd) === group.key
-            )?.cwd,
-            updatedAt: group.threads[0]?.updatedAt ?? 0,
-          })),
+        // "This Mac" projects with no cloud repo of the same name yet still
+        // get a folder, so a thread can be started in them.
+        ...localRepos.flatMap((repo) => {
+          const key =
+            aliases.get(repo.name.trim().toLowerCase()) ??
+            sidebarRepoKey(repo.cwd)
+          return key && !keyedCloudRepos.some((cloud) => cloud.key === key)
+            ? [
+                {
+                  key,
+                  label: repo.name,
+                  repoFullName: null,
+                  localRepoPath: repo.cwd,
+                  updatedAt: 0,
+                  threads: [],
+                },
+              ]
+            : []
+        }),
       ].sort((left, right) => right.updatedAt - left.updatedAt)
     : []
   const pinnedRepoKeys = new Set(prefs.pinnedRepoKeys)
@@ -478,27 +431,8 @@ export function AgentsSidebar({
       : []
 
   const pullRequestFor = useSidebarPullRequests(allItems, true)
-  const isPinned = (item: SidebarThreadItem) =>
-    item.location === "cloud"
-      ? cloudPinnedIds.has(item.id)
-      : localPinnedIds.has(item.id)
-  const isArchived = (item: SidebarThreadItem) =>
-    item.location === "cloud"
-      ? item.thread.resolved === true
-      : item.thread.archived === true
+  const isArchived = (item: SidebarThreadItem) => item.thread.resolved === true
   const toggleArchived = (item: SidebarThreadItem) => {
-    if (item.location === "local") {
-      void window.openSweDesktop
-        ?.updateLegacyLocalThread({
-          threadId: item.id,
-          archived: !isArchived(item),
-        })
-        .then(() => refreshLocalThreads(item.id))
-        .catch((error: unknown) =>
-          reportError({ title: "Couldn't archive or restore thread", error })
-        )
-      return
-    }
     if (!pendingResolves.some((vars) => vars.threadId === item.id)) {
       resolveThread.mutate({
         threadId: item.id,
@@ -507,10 +441,6 @@ export function AgentsSidebar({
     }
   }
   const togglePin = (item: SidebarThreadItem) => {
-    if (item.location === "local") {
-      toggleLocalPin(item.id)
-      return
-    }
     if (!pendingPins.some((vars) => vars.threadId === item.id)) {
       pinThread.mutate({
         threadId: item.id,
@@ -519,11 +449,7 @@ export function AgentsSidebar({
     }
   }
 
-  const activeKey = activeLocalSessionId
-    ? `local:${activeLocalSessionId}`
-    : activeThreadId
-      ? `cloud:${activeThreadId}`
-      : undefined
+  const activeKey = activeThreadId ? `cloud:${activeThreadId}` : undefined
 
   const rowProps = (
     item: SidebarThreadItem,
@@ -532,12 +458,11 @@ export function AgentsSidebar({
     item,
     isActive: item.key === activeKey,
     activeThreadId,
-    pinned: isPinned(item),
+    pinned: cloudPinnedIds.has(item.id),
     archived: isArchived(item),
     live,
     compact: prefs.compact,
     onNavigate: layout.closeOnMobile,
-    onDeleteLocal: refreshLocalThreads,
     onTogglePin: () => togglePin(item),
     onToggleArchived: () => toggleArchived(item),
   })
@@ -549,7 +474,8 @@ export function AgentsSidebar({
       threads
         .filter((thread) => !cloudPinnedIds.has(thread.id))
         .map(cloudSidebarThread),
-      prefs.filters
+      prefs.filters,
+      activeThreadId
     )
 
   // Repositories and Recents share one menu: both control the same list.
@@ -557,7 +483,7 @@ export function AgentsSidebar({
     <>
       <DropdownMenuSeparator />
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger size="sm" className="gap-space-2">
+        <DropdownMenuSubTrigger size="sm">
           <TrashIcon size={14} weight="regular" />
           Remove repository…
         </DropdownMenuSubTrigger>
@@ -698,10 +624,8 @@ export function AgentsSidebar({
     pinnedQuery.isError ||
     recentsQuery.isError ||
     (repoMode && sidebarReposQuery.isError)
-  const sourcesLoading = cloudPending || (isDesktop && localThreads.isPending)
   const isEmpty =
     !cloudPending &&
-    (!isDesktop || !localThreads.isPending) &&
     filteredPinnedItems.length === 0 &&
     repoGroups.length === 0 &&
     recents.length === 0
@@ -713,13 +637,13 @@ export function AgentsSidebar({
     >
       <div
         className={cn(
-          "flex items-center justify-between px-4 pb-4",
-          isDesktop ? "pt-13" : "pt-5"
+          "flex items-center justify-between px-space-4 pb-space-4",
+          isDesktop ? "pt-13" : "pt-space-4"
         )}
       >
         <Link
           to="/my-settings"
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-primary"
+          className="flex items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
           <img
             src={`${import.meta.env.BASE_URL}logo-mark.png`}
@@ -728,7 +652,7 @@ export function AgentsSidebar({
           />
           Open SWE
         </Link>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-space-1">
           <IconButton
             icon={MagnifyingGlassRegularIcon}
             label="Search"
@@ -794,26 +718,26 @@ export function AgentsSidebar({
       <div className="relative flex min-h-0 flex-1 flex-col">
         {scrollEdges.top && (
           <>
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 border-t border-default" />
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-default" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-sticky-header h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
           </>
         )}
         {scrollEdges.bottom && (
           <>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 border-b border-default" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-floating-bar border-b border-default" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-sticky-header h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
           </>
         )}
         <div
           ref={scrollViewport}
-          className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
+          className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2"
           onScroll={measureScrollEdges}
         >
           <SidebarNav
-            className={isDesktop ? "pb-3" : "pb-4"}
+            className={isDesktop ? "pb-space-3" : "pb-space-4"}
             onNavigate={layout.closeOnMobile}
           />
-          {sourcesLoading && allItems.length === 0 && (
+          {cloudPending && allItems.length === 0 && (
             <ThreadListSkeleton compact={prefs.compact} />
           )}
           {cloudError && (
@@ -826,14 +750,8 @@ export function AgentsSidebar({
               }}
             />
           )}
-          {localThreads.isError && (
-            <ThreadSourceError
-              label="Local threads unavailable"
-              onRetry={() => void localThreads.refetch()}
-            />
-          )}
-          {sourcesLoading && allItems.length > 0 && (
-            <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-tertiary">
+          {cloudPending && allItems.length > 0 && (
+            <div className="flex items-center gap-space-2 px-space-2 py-space-2 text-xs text-tertiary">
               <Spinner size="xxs" />
               Loading threads…
             </div>
@@ -842,7 +760,7 @@ export function AgentsSidebar({
           {(filteredPinnedItems.length > 0 ||
             pinnedGroups.length > 0 ||
             (repoMode && noRepoPinned && noRepoAvailable)) && (
-            <section className="mb-3">
+            <section className="mb-space-3">
               <SidebarSectionHeader
                 label="Pinned"
                 collapsed={sectionCollapsed("pinned")}
@@ -878,7 +796,7 @@ export function AgentsSidebar({
 
           {repoMode &&
             (unpinnedGroups.length > 0 || noRepoAvailable || isDesktop) && (
-              <section className="mb-3">
+              <section className="mb-space-3">
                 <SidebarSectionHeader
                   label={workspaceMode ? "Workspaces" : "Repositories"}
                   collapsed={!workspaceMode && sectionCollapsed("repos")}
@@ -931,7 +849,7 @@ export function AgentsSidebar({
             )}
 
           {!repoMode && (
-            <section className="mb-3">
+            <section className="mb-space-3">
               <SidebarSectionHeader
                 label="Recents"
                 collapsed={sectionCollapsed("recents")}
@@ -969,8 +887,8 @@ export function AgentsSidebar({
               )}
             </section>
           )}
-          {isEmpty && !cloudError && !localThreads.isError && (
-            <p className="px-2.5 py-6 text-center text-xs text-tertiary">
+          {isEmpty && !cloudError && (
+            <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
               {hasActiveFilters(prefs.filters)
                 ? "No threads match these filters."
                 : "No threads yet."}
@@ -979,7 +897,7 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 p-2">
+      <div className="flex items-center gap-space-2 p-space-2">
         <div className="min-w-0 flex-1">
           {user ? (
             <SidebarUserMenu user={user} showSettingsLink />
@@ -1037,12 +955,12 @@ function WorkspaceGroupSection({
 }) {
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   return (
-    <div className="mb-1">
+    <div className="mb-space-1">
       <button
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="group/workspace flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
+        className="group/workspace flex w-full items-center gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
       >
         <StackRegularIcon size={14} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
@@ -1055,7 +973,7 @@ function WorkspaceGroupSection({
         />
       </button>
       {!collapsed && (
-        <div className="pl-2">{workspace.repos.map(renderRepoGroup)}</div>
+        <div className="pl-space-2">{workspace.repos.map(renderRepoGroup)}</div>
       )}
     </div>
   )
@@ -1148,13 +1066,13 @@ function RepoGroup({
     : threads.length > REPO_PREVIEW_COUNT || (externalHasMore ?? repo.hasMore)
 
   return (
-    <div className="mb-1">
-      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
+    <div className="mb-space-1">
+      <div className="group/folder flex items-center gap-space-2 rounded-md pr-space-1 pl-space-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
         <button
           type="button"
           onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
+          className="flex min-w-0 flex-1 items-center gap-space-2 py-space-1 text-left"
         >
           <Folder size={16} weight="regular" className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
@@ -1186,19 +1104,21 @@ function RepoGroup({
         <>
           {shown.map((item) => renderRow(item, pullRequestFor(item)))}
           {shown.length === 0 && loading && (
-            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-xs text-tertiary">
+            <div className="flex items-center gap-space-2 py-space-1 pr-space-2 pl-space-5 text-xs text-tertiary">
               <Spinner size="xxs" />
               Loading chats…
             </div>
           )}
           {shown.length === 0 && !loading && !repo.isError && (
-            <p className="py-1 pr-2.5 pl-6 text-xs text-tertiary">No chats</p>
+            <p className="py-space-1 pr-space-2 pl-space-5 text-xs text-tertiary">
+              No chats
+            </p>
           )}
           {repo.isError && (
             <button
               type="button"
               onClick={() => void repo.refetch()}
-              className="w-full py-1 pr-2.5 pl-6 text-left text-xs text-error-secondary"
+              className="w-full py-space-1 pr-space-2 pl-space-5 text-left text-xs text-error-secondary"
             >
               Retry loading chats
             </button>
@@ -1212,7 +1132,7 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-xs text-tertiary transition-colors hover:text-primary disabled:cursor-wait disabled:opacity-60"
+              className="flex w-full items-center gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left text-xs text-tertiary transition-colors hover:text-primary disabled:cursor-wait disabled:opacity-60"
             >
               {loading && <Spinner size="xxs" />}
               {loading ? "Loading…" : "Show more"}
@@ -1240,16 +1160,20 @@ function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
         Loading threads
       </span>
       {groups.map((widths, groupIndex) => (
-        <div key={groupIndex} className={compact ? "mb-2" : "mb-3"} aria-hidden>
-          <div className="flex items-center gap-1 px-2 py-1">
+        <div
+          key={groupIndex}
+          className={compact ? "mb-space-2" : "mb-space-3"}
+          aria-hidden
+        >
+          <div className="flex items-center gap-space-1 px-space-2 py-space-1">
             <Skeleton className="h-2 w-16 rounded-sm" />
           </div>
           {widths.map((width, rowIndex) => (
             <div
               key={rowIndex}
               className={cn(
-                "mb-0.5 flex items-center gap-2 px-2.5",
-                compact ? "h-7 gap-1.5" : "h-8"
+                "mb-0.5 flex items-center gap-space-2 px-space-2",
+                compact ? "h-7 gap-space-2" : "h-8"
               )}
             >
               <Skeleton className="size-3 shrink-0 rounded-full" />
@@ -1270,7 +1194,7 @@ function ThreadSourceError({
   onRetry: () => void
 }) {
   return (
-    <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-secondary">
+    <div className="flex items-center gap-space-2 px-space-2 py-space-2 text-xs text-secondary">
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <Button
         size="xs"
@@ -1323,7 +1247,7 @@ function LoadMoreThreadsOnScroll({
       onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="flex w-full items-center justify-center gap-1.5 py-2 text-xs text-tertiary"
+      className="flex w-full items-center justify-center gap-space-2 py-space-2 text-xs text-tertiary"
     >
       {loading ? (
         <Spinner size="xxs" />
@@ -1337,12 +1261,10 @@ function LoadMoreThreadsOnScroll({
 export function AgentsShell({
   user,
   activeThreadId,
-  activeLocalSessionId,
   children,
 }: {
   user: SessionUser
   activeThreadId?: string
-  activeLocalSessionId?: string
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
@@ -1356,7 +1278,6 @@ export function AgentsShell({
   const activeThread = useSidebarActiveThread({
     activeThreadId,
     loadedThreads: [],
-    includeResolved: true,
     enabled: Boolean(activeThreadId),
   })
   const sidebarCommands = useMemo(() => {
@@ -1435,7 +1356,6 @@ export function AgentsShell({
           <AgentsSidebar
             user={user}
             activeThreadId={activeThreadId}
-            activeLocalSessionId={activeLocalSessionId}
             layout={layout}
           />
           <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">

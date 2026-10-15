@@ -4,6 +4,7 @@ import {
   sidebarThreadForMode,
 } from "./sidebarThreads"
 import {
+  queryOptions,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -591,8 +592,7 @@ export function useDeleteAgentSkill(organization = false) {
 // Sidebar lists and detail reads return the same per-thread summary, so warming
 // the detail cache from the already-fetched sidebar avoids a fan-out of one
 // request per thread. Navigation stays instant; the real (mark-viewed) fetch
-// fires only when a thread is actually opened. The active thread is skipped so
-// its live detail query stays the source of truth.
+// fires only when a thread is actually opened.
 export function useSeedAgentThreadDetails(
   threads: Array<AgentThread>,
   activeThreadId?: string
@@ -601,7 +601,22 @@ export function useSeedAgentThreadDetails(
 
   useEffect(() => {
     for (const thread of threads.flatMap(threadFamily)) {
-      if (thread.id === activeThreadId) continue
+      if (thread.id === activeThreadId) {
+        const key = agentThreadKeys.detail(thread.id)
+        const detail = queryClient.getQueryData<AgentThread>(key)
+        if (detail && thread.updatedAt > detail.updatedAt) {
+          queryClient.setQueryData<AgentThread>(key, {
+            ...detail,
+            updatedAt: thread.updatedAt,
+            traceUrl: thread.traceUrl,
+            sandboxId: thread.sandboxId,
+            sourceUrl: thread.sourceUrl,
+            sourceAppUrl: thread.sourceAppUrl,
+            automationId: thread.automationId,
+          })
+        }
+        continue
+      }
       // Seed as already-stale: the detail GET is what marks a thread viewed
       // server-side, so opening a seeded entry must still refetch despite the
       // detail query's `staleTime` (which exists for the optimistic seed).
@@ -673,22 +688,28 @@ export function useSidebarRepos({
 export function useSidebarActiveThread({
   activeThreadId,
   loadedThreads,
-  includeResolved = false,
   enabled = true,
 }: {
   activeThreadId?: string
   loadedThreads: Array<AgentThread>
-  includeResolved?: boolean
   enabled?: boolean
 }): AgentThread | undefined {
   const hierarchy = useProfile().data?.experimental_task_coordination === true
-  const loaded = loadedThreads
-    .flatMap((thread) => (hierarchy ? threadFamily(thread) : [thread]))
-    .some((thread) => thread.id === activeThreadId)
+  const queryClient = useQueryClient()
+  const detail = useQuery({
+    ...agentThreadDetailOptions(activeThreadId ?? "", queryClient),
+    enabled: false,
+    select: (thread) => sidebarThreadForMode(thread, hierarchy),
+  }).data
+  const loaded = loadedThreads.find((thread) =>
+    (hierarchy ? threadFamily(thread) : [thread]).some(
+      (member) => member.id === activeThreadId
+    )
+  )
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
-    enabled: enabled && Boolean(activeThreadId) && !loaded,
+    enabled: enabled && Boolean(activeThreadId) && !detail && !loaded,
     meta: {
       invalidatedBy: activeThreadId
         ? [invalidationTopic("threads", activeThreadId)]
@@ -704,9 +725,7 @@ export function useSidebarActiveThread({
     select: (thread) => sidebarThreadForMode(thread, hierarchy),
     retry: false,
   })
-  return !loaded && (!query.data?.resolved || includeResolved)
-    ? query.data
-    : undefined
+  return detail ?? loaded ?? query.data
 }
 
 function useSidebarThreadPages(
@@ -812,25 +831,29 @@ export function useSidebarRepoThreads({
 // `agent_cost._RETRY_DELAYS_SECONDS`), after the running-state poll has stopped.
 const RUN_COST_REFETCH_DELAYS_MS = [20_000, 60_000, 120_000]
 
-export function useAgentThread(threadId: string) {
-  const queryClient = useQueryClient()
-  const queryKey = agentThreadKeys.detail(threadId)
-
-  const query = useQuery({
-    queryKey,
-    queryFn: async ({ queryKey: key }) => {
+function agentThreadDetailOptions(threadId: string, queryClient: QueryClient) {
+  return queryOptions({
+    queryKey: agentThreadKeys.detail(threadId),
+    queryFn: async ({ queryKey }) => {
       const thread = await agentsApi.getThread(threadId)
-      const cached = queryClient.getQueryData<AgentThread>(key)
+      const cached = queryClient.getQueryData<AgentThread>(queryKey)
       const pendingMessages = cached?.pendingMessages
       if (!pendingMessages?.length) return thread
       return { ...thread, pendingMessages }
     },
+  })
+}
+
+export function useAgentThread(threadId: string) {
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    ...agentThreadDetailOptions(threadId, queryClient),
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 3000 : false,
+    refetchInterval: (current) =>
+      current.state.data?.status === "running" ? 3000 : false,
     meta: { invalidatedBy: [invalidationTopic("threads", threadId)] },
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch

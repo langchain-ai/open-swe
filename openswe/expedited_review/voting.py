@@ -101,6 +101,7 @@ async def handle_vote(
             pr_url=current.pull_request.url,
             approvers=", ".join(f"@{login}" for login in current.approvers),
         ),
+        title=f"Merge {current.pull_request.repo}#{current.pull_request.number}",
     ):
         woken = "Open SWE could not be woken to merge it; tag it in the thread to try again."
         return Outcome(f"{problem} {woken}" if problem else woken)

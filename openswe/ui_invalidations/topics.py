@@ -21,8 +21,8 @@ from openswe.github.pull_request_key import PullRequestKey
 from openswe.ui_invalidations import outbox
 
 if TYPE_CHECKING:
+    from openswe.github.repo_names import RepoFullName
     from openswe.incidents.models import IncidentId
-    from openswe.review.styles import RepoFullName
 
 logger = logging.getLogger(__name__)
 
@@ -106,17 +106,28 @@ class Topic(BaseTopic):
     THREADS: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: that thread's summary, such as its pending wakeup."""
 
+    ANNOUNCEMENTS: ClassVar[Topic]
+    """Admin announcements and their delivery progress; admins only."""
+
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
 
         With ``conn`` it takes effect when that transaction commits, so call it
         last there. Without, it follows a write Postgres had no part in, such as
-        the Store, and never raises.
+        one to the Agent Server, and never raises.
         """
         await self._publish(conn, self.name)
 
     async def authorize(self, session: Session, keys: set[str]) -> set[str]:
         return keys & {""}
+
+
+class AdminTopic(Topic):
+    """Data only admins may read, invalidated as a whole."""
+
+    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+        admin = is_admin(session.get("email"), login=session.get("sub"))
+        return keys & {""} if admin else set()
 
 
 class KeyedTopic[K: str](BaseTopic):
@@ -160,7 +171,7 @@ async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[s
 
 
 async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
-    # The repository listing reaches the Store, which imports this module.
+    # Imported on use: most of the app imports this module, which stays light.
     from openswe.github.repos import accessible_repo_full_names
 
     try:
@@ -178,7 +189,7 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
 
 
 async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
-    # Thread summaries reach the Store, which imports this module.
+    # Thread summaries import this module.
     from openswe.threads.summary import thread_is_readable
     from openswe.utils.json_types import thread_metadata
     from openswe.utils.thread_ops import langgraph_client
@@ -192,7 +203,7 @@ async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
     for thread_id, thread in zip(ordered, threads, strict=True):
         if isinstance(thread, BaseException):
             logger.warning(
-                "Could not read thread for invalidations",
+                "Could not read thread for queue invalidations",
                 exc_info=thread,
                 extra={"agent_thread_id": thread_id},
             )
@@ -209,3 +220,4 @@ Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
 Topic.THREADS = KeyedTopic("threads", authorize_keys=_readable_threads)
+Topic.ANNOUNCEMENTS = AdminTopic("announcements")

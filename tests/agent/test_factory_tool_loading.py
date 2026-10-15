@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain.agents.middleware.types import ModelRequest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
@@ -40,7 +41,6 @@ def _config() -> RunnableConfig:
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("fake_store")
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
 @pytest.mark.parametrize("github_login", ["octocat", None])
 async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
@@ -180,7 +180,6 @@ async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
     code_mode, ordinary = await server._mcp_code_mode(
         "thread",
         tools,
-        local_run=False,
         additional_tools=[
             "http_request",
             "read_file",
@@ -208,6 +207,26 @@ async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
         [http_tool, file_tool, write_tool, *guarded_tools], code_mode._ptc, self_tool_name="eval"
     )
     assert exposed == [tools[0], http_tool, file_tool, write_tool]
+    state: dict[str, Any] = {"messages": []}
+    state.update(await code_mode.abefore_agent(state, MagicMock()) or {})
+    offered: list[str] = []
+
+    async def model(request: ModelRequest) -> ModelResponse:
+        offered.extend(tool.name for tool in request.tools)
+        assert request.system_message is not None and "httpRequest" in request.system_message.text
+        return ModelResponse(result=[AIMessage(content="")])
+
+    await code_mode.awrap_model_call(
+        ModelRequest(
+            model=MagicMock(),
+            messages=[],
+            tools=[http_tool, file_tool, write_tool, *guarded_tools],
+            state=state,
+            runtime=MagicMock(),
+        ),
+        model,
+    )
+    assert offered == [tool.name for tool in [file_tool, write_tool, *guarded_tools]]
     assert list(ordinary) == tools[1:]
     dynamic = server._integration_middleware(ordinary, set())
     full = server._integration_middleware(tools, set())

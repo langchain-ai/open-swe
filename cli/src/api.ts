@@ -17,8 +17,6 @@ const identitySchema = z.object({
 
 export type Identity = z.infer<typeof identitySchema>
 
-const uploadedThreadSchema = z.object({ id: z.string() })
-
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -239,30 +237,4 @@ export async function exchangeDesktopHandoff(
   if (!session)
     throw new ProtocolError("exchange response is missing a session")
   return session
-}
-
-/** Fill the thread an upload code reserved with a gzipped JSONL transcript; returns its id. */
-export async function uploadSession(
-  backend: string,
-  code: string,
-  gzippedJsonl: Uint8Array
-): Promise<string> {
-  const response = await fetch(`${backend}/dashboard/api/threads/uploads`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${code}`,
-      "Content-Type": "application/x-ndjson",
-      "Content-Encoding": "gzip",
-      Accept: "application/json",
-    },
-    body: gzippedJsonl,
-  })
-  const text = await response.text()
-  if (!response.ok) {
-    throw new ApiError(response.status, detailFrom(response.statusText, text))
-  }
-  const parsed = uploadedThreadSchema.safeParse(parseJson(text))
-  if (!parsed.success)
-    throw new ProtocolError("/threads/uploads response is malformed")
-  return parsed.data.id
 }

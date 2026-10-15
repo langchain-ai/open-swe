@@ -12,17 +12,12 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
-import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 
-import { useNavigate } from "@tanstack/react-router"
-import type { DesktopLegacyLocalThread } from "@/desktop"
 import { useLocalThread } from "@/features/agents/lib/desktopLocal"
-import { useRefreshLegacyLocalThreads } from "@/features/agents/lib/legacyLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
-import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
@@ -43,32 +38,22 @@ import {
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
 import type { ThreadVisibility } from "@/lib/api"
-import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
-function ThreadRepoIndicator({
-  thread,
-  localThread,
-}: {
-  thread?: AgentThread
-  localThread?: DesktopLegacyLocalThread
-}) {
+function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
   const [open, setOpen] = useState(false)
-  const { projects: localRepos } = useDesktopProjects()
   const { prefs } = useSidebarPrefs()
   const session = useSession()
   const cloudRepos = useSidebarRepos({
     ...prefs.filters,
-    enabled: !localThread && Boolean(session.data),
+    enabled: Boolean(session.data),
   })
-  const repo = !localThread ? thread?.repoFullName.trim() : undefined
-  const repoName = localThread
-    ? localRepos.find((candidate) => candidate.cwd === localThread.cwd)?.name
-    : (cloudRepos.data?.find(
-        (candidate) =>
-          candidate.repoFullName.toLowerCase() === repo?.toLowerCase()
-      )?.name ?? (repo ? thread?.repo || repo : undefined))
+  const repo = thread.repoFullName.trim()
+  const repoName =
+    cloudRepos.data?.find(
+      (candidate) => candidate.repoFullName.toLowerCase() === repo.toLowerCase()
+    )?.name ?? (repo ? thread.repo || repo : undefined)
   if (!repoName) return null
 
   return (
@@ -93,7 +78,7 @@ function ThreadRepoIndicator({
 }
 
 const TARGET_ICONS = {
-  Cloud: CloudIcon,
+  Cloud: null,
   "This Mac": LaptopRegularIcon,
   "Local CLI": TerminalIcon,
 }
@@ -104,7 +89,6 @@ export function AgentThreadHeader({
   panelCollapsed,
   thread,
   onRename,
-  localThread,
   visibility,
   onVisibilityChange,
 }: {
@@ -112,17 +96,12 @@ export function AgentThreadHeader({
   target: keyof typeof TARGET_ICONS
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
-  localThread?: DesktopLegacyLocalThread
   thread?: AgentThread
   // Visibility of a thread that does not exist yet.
   visibility?: ThreadVisibility
   onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
-  const navigate = useNavigate()
-  const refreshLocalThreads = useRefreshLegacyLocalThreads()
-  const { prefs, toggleLocalPin } = useSidebarPrefs()
-  const [deletingLocal, setDeletingLocal] = useState(false)
-  const worktreeThread = useLocalThread(thread?.id ?? "") ?? localThread
+  const worktreeThread = useLocalThread(thread?.id ?? "")
   const sidebarCollapsed = useSidebarCollapsed()
   const TargetIcon = TARGET_ICONS[target]
   const isDesktop =
@@ -142,37 +121,14 @@ export function AgentThreadHeader({
   )
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const pinned = localThread
-    ? prefs.pinnedLocalIds.includes(localThread.id)
-    : Boolean(
-        pinnedThreads.data?.some((candidate) => candidate.id === thread?.id)
-      )
-  const archived = localThread
-    ? localThread.archived === true
-    : thread?.resolved === true
-  const isDeleting = deletingLocal || deleteThread.isPending
-  const confirmDelete = async () => {
-    if (isDeleting) return
-    if (!localThread) {
-      if (thread)
-        deleteThread.mutate(thread.id, {
-          onSuccess: () => setDeleteOpen(false),
-        })
-      return
-    }
-    setDeletingLocal(true)
-    try {
-      const deleted = await window.openSweDesktop?.deleteLegacyLocalThread(
-        localThread.id
-      )
-      if (!deleted) throw new Error("Local Open SWE thread not found")
-      refreshLocalThreads(localThread.id)
-      setDeleteOpen(false)
-      void navigate({ to: "/agents" })
-    } catch (error) {
-      reportError({ title: "Couldn't delete thread", error })
-    }
-    setDeletingLocal(false)
+  const pinned = Boolean(
+    pinnedThreads.data?.some((candidate) => candidate.id === thread?.id)
+  )
+  const archived = thread?.resolved === true
+  const isDeleting = deleteThread.isPending
+  const confirmDelete = () => {
+    if (isDeleting || !thread) return
+    deleteThread.mutate(thread.id, { onSuccess: () => setDeleteOpen(false) })
   }
   const [draft, setDraft] = useState<string | null>(null)
   const [savingTitle, setSavingTitle] = useState<string | null>(null)
@@ -186,12 +142,8 @@ export function AgentThreadHeader({
     const next = draft.trim()
     if (!next || next === title) return
     setSavingTitle(next)
-    try {
-      await onRename(next)
-    } catch (error) {
-      // Cloud renames go through a mutation, which reports its own failure.
-      if (localThread) reportError({ title: "Couldn't rename thread", error })
-    }
+    // Renames go through a mutation, which reports its own failure.
+    await onRename(next).catch(() => undefined)
     setSavingTitle(null)
   }
 
@@ -206,7 +158,7 @@ export function AgentThreadHeader({
     if (editingRef.current) event.preventDefault()
   }
   const continueThreadPrivately = () => {
-    if (!thread || localThread || continuePrivately.isPending) return
+    if (!thread || continuePrivately.isPending) return
     continuePrivately.mutate(thread.id)
   }
   const visibilityMenu = thread ? (
@@ -232,30 +184,21 @@ export function AgentThreadHeader({
       }
     />
   ) : null
-  const menuItems = (menu: ThreadMenuKind) => (
+  const menuItems = (menu: ThreadMenuKind, current: AgentThread) => (
     <ThreadMenuItems
       menu={menu}
-      thread={thread ?? null}
-      localThread={localThread}
+      thread={current}
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
       onTogglePin={() => {
-        if (localThread) toggleLocalPin(localThread.id)
-        else if (thread && !pinThread.isPending) {
-          pinThread.mutate({ threadId: thread.id, pinned: !pinned })
+        if (!pinThread.isPending) {
+          pinThread.mutate({ threadId: current.id, pinned: !pinned })
         }
       }}
       onToggleArchived={() => {
-        if (localThread) {
-          void window.openSweDesktop
-            ?.updateLegacyLocalThread({
-              threadId: localThread.id,
-              archived: !archived,
-            })
-            .then(() => refreshLocalThreads(localThread.id))
-        } else if (thread && !resolveThread.isPending) {
-          resolveThread.mutate({ threadId: thread.id, resolved: !archived })
+        if (!resolveThread.isPending) {
+          resolveThread.mutate({ threadId: current.id, resolved: !archived })
         }
       }}
       onDelete={() => setDeleteOpen(true)}
@@ -265,27 +208,25 @@ export function AgentThreadHeader({
   const header = (
     <header
       data-desktop-drag-region=""
-      className="relative z-10 h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
+      className="relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
     >
       <div
         className={cn(
-          "flex h-full w-full items-center gap-3 px-4",
-          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
-          panelCollapsed && "pr-14"
+          "flex h-full w-full items-center gap-space-3 px-space-4",
+          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-space-8"),
+          panelCollapsed && "pr-space-8"
         )}
       >
         {title && (
-          <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
-            {(thread || localThread) && (
-              <ThreadRepoIndicator thread={thread} localThread={localThread} />
-            )}
+          <div className="flex min-w-0 items-center gap-space-1 text-sm font-medium">
+            {thread && <ThreadRepoIndicator thread={thread} />}
             {draft !== null ? (
               <input
                 autoFocus
                 onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
-                className="min-w-0 rounded-md bg-surface-level-2 px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                className="min-w-0 rounded-md bg-surface-level-2 px-space-2 py-space-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 style={{ width: editorWidth }}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -311,7 +252,7 @@ export function AgentThreadHeader({
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                className="min-w-0 truncate rounded-md px-space-2 py-space-1 text-left transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 onClick={startRename}
               >
                 {savingTitle ?? title}
@@ -321,7 +262,7 @@ export function AgentThreadHeader({
                 {title}
               </span>
             )}
-            {(thread || localThread) && (
+            {thread && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <IconButton
@@ -340,28 +281,29 @@ export function AgentThreadHeader({
                   onCloseAutoFocus={keepRenameFocus}
                   className="min-w-[10rem]"
                 >
-                  {menuItems("dropdown")}
+                  {menuItems("dropdown", thread)}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
           </div>
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-space-3">
           <span
             role="img"
             aria-label={`Runs on ${target}`}
             title={target}
+            hidden={!TargetIcon}
             className="text-icon-secondary"
           >
-            <TargetIcon size={16} weight="regular" />
+            {TargetIcon && <TargetIcon size={16} weight="regular" />}
           </span>
-          {!localThread && visibilityMenu}
+          {visibilityMenu}
         </div>
       </div>
     </header>
   )
 
-  if (!thread && !localThread) return header
+  if (!thread) return header
 
   return (
     <>
@@ -371,31 +313,29 @@ export function AgentThreadHeader({
           onCloseAutoFocus={keepRenameFocus}
           className="min-w-[10rem]"
         >
-          {menuItems("context")}
+          {menuItems("context", thread)}
         </ContextMenuContent>
       </ContextMenu>
-      {thread && (
-        <ShareThreadDialog
-          open={shareOpen}
-          onOpenChange={setShareOpen}
-          busy={shareWithWorkspace.isPending}
-          running={thread.status === "running"}
-          onConfirm={() =>
-            shareWithWorkspace.mutate(thread.id, {
-              onSuccess: () => setShareOpen(false),
-            })
-          }
-        />
-      )}
+      <ShareThreadDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        busy={shareWithWorkspace.isPending}
+        running={thread.status === "running"}
+        onConfirm={() =>
+          shareWithWorkspace.mutate(thread.id, {
+            onSuccess: () => setShareOpen(false),
+          })
+        }
+      />
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         threadTitle={title ?? ""}
         isDeleting={isDeleting}
-        onConfirm={() => void confirmDelete()}
+        onConfirm={confirmDelete}
         detail={
           worktreeThread
-            ? worktreeThread.ownedWorktrees?.length
+            ? worktreeThread.ownedWorktrees.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
             : undefined

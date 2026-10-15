@@ -53,7 +53,7 @@ async def read_only_sql(query: str) -> dict[str, object]:
         }
 
     try:
-        async with postgres.read_only_transaction() as conn:
+        async with postgres.untrusted_read_only_transaction() as conn:
             await conn.execute(text(f"SET LOCAL statement_timeout = {_STATEMENT_TIMEOUT_MS}"))
             result = await conn.stream(text(query))
             columns = [str(column) for column in result.keys()]

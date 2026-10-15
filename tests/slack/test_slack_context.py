@@ -9,6 +9,7 @@ from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack import webhook as slack_webhooks
+from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     format_slack_messages_for_prompt,
@@ -350,12 +351,25 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(slack_webhooks, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(webhook_common.User, "login_for_slack", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common.User, "login_for_email", fake_login_for_email)
+
+    async def fake_slack_accounts(user_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+        # Follows whatever login_for_slack the test installs, as the per-user lookup did.
+        logins: dict[str, str] = {}
+        for user_id in {value for value in user_ids if value}:
+            if login := await webhook_common.User.login_for_slack(user_id):
+                logins[user_id] = login
+        return logins, {}
+
+    monkeypatch.setattr(slack_webhooks, "_slack_accounts_by_user_id", fake_slack_accounts)
     monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 
 
 @pytest.mark.asyncio
-async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fake_store):
+@pytest.mark.parametrize("model_choice", [None, ("anthropic:claude-opus-5-5", "max")])
+async def test_web_question_keeps_context_without_slack_delivery(
+    monkeypatch, model_choice: tuple[str, str] | None
+):
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     persisted = AsyncMock(return_value=True)
@@ -374,13 +388,17 @@ async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fa
         bot_user_id="UBOT",
         context_thread_ts="1700000000.000100",
     )
-    assert await slack_webhooks.process_slack_web_mention(request, None)
+    assert await slack_webhooks.process_slack_web_mention(request, None, model_choice=model_choice)
     run = captured["run_create"]
     assert isinstance(run, dict)
     config = run["kwargs"]["config"]["configurable"]
     assert config["source"] == "web"
     assert "slack_thread" not in config
     assert "slack_breakout" not in config
+    if model_choice is not None:
+        assert config["agent_model_id"] == model_choice[0]
+        assert config["agent_effort"] == model_choice[1]
+        assert config["model_selection"] == "explicit"
     assert persisted.await_args.kwargs["visibility"] == "private"
     assert persisted.await_args.kwargs["source_context"] is None
     messages = str(run["kwargs"]["input"])
@@ -391,7 +409,7 @@ async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fa
 
 
 @pytest.fixture
-async def slack_file_mention(monkeypatch, fake_store, registry_db):
+async def slack_file_mention(monkeypatch, registry_db):
     from openswe.sandboxes import lifecycle, state
 
     captured: dict[str, Any] = {}
@@ -434,7 +452,6 @@ async def slack_file_mention(monkeypatch, fake_store, registry_db):
 
     client = slack_webhooks.get_langgraph_client()
     client.threads = Threads()
-    client.store = fake_store
     backends = {}
     monkeypatch.setattr(lifecycle, "client", client)
     monkeypatch.setattr(state, "get_client", lambda: client)
@@ -549,7 +566,7 @@ async def test_slack_file_provisioning_requires_account_and_persisted_thread(
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
 @pytest.mark.parametrize("kitchen_channel", [True, False])
 def test_slack_followup_publishes_as_requester_and_preserves_owner(
-    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool, fake_store
+    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool
 ) -> None:
     import importlib
 
@@ -561,7 +578,6 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     client = slack_webhooks.get_langgraph_client()
-    client.store = fake_store
     saved_metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
     client.threads = _FakeThreadsClient(thread={"metadata": saved_metadata})
     monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
@@ -714,7 +730,7 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
 
 
 @pytest.fixture
-def bot_run(monkeypatch, allowed_bot, fake_store):
+def bot_run(monkeypatch, allowed_bot):
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     monkeypatch.setenv("CONFIGURED_ADMINS", "mason-gh")
@@ -745,7 +761,6 @@ def bot_run(monkeypatch, allowed_bot, fake_store):
 
     client = slack_webhooks.get_langgraph_client()
     client.threads = Threads()
-    client.store = fake_store
     request = SlackRequest(
         channel_id="C123",
         thread_ts="1700000000.000100",
@@ -798,13 +813,13 @@ async def test_bot_started_thread_stays_marked_after_a_person_replies(bot_run):
     assert threads.metadata["triggering_bot"] == "T123:B123"
 
 
-@pytest.mark.parametrize("block", ["removed", "other-owner", "private", "other-bot", "store-error"])
-async def test_bot_authorization_is_checked_before_execution(
-    monkeypatch, bot_run, fake_store, block
-):
+@pytest.mark.parametrize(
+    "block", ["removed", "other-owner", "private", "other-bot", "lookup-error"]
+)
+async def test_bot_authorization_is_checked_before_execution(monkeypatch, bot_run, block):
     request, threads, captured = bot_run
     if block == "removed":
-        await fake_store.delete_item(["allowed_slack_bots"], "T123:B123")
+        await AllowedSlackBot.remove("T123", "B123")
     elif block == "other-owner":
         threads.metadata = {"owner_type": "user", "owner_login": "alice", "visibility": "public"}
     elif block in {"private", "other-bot"}:
@@ -815,7 +830,7 @@ async def test_bot_authorization_is_checked_before_execution(
         else:
             threads.metadata["source_context"]["slack_thread"]["triggering_bot_id"] = "BOTHER"
     else:
-        monkeypatch.setattr(fake_store, "get_item", AsyncMock(side_effect=RuntimeError("offline")))
+        monkeypatch.setattr(AllowedSlackBot, "get", AsyncMock(side_effect=RuntimeError("offline")))
     await slack_webhooks.process_slack_mention(request, None)
     assert "run_create" not in captured
 
@@ -1214,7 +1229,6 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
 )
 async def test_performance_directive_switches_unless_quoted(
     monkeypatch: pytest.MonkeyPatch,
-    fake_store,
     registry_db,
     first_message: bool,
     text: str,

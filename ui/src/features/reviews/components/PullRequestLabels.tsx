@@ -75,7 +75,7 @@ export function PullRequestLabels({
       {shown.map((label) => (
         <span
           key={label.name}
-          className="inline-flex h-5 items-center gap-space-1 rounded-full border border-default px-1.5 text-[11px]"
+          className="inline-flex h-5 items-center gap-space-1 rounded-full border border-default px-space-1 text-xxs"
           title={label.description ?? undefined}
         >
           <span

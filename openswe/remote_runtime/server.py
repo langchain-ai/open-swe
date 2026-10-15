@@ -1,28 +1,19 @@
-"""What remote runtimes call back into, behind the run token.
+"""What Managed Deep Agents runs call back into, behind the run token.
 
-The model's tools are an MCP server at ``/remote-runtime/mcp``; run hooks are
-plain ``POST /remote-runtime/hooks/{hook}`` routes. Both are stateless, so any
-replica answers any call. The middleware verifies the bearer token once per
-request and leaves the verified run for the handlers, which pick the catalog of
-the graph the token was signed for and read the thread and run configuration
-from it, never from arguments.
+Every call is ``POST /remote-runtime/hooks/{hook}`` with a JSON body: the graph's
+catalog, each phase of the run's model loop, and its tool calls (see
+``openswe.remote_runtime.graph``). The middleware verifies the bearer token once
+per request and leaves the verified run for the handler, which picks the graph
+the token was signed for and reads the thread and run configuration from it,
+never from the body.
 """
 
-import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import Awaitable, Callable, Mapping
 from functools import cache
-from typing import Final, Literal, NamedTuple, override
+from typing import Final
 
-from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_http_request
-from fastmcp.server.providers import Provider
-from fastmcp.tools import Tool
-from fastmcp.tools import ToolResult as MCPToolResult
-from fastmcp.utilities.components import FastMCPComponent
-from mcp.types import TextContent
-from pydantic import BaseModel, JsonValue
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -31,54 +22,25 @@ from openswe.remote_runtime.tokens import RemoteRun, RuntimeTokenError, verify_r
 
 logger = logging.getLogger(__name__)
 
-PATH: Final = "/remote-runtime/mcp"
 HOOKS_PATH: Final = "/remote-runtime/hooks/{hook}"
-_SERVER_NAME: Final = "open-swe-remote-runtime"
 _RUN_STATE_KEY: Final = "remote_run"
+_hook_body = TypeAdapter(dict[str, JsonValue])
 
 
 class UnknownHookError(LookupError):
-    """A remote graph called a run hook this backend does not serve."""
+    """A remote graph called a hook this backend does not serve."""
 
 
-class ToolResult(BaseModel):
-    status: Literal["success", "error"]
-    content: JsonValue
-
-
-Call = Callable[[RemoteRun, str, Mapping[str, JsonValue]], Awaitable[ToolResult]]
-Hook = Callable[[RemoteRun, str], Awaitable[JsonValue]]
-
-
-class Catalog(NamedTuple):
-    tools: Callable[[], Sequence[Tool]]
-    call: Call
-    hook: Hook
+Hook = Callable[[RemoteRun, str, Mapping[str, JsonValue]], Awaitable[JsonValue]]
 
 
 @cache
-def _catalogs() -> Mapping[str, Catalog]:
+def _graphs() -> Mapping[str, Hook]:
     # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime import reviewer
+    from openswe.remote_runtime.agent import AGENT
+    from openswe.remote_runtime.reviewer import REVIEWER
 
-    def tools() -> list[Tool]:
-        return [
-            _CatalogTool(
-                name=spec["name"], description=spec["description"], parameters=spec["parameters"]
-            )
-            for spec in reviewer.served_tools()
-        ]
-
-    return {
-        reviewer.ASSISTANT_ID: Catalog(tools=tools, call=reviewer.call_tool, hook=reviewer.run_hook)
-    }
-
-
-def _catalog(run: RemoteRun) -> Catalog:
-    catalog = _catalogs().get(run.assistant_id)
-    if catalog is None:
-        raise PermissionError(f"No remote runtime serves {run.assistant_id}")
-    return catalog
+    return {graph.assistant_id: graph.hook for graph in (AGENT, REVIEWER)}
 
 
 def _scope_run(scope: Scope) -> RemoteRun:
@@ -88,55 +50,25 @@ def _scope_run(scope: Scope) -> RemoteRun:
     return run
 
 
-def _verified_run() -> tuple[RemoteRun, Catalog]:
-    run = _scope_run(get_http_request().scope)
-    return run, _catalog(run)
-
-
-class _CatalogTool(Tool):
-    @override
-    async def run(self, arguments: dict[str, JsonValue]) -> MCPToolResult:
-        run, catalog = _verified_run()
-        try:
-            result = await catalog.call(run, self.name, arguments)
-        except Exception:
-            logger.exception(
-                "Remote runtime call failed",
-                extra={"tool_name": self.name, "thread_id": run.thread_id},
-            )
-            raise
-        text = result.content if isinstance(result.content, str) else json.dumps(result.content)
-        return MCPToolResult(
-            content=[TextContent(type="text", text=text)], is_error=result.status == "error"
-        )
-
-
-class _CatalogProvider(Provider):
-    """The tools of the catalog the request's verified run token was signed for."""
-
-    @override
-    async def _list_tools(self) -> Sequence[Tool]:
-        _, catalog = _verified_run()
-        return catalog.tools()
-
-    @override
-    async def get_tasks(self) -> Sequence[FastMCPComponent]:
-        # Startup asks outside any request; no catalog tool runs as a background task.
-        return []
-
-
-def build_server() -> FastMCP:
-    server = FastMCP(_SERVER_NAME, providers=[_CatalogProvider()])
-    # A run with no catalog must fail the listing, not list as an empty catalog.
-    server.provider_error_strategy = "raise"
-    return server
-
-
-async def _hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     run = _scope_run(scope)
     hook = scope["path_params"]["hook"]
+    graph = _graphs().get(run.assistant_id)
+    if graph is None:
+        await JSONResponse({"detail": f"No remote runtime serves {run.assistant_id}"}, 403)(
+            scope, receive, send
+        )
+        return
+    raw = await Request(scope, receive).body()
     try:
-        result = await _catalog(run).hook(run, hook)
+        body = _hook_body.validate_json(raw) if raw.strip() else {}
+    except ValidationError:
+        await JSONResponse({"detail": "The hook body must be a JSON object"}, status_code=422)(
+            scope, receive, send
+        )
+        return
+    try:
+        result = await graph(run, hook, body)
     except UnknownHookError:
         await JSONResponse({"detail": f"Unknown hook {hook}"}, status_code=404)(
             scope, receive, send
@@ -158,7 +90,7 @@ async def _refuse(scope: Scope, receive: Receive, send: Send, detail: str, chall
 
 
 class RunTokenMiddleware:
-    """Verify the run token on every request and leave the verified run for the handlers."""
+    """Verify the run token on every request and leave the verified run for the handler."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -187,18 +119,4 @@ class RunTokenMiddleware:
         await self.app(scope, receive, send)
 
 
-class Mount(NamedTuple):
-    """The ASGI apps to route at ``PATH`` and ``HOOKS_PATH``, and the lifespan they hold open."""
-
-    app: ASGIApp
-    hooks: ASGIApp
-    lifespan: Callable[[], AbstractAsyncContextManager[object]]
-
-
-def build_mount() -> Mount:
-    app = build_server().http_app(path=PATH, json_response=True, stateless_http=True)
-    return Mount(
-        app=RunTokenMiddleware(app),
-        hooks=RunTokenMiddleware(_hook_endpoint),
-        lifespan=lambda: app.lifespan(app),
-    )
+HOOKS: Final = RunTokenMiddleware(hook_endpoint)

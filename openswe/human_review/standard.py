@@ -25,6 +25,7 @@ import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
+from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
@@ -66,8 +67,8 @@ from openswe.slack.client import (
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
-from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
 from openswe.utils.thread_ops import langgraph_client
@@ -188,6 +189,17 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     if snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
         names = ", ".join(snapshot.failing_checks) or "a required check"
         blockers.append(f"required checks are failing: {names}")
+    return blockers
+
+
+async def review_blockers(pull: PullRequestClient) -> list[str] | None:
+    """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
+    readiness = await Readiness.assess(pull)
+    if readiness is None:
+        return None
+    blockers = request_blockers(readiness.snapshot)
+    if await User.for_login("github", readiness.snapshot.author) is None:
+        blockers.append("its author is not an Open SWE user")
     return blockers
 
 
@@ -368,10 +380,10 @@ async def _request_review(
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
 
-    readiness = await Readiness.assess(pull)
-    if readiness is None:
+    blockers = await review_blockers(pull)
+    if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
-    if blockers := request_blockers(readiness.snapshot):
+    if blockers:
         return _failure(
             f"{pr_ref.url} cannot be put up for review: "
             + "; ".join(blockers)
@@ -386,8 +398,6 @@ async def _request_review(
     if recorded is None:
         return _failure("Pull request is unavailable")
     pull_request, details = recorded
-    if await User.for_login("github", details.author) is None:
-        return _failure("Human review is only available for PRs authored by Open SWE users.")
     if origin.thread_id:
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
 
@@ -631,6 +641,10 @@ async def assign(
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
+    if not replace and not await PROFILES.allows_auto_human_review(
+        user.github_login or github_login
+    ):
+        return _failure(f"@{github_login} opted out of automatic review picks; pick someone else.")
     if (previous := request.participant(user.id)) is not None and previous.decision == "expired":
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
@@ -701,6 +715,8 @@ async def assign(
         dm_text = (
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
+        if not replace and (base := dashboard_base_url()):
+            dm_text += f" <{base}/my-settings/agent|Turn off automatic review picks>."
         origin = added.dm_origin
         sent = await send_dm_with_location(
             user.slack_user_id,
@@ -937,6 +953,13 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     states = await latest_review_states(pull, snapshot.author)
     if states is None:
         return False
+    await ReviewPicks(request).complete(
+        {
+            login.lower()
+            for login, state in states.items()
+            if state in {"APPROVED", "CHANGES_REQUESTED"}
+        }
+    )
     if request.kind == "posted":
         await _settle_posted(request, pull, snapshot, states)
         return True
@@ -1165,31 +1188,9 @@ async def _wake_picker(
             await _schedule(request, "unclaimed", _DEADLINE_RETRY)
             return False
         return True
-    if request.thread_id:
-        return await ReviewCard(request).notify_agent(text)
-    login = requester.login_for("github") if requester is not None else ""
-    if not login:
-        logger.info(
-            "Unclaimed review request has no agent thread or requester to wake",
-            extra={"request_id": str(request.id)},
-        )
-        return False
-
-    async def record_thread(thread_id: str) -> None:
-        async with HumanReviewRequest.locked(request.id) as (_, row):
-            if row is not None:
-                row.thread_id = thread_id
-
-    await dispatch_pull_request_prompt(
-        pr.owner,
-        pr.repo,
-        pr.number,
-        login,
-        text,
-        title=f"Pick a reviewer for {pr.repo}#{pr.number}",
-        before_dispatch=record_thread,
+    return await ReviewCard(request).notify_agent(
+        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}", unlisted=True
     )
-    return True
 
 
 async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:

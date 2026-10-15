@@ -38,7 +38,7 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xxs font-medium",
+        "inline-flex shrink-0 items-center gap-space-2 rounded-full border px-space-2 py-0.5 text-xxs font-medium",
         {
           "border-brand bg-brand-subtle text-brand-primary": [
             "pending",
@@ -118,7 +118,7 @@ export function ExternalLink({
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
-        "inline-flex items-center gap-1.5 hover:underline",
+        "inline-flex items-center gap-space-2 hover:underline",
         className
       )}
     >
@@ -145,7 +145,7 @@ export function CitedText({
             <ExternalLink
               key={source.id}
               href={source.url}
-              className="mx-0.5 text-[10px] font-medium text-brand-primary [&_svg]:hidden"
+              className="mx-0.5 text-xxs font-medium text-brand-primary [&_svg]:hidden"
             >
               <span
                 aria-label={`Evidence ${evidenceIndex + 1}: ${source.source}`}

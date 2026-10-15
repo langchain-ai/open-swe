@@ -97,7 +97,7 @@ function OptionRow({
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       className={cn(
-        "flex w-full items-center gap-space-2 px-space-3 py-1.5 text-left text-xs whitespace-nowrap transition-colors",
+        "flex w-full items-center gap-space-2 px-space-3 py-space-1 text-left text-xs whitespace-nowrap transition-colors",
         selected ? "text-primary" : "text-secondary",
         focused && "bg-elevated-hover",
         disabled
@@ -401,7 +401,7 @@ export function ModelPicker({
                 <>
                   <SectionHeading>Context</SectionHeading>
                   <div
-                    className="flex items-center gap-space-2 px-space-3 py-1.5 text-xs text-primary"
+                    className="flex items-center gap-space-2 px-space-3 py-space-1 text-xs text-primary"
                     title="Context window reported for this model"
                   >
                     <span className="min-w-0 flex-1 truncate">
@@ -432,7 +432,7 @@ export function ModelPicker({
               </div>
             </>
           ) : (
-            <p className="px-space-3 py-1.5 text-xs text-tertiary">
+            <p className="px-space-3 py-space-1 text-xs text-tertiary">
               Model and reasoning are chosen when the thread starts.
             </p>
           )}
@@ -491,7 +491,7 @@ export function ModelPicker({
                   />
                 )}
                 {filteredModels.length === 0 ? (
-                  <p className="px-space-3 py-1.5 text-xs text-tertiary">
+                  <p className="px-space-3 py-space-1 text-xs text-tertiary">
                     No matches
                   </p>
                 ) : (

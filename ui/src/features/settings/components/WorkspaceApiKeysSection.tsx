@@ -67,10 +67,10 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
 
   return (
     <SettingsSection
-      title="API keys"
+      title="API Keys"
       description="Workspace-scoped keys for the CLI and automation. Keys can start system threads, not personal threads. Only admins can manage them."
     >
-      <div className="space-y-4 px-space-4 py-3.5">
+      <div className="space-y-space-4 px-space-4 py-space-3">
         {keys.isPending ? (
           <p className="text-sm text-secondary">Loading API keys…</p>
         ) : keys.isError ? (
@@ -84,9 +84,9 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
             {keys.data.map((key) => (
               <li
                 key={key.id}
-                className="flex flex-wrap items-center justify-between gap-3 py-3"
+                className="flex flex-wrap items-center justify-between gap-space-3 py-space-3"
               >
-                <div className="space-y-1">
+                <div className="space-y-space-1">
                   <p className="text-sm font-medium text-primary">
                     {key.name}{" "}
                     <span className="font-mono text-xs text-secondary">
@@ -126,7 +126,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
           </ul>
         )}
         {secret ? (
-          <div className="space-y-3 rounded-md border border-default p-space-3">
+          <div className="space-y-space-3 rounded-md border border-default p-space-3">
             <p className="text-sm font-medium text-primary">
               Copy your key now. It won’t be shown again.
             </p>
