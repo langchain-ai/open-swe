@@ -83,14 +83,6 @@ function parseToolArgs(raw: unknown): Record<string, unknown> {
   return {}
 }
 
-/** Only the last prose chunk of an agent turn survives; the earlier ones were partial. */
-export function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
-  const textIndices = chunks.flatMap((c, i) => (c.kind === "text" ? [i] : []))
-  if (textIndices.length <= 1) return chunks
-  const lastText = textIndices[textIndices.length - 1]
-  return chunks.filter((c, i) => c.kind !== "text" || i === lastText)
-}
-
 type AgentTurn = {
   id: string
   author: Message["author"]
@@ -284,7 +276,7 @@ export function streamMessagesToUi(
 
   const flushAgentTurn = () => {
     if (!agentTurn) return
-    uiMessages.push({ ...agentTurn, chunks: mergeTextChunks(agentTurn.chunks) })
+    uiMessages.push(agentTurn)
     agentTurn = null
   }
 
