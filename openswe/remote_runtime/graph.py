@@ -9,7 +9,8 @@ own middleware, which the MDA run hands each phase of its loop to:
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``before_model`` runs every ``before_model`` hook (follow-up queue, event matches,
   proxy refresh, task coordination, model routing), then renders the system prompt
-  through the graph's own model-call middleware and names the model to call
+  through the graph's own model-call middleware, rehydrates binary messages,
+  and names the model to call
 - ``model_result`` lets the transcript and usage middleware observe each response
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
@@ -35,7 +36,6 @@ from functools import partial
 from typing import Final, Literal, Protocol, cast, get_args, runtime_checkable
 from uuid import uuid4
 
-from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -90,7 +90,6 @@ logger = logging.getLogger(__name__)
 _MDA_TOOLS: Final = frozenset({"task", "eval"})
 # Model-call middleware that is MDA's own, or that observes rather than shapes a call.
 _NOT_PROMPT_SHAPING: Final = (
-    FilesystemMiddleware,
     CodeInterpreterMiddleware,
     ConversationOffloadingMiddleware,
     TranscriptMiddleware,
@@ -377,8 +376,8 @@ class RunSession:
             model_settings={},
         )
 
-    async def system_prompt(self, state: Mapping[str, object], runtime: Runtime) -> str:
-        """The system prompt the graph's own model-call middleware would send."""
+    async def model_request(self, state: Mapping[str, object], runtime: Runtime) -> ModelRequest:
+        """The prompt and messages the graph's own model-call middleware would send."""
         captured: list[ModelRequest] = []
 
         async def capture(request: ModelRequest) -> ModelResponse:
@@ -390,10 +389,9 @@ class RunSession:
             for m in self.surface.middleware
             if _overrides(m, "awrap_model_call") and not isinstance(m, _NOT_PROMPT_SHAPING)
         ]
-        await _chain(shaping, capture)(self._request(state, runtime))
-        if not captured or captured[0].system_message is None:
-            return ""
-        return captured[0].system_message.text
+        request = self._request(state, runtime)
+        await _chain(shaping, capture)(request)
+        return captured[0] if captured else request
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
         """The model the graph's model selection would call next."""
@@ -558,7 +556,23 @@ class RemoteGraph:
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
                 fallback = fallback_model_choice(model.model_id)
-                reply["system_prompt"] = await session.system_prompt(state, runtime)
+                request = await session.model_request(state, runtime)
+                originals = {message.id: message for message in _as_list(state.get("messages"))}
+                result.messages.extend(
+                    dump_messages(
+                        _with_ids(
+                            [
+                                message
+                                for message in request.messages
+                                if originals.get(message.id) != message
+                            ]
+                        )
+                    )
+                )
+                reply["messages"] = result.messages
+                reply["system_prompt"] = (
+                    request.system_message.text if request.system_message is not None else ""
+                )
                 reply["model"] = _model_spec(model).model_dump()
                 reply["fallback"] = None if fallback is None else _model_spec(fallback).model_dump()
                 reply["use_gateway"] = session.models.use_gateway

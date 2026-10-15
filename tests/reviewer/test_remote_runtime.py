@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 import jwt
 import pytest
@@ -175,6 +176,138 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     assert "eval" not in names
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     assert catalog["also_from_code"] == ["read_file"]
+
+
+@pytest.mark.parametrize(
+    ("remote", "missing"),
+    [(True, False), (True, True), (False, False)],
+    ids=["mda-image", "mda-missing-blob", "backend-image"],
+)
+async def test_read_file_images_reach_anthropic_with_a_source(
+    tmp_path: Path, remote: bool, missing: bool
+) -> None:
+    import base64
+    import hashlib
+
+    from deepagents.backends import FilesystemBackend
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from langchain.agents import create_agent
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain_anthropic import ChatAnthropic
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.messages import (
+        AIMessage,
+        BaseMessage,
+        HumanMessage,
+        ToolCall,
+        ToolMessage,
+        messages_from_dict,
+        messages_to_dict,
+    )
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.graph.message import add_messages
+    from langgraph.runtime import Runtime
+    from PIL import Image
+
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+
+    image_path = tmp_path / "screenshot.png"
+    Image.new("RGB", (1, 1)).save(image_path)
+    image_bytes = image_path.read_bytes()
+    digest = hashlib.sha256(image_bytes).hexdigest()
+    filesystem = FilesystemMiddleware(
+        backend=FilesystemBackend(root_dir=tmp_path), offload_binary_content=True
+    )
+    model = ChatAnthropic(model="claude-opus-5-5", api_key="test-key")
+
+    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
+        surface.graph = create_agent(FakeListChatModel(responses=[]), middleware=[filesystem])
+        surface.middleware = [filesystem]
+        choice = ModelChoice("anthropic:claude-opus-5-5", {})
+        surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
+
+    async def start_models(config: RunnableConfig) -> object:
+        raise AssertionError("not asked for")
+
+    graph = RemoteGraph("reviewer", build, start_models)
+    call = ToolCall(name="read_file", args={"file_path": "/screenshot.png"}, id="read-png")
+    result = await graph.hook(
+        RUN,
+        "call",
+        {
+            "run_id": "image-run",
+            "name": call["name"],
+            "arguments": call["args"],
+            "tool_call_id": call["id"],
+        },
+    )
+    assert isinstance(result, dict)
+    [tool_message] = messages_from_dict([result["message"]])
+    assert isinstance(tool_message, ToolMessage)
+    assert tool_message.content == [
+        {"type": "image", "deepagents_blob": digest, "mime_type": "image/png"}
+    ]
+    assert (tmp_path / "blobs" / digest).read_bytes() == image_bytes
+    if missing:
+        (tmp_path / "blobs" / digest).unlink()
+    history = [
+        HumanMessage(content="Check the screenshot.", id="user"),
+        AIMessage(content="", tool_calls=[call], id="reader"),
+        tool_message,
+    ]
+    captured: list[BaseMessage] = []
+
+    async def capture(request: ModelRequest) -> ModelResponse:
+        captured.extend(request.messages)
+        return ModelResponse(result=[AIMessage(content="Seen.")])
+
+    async def shape(runtime: Runtime) -> None:
+        await filesystem.awrap_model_call(
+            ModelRequest(
+                model=model, messages=history, state={"messages": history}, runtime=runtime
+            ),
+            capture,
+        )
+
+    for _ in range(2):
+        if remote:
+            reply = await graph.hook(
+                RUN,
+                "before_model",
+                {"run_id": "image-run", "messages": messages_to_dict(history)},
+            )
+            assert isinstance(reply, dict)
+            model_messages = add_messages(history, messages_from_dict(reply["messages"]))
+        else:
+            captured.clear()
+            await in_graph_context({}, shape)
+            model_messages = captured
+        payload = model._get_request_payload(model_messages)
+        [tool_result] = payload["messages"][-1]["content"]
+        assert tool_result["type"] == "tool_result"
+        if missing:
+            assert tool_result["content"] == [
+                {
+                    "type": "text",
+                    "text": "[Binary content from an earlier read_file call is no longer available. Re-read the file if you still need it.]",
+                }
+            ]
+        else:
+            assert tool_result["content"] == [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": base64.b64encode(image_bytes).decode("ascii"),
+                    },
+                }
+            ]
+        assert tool_message.content == [
+            {"type": "image", "deepagents_blob": digest, "mime_type": "image/png"}
+        ]
 
 
 class _LocalThreads:
