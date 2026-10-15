@@ -126,11 +126,6 @@ export interface ChatComposerProps {
     images: Array<ImageChunk>,
     options?: SubmitOptions
   ) => void | Promise<void>
-  /**
-   * Enter on an empty composer while a run is live. The thread view uses it to
-   * send the next queued message now.
-   */
-  onEmptySubmit?: () => void
   /** What a message sent while a run is live does; drives copy only. */
   followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
@@ -272,7 +267,6 @@ export const ChatComposer = memo(function ChatComposer({
   activeRun,
   onStop,
   onSubmit,
-  onEmptySubmit,
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
@@ -557,16 +551,6 @@ export const ChatComposer = memo(function ChatComposer({
       if (key === "Enter" && !event.shiftKey) {
         if (canSubmit) {
           void handleSubmit({ alternate: event.metaKey || event.ctrlKey })
-        } else if (
-          composerEmpty &&
-          busy &&
-          !disabled &&
-          !isSubmitting &&
-          onEmptySubmit
-        ) {
-          // Only a truly empty composer sends the queue head. A draft that
-          // cannot be sent (images on a text-only model) must stay put.
-          onEmptySubmit()
         }
         // Swallow it either way: a bare Enter must never insert a newline in a
         // composer whose Enter means "send".
@@ -576,15 +560,10 @@ export const ChatComposer = memo(function ChatComposer({
     },
     [
       activeItem,
-      busy,
       canSubmit,
       commandItems,
-      composerEmpty,
-      disabled,
       handleSubmit,
-      isSubmitting,
       menuOpen,
-      onEmptySubmit,
       selectCommandItem,
       triggerKey,
     ]

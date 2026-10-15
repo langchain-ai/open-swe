@@ -458,39 +458,6 @@ export function AgentThreadView({
     },
     [restoreQueuedAutoSelection, source, thread.id]
   )
-  const steerInFlightRef = useRef(false)
-  // Send now: the follow-up leaves the queue and goes into the live run.
-  const steerQueued = useCallback(
-    async (entry: QueuedTurn) => {
-      if (steerInFlightRef.current || entry.runId === null) return
-      steerInFlightRef.current = true
-      try {
-        const images = await materializeQueuedImages(entry)
-        if (images === null) return
-        await withdrawQueued(entry)
-        sendMessage.mutate({ content: queuedText(entry), images })
-      } catch (error) {
-        reportError({ title: "Couldn't send the queued message now", error })
-      } finally {
-        steerInFlightRef.current = false
-      }
-    },
-    [materializeQueuedImages, sendMessage, withdrawQueued]
-  )
-  const steerQueuedMessage = useCallback(
-    (id: string) => {
-      const entry = queued.find((candidate) => candidate.message.id === id)
-      if (entry) void steerQueued(entry)
-    },
-    [queued, steerQueued]
-  )
-  // Enter on an empty composer sends the head of the queue now.
-  const steerNextQueuedMessage = useCallback(() => {
-    const entry = queued.find(
-      (candidate) => candidate.runId !== null && isOwnQueued(candidate)
-    )
-    if (entry) void steerQueued(entry)
-  }, [isOwnQueued, queued, steerQueued])
   const removeQueuedMessage = useCallback(
     (id: string) => {
       const entry = queued.find((candidate) => candidate.message.id === id)
@@ -939,9 +906,6 @@ export function AgentThreadView({
                   onOpenFile={handleOpenFile}
                   loadEarlier={loadEarlier}
                   queuedMessages={queuedRows}
-                  onSteerQueuedMessage={
-                    canPost ? steerQueuedMessage : undefined
-                  }
                   onRemoveQueuedMessage={
                     canPost ? removeQueuedMessage : undefined
                   }
@@ -998,7 +962,6 @@ export function AgentThreadView({
                 activeRun={activeRun}
                 onStop={stopRun}
                 onSubmit={submitWithExcerpts}
-                onEmptySubmit={steerNextQueuedMessage}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
