@@ -155,8 +155,10 @@ from openswe.model_request import (
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
+from openswe.review.session import REVIEW_SCOUT_SOURCE
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
+from openswe.review_scout.middleware import REVIEW_SCOUT_TOOLS, ReviewScoutMiddleware
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -1510,12 +1512,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
 
     local_run = is_desktop_run(cfg)
     stop_summary_mode = cfg.stop_summary is True
+    scout_run = cfg.source == REVIEW_SCOUT_SOURCE
     workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
     # MCP loading needs only who the run acts for and where, and it is the slowest
     # lookup here, so it overlaps the settings and access lookups below.
     mcp_tools_task = (
         asyncio.ensure_future(_run_mcp_tools(thread_id, credential_login, workspace))
-        if not stop_summary_mode and not local_run and credential_scope_known
+        if not stop_summary_mode and not scout_run and not local_run and credential_scope_known
         else None
     )
     task_coordination = (
@@ -1919,6 +1922,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
+    elif scout_run:
+        static_tools = apply_tool_descriptions(list(REVIEW_SCOUT_TOOLS))
     if prefer_tools_in_sandbox:
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in CURL_REPLACED_TOOLS
@@ -2156,6 +2161,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 if guide is not None
                 else []
             ),
+            *([ReviewScoutMiddleware(thread_id=thread_id, config=config)] if scout_run else []),
             TranscriptMiddleware(),
             *([client_tools] if client_tools else []),
             *([IncidentMiddleware(incident_session)] if incident_session is not None else []),

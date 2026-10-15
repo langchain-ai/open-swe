@@ -50,6 +50,7 @@ from openswe.input_messages import (
     build_run_input,
 )
 from openswe.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
+from openswe.review.session import REVIEW_SCOUT_SOURCE
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
@@ -60,9 +61,6 @@ logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
 LangGraphRunConfig = dict[str, Any]
-
-
-_PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
 
 
 class RunMetadata(BaseModel):
@@ -76,7 +74,8 @@ class RunMetadata(BaseModel):
     @classmethod
     def of_run(cls, assistant_id: str, config: LangGraphRunConfig | None) -> Self:
         cfg = RunConfig.from_config(config)
-        if assistant_id not in _PULL_REQUEST_GRAPHS or cfg.repo is None or cfg.pr_number is None:
+        shown = assistant_id == "reviewer" or cfg.source == REVIEW_SCOUT_SOURCE
+        if not shown or cfg.repo is None or cfg.pr_number is None:
             return cls()
         return cls(pull_request=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number))
 

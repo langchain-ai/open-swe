@@ -31,7 +31,7 @@ code runs for real.
 | Run-completion webhook (`/webhooks/run-complete`)                | **real** — LangGraph delivers it for every dispatched run; `langgraph.e2e.json` allows the loopback URL production rejects |
 | Submitted PR reviews, conditional merge, collaborator permission  | **fake** (`/fake-gh/...`), enforcing self-approval and head-SHA rules      |
 | Review page chat (`chat` graph) and its diff/comment/review tools | **real**; PR contents, compare and inline comments served by `/fake-gh`    |
-| Review scout sandbox                                              | **fake** (`patches.py`) — provisioning fails after a delay, so a scout run ends in a known error |
+| Review scout checkout                                             | **fake** (`patches.py`) — the checkout fails after a delay, so a scout run ends in a known error |
 | `users` rows + provider identities for the named test users      | **real** (seeded through `User.sign_in` / `link`)                          |
 
 The fake GitHub/Slack stores are the single source of truth the mock UIs render,

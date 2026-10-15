@@ -19,6 +19,8 @@ from openswe.utils.thread_participants import participant_metadata
 logger = logging.getLogger(__name__)
 
 REVIEW_CHAT_SOURCE = "review_chat"
+# A coding agent run that plans the PR's walkthrough, on the PR's scout thread.
+REVIEW_SCOUT_SOURCE = "review-scout"
 
 WalkthroughState = Literal["building", "ready", "failed"]
 PullRequestState = Literal["draft", "open", "merged", "closed"]
