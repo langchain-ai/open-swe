@@ -159,6 +159,7 @@ def test_failed_startup_stops_runner_and_command(
     state_path = tmp_path / "tasks" / "test-startup" / "state.json"
     state = json.loads(state_path.read_text())
     assert state["status"] == "stopped"
+    assert (state_path.parent / "notify.done").is_dir()
     time.sleep(4)
     assert not marker.exists()
     with pytest.raises(ProcessLookupError):

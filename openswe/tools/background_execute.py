@@ -221,6 +221,8 @@ def _runner(
                 pass
         exit_code = process.wait()
         flush()
+        if cancelled:
+            os.makedirs(os.path.join(task_dir, "notify.done"), exist_ok=True)
         write_state(status, process.pid, exit_code)
         if not cancelled:
             notify_complete()
