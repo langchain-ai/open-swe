@@ -126,6 +126,57 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
+async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
+    """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
+    from langchain.agents import create_agent
+    from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.tools import StructuredTool
+    from langchain_quickjs import CodeInterpreterMiddleware
+
+    from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+
+    def integration(name: str) -> StructuredTool:
+        async def run(query: str) -> str:
+            return query
+
+        return StructuredTool.from_function(coroutine=run, name=name, description=name)
+
+    async def build(config: object, surface: ToolSurface) -> None:
+        surface.dynamic = DynamicToolMiddleware(
+            {"MCP": [integration("mcp_search"), integration("mcp.dotted")]}
+        )
+        core = [integration(name) for name in ("read_file", "manage_thread", "slack_reply")]
+        middleware: list[AgentMiddleware] = [
+            surface.dynamic,
+            CodeInterpreterMiddleware(ptc=[integration("mcp_search")]),
+        ]
+        surface.graph = create_agent(
+            FakeListChatModel(responses=[]), tools=core, middleware=middleware
+        )
+        surface.code_mode = True
+        surface.middleware = middleware
+        choice = ModelChoice("openai:gpt-6.1-sol", {})
+        surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
+
+    async def start_models(cfg: object) -> object:
+        raise AssertionError("not asked for")
+
+    graph = RemoteGraph("agent", build, start_models)
+    catalog = await graph.hook(RUN, "catalog", {"run_id": "run-1"})
+
+    assert isinstance(catalog, dict)
+    tools = catalog["tools"]
+    assert isinstance(tools, list)
+    names = {tool["name"] for tool in tools if isinstance(tool, dict)}
+    assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
+    assert "eval" not in names
+    assert catalog["code_only"] == ["manage_thread", "mcp_search"]
+    assert catalog["also_from_code"] == ["read_file"]
+
+
 class _LocalThreads:
     """The local Agent Server's threads, as the MDA proxy reads and claims them."""
 
@@ -311,6 +362,40 @@ async def test_mda_proxy_acts_only_on_requests_the_agent_server_authenticates(
     assert reached_here == []
     assert forwarded == []
     assert local[FRESH_THREAD]["metadata"] == {"owner_login": "ada"}
+
+
+@pytest.mark.parametrize(
+    ("permissions", "is_forwarded"), [([], False), (["openswe:backend"], True)]
+)
+async def test_mda_proxy_forwards_only_the_backend_under_custom_auth(
+    monkeypatch: pytest.MonkeyPatch, permissions: list[str], is_forwarded: bool
+) -> None:
+    from langgraph_api import config
+    from langgraph_api.auth import middleware as auth
+    from starlette.authentication import AuthCredentials, AuthenticationBackend, SimpleUser
+    from starlette.middleware import Middleware
+    from starlette.requests import HTTPConnection
+
+    class SignedIn(AuthenticationBackend):
+        async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, SimpleUser]:
+            return AuthCredentials(permissions), SimpleUser("ada")
+
+    monkeypatch.setattr(config, "USES_CUSTOM_AUTH", True)
+    monkeypatch.setattr(
+        auth,
+        "auth_middleware",
+        Middleware(
+            auth.ConditionalAuthenticationMiddleware, backend=SignedIn(), on_error=auth.on_error
+        ),
+    )
+    local, run_body = _fresh_run(owner="ada", starter="ada")
+
+    reached_here, forwarded = await _through_proxy(
+        monkeypatch, local, "POST", f"/threads/{FRESH_THREAD}/runs", run_body
+    )
+
+    assert bool(forwarded) is is_forwarded
+    assert reached_here == ([] if is_forwarded else [f"/threads/{FRESH_THREAD}/runs"])
 
 
 @pytest.mark.parametrize(("workspace", "claimed"), [("platform", True), ("default", False)])

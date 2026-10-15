@@ -28,6 +28,7 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from openswe.api.agent_server_auth import backend_call
 from openswe.config import ENV
 from openswe.jobs import queue
 from openswe.remote_runtime.asgi import (
@@ -117,6 +118,10 @@ class ThreadRouter:
         await self._authenticated(scope, receive, send)
 
     async def _route(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not backend_call(scope):
+            # The Agent Server, which keeps a copy of every thread, applies its rules to others.
+            await self.app(scope, receive, send)
+            return
         path: str = scope["path"]
         method: str = scope["method"]
         body = await read_body(receive)

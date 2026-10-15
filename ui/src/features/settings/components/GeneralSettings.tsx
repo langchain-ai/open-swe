@@ -188,7 +188,7 @@ export function GeneralSettings() {
         />
         <SettingsRow
           label="Follow-up behavior"
-          description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
+          description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message."
           control={
             <Select
               aria-label="Follow-up behavior"

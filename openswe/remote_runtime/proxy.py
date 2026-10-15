@@ -37,6 +37,7 @@ from pydantic import JsonValue, TypeAdapter
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from openswe.api.agent_server_auth import backend_call
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.remote_runtime.asgi import (
     configurable_of,
@@ -378,7 +379,7 @@ class MdaThreadProxy:
 
     async def _route(self, scope: Scope, receive: Receive, send: Send) -> None:
         runtime = self.runtime()
-        if runtime is None:
+        if runtime is None or not backend_call(scope):
             await self.app(scope, receive, send)
             return
         path: str = scope["path"]

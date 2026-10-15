@@ -726,7 +726,7 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 1")
     expect(
-      await screen.findByRole("button", { name: "Choose how to merge" })
+      await screen.findByRole("button", { name: "Squash and merge" })
     ).toBeTruthy()
     await chooseMergeMethod(1, "Rebase merge")
     fireEvent.click(screen.getByRole("button", { name: "Rebase and merge" }))
@@ -775,7 +775,7 @@ describe("My PRs", () => {
     expect(await mergeOptions(2)).toEqual(["Squash merge", "Merge commit"])
     const pair = screen.getByText("Change 2").closest("li")!
     expect(
-      within(pair).getByRole("button", { name: "Choose how to merge" })
+      within(pair).getByRole("button", { name: "Squash and merge" })
     ).toBeTruthy()
     fireEvent.click(only)
     await waitFor(() =>

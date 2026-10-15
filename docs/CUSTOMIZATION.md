@@ -150,6 +150,8 @@ Either variable can be set independently. When only the model is set, `medium` i
 
 These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
+Forked tasks configured with the main model reuse its model instance and reasoning effort for prompt-cache compatibility. A different subagent model retains its own effort but cannot share the main model's cache.
+
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
 ### Switching models

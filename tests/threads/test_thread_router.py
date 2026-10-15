@@ -405,3 +405,35 @@ async def test_with_dual_writes_a_failed_copy_is_retried_from_a_job(
     await router.sync_thread(THREAD)
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.metadata == {"title": "Fix it"}
+
+
+@pytest.mark.parametrize(("permissions", "from_index"), [([], False), (["openswe:backend"], True)])
+async def test_under_custom_auth_only_the_backend_is_answered_from_the_index(
+    monkeypatch: pytest.MonkeyPatch, permissions: list[str], from_index: bool
+) -> None:
+    from langgraph_api import config
+    from langgraph_api.auth import middleware as auth
+    from starlette.authentication import AuthCredentials, AuthenticationBackend, SimpleUser
+    from starlette.middleware import Middleware
+    from starlette.requests import HTTPConnection
+
+    class SignedIn(AuthenticationBackend):
+        async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, SimpleUser]:
+            return AuthCredentials(permissions), SimpleUser("ada")
+
+    monkeypatch.setattr(config, "USES_CUSTOM_AUTH", True)
+    monkeypatch.setattr(
+        auth,
+        "auth_middleware",
+        Middleware(
+            auth.ConditionalAuthenticationMiddleware, backend=SignedIn(), on_error=auth.on_error
+        ),
+    )
+    harness = _Harness(monkeypatch)
+    await index.create(THREAD, runtime="local", metadata={"owner_login": "bob"})
+
+    _, read = await harness.request("GET", f"/threads/{THREAD}")
+
+    # Anyone else's call reaches the Agent Server, whose rules show ada only her own threads.
+    assert harness.reached_here == ([] if from_index else [f"/threads/{THREAD}"])
+    assert (isinstance(read, dict) and read.get("metadata") == {"owner_login": "bob"}) is from_index
