@@ -1953,7 +1953,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     thread_roots = {BLOBS_ROUTE: ""}
     if bridge_client is not None:
         # A bridged machine's filesystem root is not writable, so offloads fail there.
-        thread_roots |= {route: route.rstrip("/") for route in ARTIFACT_ROUTES}
+        thread_roots |= {route: route.strip("/") for route in ARTIFACT_ROUTES}
     for route, root in thread_roots.items():
         skill_routes[route] = StoreBackend(
             store=ThreadBlobs(thread_id, root),

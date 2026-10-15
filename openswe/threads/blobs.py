@@ -35,7 +35,11 @@ def blob_namespace(thread_id: str) -> tuple[str, str]:
 
 
 class ThreadBlobs(AgentStore):
-    """One thread's files under ``root``, as the store deepagents' ``StoreBackend`` reads and writes."""
+    """One thread's files under ``root``, as the store deepagents' ``StoreBackend`` reads and writes.
+
+    Blobs use the empty root, so their rows start with ``/``; any other root must not,
+    which keeps it out of the blobs mount.
+    """
 
     def __init__(self, thread_id: str, root: str = "") -> None:
         super().__init__()
