@@ -27,6 +27,7 @@ from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
+from openswe.threads.router import ThreadRouter, thread_store_postgres
 from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
@@ -51,8 +52,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
-    from openswe.jobs.cron_import import import_agent_server_crons
     from openswe.jobs.kinds import WORKER as JOB_WORKER
+    from openswe.jobs.kinds import start_jobs
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.transcript import listener as transcript_listener
@@ -98,7 +99,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # stops is hearing about changes made elsewhere.
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
-    JOB_WORKER.start(first=import_agent_server_crons)
+    JOB_WORKER.start(first=start_jobs)
     try:
         from openswe.server import warm_agent_build
 
@@ -148,7 +149,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(AuditLogMiddleware)
     # Ahead of the core /threads and /runs routes, which the custom app shadows.
-    app.add_middleware(MdaThreadProxy)
+    app.add_middleware(ThreadRouter if thread_store_postgres() else MdaThreadProxy)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)

@@ -33,7 +33,9 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX thread_index_updated_at ON thread_index (updated_at)")
     op.execute("CREATE INDEX thread_index_created_at ON thread_index (created_at)")
-    op.execute("CREATE INDEX thread_index_busy ON thread_index (status_since) WHERE status = 'busy'")
+    op.execute(
+        "CREATE INDEX thread_index_busy ON thread_index (status_since) WHERE status = 'busy'"
+    )
 
 
 def downgrade() -> None:

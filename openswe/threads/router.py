@@ -1,0 +1,336 @@
+"""Serve the Agent Server's thread API from the PostgreSQL thread index.
+
+With ``THREAD_STORE=postgres`` this middleware sits where ``MdaThreadProxy``
+does, in front of the core ``/threads`` and ``/runs`` routes, so every client
+(the dashboard, the CLI and the backend's own ``client.threads``) keeps working
+unchanged:
+
+- Creating, reading, updating, deleting, searching and counting threads is
+  answered from the index; each change is copied to the runtimes that keep the
+  thread, so its runs and traces see it and the old proxy could take over again.
+- A thread's runs, state, history, commands and streams go to its runtime: this
+  deployment's Agent Server for ``local`` threads, Managed Deep Agents for
+  ``mda`` ones. A run started there marks the thread busy; the run-complete
+  webhook and a reconcile job settle it.
+- A thread the index does not know yet is read from the Agent Server, indexed,
+  and served from then on.
+"""
+
+import json
+import logging
+import re
+import uuid
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Final, Literal
+
+from pydantic import JsonValue, ValidationError
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from openswe.config import ENV
+from openswe.remote_runtime.asgi import (
+    StatusRecorder,
+    configurable_of,
+    forward,
+    json_body,
+    read_body,
+    replay,
+    send_json,
+)
+from openswe.remote_runtime.client import HOSTED_GRAPHS, MDA_RUNTIME, RUNTIME_METADATA_KEY
+from openswe.remote_runtime.proxy import LOCAL_HEADER, MdaRuntime, runs_on_mda
+from openswe.threads import index
+from openswe.threads.index import IndexedThread, Runtime, ThreadExistsError, ThreadSearch, as_status
+from openswe.threads.runtimes import RUNTIMES
+
+logger = logging.getLogger(__name__)
+
+_THREADS: Final = re.compile(r"^(?:/noauth)?/threads/?$")
+_SEARCH: Final = re.compile(r"^(?:/noauth)?/threads/search$")
+_COUNT: Final = re.compile(r"^(?:/noauth)?/threads/count$")
+_THREAD: Final = re.compile(r"^(?:/noauth)?/threads/(?P<thread_id>[0-9a-fA-F-]{36})(?P<rest>/.*)?$")
+_CANCEL_MANY: Final = re.compile(r"^(?:/noauth)?/runs/cancel$")
+_CREATE_RUN: Final = re.compile(r"^/runs(?:/stream|/wait)?$")
+_CREATE_CRON: Final = "/runs/crons"
+
+
+def thread_store_postgres() -> bool:
+    return ENV.THREAD_STORE.get() == "postgres"
+
+
+def _routed(scope: Scope) -> bool:
+    path: str = scope["path"]
+    if _THREAD.match(path):
+        return True
+    if scope["method"] != "POST":
+        return False
+    return bool(
+        _THREADS.match(path)
+        or _SEARCH.match(path)
+        or _COUNT.match(path)
+        or _CANCEL_MANY.match(path)
+    )
+
+
+def _timestamp(value: JsonValue) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+async def _not_found(send: Send, thread_id: str) -> None:
+    await send_json(send, 404, {"detail": f"Thread {thread_id} not found"})
+
+
+class ThreadRouter:
+    """ASGI middleware answering thread calls from the index and routing runs by runtime."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        from langgraph_api.auth.middleware import auth_middleware
+
+        self.app = app
+        # The Agent Server authenticates at its own routes, behind app middleware
+        # like this one, so requests handled here pass the same check first.
+        self._authenticated: ASGIApp = auth_middleware.cls(
+            self._route, *auth_middleware.args, **auth_middleware.kwargs
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or Headers(scope=scope).get(LOCAL_HEADER) or not _routed(scope):
+            await self.app(scope, receive, send)
+            return
+        await self._authenticated(scope, receive, send)
+
+    async def _route(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path: str = scope["path"]
+        method: str = scope["method"]
+        body = await read_body(receive)
+        if _SEARCH.match(path):
+            await self._search(send, body, count=False)
+        elif _COUNT.match(path):
+            await self._search(send, body, count=True)
+        elif _THREADS.match(path):
+            await self._create(send, body)
+        elif _CANCEL_MANY.match(path):
+            await self._cancel_many(scope, send, body)
+        elif (match := _THREAD.match(path)) is not None:
+            thread_id, rest = match["thread_id"], match["rest"] or ""
+            if rest in {"", "/"}:
+                await self._thread_itself(scope, send, body, thread_id, method)
+            elif method == "POST" and (_CREATE_RUN.match(rest) or rest == _CREATE_CRON):
+                await self._create_run(scope, send, body, thread_id, cron=rest == _CREATE_CRON)
+            elif method == "POST" and rest == "/commands":
+                await self._command(scope, send, body, thread_id)
+            else:
+                await self._to_runtime(scope, send, body, thread_id)
+
+    async def _thread(self, thread_id: str) -> IndexedThread | None:
+        """The indexed thread; one only the Agent Server knows is indexed on first use."""
+        indexed = await index.get(thread_id)
+        if indexed is not None:
+            return indexed
+        local = await RUNTIMES.local.get(thread_id)
+        if local is None:
+            return None
+        metadata = local.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        runtime: Runtime = "mda" if metadata.get(RUNTIME_METADATA_KEY) == MDA_RUNTIME else "local"
+        return await index.create(
+            thread_id,
+            runtime=runtime,
+            metadata=metadata,
+            if_exists="do_nothing",
+            status=as_status(local.get("status")) or "idle",
+            created_at=_timestamp(local.get("created_at")),
+            updated_at=_timestamp(local.get("updated_at")),
+        )
+
+    async def _create(self, send: Send, body: bytes) -> None:
+        payload = json_body(body)
+        if payload is None:
+            await send_json(send, 422, {"detail": "The body must be a JSON object"})
+            return
+        given_id = payload.get("thread_id")
+        thread_id = given_id if isinstance(given_id, str) and given_id else str(uuid.uuid4())
+        given_metadata = payload.get("metadata")
+        metadata = given_metadata if isinstance(given_metadata, dict) else {}
+        if_exists: Literal["raise", "do_nothing"] = (
+            "do_nothing" if payload.get("if_exists") == "do_nothing" else "raise"
+        )
+        try:
+            thread = await self._index_new(thread_id, metadata, if_exists=if_exists)
+        except ThreadExistsError:
+            await send_json(send, 409, {"detail": f"Thread {thread_id} already exists"})
+            return
+        await send_json(send, 200, thread.as_langgraph())
+
+    async def _index_new(
+        self,
+        thread_id: str,
+        metadata: Mapping[str, JsonValue],
+        *,
+        if_exists: Literal["raise", "do_nothing"],
+    ) -> IndexedThread:
+        if if_exists == "do_nothing" and (known := await self._thread(thread_id)) is not None:
+            return known
+        thread = await index.create(
+            thread_id, runtime="local", metadata=metadata, if_exists=if_exists
+        )
+        await RUNTIMES.local.create(thread_id, thread.metadata)
+        return thread
+
+    async def _thread_itself(
+        self, scope: Scope, send: Send, body: bytes, thread_id: str, method: str
+    ) -> None:
+        thread = await self._thread(thread_id)
+        if thread is None:
+            await _not_found(send, thread_id)
+            return
+        if method == "GET":
+            await send_json(send, 200, thread.as_langgraph())
+        elif method == "PATCH":
+            payload = json_body(body) or {}
+            metadata = payload.get("metadata")
+            updated = await index.update(thread_id, metadata if isinstance(metadata, dict) else {})
+            if updated is None:
+                await _not_found(send, thread_id)
+                return
+            await self._copy_metadata(updated, metadata if isinstance(metadata, dict) else {})
+            await send_json(send, 200, updated.as_langgraph())
+        elif method == "DELETE":
+            for runtime in reversed(RUNTIMES.copies(thread.runtime)):
+                await runtime.delete(thread_id)
+            await index.delete(thread_id)
+            await send({"type": "http.response.start", "status": 204, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+        else:
+            await self.app(scope, replay(body), send)
+
+    async def _copy_metadata(self, thread: IndexedThread, patch: Mapping[str, JsonValue]) -> None:
+        if not patch:
+            return
+        for runtime in RUNTIMES.copies(thread.runtime):
+            try:
+                await runtime.update(thread.thread_id, patch)
+            except Exception:
+                # Reads come from the index; a runtime's copy only feeds its traces.
+                logger.warning(
+                    "Copying thread metadata to its runtime failed",
+                    extra={"thread_id": thread.thread_id},
+                    exc_info=True,
+                )
+
+    async def _search(self, send: Send, body: bytes, *, count: bool) -> None:
+        try:
+            query = ThreadSearch.model_validate(json_body(body) or {})
+        except ValidationError as exc:
+            await send_json(send, 422, {"detail": str(exc)})
+            return
+        if count:
+            await send_json(send, 200, await query.count())
+            return
+        await send_json(
+            send, 200, [thread.as_langgraph(query.select) for thread in await query.run()]
+        )
+
+    def _mda(self) -> MdaRuntime:
+        runtime = RUNTIMES.mda_runtime
+        if runtime is None:
+            raise LookupError("MDA_RUNTIME_URL is not configured")
+        return runtime
+
+    async def _claim_for_mda(
+        self, thread: IndexedThread, assistant_id: JsonValue, configurable: Mapping[str, JsonValue]
+    ) -> IndexedThread:
+        """Move a fresh thread to MDA when its person (or workspace) chose MDA for its graph."""
+        if (
+            thread.runtime == "mda"
+            or not isinstance(assistant_id, str)
+            or assistant_id not in HOSTED_GRAPHS
+            or RUNTIMES.mda_runtime is None
+            or await RUNTIMES.local.has_history(thread.thread_id)
+            or not await runs_on_mda(thread.metadata, configurable)
+        ):
+            return thread
+        await index.set_runtime(thread.thread_id, "mda")
+        claimed = await index.update(thread.thread_id, {RUNTIME_METADATA_KEY: MDA_RUNTIME})
+        if claimed is None:
+            return thread
+        await RUNTIMES.local.update(thread.thread_id, {RUNTIME_METADATA_KEY: MDA_RUNTIME})
+        await RUNTIMES.mda.create(thread.thread_id, claimed.metadata)
+        logger.info("Claimed thread for Managed Deep Agents", extra={"thread_id": thread.thread_id})
+        return claimed
+
+    async def _create_run(
+        self, scope: Scope, send: Send, body: bytes, thread_id: str, *, cron: bool
+    ) -> None:
+        payload = json_body(body)
+        if payload is None:
+            await send_json(send, 422, {"detail": "The body must be a JSON object"})
+            return
+        thread = await self._thread(thread_id)
+        if thread is None:
+            if payload.get("if_not_exists") != "create":
+                await _not_found(send, thread_id)
+                return
+            thread = await self._index_new(thread_id, {}, if_exists="do_nothing")
+        thread = await self._claim_for_mda(
+            thread, payload.get("assistant_id"), configurable_of(payload)
+        )
+        if thread.runtime == "mda":
+            mda = self._mda()
+            await mda.ensure_remote_thread(thread_id)
+            rewritten = await mda.run_payload(thread_id, payload)
+            status = await forward(mda.http, scope, send, json.dumps(rewritten).encode())
+            started = 200 <= status < 300
+        else:
+            recorder = StatusRecorder(send)
+            await self.app(scope, replay(body), recorder)
+            started = recorder.succeeded
+        if started and not cron:
+            await index.set_status(thread_id, "busy")
+
+    async def _command(self, scope: Scope, send: Send, body: bytes, thread_id: str) -> None:
+        command = json_body(body)
+        thread = await self._thread(thread_id)
+        if command is None or thread is None:
+            await self._to_runtime(scope, send, body, thread_id)
+            return
+        params = command.get("params")
+        if command.get("method") == "run.start" and isinstance(params, dict):
+            thread = await self._claim_for_mda(
+                thread, params.get("assistant_id"), configurable_of(params)
+            )
+            if thread.runtime == "mda":
+                reply = await self._mda().start_command_run(thread_id, command, params)
+                await send_json(send, 200, reply)
+                if reply.get("type") == "success":
+                    await index.set_status(thread_id, "busy")
+                return
+            recorder = StatusRecorder(send)
+            await self.app(scope, replay(body), recorder)
+            if recorder.succeeded:
+                await index.set_status(thread_id, "busy")
+            return
+        await self._to_runtime(scope, send, body, thread_id)
+
+    async def _to_runtime(self, scope: Scope, send: Send, body: bytes, thread_id: str) -> None:
+        thread = await self._thread(thread_id)
+        if thread is not None and thread.runtime == "mda":
+            mda = self._mda()
+            await mda.ensure_remote_thread(thread_id)
+            await forward(mda.http, scope, send, body)
+            return
+        await self.app(scope, replay(body), send)
+
+    async def _cancel_many(self, scope: Scope, send: Send, body: bytes) -> None:
+        payload = json_body(body) or {}
+        thread_id = payload.get("thread_id")
+        if isinstance(thread_id, str):
+            await self._to_runtime(scope, send, body, thread_id)
+            return
+        await self.app(scope, replay(body), send)

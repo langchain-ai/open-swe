@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Final, Literal, Self, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import RowMapping, text
 
 from openswe.database.postgres import transaction
@@ -24,6 +24,17 @@ SelectField = Literal[
 
 THREAD_STATUSES: Final[frozenset[str]] = frozenset(get_args(ThreadStatus))
 _COLUMNS: Final = "thread_id, runtime, metadata, status, created_at, updated_at"
+
+
+_status = TypeAdapter(ThreadStatus)
+
+
+def as_status(value: object) -> ThreadStatus | None:
+    """``value`` as a thread status, or ``None`` when it is not one."""
+    try:
+        return _status.validate_python(value)
+    except ValidationError:
+        return None
 
 
 class ThreadExistsError(Exception):
@@ -190,6 +201,14 @@ async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedTh
             .first()
         )
     return None if row is None else IndexedThread.from_row(row)
+
+
+async def set_runtime(thread_id: str, runtime: Runtime) -> None:
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE thread_index SET runtime = :runtime WHERE thread_id = :thread_id"),
+            {"thread_id": thread_id, "runtime": runtime},
+        )
 
 
 async def set_status(thread_id: str, status: ThreadStatus) -> None:

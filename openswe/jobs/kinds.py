@@ -17,6 +17,8 @@ from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
 from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
+from openswe.jobs import queue
+from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
 
@@ -29,6 +31,9 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
+from openswe.threads.router import thread_store_postgres
+from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
+from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH
 from openswe.workspaces.refresh import run_workspace_refresh_tick
 
@@ -128,3 +133,19 @@ async def _human_review_deadline(job: Job) -> object:
 @_sandbox_work(RECONCILE)
 async def _reconcile(_job: Job) -> object:
     return await reconcile_stale_runs()
+
+
+@_sandbox_work(THREAD_STATUS_RECONCILE)
+async def _thread_status_reconcile(_job: Job) -> object:
+    return await reconcile_busy_threads()
+
+
+async def start_jobs() -> None:
+    """Startup work: move old scheduler crons over, and keep the standing jobs in place."""
+    await import_agent_server_crons()
+    if thread_store_postgres():
+        await queue.schedule(
+            THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
+        )
+    else:
+        await queue.cancel_key(THREAD_STATUS_RECONCILE)

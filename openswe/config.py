@@ -214,6 +214,18 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "THREAD_STORE",
+    "Where threads are indexed: 'postgres' serves thread reads, updates and searches "
+    "from PostgreSQL and each thread's runs from its runtime; 'agent_server' (default) "
+    "keeps the Agent Server as the thread index.",
+    default="agent_server",
+)
+ENV.var(
+    "MDA_ALL_THREADS",
+    "With THREAD_STORE=postgres and MDA_RUNTIME_URL set, run every new agent and reviewer "
+    "thread on Managed Deep Agents instead of only those of people who chose it.",
+)
+ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
     "comma-separated, the first signs and every one verifies.",

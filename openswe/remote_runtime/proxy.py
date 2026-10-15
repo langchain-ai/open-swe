@@ -212,6 +212,57 @@ class MdaRuntime:
             rewritten.pop("config", None)
         return _object.validate_python(rewritten)
 
+    async def start_command_run(
+        self, thread_id: str, command: Mapping[str, JsonValue], params: Mapping[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        """Answer a protocol v2 ``run.start`` by creating the run here with its context.
+
+        MDA's own ``run.start`` would drop the context, which is what carries the run token.
+        """
+        config = params.get("config")
+        configurable = config.get("configurable") if isinstance(config, dict) else None
+        run_config: dict[str, JsonValue] = {
+            **(config if isinstance(config, dict) else {}),
+            "configurable": {
+                **(configurable if isinstance(configurable, dict) else {}),
+                _V3_STREAMING_KEY: True,
+                "thread_id": thread_id,
+            },
+        }
+        strategy = params.get("multitaskStrategy") or params.get("multitask_strategy")
+        payload: dict[str, JsonValue] = {
+            "assistant_id": params["assistant_id"],
+            "input": params.get("input"),
+            "config": run_config,
+            "metadata": params.get("metadata"),
+            "stream_mode": list(_V3_RUN_STREAM_MODES),
+            "stream_subgraphs": True,
+            "stream_resumable": True,
+            "on_completion": "keep",
+            "if_not_exists": "create",
+            "multitask_strategy": strategy if isinstance(strategy, str) else "reject",
+        }
+        await self.ensure_remote_thread(thread_id)
+        rewritten = await self.run_payload(thread_id, payload)
+        response = await self.http.post(f"/threads/{thread_id}/runs", json=rewritten)
+        if response.is_error:
+            logger.warning(
+                "Starting an MDA run failed",
+                extra={"thread_id": thread_id, "status_code": response.status_code},
+            )
+            return {
+                "type": "error",
+                "id": command.get("id", 0),
+                "error": "unknown_error",
+                "message": response.text[:500],
+            }
+        run = _object.validate_python(response.json())
+        return {
+            "type": "success",
+            "id": command.get("id", 0),
+            "result": {"run_id": str(run.get("run_id") or "")},
+        }
+
     async def merged_thread(self, thread: dict[str, JsonValue]) -> dict[str, JsonValue]:
         thread_id = thread.get("thread_id")
         if not isinstance(thread_id, str):
@@ -342,7 +393,13 @@ class MdaThreadProxy:
             await self._cancel_many(runtime, scope, replayed, send, body)
         elif thread_match is not None:
             await self._thread(
-                runtime, scope, replayed, send, body, thread_match["thread_id"], thread_match["rest"]
+                runtime,
+                scope,
+                replayed,
+                send,
+                body,
+                thread_match["thread_id"],
+                thread_match["rest"],
             )
 
     async def _thread(
@@ -438,62 +495,7 @@ class MdaThreadProxy:
         command: Mapping[str, JsonValue],
         params: Mapping[str, JsonValue],
     ) -> None:
-        """Answer a protocol v2 ``run.start`` by creating the run on MDA with its context.
-
-        MDA's own ``run.start`` would drop the context, which is what carries the run token.
-        """
-        config = params.get("config")
-        configurable = config.get("configurable") if isinstance(config, dict) else None
-        run_config: dict[str, JsonValue] = {
-            **(config if isinstance(config, dict) else {}),
-            "configurable": {
-                **(configurable if isinstance(configurable, dict) else {}),
-                _V3_STREAMING_KEY: True,
-                "thread_id": thread_id,
-            },
-        }
-        strategy = params.get("multitaskStrategy") or params.get("multitask_strategy")
-        payload: dict[str, JsonValue] = {
-            "assistant_id": params["assistant_id"],
-            "input": params.get("input"),
-            "config": run_config,
-            "metadata": params.get("metadata"),
-            "stream_mode": list(_V3_RUN_STREAM_MODES),
-            "stream_subgraphs": True,
-            "stream_resumable": True,
-            "on_completion": "keep",
-            "if_not_exists": "create",
-            "multitask_strategy": strategy if isinstance(strategy, str) else "reject",
-        }
-        await runtime.ensure_remote_thread(thread_id)
-        rewritten = await runtime.run_payload(thread_id, payload)
-        response = await runtime.http.post(f"/threads/{thread_id}/runs", json=rewritten)
-        if response.is_error:
-            logger.warning(
-                "Starting an MDA run failed",
-                extra={"thread_id": thread_id, "status_code": response.status_code},
-            )
-            await send_json(
-                send,
-                200,
-                {
-                    "type": "error",
-                    "id": command.get("id", 0),
-                    "error": "unknown_error",
-                    "message": response.text[:500],
-                },
-            )
-            return
-        run = _object.validate_python(response.json())
-        await send_json(
-            send,
-            200,
-            {
-                "type": "success",
-                "id": command.get("id", 0),
-                "result": {"run_id": str(run.get("run_id") or "")},
-            },
-        )
+        await send_json(send, 200, await runtime.start_command_run(thread_id, command, params))
 
     async def _search(
         self, runtime: MdaRuntime, scope: Scope, receive: Receive, send: Send, body: bytes
