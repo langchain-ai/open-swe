@@ -1129,6 +1129,7 @@ async def slack_interactivity(
             channel_context=channel_context,
             thread_ts=option_thread_ts,
             event_ts=action_ts,
+            original_message_ts=interaction.message_ts or option_thread_ts,
             user_id=user_id,
             text=response,
             bot_user_id=common.SLACK_BOT_USER_ID,

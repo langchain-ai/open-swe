@@ -64,6 +64,7 @@ async def test_accepting_a_suggestion_asks_the_slack_threads_agent_once(
     request = cast(SlackRequest, tasks.tasks[0][1][0])
     assert (request.channel_id, request.thread_ts, request.thread_id) == ("C1", "100.000001", "t1")
     assert request.event_ts == "200.5"
+    assert request.original_message_ts == "100.000001"
     assert request.text == "Get https://github.com/lc/repo/pull/7 reviewed."
     assert "<@U1>" in request.turn_context
     respond.assert_awaited_once()

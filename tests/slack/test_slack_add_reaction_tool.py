@@ -86,3 +86,22 @@ async def test_slack_add_reaction_rejects_white_check_mark(
         "success": False,
         "error": "white_check_mark is not allowed because it can imply PR approval",
     }
+
+
+@pytest.mark.parametrize("message_ts", [None, "1.1", "1.3"])
+async def test_button_click_reacts_to_message_without_replacing_other_explicit_targets(
+    monkeypatch: pytest.MonkeyPatch, message_ts: str | None
+) -> None:
+    config = _config()
+    config["configurable"]["slack_thread"]["original_message_ts"] = "1.2"
+    targets: list[str] = []
+
+    async def add_reaction(channel_id: str, target_ts: str, emoji: str) -> bool:
+        targets.append(target_ts)
+        return True
+
+    monkeypatch.setattr(slack_reaction_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", add_reaction)
+
+    assert await slack_reaction_tool.slack_add_reaction("eyes", message_ts) == {"success": True}
+    assert targets == ["1.3" if message_ts == "1.3" else "1.2"]

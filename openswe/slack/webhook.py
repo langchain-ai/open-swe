@@ -773,6 +773,7 @@ async def _mark_slack_thread_errored(
                         thread_ts=request.thread_ts,
                         triggering_user_id=request.user_id,
                         triggering_event_ts=request.event_ts,
+                        original_message_ts=request.original_message_ts or request.event_ts,
                     )
                 ),
                 visibility=visibility,
@@ -928,8 +929,9 @@ async def _process_slack_mention_impl(
         if thread_record.exists
         else _resolved((set[str](), set[str]()))
     )
+    context_message_ts = original_message_ts if message_update else event_ts
     current_message = next(
-        (message for message in thread_messages if str(message.get("ts")) == original_message_ts),
+        (message for message in thread_messages if str(message.get("ts")) == context_message_ts),
         None,
     )
     if current_message is None and not message_update:
@@ -1180,6 +1182,7 @@ async def _process_slack_mention_impl(
         "triggering_user_name": user_name,
         "triggering_user_email": user_email or "",
         "triggering_event_ts": event_ts,
+        "original_message_ts": original_message_ts,
     }
     if request.breakout_root_suffix is not None:
         slack_thread_context["breakout_root_suffix"] = request.breakout_root_suffix
