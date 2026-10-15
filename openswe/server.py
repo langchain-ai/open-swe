@@ -319,6 +319,8 @@ USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
 BLOBS_ROUTE = "/blobs/"
+# Where deepagents offloads large tool results and summarized history.
+ARTIFACT_ROUTES = ("/large_tool_results/", "/conversation_history/")
 BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
@@ -1948,10 +1950,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
         skill_sources.insert(0, USER_SKILLS_ROUTE)
     # Offloaded images live in PostgreSQL so they can be read without the sandbox.
-    skill_routes[BLOBS_ROUTE] = StoreBackend(
-        store=ThreadBlobs(thread_id),
-        namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
-    )
+    thread_roots = {BLOBS_ROUTE: ""}
+    if bridge_client is not None:
+        # A bridged machine's filesystem root is not writable, so offloads fail there.
+        thread_roots |= {route: route.rstrip("/") for route in ARTIFACT_ROUTES}
+    for route, root in thread_roots.items():
+        skill_routes[route] = StoreBackend(
+            store=ThreadBlobs(thread_id, root),
+            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
+        )
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (

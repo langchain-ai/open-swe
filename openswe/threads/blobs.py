@@ -35,11 +35,12 @@ def blob_namespace(thread_id: str) -> tuple[str, str]:
 
 
 class ThreadBlobs(AgentStore):
-    """One thread's blobs, as the store deepagents' ``StoreBackend`` reads and writes."""
+    """One thread's files under ``root``, as the store deepagents' ``StoreBackend`` reads and writes."""
 
-    def __init__(self, thread_id: str) -> None:
+    def __init__(self, thread_id: str, root: str = "") -> None:
         super().__init__()
         self.thread_id = thread_id
+        self.root = root
 
     async def abatch(self, ops: Iterable[Op]) -> list[Result]:
         async with postgres.session() as session:
@@ -48,20 +49,25 @@ class ThreadBlobs(AgentStore):
     async def _apply(self, session: AsyncSession, op: Op) -> Result:
         match op:
             case GetOp(key=key):
-                blob = await session.get(ThreadBlob, (self.thread_id, key))
+                blob = await session.get(ThreadBlob, (self.thread_id, self.root + key))
                 return None if blob is None else self._item(blob)
             case PutOp(key=key, value=None):
                 await session.execute(
                     delete(ThreadBlob).where(
-                        ThreadBlob.thread_id == self.thread_id, ThreadBlob.path == key
+                        ThreadBlob.thread_id == self.thread_id, ThreadBlob.path == self.root + key
                     )
                 )
             case PutOp(key=key, value=dict() as value):
-                await session.merge(ThreadBlob(thread_id=self.thread_id, path=key, value=value))
+                await session.merge(
+                    ThreadBlob(thread_id=self.thread_id, path=self.root + key, value=value)
+                )
             case SearchOp(limit=limit, offset=offset):
                 blobs = await session.scalars(
                     select(ThreadBlob)
-                    .where(ThreadBlob.thread_id == self.thread_id)
+                    .where(
+                        ThreadBlob.thread_id == self.thread_id,
+                        ThreadBlob.path.startswith(f"{self.root}/", autoescape=True),
+                    )
                     .order_by(ThreadBlob.path)
                     .limit(limit)
                     .offset(offset)
@@ -74,7 +80,7 @@ class ThreadBlobs(AgentStore):
     def _item(self, blob: ThreadBlob) -> Item:
         return Item(
             value=blob.value,
-            key=blob.path,
+            key=blob.path.removeprefix(self.root),
             namespace=blob_namespace(self.thread_id),
             created_at=blob.created_at,
             updated_at=blob.created_at,
