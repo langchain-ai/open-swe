@@ -13,6 +13,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
 
+from openswe import completion
 from openswe.database import postgres
 from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.engine import Command, append, delete_transcript
@@ -524,3 +525,41 @@ async def test_a_settled_turn_is_not_reopened_by_a_later_settlement(registry_db:
         ],
     )
     assert await _turn_state(thread_id, turn) == "interrupted"
+
+
+async def test_a_run_interrupted_by_a_follow_up_closes_only_its_own_turn(registry_db: None) -> None:
+    """A run superseded by an interrupting follow-up left its turn, and the thread, running."""
+    thread_id = str(uuid7())
+    await _create(thread_id)
+    turn_a, turn_b = uuid7(), uuid7()
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"turn:{turn_a}:requested",
+                event=_requested(turn_a, "m-a", "first"),
+                actor_kind="user",
+                turn_id=turn_a,
+            ),
+            Command(
+                command_id=f"turn:{turn_a}:started:run-a",
+                event=TurnStarted(turn_id=turn_a, run_id="run-a"),
+                actor_kind="agent",
+                run_id="run-a",
+                turn_id=turn_a,
+            ),
+            Command(
+                command_id=f"turn:{turn_b}:requested",
+                event=_requested(turn_b, "m-b", "second"),
+                actor_kind="user",
+                turn_id=turn_b,
+            ),
+        ],
+    )
+
+    await completion._settle_transcript_turn(thread_id, "run-unstarted", "interrupted")
+    assert await _turn_state(thread_id, turn_b) == "requested"
+
+    await completion._settle_transcript_turn(thread_id, "run-a", "interrupted")
+    assert await _turn_state(thread_id, turn_a) == "interrupted"
+    assert await _turn_state(thread_id, turn_b) == "requested"

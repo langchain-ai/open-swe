@@ -33,7 +33,7 @@ from openswe.slack.code_channels import is_code_channel_session, set_session_sta
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
-from openswe.transcript.turns import TurnOutcome, settle_run_turn
+from openswe.transcript.turns import TurnOutcome, run_turn, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
@@ -421,14 +421,22 @@ async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: ob
         outcome: TurnOutcome = "completed"
     elif status in _TERMINAL_FAILURE_STATUSES:
         outcome = "failed"
+    elif status == "interrupted":
+        outcome = "interrupted"
     else:
         return
     try:
+        # An interrupted run that never started a turn must not close the
+        # follow-up's turn that superseded it.
+        if outcome == "interrupted" and (
+            run_id is None or await run_turn(thread_id, run_id) is None
+        ):
+            return
         await settle_run_turn(
             thread_id,
             run_id,
             outcome=outcome,
-            error=None if outcome == "completed" else f"run ended as {status}",
+            error=f"run ended as {status}" if outcome == "failed" else None,
         )
     except Exception:  # noqa: BLE001
         # The webhook still has a reply to post; the turn is closed by the
