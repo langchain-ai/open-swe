@@ -6,6 +6,7 @@ from openswe.github import webhook as service
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
+from openswe.ui_invalidations import Topic
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.routing import WorkspaceLookupError, repo_is_routable
@@ -39,14 +40,17 @@ async def github_webhook(
 
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
+    refs = EventRefs.github(body)
     await EventLog.record(
         request,
         body,
         "github",
         event_type=event_type,
         delivery_id=delivery_id,
-        refs=EventRefs.github(body),
+        refs=refs,
     )
+    if refs.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
     common.logger.info(
         "GitHub webhook received",
         extra={

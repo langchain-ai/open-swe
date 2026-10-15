@@ -1,4 +1,7 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Text } from "@langchain/macaw-components/Text"
 import { createFileRoute } from "@tanstack/react-router"
+import { useEffect } from "react"
 
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
@@ -19,6 +22,26 @@ export const Route = createFileRoute("/agents/reviews/")({
   component: ReviewsPage,
 })
 
+const REPO_STORAGE_KEY = "open-swe.reviews.repo"
+
+function readStoredRepos(): string[] | undefined {
+  try {
+    return validateReviewsSearch({
+      repo: JSON.parse(window.localStorage.getItem(REPO_STORAGE_KEY) ?? "[]"),
+    }).repo
+  } catch (error) {
+    console.warn("Discarding invalid stored repository filter", error)
+    window.localStorage.removeItem(REPO_STORAGE_KEY)
+    return undefined
+  }
+}
+
+function storeRepos(repos: string[] | undefined) {
+  if (repos?.length)
+    window.localStorage.setItem(REPO_STORAGE_KEY, JSON.stringify(repos))
+  else window.localStorage.removeItem(REPO_STORAGE_KEY)
+}
+
 const tabs = [
   ["mine", "Mine"],
   ["to-review", "To Review"],
@@ -31,6 +54,7 @@ function ReviewsPage() {
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
+    if ("repo" in changes) storeRepos(changes.repo)
     void navigate({
       search: (previous) => ({
         ...previous,
@@ -45,26 +69,32 @@ function ReviewsPage() {
       replace,
     })
   }
+  useEffect(() => {
+    const stored = readStoredRepos()
+    if (!filters.repo && stored) changeFilters({ repo: stored }, true)
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const selection = tab !== "all" ? parsePullRequestSelection(filters.pr) : null
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex min-h-0 w-full flex-1 flex-col px-6 py-6">
+      <div className="flex min-h-0 w-full flex-1 flex-col px-space-5 py-space-5">
         <div
           className={cn(
             "mx-auto flex min-h-0 w-full flex-1 flex-col",
             !selection && "max-w-6xl"
           )}
         >
-          <div className="flex items-center gap-3">
-            <h1 className="font-heading text-base font-medium text-foreground">
+          <div className="flex items-center gap-space-3">
+            <Text as="h1" variant="h3" weight="medium" color="primary">
               Pull Requests
-            </h1>
-            <div className="flex items-center gap-1">
+            </Text>
+            <div className="flex items-center gap-space-1">
               {tabs.map(([value, label]) => (
-                <button
+                <Button
                   key={value}
-                  type="button"
+                  color="secondary"
+                  variant={tab === value ? "normal" : "plain"}
                   aria-pressed={tab === value}
                   onClick={() => {
                     changeFilters({
@@ -73,20 +103,14 @@ function ReviewsPage() {
                       pr: undefined,
                     })
                   }}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 text-xs transition-colors",
-                    tab === value
-                      ? "bg-sidebar-row-hover font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-sidebar-row-hover"
-                  )}
                 >
                   {label}
-                </button>
+                </Button>
               ))}
             </div>
             <OpenPullRequestInput />
             <ReviewBookmarklet />
-            <span className="hidden text-xs text-muted-foreground lg:inline">
+            <span className="hidden text-xs text-secondary lg:inline">
               Drag to your bookmarks bar
             </span>
           </div>

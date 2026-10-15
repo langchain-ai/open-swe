@@ -1,4 +1,5 @@
-import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
+import { FlagRegularIcon } from "@langchain/macaw-components/icons"
+import { BugBeetleIcon } from "@phosphor-icons/react/dist/ssr/BugBeetle"
 
 import type { ReviewCounts as Counts } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -14,16 +15,20 @@ export function ReviewCounts({
     <>
       <span
         className={cn(
-          "inline-flex items-center gap-1",
-          counts.bugs > 0 ? "text-destructive" : "text-muted-foreground"
+          "inline-flex items-center gap-space-1",
+          counts.bugs > 0 ? "text-error-secondary" : "text-secondary"
         )}
       >
-        <BugBeetleIcon aria-hidden="true" className="size-3.5" />
+        <BugBeetleIcon
+          aria-hidden="true"
+          weight="regular"
+          className="size-3.5"
+        />
         {counts.bugs}
         {withLabels && " bugs"}
       </span>
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <FlagIcon aria-hidden="true" className="size-3.5" />
+      <span className="inline-flex items-center gap-space-1 text-secondary">
+        <FlagRegularIcon aria-hidden="true" className="size-3.5" />
         {counts.flags}
         {withLabels && " flags"}
       </span>

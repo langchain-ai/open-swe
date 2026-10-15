@@ -1,0 +1,1 @@
+The pull request was updated just as this turn started, so the walkthrough cannot show anything yet. Answer the reader's message if it needs no code from the pull request, then tell them in one sentence that the pull request just changed and you will pick up the new version when they say to continue. Do not call any `walkthrough_` tool this turn.

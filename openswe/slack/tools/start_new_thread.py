@@ -5,7 +5,9 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from openswe.dashboard.options import available_requested_models
 from openswe.dashboard.repo_access import require_repo_access_for_user
+from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
 from openswe.run_config import Repo, RunConfig
@@ -17,15 +19,15 @@ from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     append_slack_web_link_footer,
-    bind_slack_thread_id,
     get_active_slack_thread,
     get_slack_permalink,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
-    store_slack_run_mapping,
 )
 from openswe.slack.http import SlackRequestError
+from openswe.slack.records import bind_slack_thread_id, store_slack_run_mapping
 from openswe.slack.request import SlackRequest
+from openswe.slack.solo_threads import allow_solo_thread_followup
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread
 from openswe.utils.dashboard_links import dashboard_thread_url
@@ -171,11 +173,40 @@ async def slack_breakout_thread(
     default_repo: str | None = None,
     channel_id: str | None = None,
     web_only: bool = False,
-) -> dict[str, Any]:
+    model: str | None = None,
+    effort: str | None = None,
+) -> dict[str, object]:
     """Implement the `slack_breakout_thread` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:
         return {"success": False, "error": "Missing slack_thread config"}
+    model_choice: tuple[str, str] | None = None
+    if model is not None or effort is not None:
+        settings = await cached_workspace_settings(cfg.workspace_slug)
+        models = available_requested_models(fable_enabled=settings.fable_enabled)
+        selected_model = (
+            model
+            if model is not None
+            else cfg.resolved_agent_model_id
+            or cfg.agent_model_id
+            or settings.default_model_pair("agent")[0][0]
+        )
+        option = models.get(selected_model)
+        if option is None:
+            return {
+                "success": False,
+                "error": f"Unsupported model: {selected_model!r}",
+                "available_models": list(models.values()),
+            }
+        selected_effort = effort if effort is not None else option["default_effort"]
+        if selected_effort not in option["efforts"]:
+            return {
+                "success": False,
+                "error": f"Unsupported effort {selected_effort!r} for {selected_model!r}",
+                "available_models": list(models.values()),
+                "available_efforts": option["efforts"],
+            }
+        model_choice = selected_model, selected_effort
     client = langgraph_client()
     current_slack_thread = await get_active_slack_thread(
         client,
@@ -300,6 +331,7 @@ async def slack_breakout_thread(
                 explicit=bool(default_repo),
             ),
             inherited_workspace=cfg.workspace_slug,
+            model_choice=model_choice,
         )
         if not started:
             return {"success": False, "error": "Could not start the web breakout"}
@@ -380,7 +412,16 @@ async def slack_breakout_thread(
                 }
             await asyncio.sleep(delay)
 
-    await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
+    await bind_slack_thread_id(clean_channel_id, message_ts, thread_id)
+    if requester:
+        await allow_solo_thread_followup(
+            client,
+            channel_id=clean_channel_id,
+            thread_ts=message_ts,
+            message_ts=message_ts,
+            user_id=requester,
+            explicit_mention=True,
+        )
     new_slack_thread = _new_slack_thread_context(
         cfg.slack_thread.dump(),
         channel_id=clean_channel_id,
@@ -433,6 +474,9 @@ async def slack_breakout_thread(
         value = cfg.get(key)
         if value:
             new_configurable[key] = value
+    if model_choice is not None:
+        new_configurable["agent_model_id"], new_configurable["agent_effort"] = model_choice
+        new_configurable["model_selection"] = "explicit"
 
     await create_thread(
         client, thread_id, title=thread_title, if_exists="do_nothing", metadata=metadata
@@ -450,7 +494,6 @@ async def slack_breakout_thread(
     run_id = run.get("run_id") if isinstance(run, dict) else None
     if isinstance(run_id, str) and run_id:
         await store_slack_run_mapping(
-            client,
             clean_channel_id,
             message_ts,
             run_id,

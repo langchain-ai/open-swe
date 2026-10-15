@@ -101,7 +101,7 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
 async def test_mcp_admin_mutations_audit_policy_refusals_without_arguments(
     monkeypatch: pytest.MonkeyPatch, name: str, arguments: dict[str, object]
 ) -> None:
-    from openswe.mcp.cli_tools import _tools
+    from openswe.mcp.caller import _exposed
     from openswe.tools import access as access_module
 
     entries: list[AuditLog] = []
@@ -115,7 +115,7 @@ async def test_mcp_admin_mutations_audit_policy_refusals_without_arguments(
 
     monkeypatch.setattr(access_module, "resolve_access", refuse)
     monkeypatch.setattr(tools, "append_safely", append)
-    tool, _access = _tools()[name]
+    tool, _access = _exposed()[name]
     result = await tool.ainvoke(arguments)
     assert result["ok"] is False
     (entry,) = entries

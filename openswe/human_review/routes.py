@@ -9,12 +9,10 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard import profiles, repo_access
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.expedited_review.readiness import latest_review_states
-from openswe.github.ci import fetch_pr
-from openswe.github.http import github_client
+from openswe.github.http import GitHubClient, GitHubError, or_none
 from openswe.github.pull_request_status import (
     OpenPullRequest,
     OpenPullRequests,
@@ -22,11 +20,10 @@ from openswe.github.pull_request_status import (
 )
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.card import mention
-from openswe.human_review.lifecycle import dismiss_by
-from openswe.human_review.people import repo_token
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import Origin, RequestResult, request_review
-from openswe.slack.client import GitHubPrRef
+from openswe.human_review.standard import Origin, RequestResult, request_review, review_blockers
+from openswe.slack.client import GitHubPrRef, get_slack_permalink
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -57,24 +54,22 @@ async def api_review_assignments(
     ]
     rows: list[OpenPullRequest] = []
     if requests:
-        token = await profiles.get_valid_access_token(login)
-        if not token:
-            raise HTTPException(401, "GitHub token unavailable, re-login required")
-        allowed: set[str] = set()
-        for full_name in {request.pull_request.repo_full_name for request in requests}:
-            try:
-                await repo_access.assert_repo_access(full_name, token)
-            except HTTPException as exc:
-                if exc.status_code not in {403, 404}:
-                    raise
-                logger.info(
-                    "Review assignment repository no longer accessible",
-                    extra={"repository": full_name},
-                )
-            else:
-                allowed.add(full_name)
-        semaphore = asyncio.Semaphore(4)
-        async with github_client(token=token) as client:
+        async with GitHubClient.as_user(login) as github:
+            allowed: set[str] = set()
+            for full_name in {request.pull_request.repo_full_name for request in requests}:
+                owner, name = full_name.split("/", 1)
+                try:
+                    await github.repo(owner, name).info()
+                except GitHubError as exc:
+                    if exc.response.status_code not in {403, 404}:
+                        raise
+                    logger.info(
+                        "Review assignment repository no longer accessible",
+                        extra={"repository": full_name},
+                    )
+                else:
+                    allowed.add(full_name)
+            semaphore = asyncio.Semaphore(4)
 
             async def pending(request: HumanReviewRequest) -> OpenPullRequest | None:
                 pr = request.pull_request
@@ -82,7 +77,7 @@ async def api_review_assignments(
                     return None
                 async with semaphore:
                     states = await latest_review_states(
-                        client, pr.owner, pr.repo, pr.number, pr.author
+                        github.repo(pr.owner, pr.repo).pull_request(pr.number), pr.author
                     )
                 if states is None:
                     raise HTTPException(502, "Could not load assigned reviews from GitHub")
@@ -149,6 +144,9 @@ def _pr_ref(owner: str, repo: str, number: int) -> GitHubPrRef:
 
 class HumanReviewAvailability(BaseModel):
     available: bool
+    active: bool
+    permalink: str = ""
+    blockers: list[str] = []
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/human-review")
@@ -157,19 +155,25 @@ async def api_human_review_availability(
 ) -> HumanReviewAvailability:
     _pr_ref(owner, repo, number)
     await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
-    token = await repo_token(owner, repo)
-    if token is None:
-        raise HTTPException(503, "Repository installation is unavailable")
-    pr = await fetch_pr(owner=owner, repo=repo, pr_number=number, token=token)
-    if pr is None:
-        raise HTTPException(404, "Pull request is unavailable")
-    head = pr.get("head")
-    sha = head.get("sha") if isinstance(head, dict) else None
-    if not isinstance(sha, str):
-        raise HTTPException(503, "Pull request head is unavailable")
-    settings = await RepoSettings.fetch(owner, repo, token=token, ref=sha)
-    channel = await settings.channel_for_pr(owner, repo, number, token=token)
-    return HumanReviewAvailability(available=bool(channel))
+    async with GitHubClient.as_app(owner, repo) as github:
+        pull = github.repo(owner, repo).pull_request(number)
+        sha = await or_none(pull.head_sha())
+        if sha is None:
+            raise HTTPException(404, "Pull request is unavailable")
+        settings = await RepoSettings.fetch(pull.repo, ref=sha)
+        channel = await settings.channel_for_pr(pull)
+        active = await HumanReviewRequest.active_for(owner, repo, number)
+        blockers = None if active is not None else await review_blockers(pull)
+    return HumanReviewAvailability(
+        available=bool(channel),
+        active=active is not None,
+        permalink=(
+            await get_slack_permalink(active.slack_channel_id, active.slack_message_ts) or ""
+            if active is not None
+            else ""
+        ),
+        blockers=blockers or [],
+    )
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review")
@@ -220,6 +224,6 @@ async def api_dismiss_human_review_request(
         raise HTTPException(404, "This pull request has no open review request")
     person = await User.for_login("github", login)
     by = mention(person) if person is not None else f"@{login}"
-    if not await dismiss_by(request, by, (body or HumanReviewDismissBody()).reason):
+    if not await ReviewCard(request).dismiss_by(by, (body or HumanReviewDismissBody()).reason):
         raise HTTPException(409, "This review request is already closed")
     return HumanReviewDismissResult(request_id=str(request.id))

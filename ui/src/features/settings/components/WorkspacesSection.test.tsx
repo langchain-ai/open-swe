@@ -10,6 +10,7 @@ import {
   within,
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { WorkspacesSection } from "./WorkspacesSection"
 import { api } from "@/lib/api"
@@ -46,7 +47,8 @@ function renderSection(isAdmin: boolean) {
   return render(
     <QueryClientProvider client={client}>
       <WorkspacesSection isAdmin={isAdmin} renderConfigure={renderConfigure} />
-    </QueryClientProvider>
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
   )
 }
 
@@ -286,8 +288,7 @@ describe("WorkspacesSection", () => {
     const repositoryHelp = screen.getByRole("button", {
       name: "About workspace repositories",
     })
-    fireEvent.mouseEnter(repositoryHelp)
-    fireEvent.mouseMove(repositoryHelp)
+    fireEvent.pointerMove(repositoryHelp, { pointerType: "mouse" })
     expect(
       await screen.findByText(
         /routes its GitHub issues, pull requests, Linear tickets/

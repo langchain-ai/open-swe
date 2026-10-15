@@ -14,10 +14,17 @@ for secrets or credentials. Take a screenshot for applicable UI-facing changes a
 the user in the final delivery without committing it.
 
 For PR comparison screenshots:
-- Capture before/after with matching viewport, theme, and data; label any synthetic fixtures.
+- Capture before/after from the real running app, signed in as needed, showing the exact element the
+  user reported, with matching viewport, theme, and data. Use a synthetic fixture only when the real
+  app cannot run in the sandbox; then say so in the PR and your reply, and never present it as
+  before/after proof of the fix.
+- Compare the pair before publishing: the reported element must visibly change. If it does not, the
+  screenshots do not show the fix; find out why instead of publishing them.
 - Generate inline image download URLs with the correct MIME type, without an expiry unless requested.
   Keep the files available; a non-expiring URL does not make sandbox files permanent.
 - Save the tool's JSON response and build Markdown from its exact `url` field programmatically.
+  When calling through the sandbox `/invoke` endpoint, check the response envelope's `status` is
+  `success`, then extract `json.loads(response["content"])["url"]`, not `response["url"]`.
   Never retype, shorten, decode/re-encode, or reconstruct signed URLs; one changed byte can cause 403.
 - Embed a Before/After image table. Use `gh pr edit --body-file` for updates, preserving the existing
   description and footer. Do not use `gh pr edit --attach`: sandbox proxy authentication does not

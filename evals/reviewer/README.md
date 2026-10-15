@@ -16,7 +16,7 @@ evals/reviewer/
 ├── costs.py              # per-PR / per-run LLM cost from the reviewer's traces
 ├── judge.py              # claude-opus-4-5 pairwise match evaluator + aggregate
 ├── target.py             # invokes the reviewer graph over langgraph_sdk
-├── store_reporter.py     # publishes live progress to the dashboard store record
+├── status_reporter.py    # reports live progress to the dashboard
 └── run_eval.py           # client.aevaluate entrypoint
 ```
 

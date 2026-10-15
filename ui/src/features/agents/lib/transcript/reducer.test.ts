@@ -763,7 +763,7 @@ describe("context meter", () => {
       })
     )
 
-    expect(state.contextTokens).toBe(100)
+    expect(state.contextUsage?.tokens).toBe(100)
   })
 
   it("leaves the meter alone when a subagent's message completes", () => {
@@ -780,7 +780,7 @@ describe("context meter", () => {
       })
     )
 
-    expect(base.contextTokens).toBe(100)
-    expect(nested.contextTokens).toBe(100)
+    expect(base.contextUsage?.tokens).toBe(100)
+    expect(nested.contextUsage?.tokens).toBe(100)
   })
 })

@@ -21,9 +21,7 @@ import type { ThreadRunInput, TranscriptThreadSource } from "./types"
 
 /** The append-only transcript log, behind the source interface. */
 export function useTranscriptSource(threadId: string): TranscriptThreadSource {
-  const [runTracker] = useState(
-    () => new RunTracker({ transport: "cloud", threadId })
-  )
+  const [runTracker] = useState(() => new RunTracker({ threadId }))
   useEffect(() => () => runTracker.dispose(), [runTracker])
   const transcript = useThreadTranscript(threadId, { runTracker })
   const stop = useCancelRun(threadId)
@@ -41,7 +39,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
   )
 
   const state = transcript.state
-  const contextTokens = state?.contextTokens ?? null
+  const contextUsage = state?.contextUsage ?? null
   const subagents = useCallback(
     (namespace: ReadonlyArray<string>): Array<SubagentToolCall> =>
       state ? subagentToolCalls(state, namespace) : [],
@@ -71,7 +69,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       isOffloading: transcript.isOffloading,
       routed: transcript.routed,
       connection: transcript.connection,
-      contextTokens,
+      contextUsage,
       subagentToolCalls: subagents,
       subagentMessages: subagentTranscript,
       subagentTask: task,
@@ -83,7 +81,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       loadOlder: transcript.loadOlder,
     }),
     [
-      contextTokens,
+      contextUsage,
       startRun,
       stop,
       subagents,

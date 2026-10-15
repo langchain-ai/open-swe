@@ -1,12 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
+import { Text } from "@langchain/macaw-components/Text"
+import { Button } from "@langchain/macaw-components/Button"
+import { Input } from "@langchain/macaw-components/Input"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Switch } from "@langchain/macaw-components/Switch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 
 import { AppShell } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
@@ -105,7 +107,7 @@ function RepositoriesOwnerPage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
+      <main className="p-space-5">
         <Skeleton className="h-64 w-full" />
       </main>
     )
@@ -129,60 +131,63 @@ function RepositoriesOwnerPage() {
       }
       backTo={{ to: "/review", label: "Back to Code review" }}
     >
-      <section className="space-y-3">
+      <section className="space-y-space-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          <Text
+            as="h2"
+            variant="sm"
+            weight="medium"
+            color="secondary"
+            className="tracking-wide uppercase"
+          >
             Repositories
-          </h2>
-          <span className="text-xs text-muted-foreground">
+          </Text>
+          <span className="text-xs text-secondary">
             {autoReviewCount}/{ownerRepos.length} run automatically
           </span>
         </div>
         <Input
-          type="search"
+          size="md"
+          leftIcon={MagnifyingGlassRegularIcon}
           value={search}
-          onChange={(event) =>
-            setSearchPosition({ owner, search: event.target.value })
-          }
+          onChange={(next) => setSearchPosition({ owner, search: next })}
           placeholder="Search repositories…"
           aria-label="Search repositories"
         />
-        <div className="rounded-lg border border-border bg-card">
+        <div className="rounded-lg border border-default bg-surface-level-1">
           {loading && (
-            <div className="p-4">
+            <div className="p-space-4">
               <Skeleton className="h-32 w-full" />
             </div>
           )}
           {!loading && filteredRepos.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">
+            <p className="px-space-4 py-space-3 text-xs text-secondary">
               {ownerRepos.length === 0
                 ? "No repositories found for this installation."
                 : "No repositories match your search."}
             </p>
           )}
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-default">
             {pageRepos.map((r) => {
               const runsAutomatically = autoReviewSet.has(r.full_name)
               return (
                 <li
                   key={r.full_name}
-                  className="flex items-center justify-between gap-4 px-4 py-3"
+                  className="flex items-center justify-between gap-space-4 px-space-4 py-space-3"
                 >
-                  <div className="flex min-w-0 items-center gap-2 text-xs">
+                  <div className="flex min-w-0 items-center gap-space-2 text-xs">
                     <span className="truncate">
-                      <span className="text-muted-foreground">{owner}/</span>
-                      <span className="font-medium text-foreground">
+                      <span className="text-secondary">{owner}/</span>
+                      <span className="font-medium text-primary">
                         {r.full_name.slice(owner.length + 1)}
                       </span>
                     </span>
                     {r.private && (
-                      <span className="text-[10px] text-muted-foreground">
-                        private
-                      </span>
+                      <span className="text-xxs text-tertiary">private</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
+                  <div className="flex items-center gap-space-2">
+                    <span className="text-xs text-secondary">
                       Run automatically
                     </span>
                     <span
@@ -197,7 +202,7 @@ function RepositoriesOwnerPage() {
                         aria-label={`Run reviews automatically for ${r.full_name}`}
                         checked={runsAutomatically}
                         disabled={!canEdit || toggling.has(r.full_name)}
-                        onCheckedChange={(v) =>
+                        onChange={(v) =>
                           toggleAutoReview.mutate({
                             full_name: r.full_name,
                             on: v,
@@ -211,25 +216,27 @@ function RepositoriesOwnerPage() {
             })}
           </ul>
           {filteredRepos.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
-              <span className="text-muted-foreground">
+            <div className="flex items-center justify-between gap-space-4 border-t border-default px-space-4 py-space-2 text-xs">
+              <span className="text-secondary">
                 Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-space-2">
                 <Button
-                  size="sm"
-                  variant="outline"
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
                   disabled={safePage === 0}
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                 >
                   Prev
                 </Button>
-                <span className="text-muted-foreground">
+                <span className="text-secondary">
                   {safePage + 1} / {totalPages}
                 </span>
                 <Button
-                  size="sm"
-                  variant="outline"
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
                   disabled={safePage >= totalPages - 1}
                   onClick={() =>
                     setPage((p) => Math.min(totalPages - 1, p + 1))

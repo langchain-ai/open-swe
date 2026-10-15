@@ -89,8 +89,6 @@ jobs:
         with:
           bun-version: "1.4.2"
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-
       - run: corepack enable
 
       - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
@@ -148,7 +146,6 @@ jobs:
             echo "::warning::APPLE_PROVISIONING_PROFILE is not set; building without Universal Links."
           fi
           pnpm run build
-          pnpm --filter open-swe-desktop run build:local-backend
           pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never "${signing_args[@]}"
 
       - name: Verify and package release assets
@@ -177,7 +174,6 @@ jobs:
             exit 1
           fi
 
-          test -x "${apps[0]}/Contents/Resources/local-backend/runtime/bin/python3"
           # "This Mac" threads are served by the bridge client the main process requires.
           pnpm dlx @electron/asar list "${apps[0]}/Contents/Resources/app.asar" \
             | grep -q '/node_modules/open-swe-bridge-client/dist/index.js'

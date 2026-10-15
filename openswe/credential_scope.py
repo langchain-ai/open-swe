@@ -3,11 +3,10 @@
 from collections.abc import Mapping
 from typing import Any
 
-import langgraph_sdk
-
 from openswe.run_config import RunConfig
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from openswe.utils.thread_reads import read_thread
 
 
 class PrAuthorNotAParticipant(RuntimeError):
@@ -29,7 +28,7 @@ async def _thread_scope(
     thread_id = thread_id or cfg.thread_id
     if not thread_id:
         raise RuntimeError("Cannot resolve credential scope without a thread_id")
-    thread = await langgraph_sdk.get_client().threads.get(thread_id)
+    thread = await read_thread(thread_id)
     metadata = thread_metadata(thread)
     visibility = metadata.get("visibility", "public")
     if visibility not in ("public", "private"):

@@ -1,33 +1,41 @@
-import { ContextMenu } from "@base-ui/react/context-menu"
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import {
-  ArchiveIcon,
-  ArrowCounterClockwiseIcon,
-  BookOpenTextIcon,
-  CalendarBlankIcon,
   CaretDownIcon,
   CaretRightIcon,
-  ChatCircleIcon,
-  CheckCircleIcon,
-  CircleNotchIcon,
-  FolderIcon,
-  GitMergeIcon,
-  GitPullRequestIcon,
-  LockIcon,
-  PushPinIcon,
-  PushPinSlashIcon,
-  RobotIcon,
-  WarningCircleIcon,
-} from "@phosphor-icons/react"
+  LaptopRegularIcon,
+  PushPinRegularIcon,
+} from "@langchain/macaw-components/icons"
 import {
-  IoCloudOutline,
-  IoLaptopOutline,
-  IoLogoGithub,
-  IoLogoSlack,
-} from "react-icons/io5"
-import { SiLinear } from "react-icons/si"
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@langchain/macaw-components/ContextMenu"
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@langchain/macaw-components/HoverCard"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Spinner } from "@langchain/macaw-components/Spinner"
+import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
+import { BookOpenTextIcon } from "@phosphor-icons/react/dist/ssr/BookOpenText"
+import { CalendarBlankIcon } from "@phosphor-icons/react/dist/ssr/CalendarBlank"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
+import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
+import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
+import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
+import { Link, useSearch } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
-import type { ComponentType, SVGProps } from "react"
+import type { SVGProps } from "react"
 
 import type { PullRequestSnapshot } from "@/features/agents/lib/api"
 import type {
@@ -36,11 +44,9 @@ import type {
   AgentThread,
 } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
-import { useMarkLegacyLocalThreadViewed } from "@/features/agents/lib/legacyLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   markAgentThreadViewed,
@@ -54,43 +60,75 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
-import { reportError } from "@/lib/errorReporting"
 
-type Icon = ComponentType<SVGProps<SVGSVGElement>>
+/** Phosphor has no Linear mark; this is Linear's own logo. */
+function LinearLogoIcon({
+  size = 16,
+  weight: _weight,
+  mirrored: _mirrored,
+  ...props
+}: SVGProps<SVGSVGElement> & {
+  size?: string | number
+  weight?: unknown
+  mirrored?: boolean
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="currentColor"
+      {...props}
+    >
+      <path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z" />
+    </svg>
+  )
+}
 
-const SOURCE_META: Record<AgentSource, { icon: Icon; label: string }> = {
-  dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
-  github: { icon: IoLogoGithub, label: "Triggered from GitHub" },
-  slack: { icon: IoLogoSlack, label: "Triggered from Slack" },
-  linear: { icon: SiLinear, label: "Triggered from Linear" },
-  schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
+const ICON_SIZE = 14
+
+const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
+  {
+    dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
+    github: { icon: GithubLogoIcon, label: "Triggered from GitHub" },
+    slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
+    linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },
+    schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
+  }
+
+const THIS_MAC_META = { icon: LaptopRegularIcon, label: "Runs on this Mac" }
+
+function sourceMeta(item: SidebarThreadItem) {
+  if (item.source && item.source !== "dashboard")
+    return SOURCE_META[item.source]
+  return runsOnAMac(item.thread) ? THIS_MAC_META : null
 }
 
 type PrState = NonNullable<AgentThread["pr"]>["state"]
 
 const PR_STATE_META: Record<
   PrState,
-  { icon: Icon; label: string; className: string }
+  { icon: IconComponent; label: string; className: string }
 > = {
   draft: {
     icon: GitPullRequestIcon,
     label: "Draft pull request",
-    className: "text-muted-foreground/70",
+    className: "text-tertiary",
   },
   open: {
     icon: GitPullRequestIcon,
     label: "Open pull request",
-    className: "text-success-foreground",
+    className: "text-success-secondary",
   },
   merged: {
     icon: GitMergeIcon,
     label: "Merged pull request",
-    className: "text-merged-foreground",
+    className: "text-purple",
   },
   closed: {
     icon: GitPullRequestIcon,
     label: "Closed pull request",
-    className: "text-destructive",
+    className: "text-error-secondary",
   },
 }
 
@@ -198,32 +236,33 @@ function sidebarRowClassName({
   archived: boolean
 }): string {
   return cn(
-    "flex items-center gap-2 rounded-lg pr-2.5 transition-colors",
+    "flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
     paddingLeft,
     // Only ever on screen while "Show archived" is on; without this an
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
-    compact ? "h-7 gap-1.5" : "h-8",
-    "text-foreground",
+    compact ? "h-7 gap-space-2" : "h-8",
+    "text-primary",
     active
-      ? "bg-zinc-200 dark:bg-accent"
-      : "group-hover/row:bg-sidebar-row-hover"
+      ? "bg-selected group-hover/row:bg-selected-hover"
+      : "group-hover/row:bg-surface-level-2-hover"
   )
 }
 
 function RunningIndicator({ label }: { label: string }) {
   return (
-    <CircleNotchIcon
-      className="size-3.5 shrink-0 animate-spin text-muted-foreground"
-      aria-label={label}
-    />
+    <span role="img" aria-label={label} className="flex shrink-0">
+      <Spinner size="xs" className="size-3.5 text-icon-secondary" />
+    </span>
   )
 }
 
 function ErrorIndicator({ label }: { label: string }) {
   return (
     <WarningCircleIcon
-      className="size-3.5 shrink-0 text-destructive"
+      size={ICON_SIZE}
+      weight="regular"
+      className="shrink-0 text-icon-error"
       aria-label={label}
     />
   )
@@ -248,12 +287,14 @@ function PullRequestIcon({
       title={meta.label}
     >
       <Glyph
-        className={cn("size-3.5", meta.className)}
+        size={ICON_SIZE}
+        weight="regular"
+        className={meta.className}
         aria-label={meta.label}
       />
       {live?.checks === "failing" && (
         <span
-          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-destructive ring-2 ring-sidebar"
+          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-error-strong ring-2 ring-surface-level-2"
           aria-label="Checks failing"
         />
       )}
@@ -271,7 +312,6 @@ export function SidebarThreadRow({
   compact = false,
   indent = false,
   onNavigate,
-  onDeleteLocal,
   onTogglePin,
   onToggleArchived,
 }: {
@@ -285,19 +325,14 @@ export function SidebarThreadRow({
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
-  onDeleteLocal: (threadId?: string) => void
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
-  const navigate = useNavigate()
   const chat = useChatRoutes()
   const queryClient = useQueryClient()
-  const markLocalViewed = useMarkLegacyLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
-  const worktreeThread =
-    useLocalThread(item.id) ?? (item.location === "local" ? item.thread : null)
+  const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deletingLocal, setDeletingLocal] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
@@ -308,7 +343,7 @@ export function SidebarThreadRow({
       select: (search) => search.subagent,
     }) ?? null
 
-  const thread = item.location === "cloud" ? item.thread : null
+  const thread = item.thread
   const subagents = (item.subagents ?? []).filter(
     (subagent) => subagent.status !== "completed"
   )
@@ -335,8 +370,7 @@ export function SidebarThreadRow({
   const rowIsActive =
     (isActive && (!activeSubagent || subagentsCollapsed)) ||
     (Boolean(activeWorkerId) && !workersExpanded)
-  const source =
-    item.source && item.source !== "dashboard" ? SOURCE_META[item.source] : null
+  const source = sourceMeta(item)
   const SourceIcon = source?.icon
   // Strictly an unread marker, not a "finished" one: any thread the user has
   // not opened since its latest run shows the dot. The focused thread is being
@@ -344,16 +378,11 @@ export function SidebarThreadRow({
   // optimistic cache patch, which a list refetch can overwrite.
   const unread = !item.viewed && !isActive
   const isDeleting =
-    deletingLocal ||
-    (item.location === "cloud" &&
-      deleteThread.isPending &&
-      deleteThread.variables === item.id)
+    deleteThread.isPending && deleteThread.variables === item.id
 
   const markViewed = () => {
     if (item.reviewPage) markReviewViewed(queryClient, item.reviewPage, item.id)
-    else if (item.location === "cloud")
-      markAgentThreadViewed(queryClient, item.id)
-    else markLocalViewed(item.id)
+    else markAgentThreadViewed(queryClient, item.id)
   }
 
   // Covers every way a row becomes active — click, command palette, keyboard
@@ -363,27 +392,9 @@ export function SidebarThreadRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, item.viewed])
 
-  const onConfirmDelete = async () => {
+  const onConfirmDelete = () => {
     if (isDeleting) return
-    if (item.location === "cloud") {
-      deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
-      return
-    }
-    setDeletingLocal(true)
-    try {
-      const deleted =
-        (await window.openSweDesktop?.deleteLegacyLocalThread(item.id)) ?? false
-      if (!deleted) throw new Error("Local Open SWE thread not found")
-      onDeleteLocal(item.id)
-      setDeleteOpen(false)
-      if (isActive) {
-        onNavigate?.()
-        void navigate({ to: "/agents" })
-      }
-    } catch (error) {
-      reportError({ title: "Couldn't delete thread", error })
-    }
-    setDeletingLocal(false)
+    deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
   }
 
   const onArchiveClick = (event: React.MouseEvent) => {
@@ -428,9 +439,9 @@ export function SidebarThreadRow({
             if (event.key === "Enter" || event.key === " ")
               onToggleSubagents(event)
           }}
-          className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
+          className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
         >
-          <SubagentCaret className="size-3" weight="bold" />
+          <SubagentCaret size={12} weight="bold" />
         </span>
       )}
       {workers.length > 0 && (
@@ -453,35 +464,41 @@ export function SidebarThreadRow({
               setWorkersExpanded((expanded) => !expanded)
             }
           }}
-          className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
+          className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
         >
           {workersExpanded ? (
-            <CaretDownIcon className="size-3" weight="bold" />
+            <CaretDownIcon size={12} weight="bold" />
           ) : (
-            <CaretRightIcon className="size-3" weight="bold" />
+            <CaretRightIcon size={12} weight="bold" />
           )}
         </span>
       )}
       <SidebarRowTitle marquee={marquee} title={item.title} />
 
-      <span className="flex shrink-0 items-center gap-1.5 group-hover/row:hidden">
+      <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
-        {thread?.automationActionPosted && (
-          <IoLogoSlack
-            className="size-3.5 text-success-foreground"
+        {thread.automationActionPosted && (
+          <SlackLogoIcon
+            size={ICON_SIZE}
+            weight="regular"
+            className="text-icon-success"
             aria-label="Action posted to Slack"
           />
         )}
         {item.reviewPage ? (
           <BookOpenTextIcon
-            className="size-3.5 text-muted-foreground/70"
+            size={ICON_SIZE}
+            weight="regular"
+            className="text-icon-tertiary"
             aria-label="Pull request review"
           />
         ) : (
           <>
             {source && SourceIcon && !item.pr && (
               <SourceIcon
-                className="size-3.5 text-muted-foreground/70"
+                size={ICON_SIZE}
+                weight="regular"
+                className="text-icon-tertiary"
                 aria-label={source.label}
               />
             )}
@@ -492,39 +509,29 @@ export function SidebarThreadRow({
           <RunningIndicator label="Thread running" />
         ) : unread ? (
           <span
-            className="size-2 rounded-full bg-primary"
+            className="size-2 rounded-full bg-brand"
             aria-label="Unread thread"
           />
         ) : null}
       </span>
 
       <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
-        <button
-          type="button"
-          aria-label={pinned ? "Unpin thread" : "Pin thread"}
-          title={pinned ? "Unpin" : "Pin"}
+        <IconButton
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
+          label={pinned ? "Unpin thread" : "Pin thread"}
+          size="xs"
+          color="secondary"
+          variant="plain"
           onClick={onPinClick}
-          className="flex size-5 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground"
-        >
-          {pinned ? (
-            <PushPinSlashIcon className="size-3.5" />
-          ) : (
-            <PushPinIcon className="size-3.5" />
-          )}
-        </button>
-        <button
-          type="button"
-          aria-label={archived ? "Unarchive thread" : "Archive thread"}
-          title={archived ? "Unarchive" : "Archive"}
+        />
+        <IconButton
+          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
+          label={archived ? "Unarchive thread" : "Archive thread"}
+          size="xs"
+          color="secondary"
+          variant="plain"
           onClick={onArchiveClick}
-          className="flex size-5 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground"
-        >
-          {archived ? (
-            <ArrowCounterClockwiseIcon className="size-3.5" />
-          ) : (
-            <ArchiveIcon className="size-3.5" />
-          )}
-        </button>
+        />
       </span>
     </>
   )
@@ -535,11 +542,11 @@ export function SidebarThreadRow({
     paddingLeft:
       hasSubagents || workers.length > 0
         ? indent
-          ? "pl-4"
-          : "pl-2"
+          ? "pl-space-4"
+          : "pl-space-2"
         : indent
-          ? "pl-6"
-          : "pl-2.5",
+          ? "pl-space-5"
+          : "pl-space-2",
     archived,
   })
 
@@ -553,68 +560,52 @@ export function SidebarThreadRow({
       }}
       onKeyDown={openContextMenuFromKeyboard}
       className={rowClassName}
-    />
-  ) : item.location === "cloud" ? (
+    >
+      {rowContent}
+    </Link>
+  ) : (
     <Link
       to={chat.thread}
       params={{ threadId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
       className={rowClassName}
-    />
-  ) : (
-    <Link
-      to="/agents/local/$sessionId"
-      params={{ sessionId: item.id }}
-      onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
-    />
+    >
+      {rowContent}
+    </Link>
   )
 
   return (
     <>
-      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
-        <ContextMenu.Trigger
-          className={cn(
-            "group/row relative mb-0.5",
-            isDeleting && "opacity-50"
-          )}
-          onMouseEnter={marquee.measure}
-          onMouseLeave={marquee.reset}
-        >
-          <Tooltip>
-            <TooltipTrigger render={link}>{rowContent}</TooltipTrigger>
-            <TooltipPopup
-              variant="glass"
-              side="right"
-              align="start"
-              sideOffset={8}
-              className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--sidebar)]"
-            >
-              <ThreadHoverCard item={item} live={live} />
-            </TooltipPopup>
-          </Tooltip>
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-              <ThreadMenuItems
-                thread={thread}
-                localThread={
-                  item.location === "local" ? item.thread : undefined
-                }
-                pinned={pinned}
-                archived={archived}
-                isDeleting={isDeleting}
-                onTogglePin={onTogglePin}
-                onToggleArchived={onToggleArchived}
-                onDelete={() => setDeleteOpen(true)}
-              />
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
+      <ContextMenu onOpenChange={setContextMenuOpen}>
+        <ContextMenuTrigger asChild>
+          <div
+            className={cn(
+              "group/row relative mb-0.5",
+              isDeleting && "opacity-50"
+            )}
+            onMouseEnter={marquee.measure}
+            onMouseLeave={marquee.reset}
+          >
+            <RowHoverCard
+              trigger={link}
+              card={<ThreadHoverCard item={item} live={live} />}
+            />
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-[10rem]">
+          <ThreadMenuItems
+            menu="context"
+            thread={thread}
+            pinned={pinned}
+            archived={archived}
+            isDeleting={isDeleting}
+            onTogglePin={onTogglePin}
+            onToggleArchived={onToggleArchived}
+            onDelete={() => setDeleteOpen(true)}
+          />
+        </ContextMenuContent>
+      </ContextMenu>
       {hasSubagents && !subagentsCollapsed && (
         <ul aria-label={`Subagents of ${item.title}`}>
           {subagents.map((subagent) => (
@@ -650,11 +641,11 @@ export function SidebarThreadRow({
         onOpenChange={setDeleteOpen}
         threadTitle={item.title}
         isDeleting={isDeleting}
-        onConfirm={() => void onConfirmDelete()}
+        onConfirm={onConfirmDelete}
         detail={
           !worktreeThread
             ? undefined
-            : worktreeThread.ownedWorktrees?.length
+            : worktreeThread.ownedWorktrees.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
         }
@@ -699,13 +690,23 @@ function SidebarSubagentRow({
         paddingLeft: nested
           ? indent
             ? "pl-18"
-            : "pl-16"
+            : "pl-space-9"
           : indent
             ? "pl-13.5"
             : "pl-11.5",
         archived: false,
       })}
-    />
+    >
+      <SidebarRowTitle marquee={marquee} title={subagent.title} />
+      <span className="flex shrink-0 items-center gap-space-2">
+        {subagent.status === "error" && (
+          <ErrorIndicator label="Subagent failed" />
+        )}
+        {subagent.status === "in_progress" && (
+          <RunningIndicator label="Subagent running" />
+        )}
+      </span>
+    </Link>
   )
 
   return (
@@ -714,29 +715,34 @@ function SidebarSubagentRow({
       onMouseEnter={marquee.measure}
       onMouseLeave={marquee.reset}
     >
-      <Tooltip>
-        <TooltipTrigger render={link}>
-          <SidebarRowTitle marquee={marquee} title={subagent.title} />
-          <span className="flex shrink-0 items-center gap-1.5">
-            {subagent.status === "error" && (
-              <ErrorIndicator label="Subagent failed" />
-            )}
-            {subagent.status === "in_progress" && (
-              <RunningIndicator label="Subagent running" />
-            )}
-          </span>
-        </TooltipTrigger>
-        <TooltipPopup
-          variant="glass"
-          side="right"
-          align="start"
-          sideOffset={8}
-          className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--sidebar)]"
-        >
-          <SubagentHoverCard subagent={subagent} />
-        </TooltipPopup>
-      </Tooltip>
+      <RowHoverCard
+        trigger={link}
+        card={<SubagentHoverCard subagent={subagent} />}
+      />
     </li>
+  )
+}
+
+/** Rich preview beside a row; it is a hover card so its links stay clickable. */
+function RowHoverCard({
+  trigger,
+  card,
+}: {
+  trigger: React.ReactElement
+  card: React.ReactNode
+}) {
+  return (
+    <HoverCard openDelay={500} closeDelay={100}>
+      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+      <HoverCardContent
+        side="right"
+        align="start"
+        sideOffset={8}
+        className="w-auto max-w-80 rounded-lg p-space-3"
+      >
+        {card}
+      </HoverCardContent>
+    </HoverCard>
   )
 }
 
@@ -747,34 +753,38 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const onAMac = item.location === "local" || runsOnAMac(item.thread)
-  const LocationIcon = onAMac ? IoLaptopOutline : IoCloudOutline
+  const onAMac = runsOnAMac(item.thread)
+  const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
+    <div className="flex min-w-0 flex-col gap-space-2">
+      <div className="flex items-start gap-space-2">
+        <span className="min-w-0 flex-1 text-xs font-medium text-primary">
           {item.title}
         </span>
-        {item.location === "cloud" && item.thread.visibility === "private" && (
+        {item.thread.visibility === "private" && (
           <LockIcon
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            size={ICON_SIZE}
+            weight="regular"
+            className="mt-0.5 shrink-0 text-icon-secondary"
             aria-label="Private thread"
           />
         )}
         <LocationIcon
-          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+          size={ICON_SIZE}
+          weight="regular"
+          className="mt-0.5 shrink-0 text-icon-secondary"
           aria-label={locationLabel}
         />
-        <span className="mt-px shrink-0 text-[11px] text-muted-foreground">
+        <span className="mt-px shrink-0 text-xxs text-secondary">
           {compactAge(item.updatedAt)}
         </span>
       </div>
       {item.repoLabel && (
-        <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-          <FolderIcon className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate text-[12px]">{item.repoLabel}</span>
+        <div className="flex min-w-0 items-center gap-space-2 text-secondary">
+          <FolderIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
+          <span className="min-w-0 truncate text-xxs">{item.repoLabel}</span>
         </div>
       )}
       {item.pr && (
@@ -783,10 +793,10 @@ function ThreadHoverCard({
           target="_blank"
           rel="noreferrer"
           onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto -mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="pointer-events-auto -mx-space-1 flex min-w-0 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
         >
           <PullRequestIcon state={item.pr.state} live={live} />
-          <span className="min-w-0 truncate text-[12px]">{item.pr.title}</span>
+          <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
         </a>
       )}
     </div>
@@ -795,9 +805,9 @@ function ThreadHoverCard({
 
 function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
+    <div className="flex min-w-0 flex-col gap-space-2">
+      <div className="flex items-start gap-space-2">
+        <span className="min-w-0 flex-1 text-xs font-medium text-primary">
           {subagent.title}
         </span>
         {subagent.status === "in_progress" ? (
@@ -810,17 +820,19 @@ function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
           </span>
         ) : (
           <CheckCircleIcon
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            size={ICON_SIZE}
+            weight="regular"
+            className="mt-0.5 shrink-0 text-icon-secondary"
             aria-label="Subagent finished"
           />
         )}
-        <span className="mt-px shrink-0 text-[11px] text-muted-foreground">
+        <span className="mt-px shrink-0 text-xxs text-secondary">
           {compactAge(subagent.endedAt ?? subagent.startedAt)}
         </span>
       </div>
-      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-        <RobotIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0 truncate text-[12px]">
+      <div className="flex min-w-0 items-center gap-space-2 text-secondary">
+        <RobotIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
+        <span className="min-w-0 truncate text-xxs">
           {subagent.subagentType}
         </span>
       </div>
@@ -912,17 +924,19 @@ function SidebarTaskWorkerRow({
                 toggleSubagentsCollapsed(`cloud:${worker.id}`)
               }
             }}
-            className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
+            className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
           >
-            <SubagentCaret className="size-3" weight="bold" />
+            <SubagentCaret size={12} weight="bold" />
           </span>
         )}
         <RobotIcon
-          className="size-3.5 shrink-0 text-muted-foreground"
+          size={ICON_SIZE}
+          weight="regular"
+          className="shrink-0 text-icon-secondary"
           aria-label="Asynchronous task worker"
         />
         <SidebarRowTitle marquee={marquee} title={worker.title} />
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+        <span className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary">
           {worker.status === "running" && (
             <RunningIndicator label="Worker running" />
           )}

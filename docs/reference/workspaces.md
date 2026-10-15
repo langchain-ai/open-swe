@@ -83,12 +83,12 @@ workspace prefers. Existing GitHub user and installation access checks remain in
 
 ### Storage, run context, and API
 
-Workspaces, and the repository and Slack-channel bindings that route to them, live in PostgreSQL,
-not the LangGraph Store: a `workspace` table (one row per workspace, slug unique) plus
+Workspaces, and the repository and Slack-channel bindings that route to them, live in PostgreSQL:
+a `workspace` table (one row per workspace, slug unique) plus
 `workspace_repository` and `workspace_slack_channel`, which key on the bound resource
 (`repository_id`, referencing the `repository` table, and `channel_id`), so the database itself
-enforces that a repository is preferred by, and a Slack channel bound to, at most one workspace. Settings and MCP connections stay exactly where this design places
-them: in the LangGraph Store, keyed by workspace slug. `Workspace`, `WorkspaceCreate`, and
+enforces that a repository is preferred by, and a Slack channel bound to, at most one workspace. Settings and MCP connections live in
+their own PostgreSQL tables, keyed by workspace slug. `Workspace`, `WorkspaceCreate`, and
 `WorkspaceUpdate` remain the domain and API shape that the dashboard, the agent tools, and routing
 read and write; the tables are an implementation detail behind `WorkspaceStore`, swappable again
 without touching a caller.
@@ -100,7 +100,9 @@ order, and the first match wins:
 
 1. An existing thread's recorded workspace. Follow-ups on issues, PRs, Linear issues, and Slack
    threads land here; none of them recompute the workspace from the repository.
-2. A `workspace:<slug>` tag on the message that opens the thread (`env:` keeps working as an alias).
+2. A `/workspace:<slug>` command on the message that opens the thread, e.g.
+   `@Open SWE /workspace:infra fix the flaky test`. The older `workspace:<slug>` and `env:<slug>`
+   tags still work anywhere in the message.
 3. The Slack channel's bound workspace. A message in a workspace's channel runs there even when it
    names a repository another workspace prefers, since every workspace can use every repository.
 4. The repository's preferred workspace. This is how GitHub events, Linear issues, automations, and
@@ -117,8 +119,8 @@ Coding sandboxes normally get a token for the whole GitHub App installation, not
 workspace's preferred repositories. Threads started by a GitHub event or an issue automation on
 a **public** repository record that repository in their metadata when created, server-side and
 never from run configuration, and receive a token narrowed to that repository, including on every
-proxy refresh. Unknown repository visibility also causes repository-scoped access. Reviewer,
-analyzer, and review-scout sandboxes explicitly scope their tokens to the repository being
+proxy refresh. Unknown repository visibility also causes repository-scoped access. Reviewer
+and review-scout sandboxes explicitly scope their tokens to the repository being
 examined. Coding threads that members start from Slack, the dashboard, or Linear normally get
 the installation-wide token, as do workspace image builds.
 
@@ -151,9 +153,9 @@ settings and MCP connections become the `default` workspace's. Existing threads 
 workspace read as `default`. The `environment` key in thread metadata and run configuration is
 read as an alias for `workspace` so in-flight threads keep working.
 
-Workspaces live only in PostgreSQL. The one-time import of environment records from the
-LangGraph Store (`["workspaces"]` and the legacy `["environments"]` namespace) has been removed; a
-deployment still holding such records must import them with an earlier release first. A migration
+Workspaces live only in PostgreSQL. Open SWE no longer reads the LangGraph Store; a deployment
+still holding records there must move them with an earlier release first (see
+[Upgrading from the LangGraph Store](../INSTALLATION.md#upgrading-from-the-langgraph-store)). A migration
 seeds the `default` workspace, so pickers always offer it.
 
 ### Non-goals
@@ -171,7 +173,7 @@ internal MCP connections, guidelines, and prompts, provided the public repositor
 by a workspace that has none of them. GitHub access is not partitioned: every sandbox token covers
 the whole installation, so the token is not what isolates a workspace. Threads started by GitHub
 events or automations on public repositories, where outsiders' content is most likely, get a token
-for that repository only; the reviewer, analyzer, and review scout keep their own single-repository
+for that repository only; the reviewer and review scout keep their own single-repository
 tokens. A member-started thread can reach every installation repository, including ones the member
 cannot access on GitHub themselves. Unassigned repositories are
 routed by an explicit instance policy rather than silently defaulting, so a locked-down install can

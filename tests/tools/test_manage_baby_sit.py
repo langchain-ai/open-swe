@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.baby_sit import BabySitWatch
+from openswe.github.pull_request_status import PullRequestClient
 
 manage_tool = importlib.import_module("openswe.tools.manage_baby_sit")
 
@@ -30,8 +31,8 @@ async def test_manage_baby_sit_starts_cross_repo_watch_from_github_issue(
         installation,
     )
     monkeypatch.setattr(
-        manage_tool,
-        "fetch_pr",
+        PullRequestClient,
+        "pull",
         AsyncMock(return_value={"state": "open", "head": {"sha": "head-1", "ref": "feature"}}),
     )
     start = AsyncMock(

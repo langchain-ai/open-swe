@@ -1,6 +1,6 @@
 """Before-model middleware that injects queued messages into state.
 
-Checks the LangGraph store for pending messages (e.g. follow-up Linear
+Checks the thread's queued follow-ups for pending messages (e.g. follow-up Linear
 comments that arrived while the agent was busy) and injects them as new
 human messages before the next model call.
 """
@@ -10,9 +10,8 @@ from typing import Any, cast
 
 import httpx2
 from langchain.agents.middleware import before_model
-from langgraph.config import get_config, get_store
+from langgraph.config import get_config
 from langgraph.runtime import Runtime
-from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from openswe.dashboard.options import model_supports_images
@@ -31,10 +30,14 @@ from openswe.middleware.require_user_reply import (
     current_reply_surface,
 )
 from openswe.middleware.trace import scrub_middleware_inputs
-from openswe.prompts import prompt
 from openswe.users import User
-from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from openswe.utils.dashboard_handoff import (
+    DASHBOARD_HANDOFF_BODY,
+    RELAYED_FROM_KEY,
+    dashboard_input_context,
+)
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
 
 logger = logging.getLogger(__name__)
@@ -89,7 +92,9 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:
@@ -157,33 +162,6 @@ def _message_update(
     return {"messages": queued, **surface_update}
 
 
-async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
-    """Pull and clear a batched PR-babysitting event from the store (no thread fetch)."""
-    namespace = ("autofix", thread_id)
-    try:
-        item = await store.aget(namespace, "pending_event")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not read pending auto-fix event for thread %s", thread_id, exc_info=True
-        )
-        return None
-    if item is None or not item.value.get("reason"):
-        return None
-    try:
-        await store.adelete(namespace, "pending_event")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
-        )
-    message = prompt("runs/autofix-event")
-    details = item.value.get("details")
-    if isinstance(details, list):
-        joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
-        if joined:
-            message += "\n\nNewly arrived feedback to address:\n" + joined
-    return message
-
-
 @scrub_middleware_inputs
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(  # noqa: PLR0911
@@ -207,21 +185,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         if not thread_id:
             return None
 
-        try:
-            store = get_store()
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Could not get store from context: %s", e)
-            return None
-
-        if store is None:
-            return None
-
         queued_updates: list[dict[str, Any]] = []
         content_blocks: list[dict[str, Any]] = []
         injected = visible_dynamic_context_hashes(state)
-        pending_autofix = await _consume_pending_autofix_event(store, thread_id)
-        if pending_autofix:
-            content_blocks.append({"type": "text", "text": pending_autofix})
 
         try:
             # A snapshot: what this call consumes, whatever is queued meanwhile.
@@ -303,9 +269,12 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         if isinstance(value, str):
                             cast(dict[str, str], person)[key] = value
                     person = await User.canonical_person(person)
+                    relayed_from = content.get(RELAYED_FROM_KEY)
                     structured = build_input_messages(
                         blocks,
-                        {"sender_id": person["id"], "surface": "web", "kind": "human"},
+                        dashboard_input_context(
+                            person["id"], relayed_from if isinstance(relayed_from, str) else None
+                        ),
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)

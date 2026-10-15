@@ -1,12 +1,18 @@
-import type { ComponentProps, ReactNode } from "react"
+import { useMemo } from "react"
+import type { ReactNode, RefObject } from "react"
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@langchain/macaw-components/Popover"
 
-import { Popover, PopoverPopup } from "@/components/ui/popover"
 import type { DiffLineSelection } from "@/features/agents/utils/diffSelection"
 
 // Pierre renders lines in a shadow root, which `contains` doesn't cross.
-function isInDiff(selection: DiffLineSelection, node: Node) {
-  const root = node.getRootNode()
-  const host = root instanceof ShadowRoot ? root.host : node
+function isInDiff(selection: DiffLineSelection, target: EventTarget | null) {
+  if (!(target instanceof Node)) return false
+  const root = target.getRootNode()
+  const host = root instanceof ShadowRoot ? root.host : target
   return selection.wrapperProps.ref.current?.contains(host) ?? false
 }
 
@@ -19,30 +25,39 @@ export function DiffSelectionPopover({
 }: {
   selection: DiffLineSelection
   open?: boolean
-  initialFocus?: ComponentProps<typeof PopoverPopup>["initialFocus"]
+  /** Element to focus on open, or `false` to leave focus where it is. */
+  initialFocus?: RefObject<HTMLElement | null> | false
   className?: string
   children: ReactNode
 }) {
+  const anchorRef = useMemo(
+    () => ({ current: selection.anchor }),
+    [selection.anchor]
+  )
   return (
     <Popover
       open={open ?? selection.committed !== null}
-      onOpenChange={(nextOpen, details) => {
-        if (nextOpen) return
-        // Presses inside the diff start a new selection there instead.
-        const target = details.event?.target
-        if (target instanceof Node && isInDiff(selection, target)) return
-        selection.close()
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) selection.close()
       }}
     >
-      <PopoverPopup
-        anchor={selection.anchor}
+      <PopoverAnchor virtualRef={anchorRef} />
+      <PopoverContent
         side="bottom"
         align="start"
-        initialFocus={initialFocus}
         className={className}
+        onOpenAutoFocus={(event) => {
+          if (initialFocus === undefined) return
+          event.preventDefault()
+          if (initialFocus) initialFocus.current?.focus()
+        }}
+        // Presses inside the diff start a new selection there instead.
+        onInteractOutside={(event) => {
+          if (isInDiff(selection, event.target)) event.preventDefault()
+        }}
       >
         {children}
-      </PopoverPopup>
+      </PopoverContent>
     </Popover>
   )
 }

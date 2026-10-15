@@ -28,12 +28,12 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** Identity for remembering the scroll position across navigation. */
   scrollKey?: string
   showPlanArtifact?: boolean
+  /** Cost of each finished run, by invocation id, shown beside its turn's timestamp. */
+  runCosts?: Record<string, number>
   emptyState?: React.ReactNode
   footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
-  /** Send a queued message now instead of waiting for the run to end. */
-  onSteerQueuedMessage?: (id: string) => void
   /** Drop a queued message and hand it back to the composer. */
   onRemoveQueuedMessage?: (id: string) => void
   isStreaming: boolean
