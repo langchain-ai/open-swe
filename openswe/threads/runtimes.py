@@ -27,25 +27,25 @@ class _SdkThreads:
     """A runtime reached through the LangGraph SDK."""
 
     def __init__(self, client: LangGraphClient) -> None:
-        self._client = client
+        self.client = client
 
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         try:
-            return _object.validate_python(dict(await self._client.threads.get(thread_id)))
+            return _object.validate_python(dict(await self.client.threads.get(thread_id)))
         except NotFoundError:
             return None
 
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
-        await self._client.threads.create(
+        await self.client.threads.create(
             thread_id=thread_id, if_exists="do_nothing", metadata=dict(metadata)
         )
 
     async def update(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
-        await self._client.threads.update(thread_id, metadata=dict(metadata))
+        await self.client.threads.update(thread_id, metadata=dict(metadata))
 
     async def delete(self, thread_id: str) -> None:
         try:
-            await self._client.threads.delete(thread_id)
+            await self.client.threads.delete(thread_id)
         except NotFoundError:
             return
 

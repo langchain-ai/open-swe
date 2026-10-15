@@ -168,6 +168,41 @@ async def create(
     return existing
 
 
+async def import_newer(
+    thread_id: str,
+    *,
+    runtime: Runtime,
+    metadata: Mapping[str, JsonValue],
+    status: ThreadStatus,
+    created_at: datetime,
+    updated_at: datetime,
+) -> None:
+    """Index a thread as the Agent Server has it, unless the index has a newer copy."""
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO thread_index
+                    (thread_id, runtime, metadata, status, created_at, updated_at)
+                VALUES (:thread_id, :runtime, CAST(:metadata AS jsonb), :status,
+                        :created_at, :updated_at)
+                ON CONFLICT (thread_id) DO UPDATE SET
+                    runtime = EXCLUDED.runtime, metadata = EXCLUDED.metadata,
+                    status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+                WHERE thread_index.updated_at < EXCLUDED.updated_at
+                """
+            ),
+            {
+                "thread_id": thread_id,
+                "runtime": runtime,
+                "metadata": json.dumps(dict(metadata)),
+                "status": status,
+                "created_at": created_at,
+                "updated_at": updated_at,
+            },
+        )
+
+
 async def get(thread_id: str) -> IndexedThread | None:
     async with transaction() as conn:
         row = (
