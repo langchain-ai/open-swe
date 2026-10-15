@@ -9,7 +9,7 @@ from langgraph_sdk.errors import ConflictError
 from openswe import baby_sit
 from openswe.github import app as github_app
 from openswe.github.ci import RequiredCheck
-from openswe.github.http import RepoClient
+from openswe.github.http import GitHubError, RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
@@ -94,6 +94,100 @@ async def _start_watch(client: _Client) -> baby_sit.BabySitWatch:
             {"slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}}
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("read_method", "status_code", "body", "retryable"),
+    [
+        ("pull", 403, "API rate limit exceeded for installation", True),
+        ("pull", 503, "Service unavailable", True),
+        ("pull", None, "Connection failed", True),
+        ("check_runs", 503, "Service unavailable", True),
+        ("commit_statuses", 403, "secondary rate limit", True),
+        ("pull", 404, "Not Found", False),
+        ("pull", 401, "Bad credentials", False),
+        ("pull", 403, "Resource not accessible", False),
+    ],
+)
+async def test_github_read_failures_only_end_watches_when_persistent(
+    monkeypatch: pytest.MonkeyPatch,
+    read_method: str,
+    status_code: int | None,
+    body: str,
+    retryable: bool,
+) -> None:
+    client = _Client()
+    _use_client(monkeypatch, client)
+    watch = baby_sit.BabySitWatch(
+        key="acme/repo#7",
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        pr_url="https://github.com/acme/repo/pull/7",
+        head_sha="head-1",
+        installation_id=42,
+        cron_id="cron-1",
+    )
+    stored = {watch.key: watch.model_copy(deep=True)}
+
+    async def save(current: baby_sit.BabySitWatch) -> baby_sit.BabySitWatch:
+        stored[current.key] = current.model_copy(deep=True)
+        return current
+
+    monkeypatch.setattr(baby_sit.WATCHES, "get", AsyncMock(side_effect=stored.get))
+    monkeypatch.setattr(baby_sit.WATCHES, "save", save)
+    monkeypatch.setattr(baby_sit.WATCHES, "delete", AsyncMock(side_effect=stored.pop))
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    reads = {
+        "pull": AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+        "check_runs": AsyncMock(return_value=[{"name": "tests", "status": "in_progress"}]),
+        "commit_statuses": AsyncMock(return_value=[]),
+    }
+    monkeypatch.setattr(PullRequestClient, "pull", reads["pull"])
+    monkeypatch.setattr(RepoClient, "check_runs", reads["check_runs"])
+    monkeypatch.setattr(RepoClient, "commit_statuses", reads["commit_statuses"])
+    failure = (
+        GitHubError(
+            httpx2.Response(
+                status_code,
+                text=body,
+                request=httpx2.Request("GET", "https://api.github.com/test"),
+            )
+        )
+        if status_code is not None
+        else httpx2.ConnectError(body)
+    )
+    read = reads[read_method]
+    read.side_effect = failure
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(baby_sit, "_notify_watch", notify)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+
+    for attempt in range(1, 4):
+        result = await baby_sit.evaluate_watch(watch.key)
+        if retryable or attempt < 3:
+            assert result == "error"
+            assert stored[watch.key].active
+            assert stored[watch.key].evaluation_errors == (0 if retryable else attempt)
+        else:
+            assert result == "stopped"
+            assert watch.key not in stored
+
+    if retryable:
+        assert client.crons.deleted == []
+        notify.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        read.side_effect = None
+        assert await baby_sit.evaluate_watch(watch.key) == "pending"
+        assert stored[watch.key].active
+    else:
+        assert client.crons.deleted == ["cron-1"]
+        assert notify.await_args is not None
+        message = notify.await_args.args[1]
+        assert ("not found" if status_code == 404 else "denied access") in message
 
 
 async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(

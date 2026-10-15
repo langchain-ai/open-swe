@@ -18,7 +18,7 @@ import httpx2
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from openswe.github.checks import REVIEW_CHECK_RUN_NAME
-from openswe.github.http import RepoClient, or_none
+from openswe.github.http import ReadResult, RepoClient, read_result
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +41,28 @@ class CommitChecks:
     @classmethod
     async def read(cls, repo: RepoClient, sha: str) -> Self | None:
         """``None`` when GitHub could not answer for either (Checks: Read missing?)."""
+        return (await cls.read_result(repo, sha)).value
+
+    @classmethod
+    async def read_result(cls, repo: RepoClient, sha: str) -> ReadResult[Self]:
+        """Read both CI sources without losing retryable failure information."""
         runs, statuses = await asyncio.gather(
-            or_none(repo.check_runs(sha)), or_none(repo.commit_statuses(sha))
+            read_result(repo.check_runs(sha)), read_result(repo.commit_statuses(sha))
         )
-        if runs is None or statuses is None:
+        if runs.value is None or statuses.value is None:
             logger.warning(
                 "Commit checks unavailable", extra={"repo_full_name": repo.full_name, "sha": sha}
             )
-            return None
-        return cls(
-            runs=[run for run in runs if run.get("name") not in _OPEN_SWE_CHECK_NAMES],
-            statuses=statuses,
+            failure = runs.status if runs.value is None else statuses.status
+            if "transient" in (runs.status, statuses.status):
+                failure = "transient"
+            return ReadResult(None, failure)
+        return ReadResult(
+            cls(
+                runs=[run for run in runs.value if run.get("name") not in _OPEN_SWE_CHECK_NAMES],
+                statuses=statuses.value,
+            ),
+            "ok",
         )
 
     def unreported(self, required: set[RequiredCheck]) -> list[str]:
