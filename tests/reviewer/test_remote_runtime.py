@@ -220,7 +220,7 @@ async def _through_proxy(
         token = sign_runtime_token(
             RemoteRun(thread_id=thread_id, assistant_id=assistant_id, configurable=configurable)
         )
-        return {"graph": assistant_id, "run_token": token}
+        return {"graph": assistant_id, "credentials": {"run_token": token}}
 
     monkeypatch.setenv("MDA_RUNTIME_URL", "http://localhost:2041")
     monkeypatch.setattr(proxy, "remote_run_context", context)
@@ -326,10 +326,80 @@ async def test_mda_proxy_claims_a_fresh_thread_and_signs_its_run_configuration(
     assert sent["langsmith_tracer"] == {"project_name": "open-swe-e2e"}
     context = sent["context"]
     assert context["__event_streaming_v2"] is True
-    assert verify_runtime_token(context["run_token"]).configurable == {
+    assert verify_runtime_token(context["credentials"]["run_token"]).configurable == {
         "repo": {"owner": "acme", "name": "widgets"},
         "github_login": "ada",
     }
+
+
+@pytest.mark.parametrize("assistant_id", ["agent", "reviewer"])
+async def test_mda_credentials_authenticate_hooks_without_entering_trace_metadata(
+    monkeypatch: pytest.MonkeyPatch, assistant_id: str
+) -> None:
+    import json
+    from functools import partial
+    from importlib import import_module
+    from pathlib import Path
+    from unittest.mock import AsyncMock, Mock
+
+    import httpx2
+    from langchain_core.runnables import RunnableLambda
+    from langchain_core.tracers.langchain import LangChainTracer
+    from langsmith import RunTree
+    from pydantic import JsonValue
+
+    from openswe.remote_runtime import agent, reviewer
+    from openswe.remote_runtime.client import remote_run_context
+    from openswe.remote_runtime.runs import ModelSpec, RunModels
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "mda"))
+    runtime_backend = import_module("rt.backend")
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.example")
+    model = ModelSpec(model_id="openai:gpt-test", kwargs={})
+    models = RunModels(model=model, subagent_model=model, use_gateway=False)
+    monkeypatch.setattr(agent, "run_models", AsyncMock(return_value=models))
+    monkeypatch.setattr(reviewer, "run_models", AsyncMock(return_value=models))
+    context = await remote_run_context(
+        RUN.configurable, thread_id=RUN.thread_id, assistant_id=assistant_id
+    )
+    backend = runtime_backend.OpenSweBackend(context["credentials"])
+    authenticated: list[RemoteRun] = []
+
+    async def hook(scope: Scope, receive: Receive, send: Send) -> None:
+        authenticated.append(scope["state"]["remote_run"])
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b'{"authenticated": true}'})
+
+    transport = httpx2.ASGITransport(app=RunTokenMiddleware(hook))
+    monkeypatch.setattr(httpx2, "AsyncClient", partial(httpx2.AsyncClient, transport=transport))
+    posted: list[RunTree] = []
+
+    def capture(run: RunTree, **kwargs: object) -> None:
+        posted.append(run)
+
+    monkeypatch.setattr(RunTree, "post", capture)
+    monkeypatch.setattr(RunTree, "patch", Mock())
+    tracer = LangChainTracer()
+
+    async def call_hook(_: object) -> dict[str, JsonValue]:
+        return await backend.call("catalog")
+
+    result = await RunnableLambda(call_hook, name="open-swe").ainvoke(
+        {}, config={"configurable": dict(context), "callbacks": [tracer]}
+    )
+
+    assert result == {"authenticated": True}
+    assert authenticated == [
+        RemoteRun(thread_id=RUN.thread_id, assistant_id=assistant_id, configurable=RUN.configurable)
+    ]
+    [root] = posted
+    assert root.parent_run_id is None
+    metadata = root.metadata
+    assert metadata["graph"] == assistant_id
+    assert "run_token" not in metadata
+    assert "credentials" not in metadata
+    assert context["credentials"]["run_token"] not in json.dumps(metadata)
+    assert not runtime_backend.OpenSweBackend(None).has_run
 
 
 async def test_mda_proxy_acts_only_on_requests_the_agent_server_authenticates(

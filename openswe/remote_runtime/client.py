@@ -31,7 +31,7 @@ class RemoteRunContext(TypedDict):
     """The run context the MDA deployment builds its graph from."""
 
     graph: HostedGraph
-    run_token: str
+    credentials: dict[str, str]
     invocation_id: NotRequired[str]
     models: NotRequired[dict[str, JsonValue]]
 
@@ -97,7 +97,7 @@ async def remote_run_context(
     models = await (agent.run_models(cfg) if graph == "agent" else reviewer.run_models(cfg))
     context: RemoteRunContext = {
         "graph": graph,
-        "run_token": token,
+        "credentials": {"run_token": token},
         "models": models.model_dump(mode="json"),
     }
     if cfg.invocation_id:
