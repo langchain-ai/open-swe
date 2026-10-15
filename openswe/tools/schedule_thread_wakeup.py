@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from weakref import WeakValueDictionary
@@ -11,9 +12,11 @@ from xml.etree import ElementTree
 from langchain_core.messages import BaseMessage
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
+from pydantic import JsonValue, TypeAdapter
 
 from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from openswe.input_messages import build_run_input
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.client import get_active_slack_thread
@@ -21,12 +24,15 @@ from openswe.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
+_json = TypeAdapter(dict[str, JsonValue])
+
 _AGENT_ASSISTANT_ID = "agent"
 _MIN_DELAY_SECONDS = 60
 _MAX_DELAY_SECONDS = 86_400
 _END_TIME_PADDING_SECONDS = 90
 
 _WAKEUP_KIND = "thread_wakeup"
+WAKE_THREAD_JOB = "thread_wakeup"
 _WAKEUP_SENDER_ID = "system:thread-wakeup"
 _MAX_WAKEUPS_BETWEEN_USER_MESSAGES = 10
 _WAKEUP_GENERATION_METADATA_KEY = "thread_wakeup_generation"
@@ -185,6 +191,8 @@ async def purge_expired_wakeup_crons(client: Any, *, now: datetime) -> int:
 
 
 async def cancel_thread_wakeups(thread_id: str) -> None:
+    await queue.cancel_matching({"kind": _WAKEUP_KIND, "thread_id": thread_id})
+    # Wakeups scheduled before the job queue are Agent Server crons.
     client = get_client(url=langgraph_url())
     cron_ids: list[str] = []
     offset = 0
@@ -217,57 +225,63 @@ async def _purge_expired_wakeups_best_effort() -> None:
         logger.warning("Failed to purge expired thread_wakeup crons", exc_info=True)
 
 
-async def _create_wakeup_cron(
-    *,
-    thread_id: str,
-    fire_time: datetime,
-    prompt: str,
-    configurable: dict[str, Any],
-    client: Any | None = None,
+async def _schedule_wakeup(
+    *, thread_id: str, fire_time: datetime, prompt: str, configurable: dict[str, Any]
 ) -> dict[str, Any]:
-    resolved_client = get_client(url=langgraph_url()) if client is None else client
-    schedule = _build_one_shot_cron(fire_time)
-    end_time = fire_time + timedelta(seconds=_END_TIME_PADDING_SECONDS)
     run_config = prepare_run_config(
         {"configurable": configurable},
-        {"kind": "thread_wakeup", "thread_id": thread_id},
+        {"kind": _WAKEUP_KIND, "thread_id": thread_id},
     )
-    kwargs: dict[str, Any] = {
-        "schedule": schedule,
-        "input": build_run_input(
-            prompt,
+    run_input = build_run_input(
+        prompt,
+        {"sender_id": _WAKEUP_SENDER_ID, "surface": "automation", "kind": "system"},
+        systems=[
             {
-                "sender_id": _WAKEUP_SENDER_ID,
-                "surface": "automation",
-                "kind": "system",
-            },
-            systems=[
-                {
-                    "id": _WAKEUP_SENDER_ID,
-                    "display_name": "Thread wakeup scheduler",
-                    "platform": "open-swe",
-                }
-            ],
-        ),
-        "config": run_config,
-        "end_time": end_time,
-        "timezone": "UTC",
-        "metadata": run_config["metadata"],
-    }
-    if COMPLETION_WEBHOOK_URL:
-        kwargs["webhook"] = COMPLETION_WEBHOOK_URL
-    cron = await resolved_client.crons.create_for_thread(
-        thread_id,
-        _AGENT_ASSISTANT_ID,
-        **kwargs,
+                "id": _WAKEUP_SENDER_ID,
+                "display_name": "Thread wakeup scheduler",
+                "platform": "open-swe",
+            }
+        ],
     )
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
+    job = await queue.schedule(
+        WAKE_THREAD_JOB,
+        _json.validate_python(
+            {
+                "thread_id": thread_id,
+                "input": run_input,
+                "config": run_config,
+                "metadata": run_config["metadata"],
+            }
+        ),
+        due_at=fire_time,
+        metadata={"kind": _WAKEUP_KIND, "thread_id": thread_id},
+    )
     return {
         "success": True,
-        "cron_id": cron_id,
+        "cron_id": str(job.id),
         "scheduled_for": fire_time.isoformat(),
         "thread_id": thread_id,
     }
+
+
+async def run_thread_wakeup(payload: Mapping[str, JsonValue]) -> str | None:
+    """Wake the thread a wakeup job names; the run it started, queued behind any running one."""
+    thread_id = payload.get("thread_id")
+    if not isinstance(thread_id, str):
+        return None
+    kwargs: dict[str, Any] = {
+        "input": payload.get("input"),
+        "config": payload.get("config"),
+        "metadata": payload.get("metadata"),
+        "multitask_strategy": "enqueue",
+    }
+    if COMPLETION_WEBHOOK_URL:
+        kwargs["webhook"] = COMPLETION_WEBHOOK_URL
+    run = await get_client(url=langgraph_url()).runs.create(
+        thread_id, _AGENT_ASSISTANT_ID, **kwargs
+    )
+    run_id = run.get("run_id") if isinstance(run, dict) else None
+    return run_id if isinstance(run_id, str) else None
 
 
 async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) -> dict[str, Any]:
@@ -337,12 +351,11 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
             logger.exception("Failed to record thread wakeup budget for %s", thread_id)
             return {"success": False, "error": "Unable to record the thread wakeup limit"}
         try:
-            return await _create_wakeup_cron(
+            return await _schedule_wakeup(
                 thread_id=thread_id,
                 fire_time=fire_time,
                 prompt=wakeup_prompt,
                 configurable=wakeup_configurable,
-                client=client,
             )
         except Exception as exc:
             logger.exception("Failed to schedule thread wakeup for %s", thread_id)
