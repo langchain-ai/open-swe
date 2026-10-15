@@ -24,6 +24,9 @@ _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count
 # call can run a long command.
 _LONG_CALL_SECONDS: Final = 1800.0
 _HOOK_SECONDS: Final = 300.0
+# What a tool call takes past its own ``timeout`` before it answers that it ran out:
+# the sandbox's grace for an overrunning command, killing it, and the tool middleware.
+_TOOL_CALL_SLACK_SECONDS: Final = 300.0
 
 Hook = Literal[
     "catalog",
@@ -55,6 +58,10 @@ def subagent_of(tool_call_id: str) -> Iterator[None]:
 
 class BackendCallError(RuntimeError):
     """The backend refused or could not answer a call; never carries the token."""
+
+
+class BackendTimeoutError(BackendCallError):
+    """The backend did not answer in time; what the call started may still be running."""
 
 
 class ToolSpec(BaseModel):
@@ -143,21 +150,28 @@ class OpenSweBackend:
         return self._run_token is not None
 
     async def call(
-        self, hook: Hook, body: Mapping[str, JsonValue] | None = None
+        self,
+        hook: Hook,
+        body: Mapping[str, JsonValue] | None = None,
+        *,
+        seconds: float | None = None,
     ) -> dict[str, JsonValue]:
         if self._run_token is None:
             raise BackendCallError(
                 "This run carries no Open SWE run token; start it through Open SWE"
             )
-        timeout = _LONG_CALL_SECONDS if hook in {"prepare", "call"} else _HOOK_SECONDS
+        if seconds is None:
+            seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
         try:
-            async with httpx2.AsyncClient(timeout=timeout) as client:
+            async with httpx2.AsyncClient(timeout=seconds) as client:
                 response = await client.post(
                     f"{self._base}/remote-runtime/hooks/{hook}",
                     headers={"Authorization": f"Bearer {self._run_token}"},
                     json=dict(body or {}),
                 )
                 response.raise_for_status()
+        except httpx2.TimeoutException as exc:
+            raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
         except httpx2.HTTPError as exc:
             # Named by type only: transport errors can echo the request, and it carries the token.
             raise BackendCallError(f"{hook} failed ({type(exc).__name__})") from exc
@@ -170,7 +184,14 @@ class OpenSweBackend:
         return PhaseReply.model_validate(await self.call(hook, body))
 
     async def tool(self, body: Mapping[str, JsonValue]) -> ToolReply:
-        return ToolReply.model_validate(await self.call("call", body))
+        arguments = body.get("arguments")
+        requested = arguments.get("timeout") if isinstance(arguments, dict) else None
+        # A call with its own timeout, such as a long ``execute``, must be able to run it
+        # out and answer that it did, as it does in-process, rather than outlive this one.
+        seconds = _LONG_CALL_SECONDS
+        if isinstance(requested, int | float) and not isinstance(requested, bool):
+            seconds = max(seconds, requested + _TOOL_CALL_SLACK_SECONDS)
+        return ToolReply.model_validate(await self.call("call", body, seconds=seconds))
 
     async def model_result(
         self, body: Mapping[str, JsonValue], response: Sequence[BaseMessage]
