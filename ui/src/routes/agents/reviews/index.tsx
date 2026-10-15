@@ -54,7 +54,7 @@ function ReviewsPage() {
   const filters = Route.useSearch()
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
-  const clearTitleBar =
+  const clearTrafficLights =
     useSidebarCollapsed() &&
     typeof window !== "undefined" &&
     Boolean(window.openSweDesktop)
@@ -86,7 +86,7 @@ function ReviewsPage() {
       <div
         className={cn(
           "flex min-h-0 w-full flex-1 flex-col px-space-5 py-space-5",
-          clearTitleBar && "pt-13"
+          clearTrafficLights && "pt-2.5 pl-32"
         )}
       >
         <div
