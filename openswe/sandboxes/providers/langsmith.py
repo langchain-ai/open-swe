@@ -25,6 +25,7 @@ from langsmith.sandbox import (
     ResourceNotFoundError,
     SandboxClientError,
     SandboxConnectionError,
+    SandboxOperationError,
     SandboxServerReloadError,
 )
 from pydantic import BaseModel
@@ -808,6 +809,20 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             result = result_task.result()
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
+        except SandboxOperationError as exc:
+            if exc.error_type != "CommandNotFound" or exc.operation != "reconnect":
+                raise
+            logger.exception(
+                "Sandbox lost command state while collecting its result",
+                extra={"sandbox_id": self.id, "sandbox_error_type": exc.error_type},
+            )
+            msg = (
+                f"Sandbox {self.id} lost command state while collecting the result: {exc}. "
+                "The command may already have run; its outcome is unknown. "
+                "This is not a missing shell executable. No automatic retry was attempted. "
+                "Check the command's effects before deciding whether to run it again."
+            )
+            raise RuntimeError(msg) from exc
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS) as exc:
             return await self._afallback_execute(command, timeout, exc)
         return self._result_to_response(result)

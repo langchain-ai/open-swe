@@ -9,7 +9,6 @@ from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert
 from openswe.github import webhook as github_webhooks
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import FakeStore
 
 
 def _pr_payload(
@@ -250,7 +249,7 @@ async def test_converted_to_draft_disables_watch_when_drafts_off(
 
 @pytest.mark.asyncio
 async def test_pr_ready_draft_reads_the_owning_workspaces_team_default(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, registry_db: None
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     """The draft-review default belongs to the workspace that owns the repo."""
     fake_client = MagicMock()

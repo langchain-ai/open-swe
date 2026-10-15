@@ -6,8 +6,10 @@ from typing import Literal, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid7
 
+import httpx
 import pytest
 from fastapi import HTTPException
+from langgraph_sdk.errors import APIStatusError
 
 from openswe.dashboard import deps, profiles
 from openswe.dashboard.workspace_settings import (
@@ -29,7 +31,7 @@ from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User, UserPreferences
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import FakeStore, patch_thread_module
+from tests.conftest import patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
@@ -70,9 +72,7 @@ async def test_create_session_starts_only_when_requested(monkeypatch, start: boo
         dispatch.assert_not_awaited()
 
 
-async def test_create_session_uses_saved_defaults(
-    monkeypatch, fake_store: FakeStore, registry_db
-) -> None:
+async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/oss"})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
@@ -143,7 +143,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
-    monkeypatch, fake_store: FakeStore, registry_db
+    monkeypatch, registry_db
 ) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})
@@ -172,7 +172,7 @@ async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
 
 
 async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
-    monkeypatch, fake_store: FakeStore, registry_db
+    monkeypatch, registry_db
 ) -> None:
     """A new thread's model default is the repo's workspace override, not the instance record."""
     created: dict[str, object] = {}
@@ -614,6 +614,28 @@ async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) 
     )
 
     assert enriched["params"]["config"]["configurable"]["transcript_turn_id"] == str(recorded)
+
+
+@pytest.mark.parametrize("status_code", [403, 503])
+async def test_proxy_commands_preserves_thread_lookup_failure(
+    monkeypatch, status_code: int
+) -> None:
+    error = APIStatusError(
+        "thread lookup failed",
+        response=httpx.Response(
+            status_code, request=httpx.Request("GET", "http://api/threads/tid")
+        ),
+        body=None,
+    )
+    client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(side_effect=error)))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+
+    with pytest.raises(APIStatusError) as exc_info:
+        await thread_proxy.proxy_dashboard_thread_commands(
+            "tid", "octocat", b'{"method": "run.start"}'
+        )
+
+    assert exc_info.value is error
 
 
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:

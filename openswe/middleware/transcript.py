@@ -20,7 +20,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -30,7 +30,7 @@ from uuid import UUID
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.callbacks.manager import AsyncCallbackManager, CallbackManager
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
@@ -68,6 +68,7 @@ from openswe.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
+from openswe.transcript.turns import recorded_message_ids, run_turn, superseded_turns
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,16 @@ _namespace: ContextVar[tuple[str, ...]] = ContextVar("transcript_namespace", def
 def current_namespace() -> list[str]:
     """The subagent namespace for events emitted right now (``[]`` at the root)."""
     return list(_namespace.get())
+
+
+@contextlib.contextmanager
+def within_namespace(namespace: Sequence[str]) -> Iterator[None]:
+    """Emit the block's events under ``namespace``, for a subagent running in another process."""
+    token = _namespace.set(tuple(namespace))
+    try:
+        yield
+    finally:
+        _namespace.reset(token)
 
 
 def paragraph_boundary(text: str) -> int:
@@ -753,7 +764,19 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             and delivered_event_match_ids([message]) & ids.event_match_ids
         ]
         input_event_ids = {message.id for message in input_events}
-        commands: list[Command] = []
+        # A run replaced by an interrupting follow-up never reports its turn's end.
+        commands: list[Command] = [
+            Command(
+                command_id=f"turn:{stale_turn}:interrupted",
+                event=TurnInterrupted(
+                    type="turn.interrupted", turn_id=stale_turn, run_id=stale_run
+                ),
+                actor_kind="system",
+                run_id=stale_run,
+                turn_id=stale_turn,
+            )
+            for stale_turn, stale_run in await superseded_turns(ids.thread_id, ids.run_id, turn_id)
+        ]
         if (
             (not transcribed or configured_turn is None)
             and human is not None
@@ -795,6 +818,56 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         )
         run_state.enqueue(*commands)
         self._record_human_messages(run_state, input_events)
+
+    async def aresume_run(self, state: AgentState, runtime: Runtime) -> None:
+        """Rejoin the run's turn in a process that did not start it.
+
+        A run hosted on Managed Deep Agents calls back into any replica, so the
+        turn it started elsewhere, and what that turn already recorded, come
+        from PostgreSQL.
+        """
+        del runtime
+        try:
+            await self._resume_run(state)
+        except Exception:
+            logger.warning("Transcript run resume failed", exc_info=True)
+
+    async def _resume_run(self, state: AgentState) -> None:
+        ids = _run_ids()
+        if ids is None or _namespace.get() or _run_key(ids.thread_id, ids.run_id) in _runs:
+            return
+        owned = await run_turn(ids.thread_id, ids.run_id) if postgres.configured() else None
+        if owned is None:
+            await self._start_run(state)
+            return
+        run_state = RunState(
+            thread_id=ids.thread_id, run_id=ids.run_id, turn_id=owned.turn_id, enabled=owned.open
+        )
+        if owned.open:
+            humans = [
+                message.id
+                for message in cast(Sequence[BaseMessage], state.get("messages") or [])
+                if isinstance(message, HumanMessage) and isinstance(message.id, str) and message.id
+            ]
+            run_state.seen_human_ids.update(await recorded_message_ids(ids.thread_id, humans))
+            run_state.queue = asyncio.Queue()
+            run_state.writer = asyncio.create_task(_writer_loop(run_state))
+        _runs[_run_key(ids.thread_id, ids.run_id)] = run_state
+
+    async def aflush_run(self, runtime: Runtime) -> None:
+        """Write what the run queued so far, before another process continues it."""
+        del runtime
+        run_state = _lookup_state()
+        if not run_state.enabled or run_state.queue is None or _namespace.get():
+            return
+        try:
+            await asyncio.wait_for(run_state.queue.join(), timeout=30)
+        except TimeoutError:
+            logger.warning(
+                "Transcript flush timed out",
+                exc_info=True,
+                extra={"transcript_thread_id": run_state.thread_id},
+            )
 
     async def awrap_model_call(
         self,
@@ -964,28 +1037,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             return await handler(request)
 
         namespace = current_namespace()
-        name = tool_call.get("name") or "tool"
-        try:
-            state.enqueue(
-                Command(
-                    command_id=f"tool:{tool_call_id}:started",
-                    event=ToolStarted(
-                        type="tool.started",
-                        turn_id=state.turn_id,
-                        tool_call_id=tool_call_id,
-                        message_id=_issuing_message_id(state, request, tool_call_id),
-                        name=name,
-                        input=_json_object(tool_call.get("args")),
-                        namespace=namespace,
-                    ),
-                    actor_kind="agent",
-                    run_id=state.run_id,
-                    turn_id=state.turn_id,
-                )
-            )
-        except Exception:
-            logger.warning("Transcript tool start failed", exc_info=True, extra={"tool_name": name})
-
+        messages = request.state.get("messages") if isinstance(request.state, Mapping) else None
+        self._start_tool(state, tool_call, tool_call_id, messages, namespace)
         token = _namespace.set((*_namespace.get(), tool_call_id))
         try:
             result = await handler(request)
@@ -1013,6 +1066,54 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             _namespace.reset(token)
         self._complete_tool(state, tool_call_id, namespace, *_result_output(result, tool_call_id))
         return result
+
+    async def atool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
+        """Record a tool call that another process runs, such as a remote runtime's ``task``."""
+        state = _lookup_state()
+        tool_call_id = tool_call.get("id")
+        if state.enabled and tool_call_id:
+            self._start_tool(state, tool_call, tool_call_id, messages, current_namespace())
+
+    async def atool_finished(self, result: ToolMessage) -> None:
+        """Record how a tool call ``atool_started`` recorded ended."""
+        state = _lookup_state()
+        if state.enabled:
+            self._complete_tool(
+                state,
+                result.tool_call_id,
+                current_namespace(),
+                *_result_output(result, result.tool_call_id),
+            )
+
+    def _start_tool(
+        self,
+        state: RunState,
+        tool_call: ToolCall,
+        tool_call_id: str,
+        messages: object,
+        namespace: list[str],
+    ) -> None:
+        name = tool_call.get("name") or "tool"
+        try:
+            state.enqueue(
+                Command(
+                    command_id=f"tool:{tool_call_id}:started",
+                    event=ToolStarted(
+                        type="tool.started",
+                        turn_id=state.turn_id,
+                        tool_call_id=tool_call_id,
+                        message_id=_issuing_message_id(state, messages, tool_call_id),
+                        name=name,
+                        input=_json_object(tool_call.get("args")),
+                        namespace=namespace,
+                    ),
+                    actor_kind="agent",
+                    run_id=state.run_id,
+                    turn_id=state.turn_id,
+                )
+            )
+        except Exception:
+            logger.warning("Transcript tool start failed", exc_info=True, extra={"tool_name": name})
 
     def _complete_tool(
         self,
@@ -1175,8 +1276,7 @@ def _turn_requested(
     )
 
 
-def _issuing_message_id(state: RunState, request: ToolCallRequest, tool_call_id: str) -> str | None:
-    candidates = request.state.get("messages") if isinstance(request.state, Mapping) else None
+def _issuing_message_id(state: RunState, candidates: object, tool_call_id: str) -> str | None:
     if not isinstance(candidates, Sequence):
         return None
     for message in reversed(candidates):

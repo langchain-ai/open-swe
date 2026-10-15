@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from openswe.database import postgres
 from openswe.github.repositories import Repository
-from openswe.store import now_iso
+from openswe.utils.time import now_iso
 from openswe.workspaces import store as env_store
 from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 from openswe.workspaces.store import (
@@ -264,7 +264,7 @@ async def test_publish_writes_definition_and_image_together() -> None:
     assert updated.source_sandbox_id == "sb-2"
 
 
-# --- Slack channels, uniqueness, and the one-off Store import ---
+# --- Slack channels and uniqueness ---
 
 
 # --- rows ---

@@ -11,7 +11,18 @@ import { DesktopIcon } from "@phosphor-icons/react/dist/ssr/Desktop"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { BugIcon } from "@phosphor-icons/react/dist/ssr/Bug"
+import { Button } from "@langchain/macaw-components/Button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@langchain/macaw-components/Dialog"
 
+import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
+import { buildEnvironmentDiagnostics } from "@/lib/environment-diagnostics"
 import type { SessionUser } from "@/lib/api"
 import type { Theme } from "@/lib/theme"
 import { api } from "@/lib/api"
@@ -47,6 +58,14 @@ export function SidebarUserMenu({
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
   const [open, setOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [desktopVersion, setDesktopVersion] = useState<string>()
+
+  useEffect(() => {
+    if (reportOpen) {
+      void window.openSweDesktop?.getVersion().then(setDesktopVersion)
+    }
+  }, [reportOpen])
   const [datadogCopyStatus, setDatadogCopyStatus] = useState<
     "idle" | "copied" | "error"
   >("idle")
@@ -97,7 +116,6 @@ export function SidebarUserMenu({
         setDatadogCopyStatus("error")
       }
     }
-    window.setTimeout(() => setDatadogCopyStatus("idle"), 1500)
   }
 
   return (
@@ -158,21 +176,19 @@ export function SidebarUserMenu({
             </div>
           </div>
           <div className="my-space-1 border-t border-default" />
-          {datadogInitialized && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => void copyDatadogSessionLink()}
-              className="flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-left text-xs/relaxed hover:bg-elevated-hover"
-            >
-              <CopyIcon size={14} weight="regular" />
-              {datadogCopyStatus === "copied"
-                ? "Copied Datadog link"
-                : datadogCopyStatus === "error"
-                  ? "Couldn't copy Datadog link"
-                  : "Copy Datadog link"}
-            </button>
-          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              setDatadogCopyStatus("idle")
+              setReportOpen(true)
+            }}
+            className="flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-left text-xs/relaxed hover:bg-elevated-hover"
+          >
+            <BugIcon size={14} weight="regular" />
+            Report an issue
+          </button>
           {showSettingsLink && (
             <Link
               to="/my-settings"
@@ -195,6 +211,58 @@ export function SidebarUserMenu({
           </button>
         </div>
       )}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent
+          childrenClassName="gap-space-4 p-space-6"
+          showClose={false}
+        >
+          <DialogTitle>Report an issue</DialogTitle>
+          <DialogDescription>
+            Send the Open SWE team a description of what went wrong, what you
+            expected, and any steps to reproduce it.
+          </DialogDescription>
+          <p className="text-xs text-secondary">
+            {datadogInitialized
+              ? "Copy your session link and include it in your message so the team can find your session replay."
+              : "A session replay link is unavailable. You can still report the issue and copy diagnostics below."}
+          </p>
+          <div className="flex flex-wrap items-start gap-space-2">
+            {datadogInitialized && (
+              <div className="space-y-space-2 pt-space-1">
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  size="xs"
+                  leftDecorator={CopyIcon}
+                  aria-label="Copy session link"
+                  onClick={() => void copyDatadogSessionLink()}
+                >
+                  Copy session link
+                </Button>
+                <p role="status" className="text-xs text-secondary">
+                  {datadogCopyStatus === "copied"
+                    ? "Session link copied. Include it in your message to the team."
+                    : datadogCopyStatus === "error"
+                      ? "Couldn't copy the session link. You can still report the issue without it."
+                      : null}
+                </p>
+              </div>
+            )}
+            {reportOpen && (
+              <CopyDiagnosticsButton
+                getDiagnostics={() =>
+                  buildEnvironmentDiagnostics(user, desktopVersion)
+                }
+              />
+            )}
+          </div>
+          <DialogClose asChild>
+            <Button variant="outlined" size="sm">
+              Close
+            </Button>
+          </DialogClose>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

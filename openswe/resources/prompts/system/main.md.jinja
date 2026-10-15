@@ -34,10 +34,6 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% endif %}
 {% include "system/commit-pr.md" +%}
 
-{% if desktop %}
-{% include "system/commit-pr-desktop.md" +%}
-
-{% endif %}
 {% if repo_instructions_section %}
 {{ repo_instructions_section }}
 

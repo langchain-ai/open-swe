@@ -91,11 +91,9 @@ async def test_agent_subagent_uses_workspace_defaults_despite_profile_override()
 
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
-    assert subagents[0]["model"] is subagent_model
+    assert subagents[0]["model"] is main_model
     assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
-    assert make_model.call_args_list[1].args == ("openai:gpt-6.1-sol",)
     assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
-    assert make_model.call_args_list[1].kwargs["reasoning"]["effort"] == "low"
 
 
 @pytest.mark.asyncio
@@ -156,4 +154,4 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
 
     assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
     assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
-    assert make_model.call_args_list[1].args == ("openai:gpt-6.1-sol",)
+    assert captured["subagents"][0]["model"] is main_model

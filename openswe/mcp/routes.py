@@ -25,6 +25,7 @@ from openswe.mcp.managed import (
     ManagedToolsError,
     gateway_id,
     gateway_status,
+    instance_gateway,
     list_gateways,
     managed_tools_configured,
 )
@@ -223,7 +224,7 @@ async def api_discover_my_mcp(
 
 
 class ManagedToolsView(BaseModel):
-    """The managed tools gateways the caller's workspaces use, and what each still needs."""
+    """The instance's managed tools gateway (none or one), and what the caller still needs."""
 
     configured: bool
     langsmith_connected: bool = False
@@ -235,25 +236,12 @@ class ManagedConnectResponse(BaseModel):
     url: str | None = None
 
 
-async def _gateway_workspaces() -> dict[str, list[str]]:
-    """Each gateway an admin picked, with the workspaces that load it."""
-    from openswe.dashboard.workspace_settings import get_workspace_settings
-    from openswe.workspaces.store import list_workspace_options
-
-    by_gateway: dict[str, list[str]] = {}
-    for option in await list_workspace_options():
-        slug = str(option["slug"])
-        if gateway := (await get_workspace_settings(slug)).managed_tools_gateway_id:
-            by_gateway.setdefault(gateway, []).append(slug)
-    return by_gateway
-
-
 managed_mcp_router = APIRouter(route_class=MCPRoute)
 
 
 @managed_mcp_router.get("/managed-tools/gateways", response_model=list[Gateway])
 async def api_list_managed_tools_gateways(admin: dict[str, Any] = ADMIN_DEP) -> list[Gateway]:
-    """Gateways an admin can pick for a workspace, read with the admin's own LangSmith login."""
+    """Gateways an admin can pick for the instance, read with the admin's own LangSmith login."""
     try:
         return await list_gateways(admin["sub"])
     except LangSmithNotConnected as exc:
@@ -266,18 +254,16 @@ async def api_list_managed_tools_gateways(admin: dict[str, Any] = ADMIN_DEP) -> 
 async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> ManagedToolsView:
     if not managed_tools_configured():
         return ManagedToolsView(configured=False, gateways=[])
-    gateways = await _gateway_workspaces()
     statuses: list[GatewayStatus] = []
-    for gateway, workspaces in gateways.items():
+    if gateway := await instance_gateway():
         try:
-            statuses.append(await gateway_status(session["sub"], gateway, workspaces))
+            statuses.append(await gateway_status(session["sub"], gateway, with_connected=True))
         except LangSmithNotConnected:
             return ManagedToolsView(configured=True, gateways=[])
         except ManagedToolsError:
-            # One deleted or unreachable gateway must not hide the others.
             logger.warning(
                 "Managed tools gateway status unavailable",
-                extra={"gateway": gateway, "workspaces": workspaces},
+                extra={"gateway": gateway},
                 exc_info=True,
             )
     return ManagedToolsView(configured=True, langsmith_connected=True, gateways=statuses)
@@ -285,8 +271,8 @@ async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> Managed
 
 async def _card(thread_id: str, card_id: str, login: str, gateway: str) -> ConnectCard:
     """The connect card the agent offered this person in their thread."""
-    card = await ConnectCard.load(thread_id, card_id)
-    if card is None or not card.owned_by(login, gateway):
+    card = await ConnectCard.load(thread_id, card_id, login, gateway)
+    if card is None:
         raise HTTPException(404, "Unknown connect card")
     return card
 
@@ -307,8 +293,9 @@ async def api_connect_managed_tool(
         if thread_id and card:
             link = await (await _card(thread_id, card, session["sub"], gateway)).connect(slug)
         else:
-            if gateway_id(gateway) not in await _gateway_workspaces():
-                raise HTTPException(404, "No workspace uses this gateway")
+            configured = await instance_gateway()
+            if configured is None or gateway_id(gateway) != gateway_id(configured):
+                raise HTTPException(404, "This Open SWE does not use this tool kit")
             link = await connect_service(session["sub"], gateway, slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None

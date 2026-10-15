@@ -9,16 +9,13 @@ import logging
 
 from langgraph_sdk.client import LangGraphClient
 
-from openswe.slack.client import (
-    SLACK_DETACHED_AT_KEY,
-    SLACK_DETACHED_FROM_KEY,
-    delete_slack_thread_associations,
-)
+from openswe.slack.client import SLACK_DETACHED_AT_KEY, SLACK_DETACHED_FROM_KEY
+from openswe.slack.records import delete_slack_thread_associations
 from openswe.source_context import SourceContext
-from openswe.store import now_iso
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import JsonObject, thread_metadata
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +35,7 @@ async def move_thread_to_dashboard(
 ) -> bool:
     """Detach an agent thread from its Slack thread and keep it in the dashboard."""
     try:
-        await delete_slack_thread_associations(
-            langgraph_client, channel_id, thread_ts, expected_thread_id=thread_id
-        )
+        await delete_slack_thread_associations(channel_id, thread_ts, expected_thread_id=thread_id)
         thread = await langgraph_client.threads.get(thread_id)
         context = SourceContext.from_metadata(thread_metadata(thread)).dump()
         context.pop("slack_thread", None)

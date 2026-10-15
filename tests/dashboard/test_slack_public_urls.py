@@ -75,8 +75,18 @@ def test_slack_public_url_applies_to_manifest_and_oauth_without_changing_local_c
     link.assert_awaited_once_with("slack", "U123", email="alice@example.com", team_id="T123")
 
 
+@pytest.mark.parametrize(
+    ("redirect_to", "expected_path"),
+    [
+        (None, "/my-settings/connections"),
+        ("/agents?view=mine#recent", "/agents?view=mine#recent"),
+        ("/my-settings/connections", "/my-settings/connections"),
+        ("https://evil.example/steal", ""),
+        ("/dashboard/api/slack/login", ""),
+    ],
+)
 def test_slack_callback_links_the_slack_identity_to_the_session_user(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, redirect_to: str | None, expected_path: str
 ) -> None:
     local_url = "http://localhost:2024"
     monkeypatch.setenv("DASHBOARD_BASE_URL", local_url)
@@ -114,7 +124,11 @@ def test_slack_callback_links_the_slack_identity_to_the_session_user(
             COOKIE_NAME,
             issue_session(login="alice", email=None, avatar_url=None, user_id=str(user.id)),
         )
-        login = client.get("/dashboard/api/slack/login", follow_redirects=False)
+        login = client.get(
+            "/dashboard/api/slack/login",
+            params={"redirect_to": redirect_to} if redirect_to is not None else {},
+            follow_redirects=False,
+        )
         state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
         callback = client.get(
             "/dashboard/api/slack/callback",
@@ -122,6 +136,7 @@ def test_slack_callback_links_the_slack_identity_to_the_session_user(
             follow_redirects=False,
         )
         assert callback.status_code == 302, callback.text
+        assert callback.headers["location"] == f"{local_url}{expected_path}"
 
     for_session.assert_awaited_once_with(user.id, "alice")
     link.assert_awaited_once_with("slack", "U123", email="alice@example.com", team_id="T123")

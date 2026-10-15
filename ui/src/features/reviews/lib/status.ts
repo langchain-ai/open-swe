@@ -28,7 +28,7 @@ export function statusLabels(pr: OpenPullRequest): string[] {
       : []),
     ...(pr.reviewDecision === "changes_requested"
       ? ["Changes Requested"]
-      : pr.reviewDecision === "approved"
+      : pr.reviewDecision === "approved" && !pr.reviewRequired
         ? ["Approved"]
         : []),
     ...(pr.reviewRequired && !pr.draft ? ["Review required"] : []),

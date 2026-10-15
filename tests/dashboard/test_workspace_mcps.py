@@ -5,11 +5,15 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from pydantic import ValidationError
+from sqlalchemy import select
 
 from openswe.dashboard import deps, oauth, routes
+from openswe.database import postgres
 from openswe.encryption import decrypt_token
 from openswe.mcp import MCPConnectionUpdate
 from openswe.mcp import workspace as mcps
+from openswe.mcp.records import MCPConnectionRow
+from openswe.utils.json_types import JsonObject
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +21,18 @@ def encryption(monkeypatch):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 
-async def test_generic_connection_roundtrip_redacts_and_preserves_headers(fake_store):
+async def stored(name: str) -> JsonObject:
+    async with postgres.session() as session:
+        value = await session.scalar(
+            select(MCPConnectionRow.connection).where(
+                MCPConnectionRow.workspace == "default", MCPConnectionRow.name == name
+            )
+        )
+    assert value is not None
+    return value
+
+
+async def test_generic_connection_roundtrip_redacts_and_preserves_headers(registry_db):
     update = MCPConnectionUpdate(
         name="incident",
         url="https://mcp.incident.io/mcp",
@@ -26,7 +41,7 @@ async def test_generic_connection_roundtrip_redacts_and_preserves_headers(fake_s
     saved = await mcps.save_workspace_mcp("default", "incident", update)
     assert saved["header_names"] == ["Authorization"]
     assert "test-secret" not in json.dumps(saved)
-    raw = fake_store.values(["workspace_mcps", "default"])["incident"]
+    raw = await stored("incident")
     assert "test-secret" not in json.dumps(raw)
     assert json.loads(decrypt_token(raw["encrypted_headers"])) == {
         "Authorization": "Bearer test-secret"
@@ -42,15 +57,22 @@ async def test_generic_connection_roundtrip_redacts_and_preserves_headers(fake_s
     assert await mcps.list_workspace_mcps("default") == []
 
 
-async def test_corrupt_record_does_not_hide_other_connections_or_log_values(fake_store, caplog):
+async def test_corrupt_record_does_not_hide_other_connections_or_log_values(registry_db, caplog):
     saved = await mcps.save_workspace_mcp(
         "default", "example", MCPConnectionUpdate(name="example", url="https://example.com/mcp")
     )
-    fake_store.values(["workspace_mcps", "default"])["broken"] = {
-        **saved,
-        "name": "broken",
-        "encrypted_headers": {"Authorization": "test-secret"},
-    }
+    async with postgres.session() as session:
+        session.add(
+            MCPConnectionRow(
+                workspace="default",
+                name="broken",
+                connection={
+                    **saved,
+                    "name": "broken",
+                    "encrypted_headers": {"Authorization": "test-secret"},
+                },
+            )
+        )
 
     assert await mcps.list_workspace_mcps("default") == [saved]
     with pytest.raises(ValidationError):
@@ -59,7 +81,7 @@ async def test_corrupt_record_does_not_hide_other_connections_or_log_values(fake
     assert "test-secret" not in caplog.text
 
 
-async def test_oauth_secret_is_encrypted_preserved_and_cleared(fake_store):
+async def test_oauth_secret_is_encrypted_preserved_and_cleared(registry_db):
     oauth = {
         "token_url": "https://api.linear.app/oauth/token",
         "client_id": "test-app",
@@ -74,7 +96,7 @@ async def test_oauth_secret_is_encrypted_preserved_and_cleared(fake_store):
     assert saved["oauth"]["client_id"] == "test-app"
     assert "client_secret" not in saved["oauth"]
     assert "test-client-secret" not in json.dumps(saved)
-    raw = fake_store.values(["workspace_mcps", "default"])["linear"]
+    raw = await stored("linear")
     assert "test-client-secret" not in json.dumps(raw)
     assert decrypt_token(raw["encrypted_client_secret"]) == "test-client-secret"
     for fields in ({}, {"oauth": saved["oauth"]}):
@@ -83,20 +105,15 @@ async def test_oauth_secret_is_encrypted_preserved_and_cleared(fake_store):
             "linear",
             MCPConnectionUpdate(name="linear", url=saved["url"], enabled=False, **fields),
         )
-        assert (
-            fake_store.values(["workspace_mcps", "default"])["linear"]["encrypted_client_secret"]
-            == raw["encrypted_client_secret"]
-        )
+        assert (await stored("linear"))["encrypted_client_secret"] == raw["encrypted_client_secret"]
     await mcps.save_workspace_mcp(
         "default", "linear", MCPConnectionUpdate(name="linear", url=saved["url"], oauth=None)
     )
-    assert (
-        fake_store.values(["workspace_mcps", "default"])["linear"]["encrypted_client_secret"] == ""
-    )
+    assert (await stored("linear"))["encrypted_client_secret"] == ""
 
 
 @pytest.mark.parametrize("saved_header", [False, True])
-async def test_oauth_rejects_explicit_or_saved_authorization_header(fake_store, saved_header):
+async def test_oauth_rejects_explicit_or_saved_authorization_header(registry_db, saved_header):
     values = {"name": "linear", "url": "https://mcp.linear.app/mcp"}
     headers = {"authorization": "Bearer test-token"}
     if saved_header:
@@ -127,7 +144,7 @@ async def test_oauth_rejects_explicit_or_saved_authorization_header(fake_store, 
         {"client_id": "other-app"},
     ],
 )
-async def test_oauth_secret_cannot_be_reused_for_changed_destinations(fake_store, change):
+async def test_oauth_secret_cannot_be_reused_for_changed_destinations(registry_db, change):
     saved = await mcps.save_workspace_mcp(
         "default",
         "linear",
@@ -190,7 +207,7 @@ def test_invalid_connection_is_rejected(fields):
         MCPConnectionUpdate(**values)
 
 
-async def test_workspace_mcp_routes_are_admin_only_and_same_origin(fake_store, monkeypatch):
+async def test_workspace_mcp_routes_are_admin_only_and_same_origin(registry_db, monkeypatch):
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     app = FastAPI()
@@ -232,7 +249,7 @@ async def test_workspace_mcp_routes_are_admin_only_and_same_origin(fake_store, m
 
 
 async def test_reveal_headers_requires_admin_and_same_origin_without_saving(
-    fake_store, monkeypatch
+    registry_db, monkeypatch
 ):
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
@@ -318,7 +335,7 @@ async def test_validation_responses_never_echo_headers(monkeypatch, headers):
     ],
 )
 async def test_query_credentials_are_rejected_without_saving_or_echoing(
-    fake_store, monkeypatch, query_key
+    registry_db, monkeypatch, query_key
 ):
     app = FastAPI()
     app.include_router(routes.router)
@@ -338,5 +355,4 @@ async def test_query_credentials_are_rejected_without_saving_or_echoing(
         )
         assert response.status_code == 422
         assert "test-secret" not in response.text
-        assert fake_store.values(["workspace_mcps", "default"]) == {}
         assert (await client.get("/dashboard/api/workspaces/default/mcps")).json() == []

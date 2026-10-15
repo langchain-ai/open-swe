@@ -57,6 +57,17 @@ describe("filterThreads", () => {
     ).toEqual([active, visible])
   })
 
+  it("hides archived threads even when actively viewed unless Show archived is enabled", () => {
+    const archived = makeThread({ id: "archived", resolved: true })
+    const ordinary = makeThread()
+    const threads = [archived, ordinary]
+
+    expect(filterThreads(threads, filters(), archived.id)).toEqual([ordinary])
+    expect(
+      filterThreads(threads, filters({ includeResolved: true }), archived.id)
+    ).toEqual(threads)
+  })
+
   it("includes automations when requested", () => {
     const ordinary = makeThread()
     const automation = makeThread({

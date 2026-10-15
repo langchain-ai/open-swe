@@ -17,7 +17,7 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator, Awaitable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
@@ -40,6 +40,7 @@ GITHUB_HEADERS_VERSION = "2022-11-28"
 DEFAULT_TIMEOUT = httpx2.Timeout(30.0, connect=10.0, pool=5.0)
 DEFAULT_MAX_RETRIES = 3
 _PAGE_SIZE = 100
+_FILES_PER_QUERY = 100
 
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
 _IDEMPOTENT_RETRYABLE_STATUS = frozenset({502, 504})
@@ -481,6 +482,27 @@ class RepoClient:
                 raise RepoFileUnreadableError(f"Repository file {path} exceeds the size cap")
             return None
         return content if strict else content or None
+
+    async def read_files(self, paths: Sequence[str], ref: str) -> dict[str, str]:
+        """Text of each of ``paths`` present at ``ref``, read in batched GraphQL queries."""
+        found: dict[str, str] = {}
+        for start in range(0, len(paths), _FILES_PER_QUERY):
+            batch = paths[start : start + _FILES_PER_QUERY]
+            params = "".join(f",$e{i}:String!" for i in range(len(batch)))
+            fields = "".join(
+                f"f{i}:object(expression:$e{i}){{...on Blob{{text}}}}" for i in range(len(batch))
+            )
+            data = await self.graphql(
+                f"query($owner:String!,$repo:String!{params})"
+                f"{{repository(owner:$owner,name:$repo){{{fields}}}}}",
+                {f"e{i}": f"{ref}:{path}" for i, path in enumerate(batch)},
+            )
+            repository = data.get("repository") or {}
+            for i, path in enumerate(batch):
+                blob = repository.get(f"f{i}")
+                if isinstance(blob, Mapping) and isinstance(blob.get("text"), str):
+                    found[path] = blob["text"]
+        return found
 
     async def can_write(self, login: str) -> bool:
         """Whether ``login`` has write, maintain or admin here; any failure denies."""

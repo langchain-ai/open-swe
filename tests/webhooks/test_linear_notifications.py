@@ -39,7 +39,7 @@ def comment_tool() -> str:
 
 
 @pytest.fixture
-async def linear_mcp(fake_store, monkeypatch: pytest.MonkeyPatch, comment_tool: str) -> LinearMCP:
+async def linear_mcp(registry_db, monkeypatch: pytest.MonkeyPatch, comment_tool: str) -> LinearMCP:
     await workspace_mcps.save_workspace_mcp(
         "default",
         "linear",

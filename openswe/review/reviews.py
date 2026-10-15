@@ -29,7 +29,7 @@ from openswe.github.pull_request_diff import (
 )
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.webhook import trigger_pr_review_from_ref
-from openswe.review.assessment_feedback import ASSESSMENTS
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -703,7 +703,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     )
     assessment_id = metadata.get("review_assessment_id")
     assessment = (
-        await ASSESSMENTS.get(str(assessment_id)) if isinstance(assessment_id, int) else None
+        await PublishedAssessment.get(assessment_id) if isinstance(assessment_id, int) else None
     )
 
     return {

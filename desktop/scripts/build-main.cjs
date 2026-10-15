@@ -16,10 +16,7 @@ execFileSync(
     stdio: "inherit",
   },
 );
-for (const file of [
-  "backend-supervisor.cjs",
-  "legacy-local-thread-store.cjs",
-  "local-thread-store.cjs",
-]) {
-  fs.copyFileSync(path.join(root, "src", file), path.join(root, "build", file));
-}
+fs.copyFileSync(
+  path.join(root, "src", "local-thread-store.cjs"),
+  path.join(root, "build", "local-thread-store.cjs"),
+);

@@ -4,18 +4,14 @@ from typing import Any
 import pytest
 
 from openswe.slack import stop as slack_stop
+from openswe.slack.records import (
+    bind_slack_thread_id,
+    lookup_slack_thread_run_mapping,
+    store_slack_message_run_mapping,
+)
 from openswe.slack.stop import process_slack_stop_reaction
 
-
-class FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
-        return self.items.get((namespace, key))
-
-    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
-        self.items[(namespace, key)] = {"value": value}
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 class FakeThreads:
@@ -56,7 +52,6 @@ class FakeRuns:
 
 class FakeClient:
     def __init__(self) -> None:
-        self.store = FakeStore()
         self.threads = FakeThreads()
         self.runs = FakeRuns()
         self.cleared_queues: list[str] = []
@@ -72,11 +67,9 @@ def _event(message_ts: str, *, user_id: str = "UOTHER") -> dict[str, Any]:
     }
 
 
-def _add_thread(client: FakeClient, thread_ts: str = "1.000") -> str:
+async def _add_thread(client: FakeClient, thread_ts: str = "1.000") -> str:
     thread_id = f"thread-{thread_ts}"
-    client.store.items[(("slack_thread_map", "C123"), thread_ts)] = {
-        "value": {"thread_id": thread_id, "channel_id": "C123", "thread_ts": thread_ts}
-    }
+    await bind_slack_thread_id("C123", thread_ts, thread_id)
     client.threads.values[thread_id] = {
         "thread_id": thread_id,
         "metadata": {
@@ -98,10 +91,8 @@ def _add_thread(client: FakeClient, thread_ts: str = "1.000") -> str:
     return thread_id
 
 
-def _map_reply(client: FakeClient, message_ts: str, thread_ts: str = "1.000") -> None:
-    client.store.items[(("slack_run_map", "C123"), f"message:{message_ts}")] = {
-        "value": {"run_id": "run-old", "thread_ts": thread_ts}
-    }
+async def _map_reply(message_ts: str, thread_ts: str = "1.000") -> None:
+    await store_slack_message_run_mapping("C123", thread_ts, message_ts, run_id="run-old")
 
 
 def _patch_handler(
@@ -154,8 +145,8 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = FakeClient()
-    thread_id = _add_thread(client)
-    _map_reply(client, "2.000")
+    thread_id = await _add_thread(client)
+    await _map_reply("2.000")
     client.runs.by_status["pending"] = [{"run_id": "run-pending"}]
     client.runs.by_status["running"] = [{"run_id": "run-running"}]
     dispatched, claimed = _patch_handler(monkeypatch, client)
@@ -178,19 +169,19 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     assert dispatched[0]["configurable"]["github_login"] == "owner"
     assert dispatched[0]["configurable"]["stop_summary"] is True
     assert dispatched[0]["configurable"]["slack_thread"]["triggering_user_id"] == "UOWNER"
-    thread_mapping = client.store.items[(("slack_run_map", "C123"), "thread:1.000")]
-    assert thread_mapping["value"]["run_id"] == "run-summary"
+    current = await lookup_slack_thread_run_mapping("C123", "1.000")
+    assert current is not None and current.run_id == "run-summary"
 
 
 async def test_stop_reaction_ignores_mismatched_thread_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = FakeClient()
-    thread_id = _add_thread(client)
+    thread_id = await _add_thread(client)
     client.threads.values[thread_id]["metadata"]["source_context"]["slack_thread"]["channel_id"] = (
         "COTHER"
     )
-    _map_reply(client, "2.000")
+    await _map_reply("2.000")
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
     await process_slack_stop_reaction(_event("2.000"), event_id="EvMismatch")
@@ -203,8 +194,8 @@ async def test_duplicate_stop_reaction_has_no_side_effects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = FakeClient()
-    _add_thread(client)
-    _map_reply(client, "2.000")
+    await _add_thread(client)
+    await _map_reply("2.000")
     dispatched, _ = _patch_handler(monkeypatch, client)
 
     async def duplicate_claim(event_id: str) -> bool:
@@ -224,8 +215,8 @@ async def test_failed_cancellation_does_not_dispatch_success_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = FakeClient()
-    _add_thread(client)
-    _map_reply(client, "2.000")
+    await _add_thread(client)
+    await _map_reply("2.000")
     client.runs.by_status["running"] = [{"run_id": "run-running"}]
     client.runs.fail_cancel = True
     dispatched, _ = _patch_handler(monkeypatch, client)
@@ -241,8 +232,8 @@ async def test_failed_queue_cleanup_does_not_dispatch_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = FakeClient()
-    _add_thread(client)
-    _map_reply(client, "2.000")
+    await _add_thread(client)
+    await _map_reply("2.000")
     client.fail_clear = True
     dispatched, _ = _patch_handler(monkeypatch, client)
 

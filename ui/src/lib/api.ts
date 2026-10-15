@@ -311,8 +311,11 @@ export interface Profile {
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
+  experimental_mcp_ptc?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
+  run_on_mda?: boolean
+  mda_available?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -333,7 +336,9 @@ export interface ProfileUpdate {
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
+  experimental_mcp_ptc?: boolean
   experimental_act_as_approval?: boolean
+  run_on_mda?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -377,6 +382,8 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
+  /** Threads no person starts run on Managed Deep Agents, when it is configured. */
+  run_on_mda?: boolean
   /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
   managed_tools_gateway_id?: string | null
   org_guidelines?: string | null
@@ -464,12 +471,17 @@ export interface ManagedToolsMissingCredential {
   kind: "oauth" | "secret"
 }
 
+export interface ManagedToolsConnectedService {
+  name: string
+  tool_count: number
+}
+
 export interface ManagedToolsGatewayStatus {
   gateway: ManagedToolsGateway
-  workspaces: string[]
   ready: boolean
   tool_count?: number | null
   missing: ManagedToolsMissingCredential[]
+  connected?: ManagedToolsConnectedService[]
   /** LangSmith offers no tools until every missing service is connected. */
   all_required: boolean
 }
@@ -494,6 +506,22 @@ export interface AdminUser {
   display_name: string
   avatar_url: string
   is_admin: boolean
+}
+
+export interface AnnouncementSummary {
+  id: string
+  text: string
+  author: string
+  created_at: string
+  finished_at: string | null
+  recipients: number
+  sent: number
+  failed: number
+}
+
+export interface AnnouncementsView {
+  recipients: number
+  items: Array<AnnouncementSummary>
 }
 
 export interface AdminUsersPage {
@@ -736,8 +764,6 @@ export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
-  local_tracing_project: string | null
-  default_local_tracing_project: string
   default_workspace: string | null
   follow_up_behavior: FollowUpBehavior
 }
@@ -1378,7 +1404,6 @@ export interface ReviewerEvalProgress {
 }
 
 export interface ReviewerEvalStatus {
-  name: string
   status: "idle" | "starting" | "running" | "completed" | "failed"
   run_name?: string
   langsmith_project: string
@@ -1387,15 +1412,11 @@ export interface ReviewerEvalStatus {
   started_at: string | null
   finished_at: string | null
   created_by: string | null
-  pid: number | null
-  exit_code: number | null
   experiment_url: string | null
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
   worker_id?: string | null
-  trigger?: string | null
-  updated_at: string
 }
 
 export interface HumanReviewRequestResult {
@@ -1790,6 +1811,12 @@ export const api = {
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
     ),
+  listAnnouncements: () => request<AnnouncementsView>("/admin/announcements"),
+  sendAnnouncement: (text: string, test: boolean) =>
+    request<{ test: boolean; recipients: number }>("/admin/announcements", {
+      method: "POST",
+      body: JSON.stringify({ text, test }),
+    }),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   searchPullRequests: (query: string, offset = 0) =>
@@ -2078,8 +2105,13 @@ export function connectService(
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
-    const query = redirectTo
-      ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
+    const target =
+      redirectTo ??
+      (provider === "slack"
+        ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+        : "")
+    const query = target
+      ? `?${new URLSearchParams({ redirect_to: target })}`
       : ""
     window.location.assign(
       `${API_BASE}/dashboard/api/${provider}/login${query}`

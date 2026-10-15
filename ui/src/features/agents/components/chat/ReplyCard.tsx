@@ -33,13 +33,51 @@ function SlackIcon() {
   )
 }
 
-function headerLabel(
-  isLinear: boolean,
-  status: ToolExecutionChunk["status"]
-): string {
-  const pending = status === "in_progress" || status === "pending"
-  if (isLinear) return pending ? "Commenting on Linear…" : "Commented on Linear"
-  return pending ? "Sending to Slack…" : "Sent to Slack"
+type Delivery = "pending" | "failed" | "delivered"
+
+// Reply tools report some failures as a `{"success": false}` result rather than raising.
+// A result that carries images arrives as content blocks, with that object as the first text.
+function reportsFailure(output: string | undefined): boolean {
+  if (!output) return false
+  try {
+    const parsed: unknown = JSON.parse(output)
+    if (Array.isArray(parsed)) {
+      const first: unknown = parsed[0]
+      const text =
+        !!first && typeof first === "object"
+          ? (first as { text?: unknown }).text
+          : undefined
+      return typeof text === "string" && reportsFailure(text)
+    }
+    return (
+      !!parsed &&
+      typeof parsed === "object" &&
+      (parsed as { success?: unknown }).success === false
+    )
+  } catch {
+    return false
+  }
+}
+
+function delivery(chunk: ToolExecutionChunk): Delivery {
+  if (chunk.status === "in_progress" || chunk.status === "pending") {
+    return "pending"
+  }
+  if (chunk.status === "error" || reportsFailure(chunk.output)) return "failed"
+  return "delivered"
+}
+
+const HEADER_LABELS: Record<"linear" | "slack", Record<Delivery, string>> = {
+  linear: {
+    pending: "Commenting on Linear…",
+    failed: "Failed to comment on Linear",
+    delivered: "Commented on Linear",
+  },
+  slack: {
+    pending: "Sending to Slack…",
+    failed: "Failed to send to Slack",
+    delivered: "Sent to Slack",
+  },
 }
 
 type SlackTextObject = { type?: string; text?: string }
@@ -205,6 +243,7 @@ function SlackReply({ chunk }: ReplyCardProps) {
 
 export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
   const isLinear = chunk.toolKind === "linear"
+  const state = delivery(chunk)
   return (
     <div className="min-w-0 px-space-1 py-0.5">
       <div className="mb-space-1 flex items-center gap-space-2 text-xxs text-secondary">
@@ -213,7 +252,11 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
         ) : (
           <SlackIcon />
         )}
-        <span>{headerLabel(isLinear, chunk.status)}</span>
+        <span
+          className={state === "failed" ? "text-error-secondary" : undefined}
+        >
+          {HEADER_LABELS[isLinear ? "linear" : "slack"][state]}
+        </span>
       </div>
       {isLinear ? (
         <Markdown content={replyBody(chunk)} />
