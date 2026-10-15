@@ -53,6 +53,7 @@ _CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context
 _NO_CHANNEL_CONTEXT = "(unavailable — this is not a public channel, or it has no messages)"
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
 _START_FAILURE = "Open SWE could not start that request. Try again in a moment."
+_SHORTCUT_ACKNOWLEDGEMENT = "Working on it — I’ll send a separate reply, visible only to you."
 _ACKNOWLEDGEMENT = "Working on it — the answer will replace this message, visible only to you."
 _BY_THE_WAY_USAGE = "Ask a question after it: `@Open SWE /btw how does thread routing work?`"
 _BY_THE_WAY_TOO_LONG = (
@@ -204,7 +205,10 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
 
 async def _process_slack_ask(request: SlackAskRequest) -> None:
     if request.response_url:
-        await acknowledge_slack_command(request.response_url, _ACKNOWLEDGEMENT)
+        await acknowledge_slack_command(
+            request.response_url,
+            _SHORTCUT_ACKNOWLEDGEMENT if request.selected_message else _ACKNOWLEDGEMENT,
+        )
     if request.by_the_way:
         await add_slack_reaction(request.channel_id, request.message_ts, "hourglass_flowing_sand")
         if not request.question:
