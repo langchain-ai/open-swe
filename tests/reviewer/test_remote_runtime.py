@@ -313,6 +313,40 @@ async def test_mda_proxy_acts_only_on_requests_the_agent_server_authenticates(
     assert local[FRESH_THREAD]["metadata"] == {"owner_login": "ada"}
 
 
+@pytest.mark.parametrize(
+    ("permissions", "is_forwarded"), [([], False), (["openswe:backend"], True)]
+)
+async def test_mda_proxy_forwards_only_the_backend_under_custom_auth(
+    monkeypatch: pytest.MonkeyPatch, permissions: list[str], is_forwarded: bool
+) -> None:
+    from langgraph_api import config
+    from langgraph_api.auth import middleware as auth
+    from starlette.authentication import AuthCredentials, AuthenticationBackend, SimpleUser
+    from starlette.middleware import Middleware
+    from starlette.requests import HTTPConnection
+
+    class SignedIn(AuthenticationBackend):
+        async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, SimpleUser]:
+            return AuthCredentials(permissions), SimpleUser("ada")
+
+    monkeypatch.setattr(config, "USES_CUSTOM_AUTH", True)
+    monkeypatch.setattr(
+        auth,
+        "auth_middleware",
+        Middleware(
+            auth.ConditionalAuthenticationMiddleware, backend=SignedIn(), on_error=auth.on_error
+        ),
+    )
+    local, run_body = _fresh_run(owner="ada", starter="ada")
+
+    reached_here, forwarded = await _through_proxy(
+        monkeypatch, local, "POST", f"/threads/{FRESH_THREAD}/runs", run_body
+    )
+
+    assert bool(forwarded) is is_forwarded
+    assert reached_here == ([] if is_forwarded else [f"/threads/{FRESH_THREAD}/runs"])
+
+
 @pytest.mark.parametrize(("workspace", "claimed"), [("platform", True), ("default", False)])
 async def test_mda_proxy_runs_threads_no_person_starts_where_their_workspace_chose(
     monkeypatch: pytest.MonkeyPatch, workspace: str, claimed: bool

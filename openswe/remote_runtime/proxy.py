@@ -34,9 +34,11 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadStatus
 from langsmith.utils import get_tracer_project
 from pydantic import JsonValue, TypeAdapter
+from starlette.authentication import AuthCredentials
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from openswe.api.agent_server_auth import is_backend
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.remote_runtime.client import (
     HOSTED_GRAPHS,
@@ -386,13 +388,29 @@ class MdaThreadProxy:
 
     def __init__(self, app: ASGIApp) -> None:
         from langgraph_api.auth.middleware import auth_middleware
+        from langgraph_api.config import USES_CUSTOM_AUTH
 
         self.app = app
+        self._backend_only = USES_CUSTOM_AUTH
         self._runtime: MdaRuntime | None = None
         # The Agent Server authenticates at its own routes, behind app middleware
         # like this one, so requests handled here pass the same check first.
         self._authenticated: ASGIApp = auth_middleware.cls(
             self._route, *auth_middleware.args, **auth_middleware.kwargs
+        )
+
+    def _may_forward(self, scope: Scope) -> bool:
+        """Forwarded calls skip the Agent Server's resource authorization, so only the backend's go.
+
+        The SDK's in-process transport mounts at ``/noauth``, which no request can set.
+        """
+        root_path = scope.get("root_path", "")
+        credentials = scope.get("auth")
+        return (
+            not self._backend_only
+            or root_path == "/noauth"
+            or root_path.startswith("/noauth/")
+            or (isinstance(credentials, AuthCredentials) and is_backend(credentials.scopes))
         )
 
     def runtime(self) -> MdaRuntime | None:
@@ -416,7 +434,7 @@ class MdaThreadProxy:
 
     async def _route(self, scope: Scope, receive: Receive, send: Send) -> None:
         runtime = self.runtime()
-        if runtime is None:
+        if runtime is None or not self._may_forward(scope):
             await self.app(scope, receive, send)
             return
         path: str = scope["path"]
