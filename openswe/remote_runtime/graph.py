@@ -55,6 +55,7 @@ from langchain_core.messages import (
     messages_to_dict,
 )
 from langchain_core.runnables import RunnableConfig
+from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
@@ -80,23 +81,24 @@ from openswe.sandboxes.tool_runtime import (
     ToolSurface,
     tool_parameters,
 )
-from openswe.server import fallback_model_choice
+from openswe.server import callable_from_code, fallback_model_choice
 from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
-# MDA's own deep agent runs subagents.
-_MDA_TOOLS: Final = frozenset({"task"})
+# MDA's own deep agent runs subagents and code.
+_MDA_TOOLS: Final = frozenset({"task", "eval"})
 # Model-call middleware that is MDA's own, or that observes rather than shapes a call.
 _NOT_PROMPT_SHAPING: Final = (
     FilesystemMiddleware,
+    CodeInterpreterMiddleware,
     ConversationOffloadingMiddleware,
     TranscriptMiddleware,
     RecordRunUsageMiddleware,
 )
 _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
-# Loop bookkeeping MDA's own middleware already does.
-_MDA_PHASES: Final = (ModelCallLimitMiddleware,)
+# Loop bookkeeping and code mode MDA's own middleware already does.
+_MDA_PHASES: Final = (ModelCallLimitMiddleware, CodeInterpreterMiddleware)
 # A message inside a state value, as it crosses to MDA and back.
 MESSAGE_KEY: Final = "__lc_message__"
 _ROUTES: Final = frozenset(get_args(PersistedRoute))
@@ -306,6 +308,12 @@ class RunSession:
                 "models": self.start_models().model_dump(),
                 # Hidden from the model, as the in-process graph hides them.
                 "excluded": sorted((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS),
+                # Called from MDA's code mode, never offered to the model as schemas.
+                "integrations": sorted(
+                    name
+                    for name in tools.keys() & set(self.surface.integration_names)
+                    if callable_from_code(name)
+                ),
             }
         )
 

@@ -8,7 +8,7 @@ graph's tools, subagents and models from the backend's catalog for the run, and
 middleware there. The run token in the context authenticates every call.
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from typing import Final, Literal
 
 from langchain.agents.middleware import (
@@ -75,6 +75,16 @@ def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[A
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
 
 
+def _code_mode(graph: Graph, integrations: Sequence[BaseTool]) -> list[AgentMiddleware]:
+    """The graph's code mode, with every connected integration callable from it."""
+    if graph == "reviewer":
+        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *integrations])]
+    if not integrations:
+        return []
+    # As the in-process agent's MCP code mode: state per turn, subagents through `task`.
+    return [CodeInterpreterMiddleware(ptc=list(integrations), subagents=False, mode="turn")]
+
+
 # `mda build` reads the agent's name without running this factory, so its body
 # stays assignments and one `return define_deep_agent(...)`.
 async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
@@ -101,8 +111,12 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     tools = [backend_tool(spec, backend) for spec in catalog.tools]
     by_name = {tool.name: tool for tool in tools}
     excluded = frozenset(catalog.excluded)
+    # Integrations are called from code: hundreds of their schemas on every call cost
+    # the model its context, and OpenAI answers some such requests with nothing.
+    in_code = [tool for tool in tools if tool.name in catalog.integrations]
+    offered = [tool for tool in tools if tool not in in_code]
     subagent_tools = {
-        subagent.name: tools
+        subagent.name: offered
         if subagent.tools is None
         else [by_name[name] for name in subagent.tools if name in by_name]
         for subagent in catalog.subagents
@@ -113,7 +127,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         context_schema=OpenSweRunContext,
         # Named as the in-process graph names them, these replace MDA's own file
         # and shell tools: the backend runs them in the thread's sandbox.
-        tools=tools,
+        tools=offered,
         sandbox=None,
         subagents=[
             {
@@ -133,12 +147,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         middleware=[
             BackendRunMiddleware(backend, context.invocation_id),
             *_backend_reports(backend, by_name.keys()),
-            ServedToolsMiddleware(tools, excluded),
-            *(
-                [CodeInterpreterMiddleware(ptc=_REVIEWER_PTC_TOOLS)]
-                if context.graph == "reviewer"
-                else []
-            ),
+            ServedToolsMiddleware(offered, excluded),
+            *_code_mode(context.graph, in_code),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],

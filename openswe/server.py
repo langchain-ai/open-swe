@@ -801,6 +801,11 @@ async def _run_mcp_tools(
         return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
 
 
+def callable_from_code(name: str) -> bool:
+    """Whether code mode can expose a tool as ``tools.<camelCaseName>``."""
+    return is_valid_ptc_tool_name(name)
+
+
 async def _mcp_code_mode(
     thread_id: str,
     tools: Sequence[BaseTool],
@@ -814,18 +819,18 @@ async def _mcp_code_mode(
     profile = await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
     if not profile or profile.get("experimental_mcp_ptc") is not True:
         return None, tools
-    ptc_tools: list[str | BaseTool] = [tool for tool in tools if is_valid_ptc_tool_name(tool.name)]
+    ptc_tools: list[str | BaseTool] = [tool for tool in tools if callable_from_code(tool.name)]
     ptc_tools.extend(
         tool
         for tool in additional_tools
         if (tool if isinstance(tool, str) else tool.name)
         not in (DEEP_AGENT_TOOL_NAMES - {"read_file", "write_file"})
         | {"background_execute", "slack_reply", "slack_no_reply_needed", "cli_result"}
-        and is_valid_ptc_tool_name(tool if isinstance(tool, str) else tool.name)
+        and callable_from_code(tool if isinstance(tool, str) else tool.name)
     )
     if not ptc_tools:
         return None, tools
-    ordinary_tools = [tool for tool in tools if not is_valid_ptc_tool_name(tool.name)]
+    ordinary_tools = [tool for tool in tools if not callable_from_code(tool.name)]
     return CodeInterpreterMiddleware(ptc=ptc_tools, subagents=False, mode="turn"), ordinary_tools
 
 
