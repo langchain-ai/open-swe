@@ -1051,14 +1051,7 @@ async def _process_slack_mention_impl(
 
     image_urls = common.dedupe_urls(
         [url for msg in source_messages for url in common.extract_image_urls(msg.get("text", ""))]
-        + [
-            f["url_private"]
-            for msg in source_messages
-            for f in msg.get("files", [])
-            if isinstance(f, dict)
-            and f.get("mimetype", "").startswith("image/")
-            and f.get("url_private")
-        ]
+        + [url for msg in source_messages for url in slack_utils.slack_image_file_urls(msg)]
         + image_urls_from_links
     )
 

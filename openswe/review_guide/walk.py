@@ -65,14 +65,18 @@ class Walk(BaseModel):
         What is on screen stays only if all of its lines are still there.
         Returns the new walk and what was on screen if it had to go.
         """
-        pool: dict[tuple[str, str, str], list[LineRef]] = {}
-        for change in changes:
-            for line in change.lines:
-                ref = LineRef.of(line)
-                pool.setdefault(ref.content, []).append(ref)
+        current = self.on_screen
+        followed = LineRef.follow(
+            [
+                *(ref for a in self.approvals for ref in a.lines),
+                *(ref for skip in self.skips for ref in skip.lines),
+                *(current.lines if current else []),
+            ],
+            changes,
+        )
 
         def take(refs: list[LineRef]) -> list[LineRef]:
-            return [bucket.pop(0) for ref in refs if (bucket := pool.get(ref.content))]
+            return [followed[ref] for ref in refs if ref in followed]
 
         moved = self.model_copy(
             update={
@@ -90,7 +94,6 @@ class Walk(BaseModel):
                 ],
             }
         )
-        current = self.on_screen
         if current is None:
             return moved, None
         lines = take(current.lines)

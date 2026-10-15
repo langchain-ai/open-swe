@@ -220,6 +220,13 @@ class PlanWorkspace:
                 refs.append(LineRef.of(line))
         if not refs:
             raise RangeError("no lines are named to split at")
+        split_hunks = Hunks.of(self.changes, [*self.plan.splits, *refs])
+        if fragments := split_hunks.fragments(hunks, unplanned):
+            raise RangeError(
+                "these splits leave hunks of only braces, punctuation or blank lines: "
+                + ", ".join(f"`{path}` {name}" for path, name in fragments)
+                + "; split where real code starts so each block keeps its closing lines"
+            )
 
         def split_at(plan: Plan) -> None:
             planned = plan.planned()

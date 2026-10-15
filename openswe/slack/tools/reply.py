@@ -5,12 +5,15 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Annotated, Any, Literal
 
+import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage
+from langchain_core.messages.content import create_text_block
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 
+from openswe.dashboard.options import model_supports_images
 from openswe.input_messages import input_message_timestamps
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -43,7 +46,10 @@ from openswe.slack.run_feedback import feedback_block
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
 from openswe.threads.creation import create_lock_thread
+from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
+from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
 from openswe.utils.run_usage import RunUsageSummary, summarize_run_usage
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
 
@@ -76,8 +82,34 @@ async def slack_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | list[dict[str, object]]:
     """Implement the `slack_reply` tool."""
+    result = await send_slack_reply(message, response_type, options, blocks, state)
+    image_urls = result.pop("image_urls", None)
+    if not image_urls:
+        return result
+    cfg = RunConfig.from_config(get_config())
+    model_id = (state or {}).get("selected_model_id") or cfg.resolved_agent_model_id
+    if model_id and not model_supports_images(model_id):
+        result["images"] = vision_not_supported_warning(model_id, len(image_urls)).strip()
+        return result
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as http_client:
+        images = [
+            block for url in image_urls if (block := await fetch_image_block(url, http_client))
+        ]
+    return [dict(create_text_block(json.dumps(result))), *map(dict, images)]
+
+
+async def send_slack_reply(
+    message: str,
+    response_type: Literal["progress", "final"],
+    options: list[str] | None = None,
+    blocks: list[dict[str, Any]] | None = None,
+    state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Post a reply in the run's Slack thread."""
     config = get_config()
     cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
@@ -226,9 +258,10 @@ async def _stale_reply_guard(
         logger.warning("Could not check Slack reply freshness", exc_info=True)
         return None
     timestamps = latest.get("human_timestamps")
-    if not isinstance(timestamps, list) or not any(
-        isinstance(ts, str) and ts not in seen and ts > max(seen) for ts in timestamps
-    ):
+    if not isinstance(timestamps, list):
+        return None
+    arrived = [ts for ts in timestamps if isinstance(ts, str) and ts not in seen and ts > max(seen)]
+    if not arrived:
         return None
     await SlackRun.record_reply_conflict(
         channel_id,
@@ -236,6 +269,7 @@ async def _stale_reply_guard(
         run_id,
         sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
     )
+    image_urls = latest.get("image_urls") or {}
     return {
         "success": False,
         "error": "new_slack_messages",
@@ -243,6 +277,7 @@ async def _stale_reply_guard(
         "hint": prompt("tools/slack-reply-conflict"),
         "formatted": latest.get("formatted"),
         "human_timestamps": timestamps,
+        "image_urls": [url for ts in arrived for url in image_urls.get(ts, [])],
     }
 
 
