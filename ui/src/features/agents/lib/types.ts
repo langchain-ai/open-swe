@@ -508,6 +508,7 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
+  waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null

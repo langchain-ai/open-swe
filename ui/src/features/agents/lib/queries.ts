@@ -848,7 +848,10 @@ export function useAgentThread(threadId: string) {
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
     refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 3000 : false,
+      current.state.data?.status === "running" ||
+      current.state.data?.waitingForDelegatedWork
+        ? 3000
+        : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.
