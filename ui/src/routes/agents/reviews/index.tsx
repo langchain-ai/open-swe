@@ -3,6 +3,7 @@ import { Text } from "@langchain/macaw-components/Text"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect } from "react"
 
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -53,6 +54,10 @@ function ReviewsPage() {
   const filters = Route.useSearch()
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
+  const clearTitleBar =
+    useSidebarCollapsed() &&
+    typeof window !== "undefined" &&
+    Boolean(window.openSweDesktop)
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
     if ("repo" in changes) storeRepos(changes.repo)
     void navigate({
@@ -78,7 +83,12 @@ function ReviewsPage() {
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex min-h-0 w-full flex-1 flex-col px-space-5 py-space-5">
+      <div
+        className={cn(
+          "flex min-h-0 w-full flex-1 flex-col px-space-5 py-space-5",
+          clearTitleBar && "pt-13"
+        )}
+      >
         <div
           className={cn(
             "mx-auto flex min-h-0 w-full flex-1 flex-col",
