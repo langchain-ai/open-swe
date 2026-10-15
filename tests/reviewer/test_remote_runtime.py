@@ -129,6 +129,7 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     """Integrations go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     from langchain.agents import create_agent
+    from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
@@ -147,7 +148,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
         surface.dynamic = DynamicToolMiddleware(
             {"MCP": [integration("mcp_search"), integration("mcp.dotted")]}
         )
-        middleware = [surface.dynamic, CodeInterpreterMiddleware(ptc=[integration("mcp_search")])]
+        middleware: list[AgentMiddleware] = [
+            surface.dynamic,
+            CodeInterpreterMiddleware(ptc=[integration("mcp_search")]),
+        ]
         surface.graph = create_agent(FakeListChatModel(responses=[]), middleware=middleware)
         surface.middleware = middleware
         choice = ModelChoice("openai:gpt-6.1-sol", {})
