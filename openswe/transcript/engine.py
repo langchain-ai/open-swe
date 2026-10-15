@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.database import postgres
 from openswe.transcript import attachments as attachment_store
-from openswe.transcript import listener, projections, tool_output
+from openswe.transcript import inactivity, listener, projections, tool_output
 from openswe.transcript.events import (
     SCHEMA_VERSION,
     ActorKind,
@@ -261,6 +261,7 @@ async def _write(
         run_id=run_id,
         occurred_at=occurred_at,
     )
+    await inactivity.track(conn, thread_id, event, occurred_at)
     await conn.execute(
         text(
             """
