@@ -180,7 +180,7 @@ export function RepoSelector({
                       selected ? "text-primary" : "text-secondary"
                     )}
                   >
-                    <span className="min-w-0 flex-1 truncate">
+                    <span className="min-w-0 flex-1 break-words">
                       {repo.full_name}
                     </span>
                     {repo.private !== undefined && (

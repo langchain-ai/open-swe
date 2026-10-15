@@ -5,22 +5,17 @@ because logins are mutable. Writing a record for a login with no ``users`` row
 raises :class:`UnknownUser`: people come into being when they sign in.
 """
 
-import logging
 from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, and_, delete, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.database.store_imports import StoreImport
-from openswe.store import Namespace, delete_value, search_all_entries
 from openswe.users.models import UserIdentity
 from openswe.utils.json_types import JsonObject
-
-logger = logging.getLogger(__name__)
 
 
 class UnknownUser(ValueError):
@@ -49,6 +44,17 @@ def user_id_for_login(login: str) -> ScalarSelect[UUID]:
             UserIdentity.provider == "github",
             func.lower(UserIdentity.login) == login.strip().lower(),
         )
+        .order_by(UserIdentity.last_seen_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def github_login_of(user_id: InstrumentedAttribute[UUID | None]) -> ScalarSelect[str]:
+    """The GitHub login a row's ``user_id`` column signed in with last, correlated to that row."""
+    return (
+        select(UserIdentity.login)
+        .where(UserIdentity.user_id == user_id, UserIdentity.provider == "github")
         .order_by(UserIdentity.last_seen_at.desc())
         .limit(1)
         .scalar_subquery()
@@ -87,6 +93,38 @@ class UserRecords:
                 )
             )
 
+    async def add(self, login: str, value: JsonObject, key: str = "") -> None:
+        """Write a record unless one already exists, keeping the existing one and its place."""
+        async with postgres.session() as session:
+            user_id = await session.scalar(select(user_id_for_login(login)))
+            if user_id is None:
+                raise UnknownUser(login)
+            await session.execute(
+                insert(UserRecord)
+                .values(user_id=user_id, kind=self.kind, key=key, value=value)
+                .on_conflict_do_nothing()
+            )
+
+    async def items(self, login: str) -> dict[str, JsonObject]:
+        """The person's records of this kind by key."""
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(UserRecord.key, UserRecord.value).where(
+                    UserRecord.user_id == user_id_for_login(login), UserRecord.kind == self.kind
+                )
+            )
+            return dict(rows.tuples().all())
+
+    async def keys(self, login: str) -> list[str]:
+        """The person's keys of this kind, oldest write first."""
+        async with postgres.session() as session:
+            keys = await session.scalars(
+                select(UserRecord.key)
+                .where(UserRecord.user_id == user_id_for_login(login), UserRecord.kind == self.kind)
+                .order_by(UserRecord.updated_at, UserRecord.key)
+            )
+            return list(keys)
+
     async def delete(self, login: str, key: str = "") -> None:
         async with postgres.session() as session:
             await session.execute(delete(UserRecord).where(self._where(login, key)))
@@ -97,29 +135,3 @@ class UserRecords:
             return await session.scalar(
                 delete(UserRecord).where(self._where(login, key)).returning(UserRecord.value)
             )
-
-    async def import_store(self, namespace: Namespace) -> StoreImport:
-        """Move Store records, keyed by login, into this kind.
-
-        A record already in PostgreSQL wins, and one whose login has no ``users``
-        row stays in the Store for the next startup.
-        """
-        moved = waiting = 0
-        for entry in await search_all_entries(namespace):
-            item_namespace = entry.namespace or list(namespace)
-            if len(item_namespace) != len(namespace):
-                continue
-            login = entry.key
-            try:
-                if await self.get(login) is None:
-                    await self.put(login, entry.value)
-            except UnknownUser:
-                logger.warning(
-                    "Store record waits for its users row",
-                    extra={"record_kind": self.kind, "github_login": login},
-                )
-                waiting += 1
-                continue
-            await delete_value(item_namespace, entry.key)
-            moved += 1
-        return StoreImport(moved, waiting)

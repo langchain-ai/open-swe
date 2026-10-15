@@ -6,46 +6,15 @@ from unittest.mock import AsyncMock
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
+from openswe import event_claims
 from openswe.slack import move as slack_move
 from openswe.slack import thinking as slack_thinking
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import lookup_slack_thread_id
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.tools import move_thread
 from openswe.source_context import SlackThreadRef
 
 StatusCall = tuple[str, str, str]
-
-
-class _Store:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, object]] = {}
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, object] | None:
-        value = self.items.get((tuple(namespace), key))
-        return {"value": dict(value)} if value is not None else None
-
-    async def put_item(
-        self, namespace: tuple[str, ...], key: str, value: dict[str, object]
-    ) -> None:
-        self.items[(tuple(namespace), key)] = dict(value)
-
-    async def delete_item(self, namespace: tuple[str, ...], key: str) -> None:
-        self.items.pop((tuple(namespace), key), None)
-
-    async def search_items(
-        self,
-        namespace: tuple[str, ...],
-        *,
-        filter: dict[str, object],  # noqa: A002
-        limit: int,
-        offset: int,
-    ) -> dict[str, object]:
-        matches = [
-            {"namespace": list(ns), "key": key, "value": value}
-            for (ns, key), value in self.items.items()
-            if ns == tuple(namespace) and all(value.get(k) == v for k, v in filter.items())
-        ]
-        return {"items": matches[offset : offset + limit]}
 
 
 class _Threads:
@@ -92,11 +61,19 @@ class _Runs:
 
 class _LangGraph:
     def __init__(self, slack_thread: dict[str, str]) -> None:
-        self.store = _Store()
         self.threads = _Threads(
             {"source": "slack", "source_context": {"slack_thread": slack_thread}}
         )
         self.runs = _Runs()
+
+
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
+@pytest.fixture(autouse=True)
+def unclaimed_locks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(event_claims, "claim", AsyncMock(return_value=True))
+    monkeypatch.setattr(event_claims, "release", AsyncMock())
 
 
 @pytest.fixture
@@ -126,7 +103,7 @@ async def test_breakout_mid_run_moves_the_working_status(
 
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", post_root)
     client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
-    await slack_move.bind_slack_thread_id(client, "C1", "1.0", "thread-1")
+    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
 
     async with asyncio.timeout(2):
         watcher = asyncio.create_task(
@@ -168,7 +145,7 @@ async def test_moving_out_of_a_code_channel_releases_it_and_stops_its_steps(
     monkeypatch.setattr(slack_thinking, "set_session_status", set_session_status)
     monkeypatch.setattr(slack_thinking, "_LOCATION_CHECK_SECONDS", 0.0)
     client = _LangGraph({"channel_id": "C0", "thread_ts": "0"})
-    await slack_move.bind_slack_thread_id(client, "C0", "0", "thread-1")
+    await slack_move.bind_slack_thread_id("C0", "0", "thread-1")
     stream = slack_thinking.SlackThinkingStream(
         client=client,
         thread_id="thread-1",
@@ -203,7 +180,7 @@ async def test_unverifiable_rebind_reverts_before_releasing_the_destination(
     statuses: list[StatusCall],  # noqa: ARG001
 ) -> None:
     client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
-    await slack_move.bind_slack_thread_id(client, "C1", "1.0", "thread-1")
+    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
     client.threads.reads_fail_after_first_update = True
 
     with pytest.raises(slack_move.SlackRebindError) as failure:
@@ -218,15 +195,15 @@ async def test_unverifiable_rebind_reverts_before_releasing_the_destination(
     assert client.threads.metadata["source_context"] == {
         "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}
     }
-    assert await lookup_slack_thread_id(client, "C1", "1.0") == "thread-1"
-    assert await lookup_slack_thread_id(client, "C0", "0") is None
+    assert await lookup_slack_thread_id("C1", "1.0") == "thread-1"
+    assert await lookup_slack_thread_id("C0", "0") is None
 
 
 async def test_unrevertable_rebind_keeps_the_destination(
     statuses: list[StatusCall],  # noqa: ARG001
 ) -> None:
     client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
-    await slack_move.bind_slack_thread_id(client, "C1", "1.0", "thread-1")
+    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
     client.threads.reads_fail_after_first_update = True
     client.threads.max_updates = 1
 
@@ -239,7 +216,7 @@ async def test_unrevertable_rebind_keeps_the_destination(
         )
 
     assert failure.value.moved is True
-    assert await lookup_slack_thread_id(client, "C0", "0") == "thread-1"
+    assert await lookup_slack_thread_id("C0", "0") == "thread-1"
 
 
 async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
@@ -250,7 +227,7 @@ async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
 
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", post_root)
     client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
-    await slack_move.bind_slack_thread_id(client, "C1", "1.0", "thread-1")
+    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
 
     async with asyncio.timeout(2):
         watcher = asyncio.create_task(
@@ -295,12 +272,12 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=True)))
     root = AsyncMock(return_value="2.0")
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", root)
-    await slack_move.bind_slack_thread_id(client, "C1", "1.0", "thread-1")
+    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
 
     result = await move_thread.slack_move_thread("Breakout", explicit)
     assert result["success"] is True
     assert result["channel_id"] == target
-    assert await lookup_slack_thread_id(client, target, "2.0") == "thread-1"
+    assert await lookup_slack_thread_id(target, "2.0") == "thread-1"
     assert root.await_args is not None
     assert root.await_args.args[0] == target
 

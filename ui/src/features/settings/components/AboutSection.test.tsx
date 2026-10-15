@@ -38,7 +38,7 @@ it("shows session build and safe API diagnostics without an analytics report", (
     built_at: "2026-09-11T09:00:00Z",
   }
   render(<AboutSection user={user} />)
-  expect(screen.getByText("About")).toBeTruthy()
+  expect(screen.queryByRole("heading", { name: "About" })).toBeNull()
   expect(screen.getByText(/OPENSWE_ENV:/).textContent).toBe(
     "OPENSWE_ENV: preview"
   )

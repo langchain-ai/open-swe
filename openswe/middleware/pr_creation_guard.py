@@ -57,7 +57,7 @@ def _split_shell_tokens(command: str) -> list[str]:
         return command.split()
 
 
-def _executable_name(token: str) -> str:
+def executable_name(token: str) -> str:
     return os.path.basename(token.strip("'\""))
 
 
@@ -76,7 +76,7 @@ def _shell_command_argument(tokens: list[str], shell_index: int) -> str | None:
 
 def _has_nested_shell_command(tokens: list[str]) -> bool:
     return any(
-        _executable_name(token) in _SHELL_EXECUTABLES
+        executable_name(token) in _SHELL_EXECUTABLES
         and _shell_command_argument(tokens, index) is not None
         for index, token in enumerate(tokens)
     )
@@ -90,7 +90,7 @@ def _expand_nested_shell_tokens(tokens: list[str], depth: int = 0) -> list[str]:
 
     expanded = list(tokens)
     for index, token in enumerate(tokens):
-        if _executable_name(token) not in _SHELL_EXECUTABLES:
+        if executable_name(token) not in _SHELL_EXECUTABLES:
             continue
         inner_command = _shell_command_argument(tokens, index)
         if inner_command is None:
@@ -99,7 +99,8 @@ def _expand_nested_shell_tokens(tokens: list[str], depth: int = 0) -> list[str]:
     return expanded
 
 
-def _shell_tokens(command: str) -> list[str]:
+def shell_tokens(command: str) -> list[str]:
+    """``command``'s shell tokens, with the commands nested in ``bash -c`` and the like appended."""
     return _expand_nested_shell_tokens(_split_shell_tokens(command))
 
 
@@ -119,7 +120,7 @@ def _gh_subtokens(tokens: list[str], index: int) -> list[str]:
 
 def _contains_gh_pr_create(tokens: list[str]) -> bool:
     for index, token in enumerate(tokens):
-        if _executable_name(token) != "gh":
+        if executable_name(token) != "gh":
             continue
         subtokens = _gh_subtokens(tokens, index)
         for offset, subtoken in enumerate(subtokens[:-1]):
@@ -186,7 +187,7 @@ def _gh_api_uses_post_or_body(subtokens: list[str]) -> bool:
 
 def _contains_gh_api_pull_create(tokens: list[str]) -> bool:
     for index, token in enumerate(tokens):
-        if _executable_name(token) != "gh":
+        if executable_name(token) != "gh":
             continue
         subtokens = _gh_subtokens(tokens, index)
         if "api" not in subtokens:
@@ -203,7 +204,7 @@ def _contains_gh_api_pull_create(tokens: list[str]) -> bool:
 
 def _contains_direct_pull_create(tokens: list[str]) -> bool:
     for index, token in enumerate(tokens):
-        if _executable_name(token) != "curl":
+        if executable_name(token) != "curl":
             continue
         subtokens: list[str] = []
         for candidate in tokens[index + 1 :]:
@@ -229,7 +230,7 @@ def _contains_direct_pull_create(tokens: list[str]) -> bool:
 
 
 def is_pr_creation_fallback_command(command: str) -> bool:
-    tokens = _shell_tokens(command)
+    tokens = shell_tokens(command)
     return (
         _SHELL_EXPANSION_DEPTH_LIMIT_TOKEN in tokens
         or _contains_gh_pr_create(tokens)

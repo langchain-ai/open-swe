@@ -1,7 +1,7 @@
 """LangSmith Managed Tools (LMT) gateways, used by each person with their own grants.
 
-A workspace admin picks one LMT gateway (a curated set of tools across MCP servers,
-served from one MCP URL). Private threads in that workspace load the gateway with the
+An instance admin picks one LMT gateway (a curated set of tools across MCP servers,
+served from one MCP URL). Private threads in every workspace load the gateway with the
 owner's own LangSmith token, so every tool call runs with the provider connections
 that person made in LangSmith. LMT owns those provider grants and proxies the calls;
 provider tokens, consent links and the LangSmith token never reach the agent, a tool
@@ -37,7 +37,8 @@ from openswe.mcp.transport import mcp_http_client
 
 logger = logging.getLogger(__name__)
 
-GATEWAYS_PATH = "/v1/managed-tools/gateways"
+KITS_PATH = "/v1/managed-tools/kits"
+SERVERS_PATH = "/v1/managed-tools/servers"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
 CONNECTION_NAME = "lmt"
 _MISSING_CREDENTIALS_META = "com.langchain.langsmith/missingCredentials"
@@ -82,9 +83,16 @@ class GatewayCredentialsRequired(ManagedToolsError):
     """LMT's 428: a gateway that offers no tools until every listed service is connected."""
 
     def __init__(self, missing: list[MissingCredential], links: dict[str, ConsentLink]) -> None:
-        super().__init__("Connect every service in this gateway before using its tools")
+        super().__init__("Connect every service in this tool kit before using its tools")
         self.missing = missing
         self.links = links
+
+
+class ConnectedService(BaseModel):
+    """A service in the gateway this person has connected."""
+
+    name: str
+    tool_count: int
 
 
 class Gateway(BaseModel):
@@ -97,10 +105,11 @@ class GatewayStatus(BaseModel):
     """What one person sees for a gateway: every service connected, or what is left."""
 
     gateway: Gateway
-    workspaces: list[str]
     ready: bool
     tool_count: int | None = None
     missing: list[MissingCredential] = Field(default_factory=list)
+    connected: list[ConnectedService] = Field(default_factory=list)
+    """Filled only when asked for, since naming them costs another LangSmith read."""
     all_required: bool = False
     """LangSmith withholds every tool until all of ``missing`` are connected. Otherwise
     the connected services' tools load and each missing one can be connected alone."""
@@ -132,17 +141,25 @@ class _Listing:
     missing: list[MissingCredential]
     links: dict[str, ConsentLink]
     all_required: bool
+    tool_names: frozenset[str] = frozenset()
 
 
 def managed_tools_configured() -> bool:
     return langsmith_oauth_configured()
 
 
+async def instance_gateway() -> str | None:
+    """The gateway an instance admin picked; workspaces cannot override it."""
+    from openswe.dashboard.workspace_settings_cache import cached_instance_settings
+
+    return (await cached_instance_settings()).managed_tools_gateway_id
+
+
 def gateway_id(value: str) -> str:
     try:
         return str(UUID(value))
     except ValueError:
-        raise ManagedToolsError("Unknown managed tools gateway") from None
+        raise ManagedToolsError("Unknown tool kit") from None
 
 
 async def _headers(login: str) -> dict[str, str]:
@@ -200,9 +217,9 @@ def _failure(response: httpx2.Response) -> ManagedToolsError:
             body = None
         return _credentials_required(body)
     if response.status_code in {401, 403}:
-        return ManagedToolsError("LangSmith refused access to this gateway")
+        return ManagedToolsError("LangSmith refused access to this tool kit")
     if response.status_code == 404:
-        return ManagedToolsError("The managed tools gateway no longer exists")
+        return ManagedToolsError("The tool kit no longer exists")
     return ManagedToolsError(f"Managed tools failed (HTTP {response.status_code}); retry later")
 
 
@@ -229,7 +246,7 @@ async def list_gateways(login: str) -> list[Gateway]:
         for _ in range(_MAX_PAGES):
             params = {"page_size": "100", **({"cursor": cursor} if cursor else {})}
             response = await client.get(
-                langsmith_issuer() + GATEWAYS_PATH, headers=headers, params=params
+                langsmith_issuer() + KITS_PATH, headers=headers, params=params
             )
             if not response.is_success:
                 raise _failure(response)
@@ -245,19 +262,135 @@ async def list_gateways(login: str) -> list[Gateway]:
     return sorted(gateways, key=lambda gateway: gateway.name.lower())
 
 
-async def get_gateway(login: str, gateway: str) -> Gateway:
+async def _gateway_detail(login: str, gateway: str) -> dict[str, object]:
     headers = await _headers(login)
     async with _client() as client:
         response = await client.get(
-            f"{langsmith_issuer()}{GATEWAYS_PATH}/{gateway_id(gateway)}", headers=headers
+            f"{langsmith_issuer()}{KITS_PATH}/{gateway_id(gateway)}", headers=headers
         )
     if not response.is_success:
         raise _failure(response)
-    return _gateway(response.json())
+    return response.json()
+
+
+@dataclass(frozen=True)
+class _Server:
+    """What LMT's server list says about one server: its name and credential slugs."""
+
+    name: str
+    slugs: frozenset[str]
+
+
+def _server(item: dict[str, object]) -> _Server:
+    # A missing credential names its server by one of these (smith-go connectionSlug).
+    slugs = {f"mt-{item['id']}"}
+    if isinstance(key := item.get("key"), str) and key:
+        slugs |= {key, f"mt-builtin-{key}"}
+    connection = item.get("connection")
+    if isinstance(connection, dict) and isinstance(
+        slug := connection.get("agent_auth_connection_slug"), str
+    ):
+        slugs.add(slug)
+    return _Server(name=str(item["name"]), slugs=frozenset(slugs))
+
+
+async def _servers(login: str) -> dict[str, _Server]:
+    """Servers by id and key. OAuth built-ins are not listed; callers fall back."""
+    headers = await _headers(login)
+    servers: dict[str, _Server] = {}
+    async with _client() as client:
+        cursor: str | None = None
+        for _ in range(_MAX_PAGES):
+            params = {"page_size": "100", **({"cursor": cursor} if cursor else {})}
+            response = await client.get(
+                langsmith_issuer() + SERVERS_PATH, headers=headers, params=params
+            )
+            if not response.is_success:
+                raise _failure(response)
+            payload = response.json()
+            for item in payload.get("items", []):
+                if not isinstance(item, dict):
+                    continue
+                if not isinstance(item.get("name"), str) or not isinstance(item.get("id"), str):
+                    continue
+                server = _server(item)
+                for key in ("id", "key"):
+                    if isinstance(item.get(key), str):
+                        servers[item[key]] = server
+            cursor = payload.get("next_cursor")
+            if not cursor:
+                break
+    return servers
+
+
+@dataclass(frozen=True)
+class _Source:
+    """One server's tools in a gateway, by the names the gateway lists them under."""
+
+    id: str
+    fallback_name: str
+    tool_names: list[str]
+
+
+def _sources(detail: dict[str, object]) -> list[_Source]:
+    """Group the gateway's tools by server, in the order servers first appear."""
+    grouped: dict[str, _Source] = {}
+    tools = detail.get("tools")
+    for tool in tools if isinstance(tools, list) else []:
+        if not isinstance(tool, dict) or not isinstance(tool.get("mcp_name"), str):
+            continue
+        source = tool.get("server_id") or tool.get("builtin_server_key")
+        if not isinstance(source, str):
+            continue
+        if source not in grouped:
+            grouped[source] = _Source(source, _fallback_name(tool), [])
+        grouped[source].tool_names.append(tool["mcp_name"])
+    return list(grouped.values())
+
+
+def _fallback_name(tool: dict[str, object]) -> str:
+    """The server part of a gateway tool name (``<server>_<tool>``), made readable."""
+    if isinstance(key := tool.get("builtin_server_key"), str) and key:
+        name = key
+    else:
+        name = str(tool["mcp_name"])
+        upstream = tool.get("tool_name")
+        if isinstance(upstream, str) and name.endswith("_" + upstream):
+            name = name.removesuffix("_" + upstream)
+    name = re.sub(r"[_-]+", " ", name).strip()
+    return name[:1].upper() + name[1:]
+
+
+def _connected_services(
+    sources: list[_Source], servers: dict[str, _Server], listing: _Listing
+) -> list[ConnectedService]:
+    missing_slugs = {item.slug for item in listing.missing}
+    missing_names = {_match_key(item.display_name) for item in listing.missing}
+    connected: list[ConnectedService] = []
+    for source in sources:
+        server = servers.get(source.id)
+        name = server.name if server else source.fallback_name
+        slugs = (
+            server.slugs
+            if server
+            else frozenset({source.id, f"mt-{source.id}", f"mt-builtin-{source.id}"})
+        )
+        if listing.all_required:
+            # LangSmith listed nothing, so a service counts as connected when it is not missing:
+            # matched by credential slug first, then by name.
+            if slugs & missing_slugs or _match_key(name) in missing_names:
+                continue
+            count = len(source.tool_names)
+        else:
+            count = sum(tool in listing.tool_names for tool in source.tool_names)
+            if not count:
+                continue
+        connected.append(ConnectedService(name=name, tool_count=count))
+    return connected
 
 
 def _mcp_url(gateway: str) -> str:
-    return f"{langsmith_issuer()}{GATEWAYS_PATH}/{gateway_id(gateway)}/mcp"
+    return f"{langsmith_issuer()}{KITS_PATH}/{gateway_id(gateway)}/mcp"
 
 
 def _gateway_client(headers: dict[str, str], gateway: str) -> Client[StreamableHttpTransport]:
@@ -304,7 +437,7 @@ async def _with_session[T](
     except Exception as exc:
         if (found := _wrapped(exc, ManagedToolsError)) is not None:
             raise found from None
-        raise ManagedToolsError("Could not reach the managed tools gateway; retry later") from None
+        raise ManagedToolsError("Could not reach the tool kit; retry later") from None
 
 
 async def _listing(login: str, gateway: str) -> _Listing:
@@ -318,19 +451,47 @@ async def _listing(login: str, gateway: str) -> _Listing:
     except GatewayCredentialsRequired as required:
         return _Listing(None, required.missing, required.links, all_required=True)
     missing, links = _credentials((result.meta or {}).get(_MISSING_CREDENTIALS_META))
-    return _Listing(len(result.tools), missing, links, all_required=False)
+    return _Listing(
+        len(result.tools),
+        missing,
+        links,
+        all_required=False,
+        tool_names=frozenset(tool.name for tool in result.tools),
+    )
 
 
-async def gateway_status(login: str, gateway: str, workspaces: list[str]) -> GatewayStatus:
-    """Whether ``login`` has connected every service in the gateway, or which are left."""
-    summary = await get_gateway(login, gateway)
-    listing = await _listing(login, gateway)
+async def gateway_status(
+    login: str, gateway: str, *, with_connected: bool = False
+) -> GatewayStatus:
+    """Whether ``login`` has connected every service in the gateway, or which are left.
+
+    ``with_connected`` also names the services already connected, for settings pages.
+    """
+
+    async def servers() -> dict[str, _Server]:
+        try:
+            return await _servers(login)
+        except ManagedToolsError:
+            logger.warning("Managed tools server names unavailable", exc_info=True)
+            return {}
+
+    # Independent LangSmith reads; the tools/list fan-out dominates, so run them together.
+    if with_connected:
+        detail, listing, names = await asyncio.gather(
+            _gateway_detail(login, gateway), _listing(login, gateway), servers()
+        )
+        connected = _connected_services(_sources(detail), names, listing)
+    else:
+        detail, listing = await asyncio.gather(
+            _gateway_detail(login, gateway), _listing(login, gateway)
+        )
+        connected = []
     return GatewayStatus(
-        gateway=summary,
-        workspaces=workspaces,
+        gateway=_gateway(detail),
         ready=not listing.missing,
         tool_count=listing.tool_count,
         missing=listing.missing,
+        connected=connected,
         all_required=listing.all_required,
     )
 

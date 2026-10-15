@@ -63,6 +63,12 @@ import { useDiffKeys } from "./useDiffKeys"
 
 type Item = CodeViewItem<Note>
 
+/** Pierre's protected hook that hydrates a patch diff with full file contents. */
+type LoadsFiles = { loadFilesIfNecessary(): void }
+
+/** Expanded diff instances that already asked for full contents since mounting. */
+const hydrating = new WeakSet<object>()
+
 const NO_ITEMS: Array<Item> = []
 
 // A diff row as painted: the line-number gutter sets the grid track, not the 18px code line.
@@ -216,7 +222,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     return {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
-      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-bg-context);border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
+      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
         overflow === "scroll"
           ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
           : ""
@@ -234,6 +240,13 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       layout: { paddingTop: 0, paddingBottom: 160, gap: 10 },
       __devOnlyValidateItemHeights: import.meta.env.DEV,
       loadDiffFiles,
+      // Hunks highlighted alone lose multi-line string state; hydrate once shown.
+      onPostRender: (_node, instance, phase) => {
+        if (phase === "unmount") return void hydrating.delete(instance)
+        if (instance.options.collapsed || hydrating.has(instance)) return
+        hydrating.add(instance)
+        ;(instance as unknown as LoadsFiles).loadFilesIfNecessary()
+      },
       enableLineSelection: true,
       enableGutterUtility: true,
       lineHoverHighlight: "number",
@@ -545,19 +558,21 @@ function StepIntro({ entryId }: { entryId: string }) {
   const step = useEntry(entryId)?.step
   if (!step) return null
   return (
-    <NoteFrame className="py-space-3">
-      <p className="flex items-center gap-space-2 text-xxs font-medium text-brand-primary">
-        <AgentMark className="size-3" />
-        Step {step.index} of {step.count}
-      </p>
-      <p className="mt-0.5 text-xs leading-5 font-semibold text-primary">
-        <InlineCode text={step.title} />
-      </p>
-      {step.summary && (
-        <div className="mt-space-1 max-w-[72ch] text-secondary [&_li]:text-xxs [&_li]:leading-5 [&_p]:text-xxs [&_p]:leading-5">
-          <Markdown content={step.summary} />
-        </div>
-      )}
+    <NoteFrame className="pt-0 pb-space-2">
+      <div className="rounded-lg border border-brand-subtle bg-brand-subtle-gradient px-space-3 py-space-2">
+        <p className="flex items-center gap-space-2 text-xxs font-medium text-brand-primary">
+          <AgentMark className="size-3" />
+          Step {step.index} of {step.count}
+        </p>
+        <p className="mt-0.5 text-xs leading-5 font-semibold text-primary">
+          <InlineCode text={step.title} />
+        </p>
+        {step.summary && (
+          <div className="mt-space-1 max-w-[72ch] text-secondary [&_li]:text-xxs [&_li]:leading-5 [&_p]:text-xxs [&_p]:leading-5">
+            <Markdown content={step.summary} />
+          </div>
+        )}
+      </div>
     </NoteFrame>
   )
 }

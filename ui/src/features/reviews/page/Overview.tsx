@@ -60,12 +60,12 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       <StandingPanel pr={pr} />
       {detail.walkthrough?.human_input && (
         <section
-          aria-label="Human input"
+          aria-label="Requested behavior"
           className="rounded-xl border border-dashed border-default px-space-4 py-space-3"
         >
           <p className="mb-space-1 flex items-center gap-space-2 text-xs font-medium text-secondary">
             <AgentMark />
-            What people asked for
+            Requested behavior
           </p>
           <HumanInputText summary={detail.walkthrough.human_input} />
         </section>
@@ -145,7 +145,7 @@ function Description({
       <div
         ref={ref}
         className={cn(
-          "relative text-xs leading-[1.65]",
+          "relative flow-root text-xs leading-[1.65]",
           clamped && "overflow-hidden"
         )}
         style={clamped ? { maxHeight: CLAMP_PX } : undefined}

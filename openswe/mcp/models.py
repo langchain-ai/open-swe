@@ -9,7 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import now_iso
+from openswe.utils.time import now_iso
 
 _BLOCKED_HEADERS = {
     "host",

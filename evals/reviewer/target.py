@@ -15,8 +15,6 @@ from typing import Any, Literal, cast
 from langgraph_sdk import get_client
 
 from openswe.input_messages import build_run_input
-from openswe.remote_runtime.client import remote_run_context, remote_runtime_client
-from openswe.remote_runtime.reviewer import MCP_SERVER_NAME
 from openswe.review.findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
     Finding,
@@ -30,8 +28,7 @@ DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
 ScoreMode = Literal["all_findings", "surfaced_findings"]
 _VALID_SCORE_MODES: set[ScoreMode] = {"all_findings", "surfaced_findings"}
 _VALID_SEVERITIES: set[Severity] = {"low", "medium", "high", "critical"}
-# A remote runtime reaches the reviewer tools over MCP under a server prefix.
-_ADD_FINDING_TOOL_NAMES = frozenset({"add_finding", f"{MCP_SERVER_NAME}_add_finding"})
+_ADD_FINDING_TOOL_NAMES = frozenset({"add_finding"})
 
 _THREAD_IDS: set[str] = set()
 _THREAD_IDS_LOCK = threading.Lock()
@@ -49,7 +46,7 @@ def _record_completed() -> None:
 def get_completed_count() -> int:
     """Number of examples that have finished so far in this process.
 
-    Read by ``store_reporter`` to publish progress to the dashboard.
+    Read by ``status_reporter`` to publish progress to the dashboard.
     """
     with _COMPLETED_LOCK:
         return _COMPLETED
@@ -170,26 +167,13 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
     )
     configurable = _build_configurable(inputs)
     try:
-        # Mirrors dispatch: with REVIEWER_RUNTIME_URL set, the run executes on that
-        # deployment while this backend keeps the thread the publication is written to.
-        remote_client = remote_runtime_client(assistant_id)
-        if remote_client is None:
-            result = await client.runs.wait(
-                thread_id,
-                assistant_id=assistant_id,
-                input=run_input,
-                config={"configurable": configurable},
-            )
-        else:
-            result = await remote_client.runs.wait(
-                thread_id,
-                assistant_id=assistant_id,
-                input=run_input,
-                context=await remote_run_context(
-                    configurable, thread_id=thread_id, assistant_id=assistant_id
-                ),
-                if_not_exists="create",
-            )
+        # With MDA_RUNTIME_URL set on the backend, its proxy runs this on Managed Deep Agents.
+        result = await client.runs.wait(
+            thread_id,
+            assistant_id=assistant_id,
+            input=run_input,
+            config={"configurable": configurable},
+        )
         score_mode = get_score_mode()
         publish_completed = True
         if score_mode == "surfaced_findings":

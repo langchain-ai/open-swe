@@ -5,6 +5,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
+import { Link } from "@langchain/macaw-components/Link"
 import { RadioButton } from "@langchain/macaw-components/RadioButton"
 import { RadioGroup } from "@langchain/macaw-components/RadioGroup"
 import { Text } from "@langchain/macaw-components/Text"
@@ -14,7 +15,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import type { OpenPullRequest, PullRequestReviewEvent } from "@/lib/api"
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
@@ -80,7 +81,7 @@ export function SubmitReviewPopover({
   const [chosen, setEvent] = useState<PullRequestReviewEvent>(defaultVerdict)
   const event: PullRequestReviewEvent = isAuthor ? "COMMENT" : chosen
   const [openedOn, setOpenedOn] = useState<PullRequestReviewEvent | null>(null)
-  if (open && openedOn !== defaultVerdict) {
+  if (open && openedOn === null) {
     setOpenedOn(defaultVerdict)
     setEvent(defaultVerdict)
   } else if (!open && openedOn !== null) {
@@ -89,6 +90,7 @@ export function SubmitReviewPopover({
   const [body, setBody] = useState("")
   const needsBody = event !== "APPROVE" && pendingCount === 0
   const submit = useMutation({
+    retry: false,
     mutationFn: () =>
       api.submitPullRequestReview(owner, repo, number, {
         event,
@@ -226,9 +228,30 @@ export function SubmitReviewPopover({
             </RadioGroup>
           )}
           {submit.error && (
-            <p className="mt-space-2 text-xs break-words text-error-secondary">
-              {submit.error.message}
-            </p>
+            <div role="alert" className="mt-space-2 space-y-space-1">
+              <Text
+                as="p"
+                variant="xs"
+                className="break-words text-error-secondary"
+              >
+                {submit.error instanceof ApiError && submit.error.status < 500
+                  ? `Review submission was rejected: ${submit.error.message}`
+                  : `We couldn't confirm your review was submitted: ${submit.error.message}`}
+              </Text>
+              <Text as="p" variant="xs" className="text-secondary">
+                {submit.error instanceof ApiError && submit.error.status < 500
+                  ? `Your draft is preserved.${submit.error.status === 404 ? " Check that you can access this pull request on GitHub." : " Address the error before submitting again."}`
+                  : "Your draft is preserved. Check GitHub before submitting again; the review may already have been posted."}
+              </Text>
+              <Link
+                variant="xs"
+                href={`https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Check review on GitHub
+              </Link>
+            </div>
           )}
           <div className="mt-space-3 flex items-center justify-end gap-space-2">
             {pending.review && (

@@ -39,16 +39,6 @@ class FakeRuns:
         return [run for run in self.runs if status in (None, run["status"])][:limit]
 
 
-class FakeStore:
-    def __init__(self, queued: object = None) -> None:
-        self.queued = queued
-
-    async def get_item(self, namespace: tuple[str, str], key: str) -> object:
-        assert namespace == ("queue", "tid")
-        assert key == "pending_messages"
-        return self.queued
-
-
 class FakeClient:
     def __init__(
         self,
@@ -56,11 +46,9 @@ class FakeClient:
         run_status: str,
         *,
         thread_status: str = "idle",
-        queued: object = None,
     ) -> None:
         self.threads = FakeThreads(metadata, status=thread_status)
         self.runs = FakeRuns(run_status)
-        self.store = FakeStore(queued)
 
 
 async def test_get_dashboard_thread_does_not_mark_running_thread_viewed(monkeypatch) -> None:

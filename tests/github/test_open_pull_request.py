@@ -254,7 +254,7 @@ def test_private_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch) -> None
         _open()
 
 
-def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch, fake_store) -> None:
+def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,
         {"source": "slack", "github_login": "bob"},

@@ -1,13 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { SidebarUserMenu } from "./SidebarUserMenu"
@@ -33,7 +27,7 @@ vi.mock("@/lib/theme", () => ({
   useTheme: () => ({ theme: "system", setTheme: mocks.setTheme }),
 }))
 
-function renderMenu() {
+function renderMenu(isAdmin = false) {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <SidebarUserMenu
@@ -41,7 +35,7 @@ function renderMenu() {
           login: "octocat",
           email: "octocat@example.com",
           avatar_url: null,
-          is_admin: false,
+          is_admin: isAdmin,
         }}
       />
     </QueryClientProvider>
@@ -55,10 +49,12 @@ afterEach(() => {
   mocks.datadogSessionLink = undefined
   vi.clearAllMocks()
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe("SidebarUserMenu", () => {
-  it("copies the current Datadog session link", async () => {
+  it("keeps copy instructions visible until the dialog is reopened", async () => {
+    vi.useFakeTimers()
     mocks.datadogInitialized = true
     mocks.datadogSessionLink =
       "https://app.datadoghq.com/rum/explorer?query=session"
@@ -69,14 +65,23 @@ describe("SidebarUserMenu", () => {
     mocks.writeText.mockResolvedValue(undefined)
 
     renderMenu()
-    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Datadog link" }))
-
-    await waitFor(() => {
-      expect(mocks.writeText).toHaveBeenCalledWith(mocks.datadogSessionLink)
-      expect(
-        screen.getByRole("menuitem", { name: "Copied Datadog link" })
-      ).toBeTruthy()
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy session link" }))
     })
+    expect(mocks.writeText).toHaveBeenCalledWith(mocks.datadogSessionLink)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+    expect(screen.getAllByRole("status")[0]?.textContent).toContain(
+      "Session link copied. Include it in your message to the team."
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(screen.getByRole("button", { name: /octocat/i }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
+    expect(screen.getAllByRole("status")[0]?.textContent).toBe("")
   })
 
   it("shows a failure state when clipboard access is denied", async () => {
@@ -90,12 +95,11 @@ describe("SidebarUserMenu", () => {
     mocks.writeText.mockRejectedValue(new Error("denied"))
 
     renderMenu()
-    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Datadog link" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Copy session link" }))
 
     expect(
-      await screen.findByRole("menuitem", {
-        name: "Couldn't copy Datadog link",
-      })
+      await screen.findByText(/Couldn't copy the session link/)
     ).toBeTruthy()
   })
 
@@ -103,18 +107,24 @@ describe("SidebarUserMenu", () => {
     mocks.datadogInitialized = true
     renderMenu()
 
-    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Datadog link" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Copy session link" }))
 
     expect(
-      await screen.findByRole("menuitem", {
-        name: "Couldn't copy Datadog link",
-      })
+      await screen.findByText(/Couldn't copy the session link/)
     ).toBeTruthy()
   })
 
-  it("hides the item before RUM initializes", () => {
+  it("offers reporting without a session replay when RUM is unavailable", () => {
     renderMenu()
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
 
-    expect(screen.queryByRole("menuitem", { name: /Datadog link/ })).toBeNull()
+    expect(screen.getByRole("dialog")).toBeTruthy()
+    expect(
+      screen.getByText(/A session replay link is unavailable/)
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "Copy session link" })
+    ).toBeNull()
   })
 })
