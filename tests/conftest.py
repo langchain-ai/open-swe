@@ -6,7 +6,7 @@ import hmac
 import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -349,3 +349,30 @@ def slack_api(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
         monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "test-slack-token")
         yield api
+
+
+class MemoryEventClaims:
+    """``openswe.event_claims`` without PostgreSQL: claims held in memory, never lapsing."""
+
+    def __init__(self) -> None:
+        self.held: set[tuple[str, str]] = set()
+
+    async def claim(self, scope: str, key: str, *, ttl: timedelta) -> bool:
+        del ttl
+        if (scope, key) in self.held:
+            return False
+        self.held.add((scope, key))
+        return True
+
+    async def release(self, scope: str, key: str) -> None:
+        self.held.discard((scope, key))
+
+
+@pytest.fixture
+def memory_event_claims(monkeypatch: pytest.MonkeyPatch) -> MemoryEventClaims:
+    from openswe import event_claims
+
+    claims = MemoryEventClaims()
+    monkeypatch.setattr(event_claims, "claim", claims.claim)
+    monkeypatch.setattr(event_claims, "release", claims.release)
+    return claims

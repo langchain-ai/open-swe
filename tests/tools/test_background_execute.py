@@ -41,6 +41,8 @@ codes = (root / "codes").read_text().split() if (root / "codes").exists() else [
 print(codes[0] if codes else "204", end="")
 """
 
+pytestmark = pytest.mark.usefixtures("memory_event_claims")
+
 
 @pytest.fixture
 def fake_curl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

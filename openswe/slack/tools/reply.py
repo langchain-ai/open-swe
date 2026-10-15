@@ -1,16 +1,16 @@
 import json
 import logging
-import uuid
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import timedelta
 from typing import Annotated, Any, Literal
 
 from langchain_core.messages import BaseMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
-from langgraph_sdk.errors import ConflictError
 
+from openswe import event_claims
 from openswe.input_messages import input_message_timestamps
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -42,7 +42,6 @@ from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run
 from openswe.slack.run_feedback import feedback_block
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
-from openswe.threads.creation import create_lock_thread
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.run_usage import RunUsageSummary, summarize_run_usage
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -50,7 +49,8 @@ from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 _NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
-_BY_THE_WAY_ANSWER_TTL_MINUTES = 7 * 24 * 60
+_BY_THE_WAY_ANSWER_SCOPE = "slack_btw_answer"
+_BY_THE_WAY_ANSWER_TTL = timedelta(days=7)
 # The posting helpers append a dashboard-link context block.
 _WEB_LINK_BLOCKS = 1
 
@@ -306,26 +306,27 @@ async def _by_the_way_reply(
         blocks = _reply_blocks(message, None, reserve=0)
         if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
-    client = get_langgraph_client()
-    reservation = _by_the_way_answer_id(cfg.thread_id or "")
+    reservation = cfg.thread_id or ""
     try:
-        await create_lock_thread(client, reservation, ttl_minutes=_BY_THE_WAY_ANSWER_TTL_MINUTES)
-    except ConflictError:
-        return {
-            "success": False,
-            "error": "the /btw answer was already posted",
-            "hint": "Do not post again; end the run.",
-        }
+        reserved = await event_claims.claim(
+            _BY_THE_WAY_ANSWER_SCOPE, reservation, ttl=_BY_THE_WAY_ANSWER_TTL
+        )
     except Exception:
         logger.exception(
             "Could not reserve the /btw answer", extra={"agent_thread_id": cfg.thread_id}
         )
         return {"success": False, "error": "could not reserve the answer", "retry": True}
+    if not reserved:
+        return {
+            "success": False,
+            "error": "the /btw answer was already posted",
+            "hint": "Do not post again; end the run.",
+        }
     try:
         await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
     except SlackRequestError as exc:
         try:
-            await client.threads.delete(reservation)
+            await event_claims.release(_BY_THE_WAY_ANSWER_SCOPE, reservation)
         except Exception:
             logger.exception(
                 "Could not release the /btw answer reservation",
@@ -344,10 +345,6 @@ async def _by_the_way_reply(
     # Slack drops a thread's status on any bot post, including a conversation's already there.
     await settle_slack_thread_status(channel_id, thread_ts)
     return {"success": True}
-
-
-def _by_the_way_answer_id(thread_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-by-the-way-answer:{thread_id}"))
 
 
 async def _ephemeral_reply(

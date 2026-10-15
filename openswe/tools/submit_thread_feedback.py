@@ -36,7 +36,7 @@ async def submit_thread_feedback(
     run_id = str(runtime.config.get("run_id") or cfg.run_id or "")
     persisted_route = runtime.state.get("model_route") if runtime.state else None
     route: SelectedRoute | None = normalize_route(persisted_route) if persisted_route else None
-    async with agent_thread_pr_state_lock(langgraph_client(), cfg.thread_id):
+    async with agent_thread_pr_state_lock(cfg.thread_id):
         record = await FEEDBACK.get(cfg.thread_id)
         record = record or Feedback(event_id=f"tool:{run_id}", answer_run_id=run_id)
         record.status = "completed"

@@ -4,15 +4,16 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
 from langgraph_sdk import get_client
-from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Row, Select, func, literal, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
+from openswe import event_claims
 from openswe.database import postgres
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import get_github_app_installation_token
@@ -34,8 +35,6 @@ from openswe.prompts import prompt
 from openswe.slack.client import GitHubPrRef, post_slack_thread_reply
 from openswe.source_context import SourceContext
 from openswe.tasks.store import Task, TaskMembership
-from openswe.thread_ids import baby_sit_lock_thread_id
-from openswe.threads.creation import create_lock_thread
 from openswe.utils.json_types import JsonObject
 from openswe.utils.time import now_iso
 from openswe.workspaces.routing import resolve_workspace
@@ -50,27 +49,25 @@ MAX_DISPATCH_KEYS = 30
 MAX_DELIVERY_IDS = 50
 MAX_ALERT_KEYS = 30
 MAX_EVALUATION_ERRORS = 3
-WATCH_LOCK_TTL_MINUTES = 5
+WATCH_LOCK_TTL = timedelta(minutes=5)
+_WATCH_LOCK_SCOPE = "baby_sit_watch"
 
 
 @asynccontextmanager
 async def _watch_lock(key: str) -> AsyncIterator[bool]:
-    client = get_client()
-    lock_id = baby_sit_lock_thread_id(key)
     try:
-        await create_lock_thread(client, lock_id, ttl_minutes=WATCH_LOCK_TTL_MINUTES)
-    except ConflictError:
-        yield False
-        return
+        acquired = await event_claims.claim(_WATCH_LOCK_SCOPE, key, ttl=WATCH_LOCK_TTL)
     except Exception:
         logger.warning("Failed to acquire baby-sit lock for %s", key, exc_info=True)
+        acquired = False
+    if not acquired:
         yield False
         return
     try:
         yield True
     finally:
         try:
-            await client.threads.delete(lock_id)
+            await event_claims.release(_WATCH_LOCK_SCOPE, key)
         except Exception:
             logger.warning("Failed to release baby-sit lock for %s", key, exc_info=True)
 
