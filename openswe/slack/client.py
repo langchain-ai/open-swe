@@ -999,12 +999,31 @@ async def stop_slack_stream(
             raise
 
 
+async def _set_agent_session_status(channel_id: str, thread_ts: str, status: str) -> bool:
+    """Set a thread's agent session status, which carries Slack's native Stop button."""
+    try:
+        data = await _slack_stream_call(
+            "agents.sessions.setStatus",
+            {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
+        )
+    except SlackStreamError as exc:
+        logger.info("Slack agent session status unavailable: %s", exc.code)
+        return False
+    if data.get("warning"):
+        logger.warning("Slack agent session status warning: %s", data["warning"])
+    return True
+
+
 async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) -> bool:
     """Set (or clear, with "") the animated assistant status shown under a thread."""
     from openswe.slack.dm import CONCIERGE_TS
 
     if channel_id.startswith("D") and thread_ts == CONCIERGE_TS:
         return True
+    if ENV.SLACK_AGENT_VIEW_ENABLED.get_bool():
+        return await _set_agent_session_status(
+            channel_id, thread_ts, "processing" if status else "active"
+        )
     try:
         await _slack_stream_call(
             "assistant.threads.setStatus",
