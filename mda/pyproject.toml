@@ -23,4 +23,4 @@ python-version = "3.13"
 # Its own type-check root: checked against this project's environment alone, an
 # import of the backend (`openswe`) or a database driver fails to resolve.
 [tool.ty.src]
-include = ["agent.py", "identity.py", "rt"]
+include = ["agent.py", "identity.py", "channels", "rt"]

@@ -71,7 +71,6 @@ from openswe.github.token import (
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import PersonIdentity
-from openswe.linear.comments import get_recent_comments  # noqa: F401
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
 from openswe.review.findings import (
@@ -247,7 +246,6 @@ __all__ = [
     "get_github_app_installation_token",
     "get_github_app_installation_token_with_expiry",
     "get_profile_default_repo",
-    "get_recent_comments",
     "SlackRepoResolution",
     "get_slack_repo_config",
     "get_slack_user_info",

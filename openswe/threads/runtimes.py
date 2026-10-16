@@ -21,6 +21,7 @@ from openswe.remote_runtime.client import (
     MDA_GRAPH_ID,
     mda_runtime_api_key,
     mda_runtime_url,
+    mda_service_headers,
     remote_run_context,
 )
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
@@ -112,7 +113,7 @@ class MdaRuntime:
     @property
     def http(self) -> httpx.AsyncClient:
         if self._http is None:
-            headers = {}
+            headers = mda_service_headers()
             if api_key := mda_runtime_api_key():
                 headers["x-api-key"] = api_key
             self._http = httpx.AsyncClient(
@@ -121,7 +122,9 @@ class MdaRuntime:
         return self._http
 
     def sdk(self) -> LangGraphClient:
-        return get_client(url=self.url, api_key=mda_runtime_api_key())
+        return get_client(
+            url=self.url, api_key=mda_runtime_api_key(), headers=mda_service_headers()
+        )
 
     async def ensure_remote_thread(self, thread_id: str) -> None:
         if thread_id in self._mda_threads:

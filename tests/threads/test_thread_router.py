@@ -289,6 +289,25 @@ async def test_a_fresh_agent_thread_moves_to_mda(
     }
 
 
+async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    await harness.request(
+        "POST", "/threads", {"thread_id": THREAD, "metadata": {"source": "linear"}}
+    )
+
+    await router.adopt_channel_run(THREAD)
+
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.runtime == "mda"
+    assert indexed.status == "busy"
+    assert harness.runtimes.local.threads[THREAD]["metadata"]["runtime"] == "mda"
+    # MDA's channel creates it as its conversation's own thread; a copy made
+    # here first would belong to the backend and keep the channel out.
+    assert THREAD not in harness.runtimes.mda.threads
+
+
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = _Harness(monkeypatch)
     await index.create(THREAD, runtime="mda")

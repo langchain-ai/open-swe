@@ -69,6 +69,16 @@ def mda_runtime_api_key() -> str | None:
     return ENV.MDA_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
 
 
+#: The header that makes the backend MDA's trusted service, which reaches channel threads.
+MDA_SERVICE_SECRET_HEADER = "x-mda-service-secret"  # noqa: S105 - header name, not a secret
+
+
+def mda_service_headers() -> dict[str, str]:
+    """The header that makes the backend MDA's trusted service, when its secret is set."""
+    secret = ENV.MDA_SERVICE_SECRET.optional()
+    return {MDA_SERVICE_SECRET_HEADER: secret} if secret else {}
+
+
 async def remote_run_context(
     configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
 ) -> RemoteRunContext:

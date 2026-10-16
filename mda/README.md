@@ -37,6 +37,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
 | `LANGSMITH_GATEWAY_API_KEY` | Optional gateway key, as on the backend |
+| `MDA_SERVICE_SECRET` | Shared with the backend: makes it this deployment's trusted service, and authenticates the Linear channel's calls to it |
 
 The backend:
 
@@ -45,6 +46,8 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent and reviewer thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
+| `MDA_SERVICE_SECRET` | The same value as this deployment's |
+| `LINEAR_WEBHOOK_SECRET` | The Linear app's webhook signing secret, checked again for each forwarded delivery |
 
 ## Run locally
 
@@ -75,3 +78,13 @@ mda deploy --name open-swe-mda-staging --deployment-type prod
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 
 Locally, each fresh `mda dev` start rebuilds `.mda/build` and starts with empty checkpoints. MDA's dev server also refuses loopback webhooks, so the completion webhook (`COMPLETION_WEBHOOK_URL`) needs the backend at a non-loopback URL.
+
+## Linear
+
+The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear. Mentioning the app on an issue, or delegating the issue to it, opens an agent session. The channel starts the run on its own thread for the issue, so the answer, Stop and errors reach the session.
+
+The backend decides everything else, as for any other run: the repository, the workspace, the input, and the signed run token. The channel forwards each delivery to `POST /linear/channel/runs` exactly as Linear sent it. The backend checks Linear's signature again, indexes the thread, and returns the run to start. Issue and comment events that start no conversation go to `POST /linear/channel/events` for automations and `listen_events`.
+
+Threads of Linear sessions belong to the channel. The identity trusts the backend as this deployment's service (`trusted_service=True`, `MDA_SERVICE_SECRET`), so it still serves them and starts follow-up runs on them; those runs answer in the session too.
+
+`mda deploy` sets up the Linear app, which takes a Linear workspace admin; see [Linear](../docs/INSTALLATION.md#linear).

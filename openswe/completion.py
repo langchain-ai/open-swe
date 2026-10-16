@@ -20,7 +20,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
-from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata
+from openswe.dispatch import CHANNEL_METADATA_KEY, FOLLOW_UP_PICKUP_KIND, RunMetadata
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
@@ -582,6 +582,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             return {"status": "ignored", "reason": "failure reply already posted"}
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
+
+    if isinstance(payload_metadata, dict) and payload_metadata.get(CHANNEL_METADATA_KEY):
+        return {"status": "ignored", "reason": "the channel reports the failure"}
 
     # Only event-woken runs count: a failure on a run a person started always replies
     # and lets later event-woken failures report again.
