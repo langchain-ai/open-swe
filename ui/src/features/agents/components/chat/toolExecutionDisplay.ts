@@ -97,7 +97,6 @@ export interface ToolDisplayParts {
   previewTooltip?: string
 }
 
-/** The label the model gives each call it makes, added to every tool by the backend. */
 const DISPLAY_DESCRIPTION = "display_description"
 
 /** A described call reads as its description; what it would have shown moves to the tooltip. */
