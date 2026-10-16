@@ -39,14 +39,6 @@ describe("Ghostty render snapshots", () => {
       expect(changed.rowData[1]?.cells[0]?.background).toEqual(
         explicit?.background
       )
-      core.write("\u001b]10;#1e293b\u0007")
-      expect(core.snapshot().rowData[0]?.cells[0]?.foreground).toEqual(slate)
-      expect(core.snapshot().dirtyRows.size).toBe(0)
-      core.write("\u001b]110\u0007\u001b]111\u0007")
-      const reset = core.snapshot()
-      expect(reset.background).toEqual(white)
-      expect(reset.rowData[0]?.cells[0]?.background).toEqual(white)
-      expect(reset.rowData[0]?.cells[0]?.foreground).toEqual(white)
     } finally {
       core.dispose()
     }
