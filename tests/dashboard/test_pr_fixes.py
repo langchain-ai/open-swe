@@ -103,7 +103,7 @@ async def test_every_intent_locks_on_the_same_key_so_only_one_thread_is_created(
     keys: list[str] = []
 
     @asynccontextmanager
-    async def recording_lock(_client, key: str):
+    async def recording_lock(key: str):
         keys.append(key)
         yield
 
@@ -136,6 +136,32 @@ async def test_linked_thread_the_caller_cannot_post_to_is_never_reused(setup, mo
     assert await pr_fixes.start_pull_request_thread(
         "acme", "app", 12, "alice", intent=FIX
     ) == pr_fixes.PullRequestThreadRun(thread_id="new")
+
+
+async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
+    thread_id = await pr_fixes.dispatch_pull_request_prompt(
+        "acme",
+        "app",
+        12,
+        "alice",
+        "Pick a reviewer",
+        title="Reviewer assignment",
+        before_dispatch=AsyncMock(),
+        unlisted=True,
+    )
+    assert thread_id == "new"
+    metadata = setup.client.threads.update.await_args_list[0].kwargs["metadata"]
+    assert metadata["unlisted"] is True
+    assert setup.threads["existing"]["metadata"].get("unlisted") is None
+    setup.threads["new"]["metadata"].update(metadata)
+    FakeRegistry.thread_ids.append("new")
+    assert [
+        t["thread_id"] for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None)
+    ] == ["existing"]
+    assert [
+        t["thread_id"]
+        for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None, unlisted=True)
+    ] == ["new"]
 
 
 async def test_review_open_preserves_existing_task_and_fix_lists_review_chat(setup):

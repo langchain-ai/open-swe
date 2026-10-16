@@ -10,5 +10,8 @@
   },
   "http": {
     "app": "./tests/e2e/harness.py:app"
+  },
+  "webhooks": {
+    "url": { "disable_loopback": false, "require_https": false }
   }
 }

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack.http import SlackRequestError
+from openswe.slack.records import SlackThread
 
 slack_reply_tool = importlib.import_module("openswe.slack.tools.reply")
 
@@ -21,6 +22,16 @@ def _patch_slack_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", AsyncMock())
 
 
+class _Threads:
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        raise LookupError(thread_id)
+
+
+class _Client:
+    def __init__(self) -> None:
+        self.threads = _Threads()
+
+
 def _config() -> dict[str, Any]:
     return {
         "configurable": {
@@ -32,13 +43,12 @@ def _config() -> dict[str, Any]:
     }
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.parametrize("breakout", [False, True])
 async def test_kickoff_stays_until_a_subsequent_reply_posts(
     monkeypatch: pytest.MonkeyPatch,
     breakout: bool,
 ) -> None:
-    from tests.slack.test_slack_thread_mapping import _Client
-
     client = _Client()
     monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
@@ -89,13 +99,12 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
         deleted.assert_awaited_once_with(channel="C1", ts="1.1")
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_kickoff_delete_failure_does_not_interrupt_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tests.slack.test_slack_thread_mapping import _Client
-
     client = _Client()
-    await client.store.put_item(("slack_kickoff", "C1"), "1.0", {"kickoff_ts": "1.1"})
+    await SlackThread.record_kickoff("C1", "1.0", "1.1")
     monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
         slack_reply_tool,
@@ -119,14 +128,12 @@ async def test_kickoff_delete_failure_does_not_interrupt_update(
     monkeypatch.setattr(slack_reply_tool.SlackClient, "bot", bot)
     posted = {"success": True, "message_ts": "1.2"}
     assert await slack_reply_tool.slack_reply("Update", "final") == posted
-    assert (await client.store.get_item(("slack_kickoff", "C1"), "1.0"))["value"] == {
-        "kickoff_ts": "1.1"
-    }
+    thread = await SlackThread.find("C1", "1.0")
+    assert thread is not None and thread.kickoff_ts == "1.1"
     assert await slack_reply_tool.slack_reply("Another update", "final") == posted
     assert deleted.await_count == 2
-    assert (await client.store.get_item(("slack_kickoff", "C1"), "1.0"))["value"] == {
-        "removed": True
-    }
+    thread = await SlackThread.find("C1", "1.0")
+    assert thread is not None and thread.kickoff_recorded and thread.kickoff_ts is None
 
 
 async def test_slack_reply_holds_mutation_lock_while_posting(
@@ -158,16 +165,17 @@ async def test_slack_reply_holds_mutation_lock_while_posting(
     assert lock_held is False
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_freshness_conflicts_survive_offloaded_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    from tests.slack.test_slack_thread_mapping import _Client
-
-    client = _Client()
-    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
-    latest = {"human_timestamps": ["1.0", "2.0"], "formatted": "new request"}
+    latest = {
+        "human_timestamps": ["1.0", "2.0"],
+        "formatted": "new request",
+        "image_urls": {"1.0": ["seen.png"], "2.0": ["new.png"]},
+    }
     monkeypatch.setattr(slack_reply_tool, "fetch_and_format_thread", AsyncMock(return_value=latest))
     messages = [HumanMessage(content='<input-message timestamp="1.0">request</input-message>')]
     conflict = await slack_reply_tool._stale_reply_guard(
@@ -175,6 +183,7 @@ async def test_freshness_conflicts_survive_offloaded_results(
     )
     assert conflict is not None
     assert conflict["formatted"] == "new request"
+    assert conflict["image_urls"] == ["new.png"]
     messages.append(
         ToolMessage(content="Result offloaded to /large_tool_results/reply", tool_call_id="a")
     )
@@ -192,6 +201,22 @@ async def test_freshness_conflicts_survive_offloaded_results(
         await slack_reply_tool._stale_reply_guard({"messages": messages}, "C1", "1.0", "run-1")
         is None
     )
+
+
+async def test_freshness_conflict_shows_the_model_images_posted_meanwhile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conflict = {"success": False, "error": "new_slack_messages", "image_urls": ["new.png"]}
+    image = {"type": "image", "base64": "aGk=", "mime_type": "image/png"}
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: {"configurable": {}})
+    monkeypatch.setattr(slack_reply_tool, "send_slack_reply", AsyncMock(return_value=conflict))
+    monkeypatch.setattr(slack_reply_tool, "fetch_image_block", AsyncMock(return_value=image))
+
+    result = await slack_reply_tool.slack_reply("done", "final", state={"messages": []})
+
+    assert isinstance(result, list)
+    assert json.loads(result[0]["text"]) == {"success": False, "error": "new_slack_messages"}
+    assert result[1] == image
 
 
 async def test_code_channel_reply_stays_in_user_started_thread(

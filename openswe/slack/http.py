@@ -13,6 +13,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from openswe.config import ENV
 from openswe.utils import ttl_cache
+from openswe.utils.http_pool import pooled_connector
 
 SLACK_API_BASE_URL = "https://slack.com/api/"
 SLACK_REQUEST_ERRORS = (SlackApiError, aiohttp.ClientError, TimeoutError, ValueError)
@@ -51,6 +52,8 @@ class SlackClient(AsyncWebClient):
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
             response_class=_SlackResponse,
+            connector=pooled_connector(),
+            connector_owner=False,
         ) as session:
             yield cls(
                 token=token,

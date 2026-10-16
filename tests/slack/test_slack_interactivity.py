@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import AsyncMock
 from urllib.parse import urlencode
 
 import pytest
@@ -152,13 +152,11 @@ async def test_option_interaction_schedules_update_before_agent_processing(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reader", [True, False])
-async def test_looks_good_in_a_review_guide_counts_only_for_its_reader(
+async def test_next_in_a_review_guide_counts_only_for_its_reader(
     monkeypatch: pytest.MonkeyPatch, reader: bool
 ) -> None:
     payload = _option_payload()
-    payload["actions"][0]["value"] = json.dumps(
-        {"type": "open_swe_option", "response": "Looks good"}
-    )
+    payload["actions"][0]["value"] = json.dumps({"type": "open_swe_option", "response": "Next"})
     update = AsyncMock()
     advance = AsyncMock()
     guide = SimpleNamespace(is_reader=AsyncMock(return_value=reader))
@@ -273,4 +271,4 @@ async def test_code_channel_external_select_returns_registered_suggestions(
     result = await slack_routes.slack_interactivity(_request(payload), BackgroundTasks())
 
     assert result == {"options": options}
-    get_suggestions.assert_awaited_once_with(ANY, "C-code", "V-plan", "repository", "open")
+    get_suggestions.assert_awaited_once_with("C-code", "V-plan", "repository", "open")

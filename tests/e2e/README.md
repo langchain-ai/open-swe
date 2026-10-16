@@ -28,6 +28,7 @@ code runs for real.
 | LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot         |
 | GitHub App token mint + installation lookup, `api.github.com/user` identity | stubbed (offline)                                              |
 | GitHub webhook deliveries (CI, review, PR events)                | **real** route, driven by `POST /control/github-event` (signed)            |
+| Run-completion webhook (`/webhooks/run-complete`)                | **real** — LangGraph delivers it for every dispatched run; `langgraph.e2e.json` allows the loopback URL production rejects |
 | Submitted PR reviews, conditional merge, collaborator permission  | **fake** (`/fake-gh/...`), enforcing self-approval and head-SHA rules      |
 | Review page chat (`chat` graph) and its diff/comment/review tools | **real**; PR contents, compare and inline comments served by `/fake-gh`    |
 | Review scout sandbox                                              | **fake** (`patches.py`) — provisioning fails after a delay, so a scout run ends in a known error |

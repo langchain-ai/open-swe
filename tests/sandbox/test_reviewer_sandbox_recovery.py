@@ -11,7 +11,7 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
-from openswe.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
+from openswe.reviewer import PrepareReviewerRunMiddleware, ensure_reviewer_sandbox_for_thread
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from openswe.sandboxes.providers.registry import SandboxGoneError
@@ -57,7 +57,6 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
         thread_id=thread_id,
         github_proxy_repositories=None,
         workspace_slug="large",
-        owner_login=None,
         record_stale_boot=False,
     )
     # The stale id is cleared by persisting the replacement, so later runs stop
@@ -179,13 +178,12 @@ async def test_reviewer_opts_into_replacement() -> None:
         new_callable=AsyncMock,
         return_value=sandbox_backend,
     ) as ensure:
-        result, github_token = await _ensure_reviewer_sandbox_for_thread(
+        result = await ensure_reviewer_sandbox_for_thread(
             "thread-reviewer",
             RunConfig.parse({"repo": {"owner": "langchain-ai", "name": "open-swe"}}),
         )
 
     assert result is sandbox_backend
-    assert github_token is None
     assert ensure.await_args is not None
     assert ensure.await_args.kwargs["allow_replacement"] is True
 
@@ -201,7 +199,7 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
 
     with (
         patch(
-            "openswe.reviewer._ensure_reviewer_sandbox_for_thread",
+            "openswe.reviewer.ensure_reviewer_sandbox_for_thread",
             new_callable=AsyncMock,
             side_effect=SandboxUnreachableError("thread-reviewer", "sandbox-deleted", "not found"),
         ),

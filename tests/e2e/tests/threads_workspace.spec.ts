@@ -337,10 +337,15 @@ async function seedSchedules(request: APIRequestContext) {
 }
 
 async function cleanupFixtures(request: APIRequestContext) {
+  if (createdThreadIds.size > 0) {
+    const login = await request.post("/control/login", { data: USER });
+    expect(login.ok(), await login.text()).toBeTruthy();
+  }
   for (const threadId of createdThreadIds) {
-    const pinResponse = await request.delete("/store/items", {
-      data: { namespace: ["thread_pins", USER.login], key: threadId },
-    });
+    const pinResponse = await request.delete(
+      `/dashboard/api/threads/${threadId}/pin`,
+      { headers: SAME_ORIGIN_HEADERS },
+    );
     expect([200, 204, 404]).toContain(pinResponse.status());
     const response = await request.delete(`/threads/${threadId}`);
     expect([200, 204, 404]).toContain(response.status());

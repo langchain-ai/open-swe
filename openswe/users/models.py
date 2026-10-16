@@ -118,6 +118,22 @@ class User(Base):
             return await cls._load(session, user_id)
 
     @classmethod
+    async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
+        """The person a dashboard session belongs to.
+
+        The session's ``user_id`` wins while that row still holds any GitHub
+        identity, so a renamed login never falls through to whoever took the old
+        handle; only a row whose GitHub identity moved away falls back to the login.
+        """
+        if not postgres.configured():
+            return None
+        if user_id is not None:
+            user = await cls.get(user_id)
+            if user is not None and any(i.provider == "github" for i in user.identities):
+                return user
+        return await cls.for_login("github", github_login)
+
+    @classmethod
     async def for_email(cls, email: str) -> Self | None:
         """The person one of whose identities carries ``email``; most recently seen wins."""
         if not postgres.configured():
@@ -327,6 +343,23 @@ class User(Base):
                     UserIdentity.external_id == external_id,
                 )
             )
+
+    @classmethod
+    async def for_identities(
+        cls, provider: Provider, external_ids: Iterable[str]
+    ) -> dict[str, Self]:
+        """The people owning those provider accounts, keyed by account id; unknown ids are absent."""
+        wanted = {external_id for external_id in external_ids if external_id}
+        if not wanted or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls, UserIdentity.external_id)
+                .join(cls.identities)
+                .where(UserIdentity.provider == provider, UserIdentity.external_id.in_(wanted))
+                .options(selectinload(cls.identities))
+            )
+            return {external_id: user for user, external_id in rows.tuples()}
 
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:

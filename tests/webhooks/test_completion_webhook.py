@@ -9,7 +9,6 @@ from openswe.message_queue import QueuedMessage
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
-from tests.conftest import FakeStore
 
 
 class _FakeThreads:
@@ -115,7 +114,6 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
 )
 async def test_leftover_follow_ups_get_one_pickup_run(
     monkeypatch: pytest.MonkeyPatch,
-    fake_store: FakeStore,
     registry_db: None,
     status: str,
     metadata: dict[str, object],
@@ -128,7 +126,6 @@ async def test_leftover_follow_ups_get_one_pickup_run(
     client = SimpleNamespace(
         threads=_FakeThreads({"source": "dashboard", "owner_login": "owner"}),
         runs=SimpleNamespace(list=AsyncMock(return_value=[])),
-        store=fake_store,
     )
     dispatched: list[dict[str, object]] = []
 
@@ -146,7 +143,6 @@ async def test_leftover_follow_ups_get_one_pickup_run(
         return {"run_id": "pickup-run"}
 
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
     monkeypatch.setattr(events, "worker_finished", AsyncMock(return_value=worker))
     monkeypatch.setattr(
         store.TaskDelegation, "get", AsyncMock(return_value=SimpleNamespace(cancelled=cancelled))
@@ -183,7 +179,6 @@ async def test_success_status_deduplicates_cost_refresh(
     metadata["session_cost_refresh_scheduled_run_ids"] = ["run-1"]
     client = _FakeClient(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
     schedule = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "schedule_session_cost_refresh", schedule)
 

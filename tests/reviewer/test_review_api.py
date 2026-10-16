@@ -1,3 +1,6 @@
+from unittest.mock import AsyncMock
+
+import httpx2
 import pytest
 from fastapi import HTTPException
 
@@ -63,17 +66,22 @@ async def test_label_write_requires_repository_access(monkeypatch):
 
 
 async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
-    async def fake_github_get(path, token, **kwargs):
-        return {"body": "see ![diagram](https://x.githubusercontent.com/a.png)"}
-
-    monkeypatch.setattr("openswe.review.reviews._github_get", fake_github_get)
+    pull = httpx2.Response(
+        200,
+        json={"body": "see ![diagram](https://x.githubusercontent.com/a.png)"},
+        request=httpx2.Request("GET", "https://api.github.com"),
+    )
+    monkeypatch.setattr(
+        "openswe.github.app.get_github_app_installation_token", AsyncMock(return_value="tok")
+    )
+    monkeypatch.setattr("openswe.github.http.github_request", AsyncMock(return_value=pull))
 
     # A URL not present in the PR body (cross-repo IDOR attempt) is rejected.
     with pytest.raises(HTTPException) as exc:
         await _require_image_in_pr(
-            "acme", "repo", 7, "https://x.githubusercontent.com/other-repo.png", "tok"
+            "acme", "repo", 7, "https://x.githubusercontent.com/other-repo.png"
         )
     assert exc.value.status_code == 403
 
     # A URL actually embedded in the PR body is allowed.
-    await _require_image_in_pr("acme", "repo", 7, "https://x.githubusercontent.com/a.png", "tok")
+    await _require_image_in_pr("acme", "repo", 7, "https://x.githubusercontent.com/a.png")

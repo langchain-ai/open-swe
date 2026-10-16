@@ -8,6 +8,7 @@ import pytest
 from langsmith.utils import LangSmithError
 
 from openswe import session_cost
+from openswe.slack.records import SlackRun
 from openswe.utils import langsmith as ls_utils
 
 
@@ -144,19 +145,10 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
     monkeypatch: pytest.MonkeyPatch,
     run_cost: float | None,
 ) -> None:
-    class _Store:
-        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
-            if key == "run:run-1":
-                return {
-                    "value": {
-                        "run_id": "run-1",
-                        "thread_ts": "1.0",
-                        "message_ts": "1.1",
-                    }
-                }
-            return None
-
-    client: Any = SimpleNamespace(store=_Store())
+    mapping = SlackRun(channel_id="C1", run_id="run-1", thread_ts="1.0", message_ts="1.1")
+    monkeypatch.setattr(
+        session_cost, "lookup_slack_run_message_mapping", AsyncMock(return_value=mapping)
+    )
     blocks = [
         {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
         {"type": "actions", "elements": [{"type": "button", "action_id": "approve"}]},
@@ -196,7 +188,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
     update = AsyncMock(return_value=None)
     monkeypatch.setattr(session_cost, "update_slack_message", update)
 
-    status, reason = await session_cost._refresh_once(_state(0), client)
+    status, reason = await session_cost._refresh_once(_state(0))
 
     if run_cost is None:
         assert status == "pending"

@@ -60,7 +60,7 @@ async def invalidate(conn: AsyncConnection | AsyncSession, *topics: str) -> None
 
 
 async def invalidate_standalone(*topics: str) -> None:
-    """Invalidate ``topics`` after a write Postgres had no part in, such as the Store.
+    """Invalidate ``topics`` after a write Postgres had no part in, such as one to the Agent Server.
 
     Never raises: the write it follows has already happened, and a reader that
     misses this only waits for its next refetch.

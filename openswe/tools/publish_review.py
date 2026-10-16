@@ -8,6 +8,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from openswe.analytics.usage import record_reviewer_publication
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
 from openswe.github.pull_requests import PullRequest
@@ -17,7 +18,7 @@ from openswe.github.thread_token import (
     resolve_thread_github_token,
 )
 from openswe.review.approvals import approval_mode_for
-from openswe.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from openswe.review.findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
@@ -79,6 +80,7 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
         logger.debug("Failed to record reviewer usage", exc_info=True)
 
 
+@audit_tool()
 async def publish_review(
     ranking: list[str],
     severity_threshold: Severity = "medium",
@@ -566,19 +568,16 @@ async def _publish_review_async(
                 )
                 if isinstance(current_run_id, str) and current_run_id:
                     langgraph_run_id = current_run_id
-            await ASSESSMENTS.put(
-                str(review_id),
-                PublishedAssessment(
-                    **assessment.model_dump(),
-                    review_id=review_id,
-                    owner=owner,
-                    repo=repo,
-                    pr_number=pr_number,
-                    approved=approved,
-                    dry_run=dry_run,
-                    run_id=langgraph_run_id,
-                ),
-            )
+            await PublishedAssessment(
+                **assessment.model_dump(),
+                review_id=review_id,
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                approved=approved,
+                dry_run=dry_run,
+                run_id=langgraph_run_id,
+            ).save()
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
         except Exception:
             logger.exception("Failed to save published assessment", extra={"review_id": review_id})

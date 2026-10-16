@@ -23,18 +23,18 @@ def policy() -> IncidentPolicy:
 
 
 @pytest.fixture
-async def record(fake_store, policy):
-    await service.POLICIES.put("default", policy)
+async def record(registry_db, policy):
+    await service.POLICIES.put(policy)
     record = Incident(id="i1", workspace_id="T1", channel_id="C1", thread_id="thread-1")
     await service.INCIDENTS.put(record.id, record)
     return record
 
 
 @pytest.fixture
-def platform(fake_store, monkeypatch):
+def platform(monkeypatch):
     runs = SimpleNamespace(list=AsyncMock(return_value=[]), cancel_many=AsyncMock())
-    client = SimpleNamespace(runs=runs, store=fake_store)
-    monkeypatch.setattr(turns, "store_client", lambda: client)
+    client = SimpleNamespace(runs=runs)
+    monkeypatch.setattr(turns, "get_client", lambda: client)
     monkeypatch.setattr(turns, "create_durable_run", AsyncMock(return_value={"run_id": "r1"}))
     monkeypatch.setattr(turns, "queue_message_for_thread", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "post_slack_thread_reply_with_ts", AsyncMock(return_value="9.0"))
@@ -114,9 +114,7 @@ async def test_explicit_turn_interrupts_and_carries_request_and_thread(record, p
     assert "Why are we seeing 500s?" in rendered and "slack:U1" in rendered
 
 
-async def test_completion_reschedules_only_stranded_context(
-    record, policy, platform, fake_store, registry_db
-):
+async def test_completion_reschedules_only_stranded_context(record, policy, platform):
     assert (await turns.handle_run_completion("thread-1", "r1", "success"))["reason"] == (
         "incident turn complete"
     )

@@ -1,18 +1,30 @@
+import {
+  GearRegularIcon,
+  MoonRegularIcon,
+  SignOutRegularIcon,
+  SunRegularIcon,
+} from "@langchain/macaw-components/icons"
+import { Avatar } from "@langchain/macaw-components/Avatar"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { DesktopIcon } from "@phosphor-icons/react/dist/ssr/Desktop"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { BugIcon } from "@phosphor-icons/react/dist/ssr/Bug"
+import { Button } from "@langchain/macaw-components/Button"
 import {
-  IoCopyOutline,
-  IoDesktopOutline,
-  IoLogOutOutline,
-  IoMoonOutline,
-  IoSettingsOutline,
-  IoSunnyOutline,
-} from "react-icons/io5"
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@langchain/macaw-components/Dialog"
 
+import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
+import { buildEnvironmentDiagnostics } from "@/lib/environment-diagnostics"
 import type { SessionUser } from "@/lib/api"
 import type { Theme } from "@/lib/theme"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { api } from "@/lib/api"
 import {
   getDatadogSessionLink,
@@ -26,11 +38,11 @@ import { cn } from "@/lib/utils"
 const THEME_OPTIONS: Array<{
   value: Theme
   label: string
-  icon: typeof IoSunnyOutline
+  icon: IconComponent
 }> = [
-  { value: "light", label: "Light", icon: IoSunnyOutline },
-  { value: "dark", label: "Dark", icon: IoMoonOutline },
-  { value: "system", label: "System", icon: IoDesktopOutline },
+  { value: "light", label: "Light", icon: SunRegularIcon },
+  { value: "dark", label: "Dark", icon: MoonRegularIcon },
+  { value: "system", label: "System", icon: DesktopIcon },
 ]
 
 interface SidebarUserMenuProps {
@@ -46,6 +58,14 @@ export function SidebarUserMenu({
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
   const [open, setOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [desktopVersion, setDesktopVersion] = useState<string>()
+
+  useEffect(() => {
+    if (reportOpen) {
+      void window.openSweDesktop?.getVersion().then(setDesktopVersion)
+    }
+  }, [reportOpen])
   const [datadogCopyStatus, setDatadogCopyStatus] = useState<
     "idle" | "copied" | "error"
   >("idle")
@@ -96,10 +116,7 @@ export function SidebarUserMenu({
         setDatadogCopyStatus("error")
       }
     }
-    window.setTimeout(() => setDatadogCopyStatus("idle"), 1500)
   }
-
-  const initials = (user.login || "?").slice(0, 2).toUpperCase()
 
   return (
     <div ref={ref} className="relative">
@@ -108,18 +125,18 @@ export function SidebarUserMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-sidebar-accent"
+        className="flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-left outline-none hover:bg-surface-level-2-hover focus-visible:ring-2 focus-visible:ring-focus"
       >
-        <Avatar className="size-7">
-          {user.avatar_url && (
-            <AvatarImage src={user.avatar_url} alt={user.login} />
-          )}
-          <AvatarFallback>{initials}</AvatarFallback>
-        </Avatar>
+        <Avatar
+          className="size-7 text-xs"
+          imageUrl={user.avatar_url ?? undefined}
+          label={user.login || "?"}
+          shape="circle"
+        />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-xs font-medium">{user.login}</span>
           {user.email && (
-            <span className="truncate text-[10px] text-muted-foreground">
+            <span className="truncate text-xxs text-secondary">
               {user.email}
             </span>
           )}
@@ -128,13 +145,13 @@ export function SidebarUserMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          className="absolute right-0 bottom-full left-0 mb-space-2 overflow-hidden rounded-md border border-default bg-elevated p-space-1 text-primary shadow-md"
         >
-          <div className="px-2 py-1.5">
-            <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          <div className="px-space-2 py-space-1">
+            <span className="text-xxs font-medium tracking-wide text-tertiary uppercase">
               Theme
             </span>
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
+            <div className="mt-space-1 grid grid-cols-3 gap-space-1">
               {THEME_OPTIONS.map((option) => {
                 const Icon = option.icon
                 const active = theme === option.value
@@ -145,43 +162,41 @@ export function SidebarUserMenu({
                     onClick={() => setTheme(option.value)}
                     aria-pressed={active}
                     className={cn(
-                      "flex flex-col items-center gap-1 rounded-sm border px-1 py-1.5 text-[10px] transition-colors",
+                      "flex flex-col items-center gap-space-1 rounded-sm border px-space-1 py-space-1 text-xxs transition-colors",
                       active
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-transparent text-muted-foreground hover:bg-muted"
+                        ? "border-brand-subtle bg-brand-subtle text-brand-primary"
+                        : "border-transparent text-secondary hover:bg-elevated-hover"
                     )}
                   >
-                    <Icon className="size-3.5" />
+                    <Icon size={14} weight="regular" />
                     {option.label}
                   </button>
                 )
               })}
             </div>
           </div>
-          <div className="my-1 h-px bg-border" />
-          {datadogInitialized && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => void copyDatadogSessionLink()}
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
-            >
-              <IoCopyOutline className="size-3.5" />
-              {datadogCopyStatus === "copied"
-                ? "Copied Datadog link"
-                : datadogCopyStatus === "error"
-                  ? "Couldn't copy Datadog link"
-                  : "Copy Datadog link"}
-            </button>
-          )}
+          <div className="my-space-1 border-t border-default" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              setDatadogCopyStatus("idle")
+              setReportOpen(true)
+            }}
+            className="flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-left text-xs/relaxed hover:bg-elevated-hover"
+          >
+            <BugIcon size={14} weight="regular" />
+            Report an issue
+          </button>
           {showSettingsLink && (
             <Link
               to="/my-settings"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-muted"
+              className="flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-xs/relaxed hover:bg-elevated-hover"
             >
-              <IoSettingsOutline className="size-3.5" />
+              <GearRegularIcon size={14} />
               Settings
             </Link>
           )}
@@ -189,13 +204,65 @@ export function SidebarUserMenu({
             type="button"
             role="menuitem"
             onClick={() => void onLogout()}
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
+            className="flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-left text-xs/relaxed hover:bg-elevated-hover"
           >
-            <IoLogOutOutline className="size-3.5" />
+            <SignOutRegularIcon size={14} />
             Sign out
           </button>
         </div>
       )}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent
+          childrenClassName="gap-space-4 p-space-6"
+          showClose={false}
+        >
+          <DialogTitle>Report an issue</DialogTitle>
+          <DialogDescription>
+            Send the Open SWE team a description of what went wrong, what you
+            expected, and any steps to reproduce it.
+          </DialogDescription>
+          <p className="text-xs text-secondary">
+            {datadogInitialized
+              ? "Copy your session link and include it in your message so the team can find your session replay."
+              : "A session replay link is unavailable. You can still report the issue and copy diagnostics below."}
+          </p>
+          <div className="flex flex-wrap items-start gap-space-2">
+            {datadogInitialized && (
+              <div className="space-y-space-2 pt-space-1">
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  size="xs"
+                  leftDecorator={CopyIcon}
+                  aria-label="Copy session link"
+                  onClick={() => void copyDatadogSessionLink()}
+                >
+                  Copy session link
+                </Button>
+                <p role="status" className="text-xs text-secondary">
+                  {datadogCopyStatus === "copied"
+                    ? "Session link copied. Include it in your message to the team."
+                    : datadogCopyStatus === "error"
+                      ? "Couldn't copy the session link. You can still report the issue without it."
+                      : null}
+                </p>
+              </div>
+            )}
+            {reportOpen && (
+              <CopyDiagnosticsButton
+                getDiagnostics={() =>
+                  buildEnvironmentDiagnostics(user, desktopVersion)
+                }
+              />
+            )}
+          </div>
+          <DialogClose asChild>
+            <Button variant="outlined" size="sm">
+              Close
+            </Button>
+          </DialogClose>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

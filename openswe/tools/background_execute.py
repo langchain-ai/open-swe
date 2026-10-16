@@ -443,7 +443,7 @@ async def _launch_with_cron(
     active = sum(task.get("status") == "running" for task in current.get("tasks", []))
     if active >= MAX_ACTIVE_TASKS:
         return {"success": False, "error": "active task limit reached"}
-    from openswe.background_tasks import MONITOR_LOCK, ensure_background_task_cron
+    from openswe.background_tasks import MONITOR_LOCK, ensure_background_task_polling
 
     wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
     wait = await backend.aexecute(wait_for_monitor, timeout=15)
@@ -463,7 +463,7 @@ async def _launch_with_cron(
             "error": "command started, but automatic completion monitoring is busy",
         }
     try:
-        await ensure_background_task_cron(thread_id)
+        await ensure_background_task_polling(thread_id)
     except Exception:
         logger.warning("Failed to schedule background-task monitor", exc_info=True)
         return {

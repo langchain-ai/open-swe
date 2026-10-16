@@ -4,7 +4,7 @@ import json
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-import httpx
+import httpx2
 import pytest
 from cryptography.fernet import Fernet
 
@@ -12,6 +12,7 @@ from openswe.mcp import MCPConnectionUpdate, runtime
 from openswe.mcp import oauth as mcp_oauth
 from openswe.mcp import transport as mcp_transport
 from openswe.mcp import workspace as settings
+from openswe.mcp.records import SharedMCPConnections
 from openswe.tool_loaders import workspace_mcp as loader
 
 
@@ -24,7 +25,7 @@ def oauth_remote(monkeypatch):
         if request.headers["host"] == "auth.example":
             state["tokens"].append(request)
             await asyncio.sleep(0)
-            return httpx.Response(
+            return httpx2.Response(
                 state["token_status"],
                 json=state.get(
                     "token_payload",
@@ -44,9 +45,9 @@ def oauth_remote(monkeypatch):
         )
         if accepted and not state["reject"] and "reply" in state:
             return state["reply"](request)
-        return httpx.Response(200 if accepted and not state["reject"] else 401, json={})
+        return httpx2.Response(200 if accepted and not state["reject"] else 401, json={})
 
-    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda **kwargs: httpx.MockTransport(remote))
+    monkeypatch.setattr(httpx2, "AsyncHTTPTransport", lambda **kwargs: httpx2.MockTransport(remote))
     monkeypatch.setattr(
         mcp_transport,
         "resolve_and_validate",
@@ -79,15 +80,15 @@ async def oauth_record(method="client_secret_post"):
 
 
 def client_for(record, namespace=("workspace_mcps", "default")):
-    connection = runtime._connection(record, namespace)
-    factory = connection["httpx_client_factory"]
+    transport = runtime._client(record, namespace).transport
+    factory = transport.httpx_client_factory
     assert factory is not None
-    return factory(headers=connection["headers"], auth=connection.get("auth"))
+    return factory(headers=transport.headers, auth=transport.auth)
 
 
 @pytest.mark.parametrize("method", ["client_secret_post", "client_secret_basic"])
 async def test_oauth_authenticates_and_reuses_token_across_connections(
-    fake_store, oauth_remote, method
+    registry_db, oauth_remote, method
 ):
     record = await oauth_record(method)
     for _ in range(2):
@@ -111,7 +112,7 @@ async def test_oauth_authenticates_and_reuses_token_across_connections(
 
 
 async def test_identical_oauth_credentials_do_not_share_tokens_between_owners(
-    fake_store, oauth_remote
+    registry_db, oauth_remote
 ):
     record = await oauth_record()
     for owner in ["alice", "bob"]:
@@ -120,7 +121,7 @@ async def test_identical_oauth_credentials_do_not_share_tokens_between_owners(
     assert len(oauth_remote["tokens"]) == 2
 
 
-async def test_oauth_retries_unauthorized_only_once(fake_store, oauth_remote):
+async def test_oauth_retries_unauthorized_only_once(registry_db, oauth_remote):
     record = await oauth_record()
     async with client_for(record) as client:
         assert (await client.post(record.url, json={})).status_code == 200
@@ -134,7 +135,7 @@ async def test_oauth_retries_unauthorized_only_once(fake_store, oauth_remote):
     assert len(oauth_remote["tokens"]) == 2
 
 
-async def test_oauth_failure_redacts_remote_response(fake_store, oauth_remote, caplog):
+async def test_oauth_failure_redacts_remote_response(registry_db, oauth_remote, caplog):
     record = await oauth_record()
     oauth_remote["token_status"] = 400
     async with client_for(record) as client:
@@ -146,7 +147,7 @@ async def test_oauth_failure_redacts_remote_response(fake_store, oauth_remote, c
 
 
 async def test_oauth_refreshes_expiring_tokens_and_rotated_secrets(
-    fake_store, oauth_remote, monkeypatch
+    registry_db, oauth_remote, monkeypatch
 ):
     now = 100
     monkeypatch.setattr(mcp_oauth, "monotonic", lambda: now)
@@ -170,7 +171,7 @@ async def test_oauth_refreshes_expiring_tokens_and_rotated_secrets(
         {"access_token": "test-client-secret", "token_type": "Bearer", "expires_in": -1},
     ],
 )
-async def test_invalid_token_responses_are_redacted(fake_store, oauth_remote, payload):
+async def test_invalid_token_responses_are_redacted(registry_db, oauth_remote, payload):
     record = await oauth_record()
     oauth_remote["token_payload"] = payload
     async with client_for(record) as client:
@@ -181,7 +182,7 @@ async def test_invalid_token_responses_are_redacted(fake_store, oauth_remote, pa
 
 
 async def test_private_token_endpoint_is_blocked_before_credentials_are_sent(
-    fake_store, oauth_remote, monkeypatch
+    registry_db, oauth_remote, monkeypatch
 ):
     record = await oauth_record()
 
@@ -196,7 +197,7 @@ async def test_private_token_endpoint_is_blocked_before_credentials_are_sent(
     assert oauth_remote["calls"] == []
 
 
-async def test_token_redirect_is_not_followed(fake_store, oauth_remote):
+async def test_token_redirect_is_not_followed(registry_db, oauth_remote):
     record = await oauth_record()
     oauth_remote["token_status"] = 302
     async with client_for(record) as client:
@@ -206,11 +207,11 @@ async def test_token_redirect_is_not_followed(fake_store, oauth_remote):
     assert oauth_remote["calls"] == []
 
 
-async def test_oauth_works_through_real_mcp_discovery_and_execution(fake_store, oauth_remote):
+async def test_oauth_works_through_real_mcp_discovery_and_execution(registry_db, oauth_remote):
     def reply(request):
         payload = json.loads(request.content) if request.content else {}
         if "id" not in payload:
-            return httpx.Response(202)
+            return httpx2.Response(202)
         method = payload["method"]
         result = {
             "initialize": {
@@ -224,17 +225,20 @@ async def test_oauth_works_through_real_mcp_discovery_and_execution(fake_store, 
                 ]
             },
             "tools/call": {"content": [{"type": "text", "text": "found"}], "isError": False},
-        }[method]
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": payload["id"], "result": result})
+        }.get(method)
+        if result is None:
+            error = {"code": -32601, "message": "Method not found"}
+            return httpx2.Response(
+                200, json={"jsonrpc": "2.0", "id": payload["id"], "error": error}
+            )
+        return httpx2.Response(200, json={"jsonrpc": "2.0", "id": payload["id"], "result": result})
 
     oauth_remote["reply"] = reply
     record = await oauth_record()
     definitions = await runtime.discover_tools(record, ("workspace_mcps", "default"))
     assert [tool.name for tool in definitions] == ["search"]
-    fake_store.seed(
-        ["workspace_mcps", "default"],
-        record.name,
-        {**record.model_dump(), "allowed_tools": ["search"]},
+    await SharedMCPConnections("default").put(
+        record.model_copy(update={"allowed_tools": ["search"]})
     )
     tools = await loader.load_workspace_mcp_tools("default")
     result = await tools[0].ainvoke({})

@@ -7,14 +7,8 @@ import httpx2
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
-from openswe.github.http import (
-    GITHUB_API_BASE,
-    GITHUB_GRAPHQL,
-    GitHubClient,
-    github_client,
-    github_request,
-)
-from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.http import GITHUB_API_BASE, GITHUB_GRAPHQL, github_request
+from openswe.github.pull_request_status import PullRequestClient, pull_request_identity
 from openswe.github.repo_merge_methods import MergeMethod
 from openswe.github.squash_message import GitHubUser, SquashSource
 
@@ -348,53 +342,50 @@ async def _resolve_review_thread(client: httpx2.AsyncClient, thread_id: str) -> 
 
 
 async def resolve_review_threads(
-    owner: str, repo: str, number: int, body: ResolveReviewThreads, token: str
+    pull: PullRequestClient, body: ResolveReviewThreads
 ) -> ResolveReviewThreadsResult:
-    """Resolve review threads as the signed-in user, limited to this PR's open threads."""
+    """Resolve review threads, limited to this PR's open threads."""
+    owner, repo, number = pull.repo.owner, pull.repo.name, pull.number
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
-    async with github_client(token=token) as client:
-        threads = (
-            await GitHubClient(client).repo(owner, repo).pull_request(number).unresolved_threads()
+    threads = await pull.unresolved_threads()
+    if threads is None:
+        logger.warning(
+            "Review threads unavailable for resolve",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
         )
-        if threads is None:
-            logger.warning(
-                "Review threads unavailable for resolve",
-                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
-            )
-            raise HTTPException(502, "GitHub did not return the review threads")
-        open_ids = {thread["thread_id"] for thread in threads if thread.get("thread_id")}
-        resolved: list[str] = []
-        failed: list[str] = []
-        # Serial on purpose: GitHub's secondary rate limit punishes concurrent mutations.
-        for thread_id in dict.fromkeys(body.thread_ids):
-            if thread_id not in open_ids:
-                continue
-            (resolved if await _resolve_review_thread(client, thread_id) else failed).append(
-                thread_id
-            )
+        raise HTTPException(502, "GitHub did not return the review threads")
+    open_ids = {thread["thread_id"] for thread in threads if thread.get("thread_id")}
+    resolved: list[str] = []
+    failed: list[str] = []
+    # Serial on purpose: GitHub's secondary rate limit punishes concurrent mutations.
+    for thread_id in dict.fromkeys(body.thread_ids):
+        if thread_id not in open_ids:
+            continue
+        resolved_now = await _resolve_review_thread(pull.repo.github.http, thread_id)
+        (resolved if resolved_now else failed).append(thread_id)
     return ResolveReviewThreadsResult(resolved=resolved, failed=failed)
 
 
 async def act_on_pull_request(
-    owner: str, repo: str, number: int, action: PullRequestAction, token: str
+    pull: PullRequestClient, action: PullRequestAction
 ) -> PullRequestActionResult:
+    owner, repo, number = pull.repo.owner, pull.repo.name, pull.number
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
-    async with github_client(token=token) as client:
-        try:
-            await action.perform(client, owner, repo, number)
-        except HTTPException as exc:
-            logger.warning(
-                "Pull request action failed",
-                extra={
-                    "pr_repo_full_name": f"{owner}/{repo}",
-                    "pr_number": number,
-                    "pr_action": action.action,
-                    "status_code": exc.status_code,
-                    "error_detail": exc.detail,
-                },
-                exc_info=exc.__cause__ is not None,
-            )
-            raise
+    try:
+        await action.perform(pull.repo.github.http, owner, repo, number)
+    except HTTPException as exc:
+        logger.warning(
+            "Pull request action failed",
+            extra={
+                "pr_repo_full_name": f"{owner}/{repo}",
+                "pr_number": number,
+                "pr_action": action.action,
+                "status_code": exc.status_code,
+                "error_detail": exc.detail,
+            },
+            exc_info=exc.__cause__ is not None,
+        )
+        raise
     return PullRequestActionResult(action=action.action, done=True)

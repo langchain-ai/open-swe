@@ -12,7 +12,9 @@ from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
@@ -20,26 +22,29 @@ from openswe.input_messages import dynamic_context_hash, input_message_text, mes
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
+from openswe.run_config import RunConfig
+from openswe.schedules import store as schedules
+from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     get_dashboard_thread,
     resolve_dashboard_thread,
-    send_dashboard_message,
 )
 from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
-from openswe.threads.runs import ThreadMessageBody, start_dashboard_thread
+from openswe.threads.runs import start_dashboard_thread
 from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_preference import sandbox_only
 from openswe.users import User
 from openswe.utils.dashboard_links import (
@@ -83,6 +88,11 @@ _MAX_RUNS = 25
 _MAX_INSPECTION_CONTENT_CHARS = 50_000
 _MAX_PLAN_COMMENTS = 100
 _MAX_PLAN_CHARS = 500_000
+_NO_ACTOR = "No verified triggering user is available"
+_NO_WRITER = (
+    f"{_NO_ACTOR}. Automation runs can read threads with list_threads and get_thread "
+    "but cannot message, manage, or start them."
+)
 
 
 @dataclass(frozen=True)
@@ -90,6 +100,8 @@ class _Actor:
     login: str
     email: str | None
     name: str
+    # An automation reading threads on its own run; it has no participant threads.
+    automation: bool = False
 
     @property
     def session(self) -> dict[str, Any]:
@@ -128,6 +140,21 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     except HTTPException:
         return None
     return _Actor(login=login, email=email, name=login)
+
+
+async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
+    """Who reads threads: the triggering user, or else the automation whose run this is."""
+    if actor := await _actor(state):
+        return actor
+    record = await schedules.authorized_schedule_run(RunConfig.parse(_config().get("configurable")))
+    if record is None:
+        return None
+    return _Actor(
+        login=f"system:schedule:{record['id']}",
+        email=None,
+        name=record.get("name") or "Automation",
+        automation=True,
+    )
 
 
 async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
@@ -218,6 +245,7 @@ def _exact_locator_filters(
     return filters
 
 
+@expose_mcp()
 @sandbox_only
 async def list_threads(
     participant: str | None = None,
@@ -235,9 +263,9 @@ async def list_threads(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `list_threads` tool."""
-    actor = await _actor(state)
+    actor = await _reader(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_ACTOR)
     requested = (
         participant.strip() if isinstance(participant, str) and participant.strip() else None
     )
@@ -299,7 +327,8 @@ async def list_threads(
             email=actor.email,
             limit=limit,
             offset=offset,
-            include_all=all_users or (admin_threads is True and requested is None),
+            include_all=all_users
+            or (requested is None and (admin_threads is True or actor.automation)),
             resolved=resolved,
             viewed=viewed,
             source=source,
@@ -618,6 +647,8 @@ def _looks_uuid(value: str) -> bool:
 
 
 async def _private_thread_context(actor: _Actor) -> bool:
+    if RunConfig.parse(_config().get("configurable")).mcp_caller:
+        return True
     thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         return False
@@ -640,12 +671,10 @@ async def _authorized_locator(
         if not thread_id:
             return _failure("Could not resolve LangSmith trace to an Open SWE thread")
     elif slack_locator:
-        client = langgraph_client()
-        thread_id = await lookup_slack_thread_id(client, *slack_locator) or ""
+        thread_id = await lookup_slack_thread_id(*slack_locator) or ""
         if not thread_id:
             thread_id = (
-                await lookup_slack_thread_id(client, slack_locator[0], CODE_CHANNEL_SESSION_TS)
-                or ""
+                await lookup_slack_thread_id(slack_locator[0], CODE_CHANNEL_SESSION_TS) or ""
             )
         if not thread_id:
             return _failure("Could not resolve Slack link to an Open SWE thread")
@@ -733,15 +762,16 @@ def _available_actions(
     return actions
 
 
+@expose_mcp()
 @sandbox_only
 async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `get_thread` tool."""
-    actor = await _actor(state)
+    actor = await _reader(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_ACTOR)
     locator = thread_id.strip()
     try:
         resolved = await _authorized_locator(locator, actor)
@@ -770,8 +800,8 @@ async def get_thread(
         plan_comments = plan_comments_task.result()
         approvals = approvals_task.result()
         queued_count = queued_count_task.result()
-        # `queued_count` only sees the legacy in-run injection queue (Slack
-        # context, the `send_dashboard_message` tool). A composer follow-up
+        # `queued_count` only sees the in-run injection queue (Slack context,
+        # steered follow-ups). A composer follow-up
         # enqueued via the server-backed queue adapter is a genuine
         # LangGraph run instead — count it too.
         queued_count += len(pending_runs_task.result())
@@ -819,7 +849,9 @@ async def get_thread(
         "links": links,
         "langsmith": _langsmith_identifiers(summary.get("traceUrl"), locator),
         "slack": slack_locator and _slack_identifiers(locator),
-        "available_actions": _available_actions(
+        "available_actions": []
+        if actor.automation
+        else _available_actions(
             admin=actor.admin,
             admin_thread=summary.get("adminThread") is True,
             running=running,
@@ -856,20 +888,9 @@ async def _send_message(
     model_id: str | None,
     effort: str | None,
 ) -> dict[str, Any]:
-    body = ThreadMessageBody(
-        content=message,
-        model_id=model_id,
-        effort=effort,
-    )
-    try:
-        queued_summary = await send_dashboard_message(
-            thread_id, actor.login, body, email=actor.email
-        )
-        return {"success": True, "mode": "queued", "thread": _list_item(queued_summary)}
-    except HTTPException as exc:
-        if exc.status_code != 409:
-            raise
-
+    # The dashboard's own send: a busy thread gets the message steered into its
+    # open turn or queued as a follow-up run, both shown on the transcript at once.
+    # Marked as relayed so it never moves the recipient's conversation to Web.
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
@@ -881,28 +902,40 @@ async def _send_message(
             "config": {"configurable": configurable},
         },
     }
+    caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
         email=actor.email,
+        relayed_from=caller_thread_id if isinstance(caller_thread_id, str) else None,
     )
     try:
-        payload = json.loads(content) if content else None
-    except json.JSONDecodeError:
-        payload = None
+        reply = _CommandReply.model_validate_json(content or b"{}")
+    except ValidationError:
+        reply = _CommandReply()
     if status_code not in {200, 202, 204}:
-        detail = payload.get("detail") if isinstance(payload, Mapping) else None
-        return _failure(
-            detail if isinstance(detail, str) else "Could not start thread run",
-            status_code=status_code,
-        )
-    run_id = payload.get("run_id") if isinstance(payload, Mapping) else None
-    return {
-        "success": True,
-        "mode": "started",
-        "run_id": run_id if isinstance(run_id, str) else None,
-    }
+        return _failure(reply.detail or "Could not start thread run", status_code=status_code)
+    result = reply.result
+    mode = "steered" if result.steered else "queued" if result.queued else "started"
+    return {"success": True, "mode": mode, "run_id": result.run_id}
+
+
+class _CommandResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: str | None = None
+    queued: bool = False
+    steered: bool = False
+
+
+class _CommandReply(BaseModel):
+    """The commands proxy's reply to ``run.start``: a start, a steer, or a queued follow-up."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    result: _CommandResult = Field(default_factory=_CommandResult)
+    detail: str | None = None
 
 
 def _required(value: str | None, name: str, action: str) -> dict[str, Any] | None:
@@ -953,6 +986,8 @@ def _unexpected_action_arguments(
     return sorted(provided - allowed)
 
 
+@expose_mcp()
+@audit_tool()
 async def manage_thread(
     thread_id: str,
     action: ThreadAction,
@@ -969,7 +1004,7 @@ async def manage_thread(
     """Implement the `manage_thread` tool."""
     actor = await _actor(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_WRITER)
     thread_id = thread_id.strip()
     if not thread_id:
         return _failure("thread_id is required")
@@ -1089,6 +1124,8 @@ async def manage_thread(
         return _failure("Thread action failed")
 
 
+@expose_mcp()
+@audit_tool()
 async def start_thread(
     title: str,
     instructions: str,
@@ -1099,7 +1136,7 @@ async def start_thread(
     """Implement the `start_thread` tool."""
     actor = await _actor(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_WRITER)
     title = title.strip()
     instructions = instructions.strip()
     if not title:

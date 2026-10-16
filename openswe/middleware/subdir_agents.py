@@ -1,5 +1,6 @@
 """Auto-load applicable ``AGENTS.md`` files after file reads."""
 
+import asyncio
 import logging
 import posixpath
 from collections import defaultdict
@@ -14,7 +15,7 @@ from langgraph.types import Command
 
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
-from openswe.sandboxes.state import SANDBOX_BACKENDS
+from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,14 @@ def _extract_text(result: Any) -> str | None:
     return encoded[:_MAX_AGENTS_BYTES].decode("utf-8", errors="ignore") + "\n\n[truncated]"
 
 
+async def _read_agents_file(backend: SandboxBackendProxy, path: str) -> str | None:
+    try:
+        return _extract_text(await backend.aread(path, offset=0, limit=_MAX_AGENTS_LINES))
+    except Exception:
+        logger.debug("subdir_agents: aread failed for %s", path, exc_info=True)
+        return None
+
+
 def _system_reminder(file_path: str, loaded: Iterable[tuple[str, str]]) -> str:
     sections = [f"Instructions from: {path}\n{content.rstrip()}" for path, content in loaded]
     body = "\n\n".join(sections)
@@ -145,7 +154,7 @@ class SubdirAgentsReadMiddleware(OpenSWEMiddleware):
     def _thread_key(self, request: ToolCallRequest) -> str:
         return _thread_id(request) or "__unknown_thread__"
 
-    def _backend(self, request: ToolCallRequest) -> Any | None:
+    def _backend(self, request: ToolCallRequest) -> SandboxBackendProxy | None:
         thread_id = _thread_id(request)
         if not thread_id:
             return None
@@ -164,19 +173,10 @@ class SubdirAgentsReadMiddleware(OpenSWEMiddleware):
         if backend is None:
             return None
         loaded_paths = self._loaded[self._thread_key(request)]
-        loaded: list[tuple[str, str]] = []
-        for path in _candidate_agents_paths(file_path):
-            if path in loaded_paths:
-                continue
-            loaded_paths.add(path)
-            try:
-                text = _extract_text(await backend.aread(path, offset=0, limit=_MAX_AGENTS_LINES))
-            except Exception:
-                logger.debug("subdir_agents: aread failed for %s", path, exc_info=True)
-                continue
-            if text is None:
-                continue
-            loaded.append((path, text))
+        paths = [path for path in _candidate_agents_paths(file_path) if path not in loaded_paths]
+        loaded_paths.update(paths)
+        texts = await asyncio.gather(*(_read_agents_file(backend, path) for path in paths))
+        loaded = [(path, text) for path, text in zip(paths, texts, strict=True) if text is not None]
         return _system_reminder(file_path, loaded) if loaded else None
 
     async def awrap_tool_call(

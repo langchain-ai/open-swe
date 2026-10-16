@@ -98,7 +98,9 @@ test.describe("my pull requests", () => {
     await expect(card(page, theirs)).toHaveCount(0);
     await search.blur();
     await page.keyboard.press("Control+k");
-    await page.getByRole("combobox").fill("aardvark");
+    await page
+      .getByPlaceholder("Search commands, threads, and pull requests…")
+      .fill("aardvark");
     const result = page.getByRole("option", {
       name: /Improve deployment reliability/,
     });
@@ -208,7 +210,7 @@ test.describe("my pull requests", () => {
     expect(closed.ok()).toBeTruthy();
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
-      page.getByText("No pending GitHub review requests."),
+      page.getByText("No pending GitHub review requests"),
     ).toBeVisible();
   });
 
@@ -373,13 +375,16 @@ test.describe("my pull requests", () => {
     );
     await expect(method).toBeHidden();
     await card(page, mine)
-      .getByRole("button", { name: "Merge", exact: true })
+      .getByRole("button", { name: "Rebase and merge", exact: true })
       .click();
 
     await expect(page.getByText(`Merged ${DEMO}#${mine.number}`)).toBeVisible();
     await expect(card(page, mine)).toContainText("Merged ·");
     await expect(
-      card(page, mine).getByRole("button", { name: "Merge", exact: true }),
+      card(page, mine).getByRole("button", {
+        name: "Rebase and merge",
+        exact: true,
+      }),
     ).toHaveCount(0);
 
     const merged = await readPullRequest(page, "fakeorg", "demo", mine.number);
@@ -391,7 +396,7 @@ test.describe("my pull requests", () => {
     ).toBe(false);
   });
 
-  test("withholds the merge until a method is chosen on the card", async ({
+  test("defaults to squash while allowing a different method on the card", async ({
     page,
   }) => {
     await setRepoMergeMethods(page, DEMO, ["squash", "rebase"]);
@@ -407,19 +412,24 @@ test.describe("my pull requests", () => {
     const method = card(page, mine).getByLabel(
       `Merge method for PR #${mine.number}`,
     );
-    const merge = card(page, mine).getByRole("button", {
-      name: "Merge",
-      exact: true,
-    });
-    // The select only settles once the allowed methods land, and the button is
-    // disabled until then for that reason rather than for want of a choice.
-    await expect(method).toBeEnabled();
-    await expect(merge).toBeDisabled();
     await expect(
-      method.getByRole("option", { name: "Merge commit", exact: true }),
+      card(page, mine).getByRole("button", {
+        name: "Squash and merge",
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await expect(method).toBeEnabled();
+    await method.click();
+    await expect(
+      page.getByRole("menuitemradio", { name: /^Merge commit/ }),
     ).toHaveCount(0);
 
-    await method.selectOption("squash");
+    await page.getByRole("menuitemradio", { name: /^Squash merge/ }).click();
+    await page.keyboard.press("Escape");
+    const merge = card(page, mine).getByRole("button", {
+      name: "Squash and merge",
+      exact: true,
+    });
     await expect(merge).toBeEnabled();
     await merge.click();
 

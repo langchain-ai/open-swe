@@ -195,16 +195,27 @@ async def slack_post_message(
             return {"success": False, "error": "invalid_slack_response"}
         seen_cursors.add(cursor)
 
-    blocks = markdown_blocks(message) or []
     cfg = RunConfig.from_runtime()
-    if cfg.thread_id:
-        location = await run_slack_location(cfg, cfg.thread_id)
-        if location[0] and location[1] and location[0] != channel_id:
-            blocks.extend(await origin_footer(cfg.thread_id, location))
+    if not cfg.thread_id:
+        return {"success": False, "error": "origin_thread_required"}
+    location = await run_slack_location(cfg, cfg.thread_id)
+    footer = await origin_footer(cfg.thread_id, location)
+    if not footer:
+        return {"success": False, "error": "origin_link_unavailable"}
+    footer_text = " · ".join(
+        element["text"]
+        for block in footer
+        if block["type"] == "context"
+        for element in block["elements"]
+    )
+    blocks = [*(markdown_blocks(message) or []), *footer]
+    fallback_text = f"{markdown_to_mrkdwn(message)}\n\n{footer_text}"
+    if len(fallback_text) > 40_000:
+        return {"success": False, "error": "msg_too_long"}
     try:
         message_ts = await post_slack_top_level_message_with_ts(
             channel_id,
-            markdown_to_mrkdwn(message),
+            fallback_text,
             unfurl_links=False,
             unfurl_media=False,
             blocks=block_payload(blocks) if blocks else None,

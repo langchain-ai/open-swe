@@ -5,6 +5,7 @@ import pytest
 
 from openswe.slack import breakout
 from openswe.slack.channels import SlackChannel
+from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.request import SlackRequest
 from openswe.users import User
 from openswe.workspaces import routing
@@ -66,18 +67,24 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     ("text", "expected"),
     [
         ("<@U0BOT> /breakout fix it", Command("fix it")),
-        ("/breakout fix it", Command("fix it")),
         (
             "details <@U0BOT> /breakout <#C2|target> fix it",
             Command("fix it", "<#C2|target>", "C2", "details"),
         ),
         ("details <@U0BOT> /breakout", Command("", prior_text="details")),
-        ("details <@U0BOT> please /breakout fix it", None),
-        ("details /breakout fix it <@U0BOT>", None),
+        (
+            "<@U0BOT> /WORKSPACE:Infra /breakout fix it",
+            Command("fix it", options="/workspace:infra", workspace="infra"),
+        ),
+        ("<@U0BOT> /breakout:web <#C2> why", Command("<#C2> why")),
+        (
+            "<@U0BOT> /breakout fix workspace:infra bug",
+            Command("fix workspace:infra bug", workspace="infra"),
+        ),
     ],
 )
-def test_breakout_command_requires_position_after_mention(text, expected):
-    assert Command.parse(text, "U0BOT") == expected
+def test_breakout_command_from_message(text, expected):
+    assert Command.from_message(ParsedSlackMessage.parse(text, "U0BOT")) == expected
 
 
 @pytest.mark.asyncio
@@ -110,10 +117,10 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
 
     request = _request()
-    instruction = "workspace:other fix it"
+    command = Command("fix it", channel_id=explicit, options="/workspace:other", workspace="other")
     if email_only:
         request = request.model_copy(update={"thread_id": None})
-        instruction = "fix it"
+        command = Command("fix it", channel_id=explicit)
         monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
         monkeypatch.setattr(
             breakout.common,
@@ -143,19 +150,19 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
             ),
         )
     monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
-    await breakout.process_slack_breakout(request, Command(instruction, channel_id=explicit), None)
+    await breakout.process_slack_breakout(request, command, None)
 
     assert mention.await_args is not None
     assert mention.await_args.kwargs["inherited_workspace"] == (None if explicit else "engineering")
     assert root.await_args is not None
     assert root.await_args.args[0] == expected
     assert root.await_args.args[1] == (
-        f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE>"
+        "`/breakout`: fix it · <https://slack/p105|(source)> · <@U_ALICE>"
     )
     update.assert_awaited_once_with(
         expected,
         "200.0",
-        f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE> "
+        "`/breakout`: fix it · <https://slack/p105|(source)> · <@U_ALICE> "
         "<https://dashboard.example/agents/new-thread|Open in Web>",
         blocks=ANY,
         unfurl_links=False,
@@ -167,7 +174,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
         "200.0",
         "new-thread",
-        instruction,
+        command.thread_text,
         "100.0",
     )
     assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
@@ -186,7 +193,7 @@ async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(
     mention = AsyncMock()
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
     text = "Context for this task.\nMore details <@U0BOT> /breakout fix it"
-    command = Command.parse(text, "U0BOT")
+    command = Command.from_message(ParsedSlackMessage.parse(text, "U0BOT"))
 
     assert command == Command("fix it", prior_text="Context for this task.\nMore details")
     await breakout.process_slack_breakout(

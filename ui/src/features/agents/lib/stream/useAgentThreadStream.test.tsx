@@ -46,7 +46,6 @@ vi.mock("@langchain/react", () => ({
 
 vi.mock("@/lib/langgraph-client", () => ({
   createDashboardClient: () => ({}),
-  createLocalGraphClient: () => ({}),
   dashboardFetch: fetch,
 }))
 
@@ -56,10 +55,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 function render() {
-  return renderHook(
-    () => useAgentThreadStream({ transport: "cloud", threadId: "one" }),
-    { wrapper }
-  )
+  return renderHook(() => useAgentThreadStream("one"), { wrapper })
 }
 
 function lastStream(): StreamOptions {

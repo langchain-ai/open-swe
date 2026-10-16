@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef } from "react"
-import { ArrowClockwiseIcon } from "@phosphor-icons/react"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Button } from "@langchain/macaw-components/Button"
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react"
 import type { FileTreeBatchOperation } from "@pierre/trees"
 
@@ -10,7 +12,6 @@ import {
   treeThemeStyle,
 } from "@/features/agents/components/DiffFilesView"
 import { useDirectoryEntries } from "@/features/agents/lib/workspaceFiles"
-import { cn } from "@/lib/utils"
 
 interface FileBrowserPanelProps {
   target: TerminalTarget
@@ -187,22 +188,20 @@ export function FileBrowserPanel({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
-        <button
-          type="button"
-          aria-label="Refresh files"
-          title="Refresh files"
+    <div className="flex min-h-0 flex-1 flex-col bg-surface-level-1">
+      <div className="flex h-9 shrink-0 items-center gap-space-1 border-b border-default px-space-2">
+        <IconButton
+          icon={ArrowClockwiseIcon}
+          label="Refresh files"
+          size="sm"
+          color="secondary"
+          variant="plain"
+          loading={isPending}
           onClick={() => {
             refresh()
             onRefreshSelectedFile?.()
           }}
-          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground"
-        >
-          <ArrowClockwiseIcon
-            className={cn("size-3.5", isPending && "animate-spin")}
-          />
-        </button>
+        />
         <input
           type="search"
           value={search.value}
@@ -215,17 +214,21 @@ export function FileBrowserPanel({
             search.close()
             event.currentTarget.blur()
           }}
-          className="h-7 min-w-0 flex-1 bg-transparent px-1 text-xs outline-none placeholder:text-muted-foreground/70"
+          className="h-7 min-w-0 flex-1 bg-transparent px-space-1 text-xs text-primary outline-none placeholder:text-placeholder"
         />
       </div>
       {error ? (
-        <button
-          type="button"
-          onClick={refresh}
-          className="p-4 text-left text-xs leading-relaxed text-destructive"
-        >
-          {error} Click to retry.
-        </button>
+        <div className="flex flex-col items-start gap-space-2 p-space-4 text-xs text-error-secondary">
+          {error}
+          <Button
+            size="xs"
+            variant="outlined"
+            color="secondary"
+            onClick={refresh}
+          >
+            Retry
+          </Button>
+        </div>
       ) : null}
       <FileTree
         model={model}
@@ -235,7 +238,7 @@ export function FileBrowserPanel({
           {
             height: "100%",
             ...treeThemeStyle(),
-            "--trees-theme-sidebar-bg": "var(--background)",
+            "--trees-theme-sidebar-bg": "var(--bg-surface-level-1)",
           } as React.CSSProperties
         }
       />

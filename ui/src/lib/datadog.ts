@@ -76,15 +76,13 @@ export function subscribeToDatadogInitialization(
 function templateDashboardPath(pathname: string): string {
   if (/^\/agents\/reviews\/[^/]+\/[^/]+\/[^/]+\/?$/.test(pathname))
     return "/agents/reviews/:owner/:repo/:number"
-  if (/^\/agents\/local\/[^/]+\/?$/.test(pathname))
-    return "/agents/local/:sessionId"
   if (/^\/agents\/automations\/(?!new\/?$)[^/]+\/?$/.test(pathname))
     return "/agents/automations/:scheduleId"
   if (/^\/agents\/[^/]+\/plan\/?$/.test(pathname))
     return "/agents/:threadId/plan"
   if (
     /^\/agents\/[^/]+\/?$/.test(pathname) &&
-    !/^\/agents\/(automations|instructions|local|reviews|sandbox|skills|threads|workspaces)\/?$/.test(
+    !/^\/agents\/(automations|instructions|reviews|sandbox|skills|threads|workspaces)\/?$/.test(
       pathname
     )
   )

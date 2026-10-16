@@ -8,9 +8,15 @@ import httpx
 import langgraph_sdk
 import pytest
 from fastapi import HTTPException
-from mcp.types import Tool
+from mcp.types import ListToolsResult, Tool
 
+from openswe.dashboard.workspace_settings import (
+    WorkspaceSettingsUpdate,
+    upsert_instance_settings,
+    upsert_workspace_overrides,
+)
 from openswe.mcp import cards, managed, routes, runtime
+from openswe.users.models import User
 
 GATEWAY_ID = "01a0f8da-0f4b-7817-b2da-27b7bfa5f0f8"
 
@@ -56,20 +62,154 @@ def test_gateway_challenge_lists_every_service_to_connect():
     }
 
 
+async def test_gateway_status_reads_missing_services_under_either_policy(monkeypatch):
+    linear = {
+        "kind": "oauth",
+        "slug": "linear",
+        "display_name": "Linear",
+        "verification_url": "https://smith.langchain.com/connect/linear",
+        "auth_id": "linear-auth",
+    }
+    listing: list[object] = [
+        ListToolsResult.model_validate(
+            {
+                "tools": [{"name": "notion_search", "inputSchema": {"type": "object"}}],
+                "_meta": {"com.langchain.langsmith/missingCredentials": [linear]},
+            }
+        )
+    ]
+
+    async def with_session(login, gateway, use):
+        if isinstance(listing[0], Exception):
+            raise listing[0]
+        return listing[0]
+
+    monkeypatch.setattr(managed, "_with_session", with_session)
+    monkeypatch.setattr(
+        managed,
+        "_gateway_detail",
+        AsyncMock(return_value={"id": GATEWAY_ID, "name": "Eng", "tool_count": 2}),
+    )
+
+    partial = await managed.gateway_status("alice", GATEWAY_ID)
+    assert (partial.ready, partial.all_required, partial.tool_count) == (False, False, 1)
+    assert [item.slug for item in partial.missing_for(["linear"])] == ["linear"]
+    assert partial.missing_for(["Notion"]) == []
+    assert (await managed.connect_link("alice", GATEWAY_ID, "linear")).auth_id == "linear-auth"
+    assert await managed.connect_link("alice", GATEWAY_ID, "notion") is None
+
+    listing[0] = managed._credentials_required(
+        {"credentials": [linear, {"kind": "oauth", "slug": "notion", "display_name": "Notion"}]}
+    )
+    required = await managed.gateway_status("alice", GATEWAY_ID)
+    assert required.all_required
+    assert [item.slug for item in required.missing_for(["Linear"])] == ["linear", "notion"]
+
+
+async def test_gateway_status_names_the_services_already_connected(monkeypatch):
+    notion_id = "01a0f8da-0000-7000-8000-000000000001"
+    linear_id = "01a0f8da-0000-7000-8000-000000000002"
+    detail = {
+        "id": GATEWAY_ID,
+        "name": "Eng",
+        "tool_count": 4,
+        "tools": [
+            {"server_id": notion_id, "tool_name": "search", "mcp_name": "notion_search"},
+            {"server_id": notion_id, "tool_name": "fetch", "mcp_name": "notion_fetch"},
+            {"server_id": linear_id, "tool_name": "get_issue", "mcp_name": "linear_get_issue"},
+            {
+                "builtin_server_key": "langchain-docs",
+                "tool_name": "search",
+                "mcp_name": "langsmith_langchain_docs_search",
+            },
+        ],
+    }
+    linear = {"kind": "oauth", "slug": "linear", "display_name": "Linear"}
+    listing: list[object] = [
+        ListToolsResult.model_validate(
+            {
+                "tools": [
+                    {"name": name, "inputSchema": {"type": "object"}}
+                    for name in ("notion_search", "notion_fetch", "langsmith_langchain_docs_search")
+                ],
+                "_meta": {"com.langchain.langsmith/missingCredentials": [linear]},
+            }
+        )
+    ]
+
+    async def with_session(login, gateway, use):
+        if isinstance(listing[0], Exception):
+            raise listing[0]
+        return listing[0]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == managed.SERVERS_PATH
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {"id": notion_id, "key": "notion", "name": "Notion MCP"},
+                    {"id": linear_id, "key": "linear", "name": "Linear"},
+                ]
+            },
+        )
+
+    monkeypatch.setattr(managed, "_with_session", with_session)
+    monkeypatch.setattr(managed, "_gateway_detail", AsyncMock(return_value=detail))
+    monkeypatch.setattr(
+        managed, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    )
+
+    assert (await managed.gateway_status("alice", GATEWAY_ID)).connected == []
+
+    partial = await managed.gateway_status("alice", GATEWAY_ID, with_connected=True)
+    assert [(item.name, item.tool_count) for item in partial.connected] == [
+        ("Notion MCP", 2),
+        ("Langchain docs", 1),
+    ]
+
+    listing[0] = managed._credentials_required({"credentials": [linear]})
+    required = await managed.gateway_status("alice", GATEWAY_ID, with_connected=True)
+    assert [(item.name, item.tool_count) for item in required.connected] == [
+        ("Notion MCP", 2),
+        ("Langchain docs", 1),
+    ]
+
+    # LMT names a missing server by its credential slug, not the server's own name.
+    notion = {"kind": "oauth", "slug": f"mt-{notion_id}", "display_name": "Notion"}
+    listing[0] = managed._credentials_required({"credentials": [notion]})
+    required = await managed.gateway_status("alice", GATEWAY_ID, with_connected=True)
+    assert [(item.name, item.tool_count) for item in required.connected] == [
+        ("Linear", 1),
+        ("Langchain docs", 1),
+    ]
+
+
+async def test_only_the_instance_picks_the_gateway(registry_db):
+    await upsert_workspace_overrides(
+        "oss", WorkspaceSettingsUpdate(managed_tools_gateway_id=GATEWAY_ID)
+    )
+    assert await managed.instance_gateway() is None
+
+    # Saving drops the cached read, so the change applies at once.
+    await upsert_instance_settings(WorkspaceSettingsUpdate(managed_tools_gateway_id=GATEWAY_ID))
+    assert await managed.instance_gateway() == GATEWAY_ID
+
+
 async def test_gateways_are_read_with_the_users_own_token(monkeypatch):
     requests: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         return httpx.Response(
-            200, json={"items": [{"id": GATEWAY_ID, "name": "Open SWE", "tools": [{}, {}]}]}
+            200, json={"items": [{"id": GATEWAY_ID, "name": "Open SWE", "tool_count": 200}]}
         )
 
     monkeypatch.setattr(
         managed, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle))
     )
     assert await managed.list_gateways("Alice") == [
-        managed.Gateway(id=GATEWAY_ID, name="Open SWE", tool_count=2)
+        managed.Gateway(id=GATEWAY_ID, name="Open SWE", tool_count=200)
     ]
     assert requests[-1].headers["Authorization"] == "Bearer alice-langsmith-token"
     assert "X-LangSmith-Identity" not in requests[-1].headers
@@ -96,10 +236,10 @@ def private_thread(monkeypatch, owner: str) -> dict[str, str]:
 
 async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
     async def discover(record, namespace):
-        assert record.url.endswith(f"/v1/managed-tools/gateways/{GATEWAY_ID}/mcp")
+        assert record.url.endswith(f"/v1/managed-tools/kits/{GATEWAY_ID}/mcp")
         assert record.connection_headers()["Authorization"] == "Bearer alice-langsmith-token"
         return [
-            Tool(name=name, inputSchema={"type": "object"})
+            Tool(name=name, input_schema={"type": "object"})
             for name in ("notion_notion-search", "linear_list_issues")
         ]
 
@@ -125,7 +265,7 @@ async def test_langsmith_outage_drops_only_the_gateway(monkeypatch):
     monkeypatch.setattr(managed, "langsmith_access_token", unavailable)
 
     async def discover(record, namespace):
-        return [Tool(name="search", inputSchema={"type": "object"})]
+        return [Tool(name="search", input_schema={"type": "object"})]
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
     workspace_record = MCPConnection(
@@ -148,36 +288,40 @@ async def test_langsmith_outage_drops_only_the_gateway(monkeypatch):
 
 
 @pytest.fixture
-def card_store(monkeypatch) -> dict[tuple[tuple[str, ...], str], dict[str, object]]:
-    items: dict[tuple[tuple[str, ...], str], dict[str, object]] = {}
-
-    async def get_item(namespace, key):
-        value = items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(namespace, key, value):
-        items[(tuple(namespace), key)] = value
-
-    store = SimpleNamespace(get_item=get_item, put_item=put_item)
+async def card_store(monkeypatch, registry_db) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    await User.sign_in("github", "1", login="alice")
+    await User.sign_in("github", "2", login="bob")
     thread = {"metadata": {"source": "slack", "github_login": "carol", "workspace": "eng"}}
     monkeypatch.setattr(
         cards,
         "langgraph_client",
-        lambda: SimpleNamespace(
-            store=store, threads=SimpleNamespace(get=AsyncMock(return_value=thread))
-        ),
+        lambda: SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=thread))),
     )
-    return items
 
 
-async def test_card_resumes_the_thread_once_every_service_is_connected(monkeypatch, card_store):
-    card = cards.ConnectCard(thread_id="t", card_id="call-1", login="alice", gateway=GATEWAY_ID)
+async def test_card_resumes_once_its_own_services_are_connected(monkeypatch, card_store):
+    card = cards.ConnectCard(
+        thread_id="t",
+        card_id="call-1",
+        login="alice",
+        gateway=GATEWAY_ID,
+        services=["linear", "pylon"],
+    )
     monkeypatch.setattr(cards, "consent_outcome", AsyncMock(return_value="completed"))
-    connected: set[str] = set()
+    # Re-listing is best effort; a gateway refusing it must not keep the thread waiting.
+    refresh = AsyncMock(side_effect=ValueError("MCP tool discovery failed (HTTP 428)"))
+    monkeypatch.setattr(cards, "refresh_tools", refresh)
+    unconnected = {"notion", "linear", "pylon"}
 
-    async def status(login, gateway, workspaces):
-        return SimpleNamespace(
-            ready=connected == {"notion", "linear"}, gateway=SimpleNamespace(name="Eng")
+    async def status(login, gateway):
+        return managed.GatewayStatus(
+            gateway=managed.Gateway(id=GATEWAY_ID, name="Eng", tool_count=3),
+            ready=not unconnected,
+            missing=[
+                managed.MissingCredential(slug=slug, display_name=slug, kind="oauth")
+                for slug in sorted(unconnected)
+            ],
         )
 
     monkeypatch.setattr(cards, "gateway_status", status)
@@ -193,12 +337,14 @@ async def test_card_resumes_the_thread_once_every_service_is_connected(monkeypat
     dispatch = AsyncMock()
     monkeypatch.setattr(cards, "dispatch_agent_run", dispatch)
 
-    connected.add("notion")
-    await card._resume_after("notion-auth")
+    unconnected.discard("linear")
+    await card._resume_after("linear-auth")
     dispatch.assert_not_awaited()
-    connected.add("linear")
-    await asyncio.gather(card._resume_after("linear-auth"), card._resume_after("linear-again"))
+    # Notion was not on this card, so it does not hold the thread back.
+    unconnected.discard("pylon")
+    await asyncio.gather(card._resume_after("pylon-auth"), card._resume_after("pylon-again"))
     assert dispatch.await_count == 1
+    refresh.assert_awaited_with("alice", GATEWAY_ID)
     configurable = dispatch.await_args.args[2]
     assert configurable["github_login"] == "alice"
     assert configurable["workspace"] == "eng"
@@ -235,38 +381,38 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
         lambda: {"configurable": {"source": "slack", "thread_id": "t", "github_login": "alice"}},
     )
     monkeypatch.setattr(tool, "private_credential_login", AsyncMock(return_value="alice"))
-    monkeypatch.setattr(
-        tool,
-        "cached_workspace_settings",
-        AsyncMock(return_value=SimpleNamespace(managed_tools_gateway_id=GATEWAY_ID)),
-    )
-    missing = managed.MissingCredential(slug="linear", display_name="Linear", kind="oauth")
+    monkeypatch.setattr(tool, "instance_gateway", AsyncMock(return_value=GATEWAY_ID))
+    missing = [
+        managed.MissingCredential(slug="mt-1", display_name="Linear", kind="oauth"),
+        managed.MissingCredential(slug="mt-2", display_name="Notion", kind="oauth"),
+    ]
     monkeypatch.setattr(
         tool,
         "gateway_status",
         AsyncMock(
             return_value=managed.GatewayStatus(
                 gateway=managed.Gateway(id=GATEWAY_ID, name="Eng", tool_count=3),
-                workspaces=[],
                 ready=False,
-                missing=[missing],
+                missing=missing,
             )
         ),
     )
     post = AsyncMock(return_value={"success": True})
-    monkeypatch.setattr(tool, "slack_reply", post)
+    monkeypatch.setattr(tool, "send_slack_reply", post)
 
-    result = await tool.connect_managed_tools({"reply_surface": "slack"}, "call-1")
+    result = await tool.connect_managed_tools(["linear"], {"reply_surface": "slack"}, "call-1")
 
     assert result["status"] == "connection_required"
-    button = post.await_args.kwargs["blocks"][1]["elements"][0]
+    assert isinstance(offered := result["missing"], list)
+    assert [item["display_name"] for item in offered] == ["Linear"]
+    [button] = post.await_args.kwargs["blocks"][1]["elements"]
     parsed = urlparse(button["url"])
     assert (parsed.netloc, parsed.path) == (
         "api.example",
-        f"/dashboard/api/my-managed-tools/{GATEWAY_ID}/connect/linear",
+        f"/dashboard/api/my-managed-tools/{GATEWAY_ID}/connect/mt-1",
     )
     assert parse_qs(parsed.query) == {"thread_id": ["t"], "card": ["call-1"]}
-    assert await cards.ConnectCard.load("t", "call-1") is not None
+    assert (await cards.ConnectCard.load("t", "call-1", "alice", GATEWAY_ID)).services == ["mt-1"]
     assert result["continues_automatically"] is True
 
     # The Slack call ends the turn, so "already connected" must still reach the person.
@@ -274,7 +420,7 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
         update={"ready": True, "missing": []}
     )
     post.reset_mock()
-    assert (await tool.connect_managed_tools({"reply_surface": "slack"}, "call-2"))[
+    assert (await tool.connect_managed_tools(None, {"reply_surface": "slack"}, "call-2"))[
         "status"
     ] == "connected"
     assert post.await_args.args[1] == "final"

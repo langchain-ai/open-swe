@@ -4,6 +4,7 @@ import asyncio
 import itertools
 from collections.abc import Sequence
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid7
 
 import pytest
@@ -27,6 +28,7 @@ from openswe.transcript.events import (
 )
 from openswe.transcript.rebuild import rebuild_thread_projections
 from openswe.transcript.snapshot import load_events, load_snapshot
+from openswe.transcript.turns import RunTurn
 
 THREAD_ID = "thread-under-test"
 RUN_ID = "run-under-test"
@@ -77,6 +79,7 @@ def _install(
 
     monkeypatch.setattr(mw, "_has_transcript", _has_transcript)
     monkeypatch.setattr(mw, "_reusable_turn_id", _reusable_turn_id)
+    monkeypatch.setattr(mw, "superseded_turns", AsyncMock(return_value=[]))
     configurable: dict[str, Any] = {"thread_id": THREAD_ID, "run_id": RUN_ID}
     if turn_id is not None:
         configurable["transcript_turn_id"] = str(turn_id)
@@ -197,6 +200,50 @@ async def test_only_mid_run_human_messages_are_recorded_once(
     ]
     assert [command.command_id for command in human_events] == ["human:human-queued"]
     assert human_events[0].event.role == "human"
+
+
+async def test_a_run_continued_in_another_process_keeps_its_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An MDA run's hooks can reach any replica; the turn and what it recorded carry over."""
+    engine = _install(monkeypatch, transcribed=True)
+    asked = HumanMessage(content="do the thing", id="human-1")
+    await mw.TranscriptMiddleware().abefore_agent({"messages": [asked]}, None)
+    await mw.TranscriptMiddleware().aflush_run(None)
+    [started] = [c for c in engine.commands if c.event.type == "turn.started"]
+    turn_id = started.turn_id
+    assert turn_id is not None
+
+    # Another process: nothing in memory, only what PostgreSQL recorded.
+    mw._runs.clear()
+
+    async def run_turn(thread_id: str, run_id: str) -> RunTurn:
+        assert (thread_id, run_id) == (THREAD_ID, RUN_ID)
+        return RunTurn(turn_id, open=True)
+
+    async def recorded_message_ids(thread_id: str, message_ids: Sequence[str]) -> set[str]:
+        return {"human-1"} & set(message_ids)
+
+    monkeypatch.setattr(mw, "run_turn", run_turn)
+    monkeypatch.setattr(mw, "recorded_message_ids", recorded_message_ids)
+    replied = AIMessage(content="on it", id="ai-1")
+    queued = HumanMessage(content="also this", id="human-2")
+    history = [asked, replied, queued]
+    middleware = mw.TranscriptMiddleware()
+    await middleware.aresume_run({"messages": history}, None)
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="done", id="ai-2")])
+
+    await middleware.awrap_model_call(_model_request(history), model_handler)
+    await middleware.aafter_agent({"messages": history}, None)
+
+    assert engine.types.count("turn.started") == 1
+    assert [c.command_id for c in engine.commands if c.command_id.startswith("human:")] == [
+        "human:human-2"
+    ]
+    assert {c.turn_id for c in engine.commands if c.turn_id is not None} == {turn_id}
+    assert engine.command_ids[-1] == f"turn:{turn_id}:completed"
 
 
 @pytest.mark.parametrize("supplied_turn", [False, True])
@@ -354,6 +401,48 @@ async def test_a_run_inheriting_a_closed_turn_id_opens_and_closes_its_own_turn(
     assert snapshot is not None and snapshot.thread.status == "idle"
 
 
+@pytest.mark.parametrize("reuses_turn", [False, True])
+async def test_a_follow_up_closes_the_turn_its_interrupted_predecessor_left_running(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, reuses_turn: bool
+) -> None:
+    """A run replaced by an interrupting follow-up never reports its turn's end."""
+    thread_id, first_turn = str(uuid7()), uuid7()
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id="created",
+                event=ThreadCreated(title="Task", source="slack", owner_login="owner"),
+                actor_kind="system",
+            )
+        ],
+    )
+    configurable: dict[str, object] = {
+        "thread_id": thread_id,
+        "run_id": "run-a",
+        "transcript_turn_id": str(first_turn),
+    }
+    monkeypatch.setattr(mw, "get_config", lambda: {"configurable": configurable})
+    middleware = mw.TranscriptMiddleware()
+    first: dict[str, Any] = {"messages": [HumanMessage(content="first", id="first")]}
+    await middleware.abefore_agent(first, None)
+    await mw._finish(mw._runs.pop(mw._run_key(thread_id, "run-a")))
+
+    configurable.update(run_id="run-b")
+    if not reuses_turn:
+        configurable.pop("transcript_turn_id")
+    second: dict[str, Any] = {
+        "messages": [*first["messages"], HumanMessage(content="second", id="second")]
+    }
+    await middleware.abefore_agent(second, None)
+    await middleware.aafter_agent(second, None)
+
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None and snapshot.thread.status == "idle"
+    states = {turn.turn_id: turn.state for turn in snapshot.turns}
+    assert states[first_turn] == ("completed" if reuses_turn else "interrupted")
+
+
 async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -502,3 +591,91 @@ async def test_a_cancelled_subagent_tool_leaves_the_parent_running(
 
     assert "turn.interrupted" not in engine.types
     assert engine.types[-1] == "turn.completed"
+
+
+async def test_an_mda_subagent_is_recorded_under_its_task_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
+    from langchain.agents import create_agent
+    from langchain_core.messages import messages_to_dict
+    from langchain_core.tools import tool
+
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.remote_runtime.tokens import RemoteRun
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+
+    @tool
+    def read_file(path: str) -> str:
+        """Read a file."""
+        return f"contents of {path}"
+
+    async def build(config: Any, surface: ToolSurface) -> None:
+        middleware = [mw.TranscriptMiddleware()]
+        surface.graph = create_agent(
+            GenericFakeChatModel(messages=iter([])), tools=[read_file], middleware=middleware
+        )
+        surface.middleware = middleware
+
+    async def start_models(cfg: Any) -> Any:
+        raise AssertionError("not asked for")
+
+    graph = RemoteGraph("agent", build, start_models)
+    run = RemoteRun(thread_id=THREAD_ID, assistant_id="agent", configurable={})
+    asked = HumanMessage(content="do the thing", id="human-1")
+    delegated = AIMessage(
+        content="",
+        id="ai-1",
+        tool_calls=[{"name": "task", "args": {"description": "look"}, "id": "task-1"}],
+    )
+    root = messages_to_dict([asked, delegated])
+    looked = AIMessage(
+        content="",
+        id="sub-ai-1",
+        tool_calls=[{"name": "read_file", "args": {"path": "a.py"}, "id": "sub-call-1"}],
+    )
+    nested = messages_to_dict([HumanMessage(content="look", id="sub-human"), looked])
+    answer = AIMessage(content="found it", id="sub-ai-2")
+
+    await graph.hook(run, "prepare", {"run_id": RUN_ID, "messages": root[:1]})
+    task = {"name": "task", "arguments": {"description": "look"}, "tool_call_id": "task-1"}
+    await graph.hook(run, "tool_started", {"run_id": RUN_ID, "messages": root, **task})
+    inside = {"run_id": RUN_ID, "messages": nested, "namespace": ["task-1"]}
+    await graph.hook(
+        run,
+        "call",
+        {
+            **inside,
+            "name": "read_file",
+            "arguments": {"path": "a.py"},
+            "tool_call_id": "sub-call-1",
+        },
+    )
+    await graph.hook(run, "model_result", {**inside, "response": messages_to_dict([answer])})
+    result = ToolMessage(content="found it", tool_call_id="task-1")
+    await graph.hook(
+        run,
+        "tool_result",
+        {"run_id": RUN_ID, "messages": root, **task, "result": messages_to_dict([result])[0]},
+    )
+
+    recorded = [
+        (
+            c.event.type,
+            getattr(c.event, "tool_call_id", None) or c.event.message_id,
+            c.event.namespace,
+        )
+        for c in engine.commands
+        if c.event.type in {"tool.started", "tool.completed", "message.completed"}
+    ]
+    assert recorded == [
+        ("tool.started", "task-1", []),
+        ("tool.started", "sub-call-1", ["task-1"]),
+        ("tool.completed", "sub-call-1", ["task-1"]),
+        ("message.completed", "sub-ai-2", ["task-1"]),
+        ("tool.completed", "task-1", []),
+    ]
+    [task_started] = [c for c in engine.commands if c.command_id == "tool:task-1:started"]
+    assert task_started.event.message_id == "ai-1"

@@ -121,7 +121,7 @@ class EventMatch(Base):
         introduced: set[str] = set()
         messages: list[RunMessage] = []
         for match in matches:
-            data: dict[str, object] = {"event_match": str(match.id)}
+            data: dict[str, str] = {"event_match": str(match.id)}
             built = build_input_messages(
                 match.content,
                 {

@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -91,25 +92,6 @@ vi.mock("@/features/automations/components/TriggerMenu", () => ({
 vi.mock("@/features/agents/components/ModelPicker", () => ({
   ModelPicker: () => <div />,
 }))
-vi.mock("@/components/ui/switch", () => ({
-  Switch: () => <input type="checkbox" />,
-}))
-vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  SelectContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  SelectItem: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  SelectValue: () => <div />,
-}))
-
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -159,21 +141,25 @@ describe("AutomationEditor", () => {
     } as unknown as ReturnType<typeof useSession>)
 
     const markup = renderToStaticMarkup(
-      <AutomationEditor
-        mode="edit"
-        schedule={{
-          id: "sched_1",
-          name: "Nightly",
-          prompt: "Check dependencies",
-          schedule: "0 9 * * *",
-          triggers: [{ id: "trigger_1", kind: "schedule", cron: "0 9 * * *" }],
-          scope: "workspace",
-          workspace: "core",
-          adminThread: false,
-          model: "Default",
-          enabled: true,
-        }}
-      />
+      <TooltipProvider>
+        <AutomationEditor
+          mode="edit"
+          schedule={{
+            id: "sched_1",
+            name: "Nightly",
+            prompt: "Check dependencies",
+            schedule: "0 9 * * *",
+            triggers: [
+              { id: "trigger_1", kind: "schedule", cron: "0 9 * * *" },
+            ],
+            scope: "workspace",
+            workspace: "core",
+            adminThread: false,
+            model: "Default",
+            enabled: true,
+          }}
+        />
+      </TooltipProvider>
     )
 
     expect(markup).toContain(">Core<")
@@ -182,7 +168,9 @@ describe("AutomationEditor", () => {
 
   it("starts a new automation in the default workspace", () => {
     signInAsAdmin()
-    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+    render(<AutomationEditor mode="create" template={TEMPLATE} />, {
+      wrapper: TooltipProvider,
+    })
 
     expect(
       screen.getByRole("button", { name: "Workspace" }).textContent
@@ -196,10 +184,14 @@ describe("AutomationEditor", () => {
 
   it("sends a workspace the user picked", () => {
     signInAsAdmin()
-    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+    render(<AutomationEditor mode="create" template={TEMPLATE} />, {
+      wrapper: TooltipProvider,
+    })
 
-    fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
-    fireEvent.click(screen.getByRole("button", { name: /^Core/ }))
+    fireEvent.keyDown(screen.getByRole("button", { name: "Workspace" }), {
+      key: "Enter",
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Core/ }))
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
 
     expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
@@ -229,12 +221,15 @@ describe("AutomationEditor", () => {
             model: "Default",
             enabled: true,
           }}
-        />
+        />,
+        { wrapper: TooltipProvider }
       )
 
       expect(screen.getByText(/gone.*no longer exists/)).toBeTruthy()
-      fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
-      expect(screen.getByRole("button", { name: /^Default/ })).toBeTruthy()
+      fireEvent.keyDown(screen.getByRole("button", { name: "Workspace" }), {
+        key: "Enter",
+      })
+      expect(screen.getByRole("menuitem", { name: /^Default/ })).toBeTruthy()
     } finally {
       mocks.workspaces = previous
     }
@@ -257,7 +252,8 @@ describe("AutomationEditor", () => {
           model: "Default",
           enabled: true,
         }}
-      />
+      />,
+      { wrapper: TooltipProvider }
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Add GitHub trigger" }))
@@ -301,7 +297,8 @@ describe("AutomationEditor", () => {
           model: "Default",
           enabled: true,
         }}
-      />
+      />,
+      { wrapper: TooltipProvider }
     )
     const filter = screen.getByLabelText(/Workflow conclusion/)
     expect((filter as HTMLSelectElement).value).toBe("failure")
@@ -327,7 +324,9 @@ describe("AutomationEditor", () => {
 
   it("saves a Linear trigger with its team and filters", () => {
     signInAsAdmin()
-    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+    render(<AutomationEditor mode="create" template={TEMPLATE} />, {
+      wrapper: TooltipProvider,
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Add Linear trigger" }))
     fireEvent.change(screen.getByLabelText("Team key"), {

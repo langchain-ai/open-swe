@@ -34,15 +34,6 @@ async def _ensure_dashboard_github_token(login: str) -> None:
         raise HTTPException(401, "github token unavailable, re-login required")
 
 
-# No app-installation-token fallback: PR file contents must be fetched with
-# the user's own credential so GitHub enforces their current repo access.
-async def _github_token_for_login(login: str) -> str:
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-    return token
-
-
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:
     try:
         thread = await langgraph_client().threads.get(thread_id)
