@@ -11,7 +11,6 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
-from openswe.act_as.gate import require_consent
 from openswe.analytics.usage import record_agent_pr_usage
 from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
@@ -1078,17 +1077,6 @@ async def _open_pull_request(
                 branch_pushed=None,
                 failed_step="workspace_repo",
             )
-        if refusal := await require_consent(
-            thread_id=_configurable().thread_id,
-            token_kind=kind,
-            author=author,
-            owner=owner,
-            repo=repo,
-            head=head,
-            base=base,
-            title=title,
-        ):
-            return dict(refusal)
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,

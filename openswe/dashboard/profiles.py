@@ -92,7 +92,6 @@ class ProfileUpdate(BaseModel):
     experimental_mcp_ptc: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    experimental_act_as_approval: bool | None = None
     run_on_mda: bool | None = None
     slack_onboarding_dismissed: bool = False
 
@@ -403,11 +402,6 @@ async def put_my_profile(
             pr_failure_reactions=update.pr_failure_reactions,
             prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
             experimental_task_coordination=update.experimental_task_coordination,
-            experimental_act_as_approval=update.experimental_act_as_approval,
-            # Switching approval either way starts over from asking every time.
-            act_as_always_allowed=(
-                False if update.experimental_act_as_approval is not None else None
-            ),
             run_on_mda=update.run_on_mda,
         ),
     )
@@ -417,7 +411,6 @@ async def put_my_profile(
         or update.pr_failure_reactions
         or update.prefer_tools_in_sandbox
         or update.experimental_task_coordination
-        or update.experimental_act_as_approval
         or update.run_on_mda
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
