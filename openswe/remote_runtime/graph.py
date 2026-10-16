@@ -66,6 +66,7 @@ from openswe.middleware.conversation_offloading import ConversationOffloadingMid
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
+from openswe.prompts import common_prompt
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -308,7 +309,7 @@ class RunSession:
                     {
                         "name": subagent.name,
                         "description": subagent.description,
-                        "system_prompt": subagent.system_prompt,
+                        "system_prompt": common_prompt(subagent.system_prompt),
                         "tools": None
                         if subagent.tools is None
                         else [name for name in subagent.tools if name in tools],
@@ -411,11 +412,13 @@ class RunSession:
         offered = self._offered()
         await _chain(shaping, capture)(self._request(state, runtime, offered))
         if not captured:
-            return ModelCallShape(system_prompt="", hidden_tools=[])
+            return ModelCallShape(system_prompt=common_prompt(), hidden_tools=[])
         request = captured[0]
         kept = {getattr(tool, "name", None) for tool in request.tools}
         return ModelCallShape(
-            system_prompt=request.system_message.text if request.system_message else "",
+            system_prompt=common_prompt(
+                request.system_message.text if request.system_message else ""
+            ),
             hidden_tools=sorted(tool.name for tool in offered if tool.name not in kept),
         )
 

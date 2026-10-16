@@ -14,6 +14,7 @@ from typing import Any, NotRequired, cast
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -46,7 +47,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.prompts import apply_tool_descriptions, prompt
+from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.author_guidance import SteeringHistory
 from openswe.run_config import RunConfig
 from openswe.runtime import (
@@ -58,7 +59,7 @@ from openswe.runtime import (
     graph_loaded_for_execution,
 )
 from openswe.sandboxes.repo_prep import prepare_review_repo
-from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
     walkthrough_describe_other,
@@ -345,7 +346,13 @@ async def build_review_scout(
     )
     graph = create_deep_agent(
         model=model,
-        system_prompt="",
+        system_prompt=common_prompt(),
+        subagents=[
+            {
+                **GENERAL_PURPOSE_SUBAGENT,
+                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
+            },
+        ],
         tools=apply_tool_descriptions(
             [
                 walkthrough_plan_chunk,
@@ -362,6 +369,13 @@ async def build_review_scout(
         tool_surface.graph = graph
         tool_surface.middleware = middleware
         tool_surface.models = models
+        tool_surface.subagents = [
+            SurfaceSubagent(
+                name=GENERAL_PURPOSE_SUBAGENT["name"],
+                description=GENERAL_PURPOSE_SUBAGENT["description"],
+                system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+            )
+        ]
     return graph
 
 

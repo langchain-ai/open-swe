@@ -92,6 +92,53 @@ async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_cal
     assert (await session.model_call({"messages": [], "asked": True}, None)).hidden_tools == []
 
 
+@pytest.mark.parametrize("environment", ["preview", "staging", "production"])
+async def test_remote_prompts_include_deployment_context(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    from langgraph.runtime import Runtime
+
+    from openswe.middleware.prepare_run import BasePrepareRunMiddleware
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import (
+        ModelChoice,
+        SurfaceModels,
+        SurfaceSubagent,
+        ToolSurface,
+    )
+
+    monkeypatch.setenv("OPENSWE_ENV", environment)
+    model = ModelChoice("openai:gpt-6.1-sol", {})
+    session = RunSession(
+        ToolSurface(
+            middleware=[BasePrepareRunMiddleware()],
+            models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+            subagents=[SurfaceSubagent("worker", "worker", "subagent instructions")],
+        ),
+        {},
+        None,
+        started_here=True,
+    )
+    main_prompt = (
+        await session.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
+    ).system_prompt
+    subagents = session.catalog()["subagents"]
+    assert isinstance(subagents, list)
+    assert isinstance(subagents[0], dict)
+    subagent_prompt = subagents[0]["system_prompt"]
+    assert isinstance(subagent_prompt, str)
+
+    for rendered, original in (
+        (main_prompt, "main instructions"),
+        (subagent_prompt, "subagent instructions"),
+    ):
+        if environment == "production":
+            assert rendered == original
+        else:
+            assert rendered.count(f"**{environment}**") == 1
+            assert rendered.endswith(original)
+
+
 async def test_app_lifespan_exits_without_managed_deep_agents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

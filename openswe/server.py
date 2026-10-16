@@ -146,7 +146,7 @@ from openswe.model_request import (
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import construct_system_prompt
-from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
+from openswe.prompts import apply_tool_descriptions, common_prompt, prompt, warm_tool_schemas
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import RunConfig
@@ -2179,7 +2179,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.graph_assembly"):
         graph = create_deep_agent(
             model=main_model,
-            system_prompt="",
+            system_prompt=common_prompt(),
             tools=main_tools,
             subagents=[
                 _general_purpose_subagent(
