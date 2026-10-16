@@ -1134,6 +1134,7 @@ async def build_reviewer_agent(
     if tool_surface is not None:
         tool_surface.graph = graph
         tool_surface.middleware = middleware
+        tool_surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
         tool_surface.models = SurfaceModels(
             main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
             subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),
