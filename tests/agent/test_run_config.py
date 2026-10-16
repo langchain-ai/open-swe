@@ -18,12 +18,10 @@ def test_bools_are_not_accepted_as_integers():
     cfg = RunConfig.parse(
         {
             "pr_number": True,
-            "chat_pr_number": False,
             "thread_id": "t1",
         }
     )
     assert cfg.pr_number is None
-    assert cfg.chat_pr_number is None
     assert cfg.thread_id == "t1"
 
 

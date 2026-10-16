@@ -41,7 +41,6 @@ _TOOL_MODULES = {
     "publish_review": ".publish_review",
     "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
-    "read_repo_file": "openswe.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
@@ -64,7 +63,6 @@ _TOOL_MODULES = {
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
     "send_announcement": ".send_announcement",
-    "search_repo_code": "openswe.github.tools.search_repo_code",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
     "slack_attach_html": "openswe.slack.tools.attach_html",
@@ -125,7 +123,6 @@ __all__ = [
     "publish_review",
     "write_database_rows",
     "read_only_sql",
-    "read_repo_file",
     "read_user_settings",
     "record_human_input",
     "recreate_sandbox",
@@ -148,7 +145,6 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_pull_requests",
     "send_announcement",
-    "search_repo_code",
     "start_thread",
     "slack_add_reaction",
     "slack_attach_html",
@@ -171,8 +167,6 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from openswe.github.tools.read_repo_file import read_repo_file
-    from openswe.github.tools.search_repo_code import search_repo_code
     from openswe.incidents.tools import manage_incident
     from openswe.slack.tools.add_reaction import slack_add_reaction
     from openswe.slack.tools.attach_html import slack_attach_html

@@ -52,6 +52,46 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
+async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
+    from collections.abc import Awaitable, Callable
+
+    from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
+    from langchain_core.tools import tool
+
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    def plan(step: str) -> str:
+        """Plan a step."""
+        return step
+
+    @tool
+    def record(summary: str) -> str:
+        """Record a summary."""
+        return summary
+
+    class HideRecordUntilAsked(AgentMiddleware):
+        async def awrap_model_call(
+            self,
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            if not request.state.get("asked"):
+                request = request.override(tools=[t for t in request.tools if t.name != "record"])
+            return await handler(request)
+
+    session = RunSession(
+        ToolSurface(tools={"plan": plan, "record": record}, middleware=[HideRecordUntilAsked()]),
+        {},
+        None,
+        started_here=True,
+    )
+
+    assert (await session.model_call({"messages": []}, None)).hidden_tools == ["record"]
+    assert (await session.model_call({"messages": [], "asked": True}, None)).hidden_tools == []
+
+
 @pytest.mark.parametrize("environment", ["preview", "staging", "production"])
 async def test_remote_prompts_include_deployment_context(
     monkeypatch: pytest.MonkeyPatch, environment: str
@@ -79,9 +119,9 @@ async def test_remote_prompts_include_deployment_context(
         None,
         started_here=True,
     )
-    main_prompt = await session.system_prompt(
-        {"rendered_system_prompt": "main instructions"}, Runtime()
-    )
+    main_prompt = (
+        await session.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
+    ).system_prompt
     subagents = session.catalog()["subagents"]
     assert isinstance(subagents, list)
     assert isinstance(subagents[0], dict)

@@ -19,7 +19,7 @@ dev: $(if $(POSTGRES_URI),,postgres)
 		lsof -nP -iTCP:2024 -sTCP:LISTEN >&2; exit 1; fi
 	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
-# The Managed Deep Agents runtime `make dev` sends agent and reviewer runs to (mda/README.md).
+# The Managed Deep Agents runtime `make dev` sends every agent run to (mda/README.md).
 dev-mda:
 	cd mda && uv run --locked mda dev --port 2025 --no-browser
 
@@ -137,7 +137,7 @@ mda-boundary:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server (starts the local PostgreSQL container unless POSTGRES_URI is set)'
-	@echo 'dev-mda                      - Managed Deep Agents dev server on :2025, where agent and reviewer runs go'
+	@echo 'dev-mda                      - Managed Deep Agents dev server on :2025, where every agent run goes'
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'migration m="..."            - create the next database migration'

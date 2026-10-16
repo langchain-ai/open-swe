@@ -55,6 +55,8 @@ class ModelCall(BaseModel):
     """What the backend's middleware says the next model call sends."""
 
     system_prompt: str
+    # Tools the graph's own middleware takes off this call's list.
+    hidden_tools: list[str] = []
     model: ModelSpec | None
     fallback: ModelSpec | None
     use_gateway: bool
@@ -102,7 +104,8 @@ class ServedToolsMiddleware(AgentMiddleware):
 
     The backend's tools act on its sandbox, so they stay offered even where MDA's
     filesystem middleware drops one it cannot back itself, such as ``execute``.
-    Hidden tools stay registered, so a call by name still runs, as in-process.
+    Hidden tools stay registered, so a call by name still runs, as in-process; the
+    backend names the ones its middleware hides from each call.
     """
 
     def __init__(self, tools: Sequence[BaseTool], hidden: frozenset[str]) -> None:
@@ -114,9 +117,15 @@ class ServedToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        offered = [t for t in request.tools if getattr(t, "name", None) not in self._hidden]
+        call = request.state.get("open_swe_call")
+        hidden = self._hidden | (
+            frozenset(ModelCall.model_validate(call).hidden_tools)
+            if isinstance(call, Mapping)
+            else frozenset()
+        )
+        offered = [t for t in request.tools if getattr(t, "name", None) not in hidden]
         names = {getattr(tool, "name", None) for tool in offered}
-        missing = [tool for tool in self._tools if tool.name not in names]
+        missing = [tool for tool in self._tools if tool.name not in names | hidden]
         return await handler(request.override(tools=[*offered, *missing]))
 
 
@@ -148,6 +157,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if reply.system_prompt is not None:
             update["open_swe_call"] = ModelCall(
                 system_prompt=reply.system_prompt,
+                hidden_tools=reply.hidden_tools,
                 model=reply.model,
                 fallback=reply.fallback,
                 use_gateway=reply.use_gateway,

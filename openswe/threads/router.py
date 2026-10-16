@@ -253,7 +253,7 @@ class ThreadRouter:
         )
 
     async def _claim_for_mda(self, thread: IndexedThread, assistant_id: JsonValue) -> IndexedThread:
-        """Move a fresh thread to MDA for its first agent or reviewer run or state.
+        """Move a fresh thread to MDA for its first run or state of a graph MDA hosts.
 
         Other graphs, and threads with checkpoints here already, stay on this deployment.
         """

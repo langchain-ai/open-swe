@@ -275,7 +275,7 @@ MDA_RUNTIME_API_KEY=""                # LangSmith key to call it with; defaults 
 REMOTE_RUNTIME_TOKEN_SECRET=""        # openssl rand -hex 32     (signs the run tokens it calls back with); required
 ```
 
-Agent and reviewer threads run their model loop on a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) deployment of the project in `mda/`, and the backend refuses to start without one. Deploy it with `mda deploy` as [mda/README.md](../mda/README.md#build-and-deploy) describes, with `OPEN_SWE_BACKEND_URL` set to this deployment's URL.
+Every Open SWE thread runs its model loop on a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) deployment of the project in `mda/`, and the backend refuses to start without one. Deploy it with `mda deploy` as [mda/README.md](../mda/README.md#build-and-deploy) describes, with `OPEN_SWE_BACKEND_URL` set to this deployment's URL.
 
 On LangGraph Platform, set them under the deployment's environment variables; saving rolls out a new revision. With Docker, put them in the file you pass as `--env-file`. `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` are not needed: they default to `LANGGRAPH_URL` because the dashboard is served from the same origin.
 

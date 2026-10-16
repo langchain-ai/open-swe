@@ -8,8 +8,9 @@ own middleware, which the MDA run hands each phase of its loop to:
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``before_model`` runs every ``before_model`` hook (follow-up queue, event matches,
-  proxy refresh, task coordination, model routing), then renders the system prompt
-  through the graph's own model-call middleware and names the model to call
+  proxy refresh, task coordination, model routing), then runs the graph's own
+  model-call middleware for the system prompt and the tools it hides from this
+  call, and names the model to call
 - ``model_result`` lets the transcript and usage middleware observe each response
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
@@ -55,6 +56,7 @@ from langchain_core.messages import (
     messages_to_dict,
 )
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
@@ -194,6 +196,14 @@ def _model_spec(choice: ModelChoice) -> ModelSpec:
 
 def _overrides(middleware: AgentMiddleware, hook: str) -> bool:
     return getattr(type(middleware), hook) is not getattr(AgentMiddleware, hook)
+
+
+class ModelCallShape(BaseModel):
+    """What the graph's own model-call middleware makes of the next call."""
+
+    system_prompt: str
+    # Tools the middleware takes off this call's list, as it would in-process.
+    hidden_tools: list[str]
 
 
 class PhaseResult(BaseModel):
@@ -368,18 +378,26 @@ class RunSession:
             update=_json_state(update), messages=dump_messages(added), jump_to=jump_to
         )
 
-    def _request(self, state: Mapping[str, object], runtime: Runtime) -> ModelRequest:
+    def _offered(self) -> list[BaseTool]:
+        return [tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS]
+
+    def _request(
+        self,
+        state: Mapping[str, object],
+        runtime: Runtime,
+        tools: Sequence[BaseTool] = (),
+    ) -> ModelRequest:
         return ModelRequest(
             model=FakeListChatModel(responses=[""]),
             messages=_as_list(state.get("messages")),
             state=cast(AgentState, dict(state)),
             runtime=runtime,
-            tools=[],
+            tools=list(tools),
             model_settings={},
         )
 
-    async def system_prompt(self, state: Mapping[str, object], runtime: Runtime) -> str:
-        """The system prompt the graph's own model-call middleware would send."""
+    async def model_call(self, state: Mapping[str, object], runtime: Runtime) -> ModelCallShape:
+        """The system prompt and tool list the graph's own model-call middleware would send."""
         captured: list[ModelRequest] = []
 
         async def capture(request: ModelRequest) -> ModelResponse:
@@ -391,10 +409,18 @@ class RunSession:
             for m in self.surface.middleware
             if _overrides(m, "awrap_model_call") and not isinstance(m, _NOT_PROMPT_SHAPING)
         ]
-        await _chain(shaping, capture)(self._request(state, runtime))
-        if not captured or captured[0].system_message is None:
-            return common_prompt()
-        return common_prompt(captured[0].system_message.text)
+        offered = self._offered()
+        await _chain(shaping, capture)(self._request(state, runtime, offered))
+        if not captured:
+            return ModelCallShape(system_prompt=common_prompt(), hidden_tools=[])
+        request = captured[0]
+        kept = {getattr(tool, "name", None) for tool in request.tools}
+        return ModelCallShape(
+            system_prompt=common_prompt(
+                request.system_message.text if request.system_message else ""
+            ),
+            hidden_tools=sorted(tool.name for tool in offered if tool.name not in kept),
+        )
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
         """The model the graph's model selection would call next."""
@@ -564,7 +590,7 @@ class RemoteGraph:
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
                 fallback = fallback_model_choice(model.model_id)
-                reply["system_prompt"] = await session.system_prompt(state, runtime)
+                reply.update((await session.model_call(state, runtime)).model_dump())
                 reply["model"] = _model_spec(model).model_dump()
                 reply["fallback"] = None if fallback is None else _model_spec(fallback).model_dump()
                 reply["use_gateway"] = session.models.use_gateway

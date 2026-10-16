@@ -243,8 +243,11 @@ async def test_a_refused_run_leaves_the_thread_idle(monkeypatch: pytest.MonkeyPa
     harness = _Harness(monkeypatch)
     harness.local_status = 409
     await index.create(THREAD, runtime="local")
+    # A thread whose runs left checkpoints here keeps running here.
+    await harness.runtimes.local.create(THREAD, {})
+    harness.runtimes.local.threads[THREAD]["values"] = {"messages": [{"content": "hi"}]}
 
-    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "review-scout"})
+    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent"})
 
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "idle"
@@ -302,8 +305,11 @@ async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPa
     assert harness.runtimes.local.threads == {} and harness.runtimes.mda.threads == {}
 
 
-@pytest.mark.parametrize(("assistant_id", "moves"), [("agent", True), ("review-scout", False)])
-async def test_only_agent_and_reviewer_threads_move_to_mda(
+@pytest.mark.parametrize(
+    ("assistant_id", "moves"),
+    [("agent", True), ("review-scout", True), ("a-graph-mda-does-not-host", False)],
+)
+async def test_only_threads_of_graphs_mda_hosts_move_to_mda(
     monkeypatch: pytest.MonkeyPatch, secret: None, assistant_id: str, moves: bool
 ) -> None:
     harness = _Harness(monkeypatch)
