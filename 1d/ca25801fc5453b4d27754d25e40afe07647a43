@@ -1,0 +1,291 @@
+tests/test_task_threads.py
+  s_30a39b9625d194::t_45440aa7abb6ac 367
+ui/src/features/agents/components/PlanReview.test.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 20,23,163-225
+  s_30a39b9625d194::t_372acab1bc7e08 226
+ui/src/features/agents/lib/transcript/reducer.test.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 233-262
+openswe/threads/router.py
+  s_30a39b9625d194::t_45440aa7abb6ac 3-5,9,46,255,258,296,301,318,320,336,367
+ui/src/features/agents/components/AgentThreadView.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 1,51,60,88,151-153,156-160,162-163,165-166,175,230,348,719,846,849-850,852-855,857-860,862-903,928-938,973-980,997
+docs/DEVELOPMENT.md
+  s_30a39b9625d194::t_45440aa7abb6ac 89-91,94-95,111,269
+openswe/threads/routes.py
+  s_30a39b9625d194::t_45440aa7abb6ac 44,436-456
+  s_30a39b9625d194::t_195ecc2225ba46 457-458
+mda/rt/backend.py
+  s_30a39b9625d194::t_45440aa7abb6ac 8-9,15,23-24,72-75,147-170,198-200,204,207-223
+openswe/remote_runtime/graph.py
+  s_30a39b9625d194::t_45440aa7abb6ac 400-402,411,414-424
+  s_30a39b9625d194::t_f38da677d3ef19 425
+ui/src/features/reviews/components/RequestHumanReview.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 86-88,111
+tests/e2e/mda-dev.sh
+  s_30a39b9625d194::t_45440aa7abb6ac 1-40
+tests/dashboard/test_thread_visibility.py
+  s_30a39b9625d194::t_45440aa7abb6ac 21-22,27,177-197,258
+mda/README.md
+  s_30a39b9625d194::t_45440aa7abb6ac 18,24,26,28,45,52-55
+openswe/middleware/workflow_push_guard.py
+  s_30a39b9625d194::t_45440aa7abb6ac 47-50,58-78,293-306,308,318-327,468,471,475-478,483,485,509,522,530-531,543,712,740-753
+openswe/human_review/card.py
+  s_30a39b9625d194::t_45440aa7abb6ac 32
+tests/e2e/tests/dashboard_transcript.spec.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 296-297,302-308
+openswe/jobs/kinds.py
+  s_30a39b9625d194::t_45440aa7abb6ac 36,168-174
+ui/src/features/agents/lib/queries.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 21,1249-1278
+  s_30a39b9625d194::t_6e10971a7d8baa 1279-1281
+openswe/threads/status.py
+  s_30a39b9625d194::t_45440aa7abb6ac 35-40
+tests/e2e/tests/dashboard.spec.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 238-242
+tests/e2e/playwright.config.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 7,9-18,61-70,72-86
+openswe/resources/prompts/model-request/performance.md
+  s_30a39b9625d194::t_45440aa7abb6ac 1-6
+openswe/resources/prompts/tools/create_sandbox_file_download_url.md
+  s_30a39b9625d194::t_45440aa7abb6ac 9-11
+tests/dashboard/test_dashboard_thread_api.py
+  s_30a39b9625d194::t_45440aa7abb6ac 14,175-206
+  s_30a39b9625d194::t_b8c2367c72dc9b 207-208
+ui/src/features/agents/components/composer/RunTargetSelector.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 59,62-64
+Makefile
+  s_30a39b9625d194::t_45440aa7abb6ac 1,22-25,140
+docs/INSTALLATION.md
+  s_30a39b9625d194::t_45440aa7abb6ac 272-275,278
+  s_30a39b9625d194::t_19f9e24232a65d 279
+openswe/human_review/lifecycle.py
+  s_30a39b9625d194::t_45440aa7abb6ac 946
+tests/bridge/test_bridge_backend.py
+  s_30a39b9625d194::t_45440aa7abb6ac 11,17,23,25,60,78,89,103-132
+cli/README.md
+  s_30a39b9625d194::t_45440aa7abb6ac 54-55
+openswe/resources/prompts/system/main.md.jinja
+  s_30a39b9625d194::t_45440aa7abb6ac 60
+openswe/resources/prompts/reviewer/subagent.md.jinja
+  s_30a39b9625d194::t_45440aa7abb6ac 1-3
+tests/e2e/e2e_env.py
+  s_30a39b9625d194::t_45440aa7abb6ac 41-42,90-91
+tests/middleware/test_transcript.py
+  s_30a39b9625d194::t_45440aa7abb6ac 16-17,169-212
+  s_30a39b9625d194::t_180921708c8c06 213-214
+openswe/reviewer.py
+  s_30a39b9625d194::t_45440aa7abb6ac 50,96,137,635-637,1115,1140
+tests/e2e/mda_entrypoint.py
+  s_30a39b9625d194::t_45440aa7abb6ac 1-43
+ui/src/features/agents/lib/transcript/types.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 81
+mda/rt/middleware.py
+  s_30a39b9625d194::t_45440aa7abb6ac 105,108-110,117
+AGENTS.md
+  s_30a39b9625d194::t_45440aa7abb6ac 11
+ui/src/features/agents/lib/transcript/reducer.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 69-70,189,623,704,879-899,987-988,1121-1126
+openswe/dashboard/profiles.py
+  s_30a39b9625d194::t_45440aa7abb6ac 369,418
+openswe/completion.py
+  s_30a39b9625d194::t_45440aa7abb6ac 502-508
+openswe/dispatch.py
+  s_30a39b9625d194::t_45440aa7abb6ac 275,358-360
+openswe/threads/index_import.py
+  s_30a39b9625d194::t_45440aa7abb6ac 3-5,22
+openswe/bridge/constants.py
+  s_30a39b9625d194::t_45440aa7abb6ac 21-23
+swagger.json
+  s_30a39b9625d194::t_45440aa7abb6ac 6824-6853,18845-18900
+  s_30a39b9625d194::t_395a9982a0a777 18901-18904
+openswe/resources/prompts/system/shared-base.md
+  s_30a39b9625d194::t_45440aa7abb6ac 33,36
+tests/e2e/harness.py
+  s_30a39b9625d194::t_45440aa7abb6ac 223-232
+pyproject.toml
+  s_30a39b9625d194::t_45440aa7abb6ac 133-137
+mda/agent.py
+  s_30a39b9625d194::t_45440aa7abb6ac 117-118,132-134,154
+openswe/threads/handlers.py
+  s_30a39b9625d194::t_45440aa7abb6ac 8,11,14,32,446-447,471-499,564-566
+.github/workflows/ci.yml
+  s_30a39b9625d194::t_45440aa7abb6ac 274,319-322,390-393
+ui/src/features/agents/terminal/ghostty/core.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 197-198,905-909,911,931-933,961-962
+  s_30a39b9625d194::t_a49bab1f48d753 963
+ui/src/routes/__root.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 24,110
+tests/agent/test_model_handoff_prepare.py
+  s_30a39b9625d194::t_45440aa7abb6ac 305-326
+openswe/human_review/standard.py
+  s_30a39b9625d194::t_45440aa7abb6ac 294-296,547,653,1281,1364,1426
+ui/src/features/agents/components/AgentsHome.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 1,589
+ui/src/features/agents/components/composer/ChatComposer.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 144
+ui/src/features/reviews/components/PullRequestActionButton.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 4,10,17,31-32,36
+openswe/search_policy.py
+  s_30a39b9625d194::t_45440aa7abb6ac 1-3
+ui/src/features/agents/components/messages/renderItems.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 29-30,114-120,149-151,296-302
+ui/src/features/agents/components/subagents/SubagentThreadView.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 1,88
+openswe/review_scout/launch.py
+  s_30a39b9625d194::t_45440aa7abb6ac 13
+ui/src/features/agents/lib/types.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 68-69,134-138
+openswe/bridge/store.py
+  s_30a39b9625d194::t_45440aa7abb6ac 41,123-126,153-162
+  s_30a39b9625d194::t_a16de907a6e5a0 163
+openswe/review_scout/graph.py
+  s_30a39b9625d194::t_45440aa7abb6ac 37,61,327
+ui/src/components/Branding.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 1-57
+mda/rt/tools.py
+  s_30a39b9625d194::t_45440aa7abb6ac 20-26,48-54,56,61-70
+  s_30a39b9625d194::t_a5233d5760dc0e 71
+ui/src/features/agents/lib/streamMessagesToUi.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 42
+openswe/model_request.py
+  s_30a39b9625d194::t_45440aa7abb6ac 87,100,132-138,140-142
+openswe/expedited_review/card.py
+  s_30a39b9625d194::t_45440aa7abb6ac 47,259,292,313
+evals/model_request.py
+  s_30a39b9625d194::t_45440aa7abb6ac 25,34-47,81
+ui/src/components/VersionMismatchBanner.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 25-32
+openswe/middleware/transcript.py
+  s_30a39b9625d194::t_45440aa7abb6ac 25,35,201-264,598-655,1163,1166-1168,1181,1190,1198,1204,1388-1405
+  s_30a39b9625d194::t_91f08d78eb529e 1406-1407
+.agents/skills/writing-pr-body-title-description/SKILL.md
+  s_30a39b9625d194::t_45440aa7abb6ac 6
+tests/e2e/fake_llm.py
+  s_30a39b9625d194::t_45440aa7abb6ac 18,243-262,1620
+ui/src/lib/plan.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 118
+openswe/threads/summary.py
+  s_30a39b9625d194::t_45440aa7abb6ac 12,45,136-140,142-143
+evals/reviewer/target.py
+  s_30a39b9625d194::t_45440aa7abb6ac 170
+openswe/remote_runtime/client.py
+  s_30a39b9625d194::t_45440aa7abb6ac 42,45,48-50,63-65
+openswe/threads/moves.py
+  s_30a39b9625d194::t_45440aa7abb6ac 1-171
+ui/src/features/agents/terminal/ghostty/surface.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 7,1663,1665-1670
+tests/threads/test_thread_router.py
+  s_30a39b9625d194::t_45440aa7abb6ac 11,85,98,107,123-124,218-221,247,253,256,263-269,280-282,284-289,306,309,319-337
+  s_30a39b9625d194::t_4d7589f84080df 338-339
+ui/src/features/agents/components/messages/timeline/AgentTurn.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 25,70-110,298-308
+  s_30a39b9625d194::t_4c2489f718caef 309
+tests/agent/test_shell_search.py
+  s_30a39b9625d194::t_45440aa7abb6ac 1-50
+tests/reviewer/test_mda_tools.py
+  s_30a39b9625d194::t_45440aa7abb6ac 1-64
+tests/e2e/README.md
+  s_30a39b9625d194::t_45440aa7abb6ac 6-9,21,50-54,133,136
+ui/src/styles/markdown.css
+  s_30a39b9625d194::t_45440aa7abb6ac 124-125
+ui/src/features/reviews/components/RequestHumanReview.test.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 74-80,93-112
+ui/src/features/agents/components/AgentsSidebar.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 1,591-592,640,985,1007,1089,1091-1103
+openswe/github/pull_requests.py
+  s_30a39b9625d194::t_45440aa7abb6ac 53,275-279
+  s_30a39b9625d194::t_db89bf7aa471a4 280
+tests/e2e/.gitignore
+  s_30a39b9625d194::t_45440aa7abb6ac 8
+openswe/threads/runtimes.py
+  s_30a39b9625d194::t_45440aa7abb6ac 3-5,12,17-26,31-37,41-54,93-98,105-151,153-215,217,228,236
+  s_30a39b9625d194::t_1eb34b8f0abdf6 16,152
+openswe/resources/prompts/runs/sandbox-handoff.md.jinja
+  s_30a39b9625d194::t_45440aa7abb6ac 1
+ui/src/features/agents/components/messages/timeline/WorkEntryRow.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 293
+ui/src/features/reviews/components/SubmitReviewPopover.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 151-153
+ui/src/features/agents/components/chat/ReplyCard.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 1-2,84,88,90-95,112-147,150-166,196,232-239
+openswe/resources/prompts/model-request/instructions.md
+  s_30a39b9625d194::t_45440aa7abb6ac 7-9,16-18
+tests/agent/test_workflow_push_guard.py
+  s_30a39b9625d194::t_45440aa7abb6ac 72,128-142,165-176,262-273,275,323,346-358,360,379-380,385-386,389-395,406,409,413,421-441
+  s_30a39b9625d194::t_928e22ca19de98 442-443
+openswe/remote_runtime/agent.py
+  s_30a39b9625d194::t_45440aa7abb6ac 7,13-14,23-27
+ui/src/features/agents/components/PlanReview.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 51,64,75-79,95-97,101-111,114-116,119,123-124,126-127,130,228-230,241-257,259,262,267-271,276,294,355-367
+openswe/resources/prompts/reviewer/repo-ready.md.jinja
+  s_30a39b9625d194::t_45440aa7abb6ac 1
+ui/src/features/agents/terminal/ghostty/core.test.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 1-46
+ui/src/features/agents/components/AgentThreadHeader.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 116,120,229
+openswe/middleware/prepare_run.py
+  s_30a39b9625d194::t_45440aa7abb6ac 3,20-21,109-128
+  s_30a39b9625d194::t_54650b536a5a5b 129
+openswe/server.py
+  s_30a39b9625d194::t_45440aa7abb6ac 66,184,334,725,1131-1133,1152,1955,1957,1961-1962
+  s_30a39b9625d194::t_3363b0bd29532b 1963
+tests/threads/test_index_import.py
+  s_30a39b9625d194::t_45440aa7abb6ac 46,58
+openswe/run_config.py
+  s_30a39b9625d194::t_45440aa7abb6ac 107-108,277-284
+  s_30a39b9625d194::t_db519e678dc4a6 285
+openswe/review/reviews.py
+  s_30a39b9625d194::t_45440aa7abb6ac 44,47
+ui/src/features/agents/components/messages/timeline/workEntry.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 237-238,284-289
+  s_30a39b9625d194::t_42428dfef1b23b 290-291
+ui/src/features/agents/lib/api.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 33-37,310-313
+  s_30a39b9625d194::t_7b415193a85675 314
+ui/src/features/agents/lib/provider/useSubmitAgentMessage.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 96
+README.md
+  s_30a39b9625d194::t_45440aa7abb6ac 29-30
+openswe/config.py
+  s_30a39b9625d194::t_45440aa7abb6ac 218-219,229
+tests/threads/test_sandbox_move.py
+  s_30a39b9625d194::t_45440aa7abb6ac 1-52
+openswe/api/app.py
+  s_30a39b9625d194::t_45440aa7abb6ac 29,56,68,153
+cli/src/main.ts
+  s_30a39b9625d194::t_45440aa7abb6ac 136-142,154-155
+openswe/threads/index.py
+  s_30a39b9625d194::t_45440aa7abb6ac 3-5
+tests/e2e/dev-mock.sh
+  s_30a39b9625d194::t_45440aa7abb6ac 64-66,70
+openswe/bridge/backend.py
+  s_30a39b9625d194::t_45440aa7abb6ac 46,108-110,115-122,177-190,197
+ui/src/components/Branding.test.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 1-55
+ui/src/components/VersionMismatchBanner.test.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 46-47
+tests/reviewer/test_remote_runtime.py
+  s_30a39b9625d194::t_45440aa7abb6ac 30-103
+ui/src/routes/agents/reviews/index.tsx
+  s_30a39b9625d194::t_45440aa7abb6ac 6,57-60,93-100
+openswe/threads/runs.py
+  s_30a39b9625d194::t_45440aa7abb6ac 61,758-759,762-767,842,845,848,853-860,881-883,958-959
+openswe/resources/prompts/system/sandbox-file-downloads.md
+  s_30a39b9625d194::t_45440aa7abb6ac 16-19,29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1dca25801fc5453b4d27754d25e40afe07647a43",
+  "prompts": {},
+  "sessions": {
+    "s_30a39b9625d194": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfdce3a1-d304-41eb-bba0-703a4018521b",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}
