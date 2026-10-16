@@ -12,6 +12,7 @@ from deepagents.backends.protocol import ExecuteResponse
 from langsmith.sandbox import (
     CommandTimeoutError,
     SandboxConnectionError,
+    SandboxOperationError,
     SandboxRetryableConnectionError,
 )
 
@@ -159,6 +160,37 @@ async def test_aexecute_midstream_ws_drop_falls_back_to_base(
     resp = await sb.aexecute("git status", timeout=5)
     assert called["command"] == "git status"
     assert resp.output == "via-http"
+
+
+@pytest.mark.parametrize(
+    ("error_type", "operation"),
+    [
+        ("CommandNotFound", "reconnect"),
+        ("CommandNotFound", "command"),
+        ("OtherFailure", "reconnect"),
+    ],
+)
+async def test_aexecute_operation_error_does_not_replay(
+    monkeypatch: pytest.MonkeyPatch, error_type: str, operation: str
+) -> None:
+    error = SandboxOperationError(
+        "Command not found: command-id", error_type=error_type, operation=operation
+    )
+    sb = _backend(_FakeHandle(raises=error))
+    fallback = AsyncMock()
+    monkeypatch.setattr(sb, "_afallback_execute", fallback)
+
+    if error_type == "CommandNotFound" and operation == "reconnect":
+        with pytest.raises(RuntimeError, match="outcome is unknown") as caught:
+            await sb.aexecute("git commit", timeout=5)
+        assert caught.value.__cause__ is error
+    else:
+        with pytest.raises(SandboxOperationError) as caught:
+            await sb.aexecute("git commit", timeout=5)
+        assert caught.value is error
+
+    assert len(cast(_FakeSandbox, sb._async_sandbox).run_calls) == 1
+    fallback.assert_not_awaited()
 
 
 def test_execute_is_async_only() -> None:

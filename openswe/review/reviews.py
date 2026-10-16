@@ -41,9 +41,10 @@ from openswe.review.findings import (
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
 from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from openswe.thread_ids import reviewer_thread_id
+from openswe.threads.status import thread_run_error
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import ThreadLike, thread_metadata
-from openswe.utils.thread_ops import langgraph_client, thread_run_error
+from openswe.utils.thread_ops import langgraph_client
 from openswe.walkthrough.record import WalkthroughView
 from openswe.workspaces.store import WORKSPACES
 

@@ -55,7 +55,7 @@ afterEach(() => {
 describe("agent run span", () => {
   it("tracks a submitted run from send to completion", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
-    const tracker = new RunTracker({ transport: "cloud", threadId: THREAD_A })
+    const tracker = new RunTracker({ threadId: THREAD_A })
 
     tracker.submitted()
     recordRequestTiming({
@@ -93,7 +93,6 @@ describe("agent run span", () => {
       "first_text",
     ])
     expect(span?.attributes).toMatchObject({
-      transport: "cloud",
       joined: false,
       command_ttfb_ms: 88,
       stream_ttfb_ms: 120,
@@ -112,7 +111,7 @@ describe("agent run span", () => {
 
   it("marks generation_start for a run that never streams assistant text", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
-    const tracker = new RunTracker({ transport: "cloud", threadId: THREAD_A })
+    const tracker = new RunTracker({ threadId: THREAD_A })
 
     tracker.submitted()
     tracker.event(lifecycle("running", 9_900))
@@ -130,7 +129,7 @@ describe("agent run span", () => {
 
   it("ignores a non-assistant message start for generation_start", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
-    const tracker = new RunTracker({ transport: "cloud", threadId: THREAD_A })
+    const tracker = new RunTracker({ threadId: THREAD_A })
 
     tracker.submitted()
     tracker.event(messageStart("tool", 9_950))
@@ -141,14 +140,13 @@ describe("agent run span", () => {
   })
 
   it("opens a joined span when a run starts that this client did not submit", () => {
-    const tracker = new RunTracker({ transport: "local", threadId: THREAD_A })
+    const tracker = new RunTracker({ threadId: THREAD_A })
 
     tracker.event(lifecycle("running", Date.now()))
     tracker.completed("interrupt")
 
     const [span] = getPerfSpans()
     expect(span?.attributes).toMatchObject({
-      transport: "local",
       joined: true,
       reason: "interrupt",
     })
@@ -159,8 +157,8 @@ describe("agent run span", () => {
   })
 
   it("keeps request and transcript timings on the stream that owns the thread", () => {
-    const runA = new RunTracker({ transport: "cloud", threadId: THREAD_A })
-    const runB = new RunTracker({ transport: "cloud", threadId: null })
+    const runA = new RunTracker({ threadId: THREAD_A })
+    const runB = new RunTracker({ threadId: null })
     runA.submitted()
     runB.bindThread(THREAD_B.toUpperCase())
     runB.submitted()

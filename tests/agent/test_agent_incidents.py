@@ -65,7 +65,7 @@ def _incident_config(**extra: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("explicit", [False, True])
 async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
-    fake_store, monkeypatch, saved_thread_scope, explicit
+    monkeypatch, saved_thread_scope, explicit
 ):
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.sandboxes.state import SandboxBackendProxy
@@ -160,13 +160,13 @@ async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread
 
 @pytest.mark.parametrize("requested_action", [False, True])
 async def test_main_agent_records_the_incident_report_through_the_tool(
-    fake_store, registry_db, monkeypatch, saved_thread_scope, requested_action
+    registry_db, monkeypatch, saved_thread_scope, requested_action
 ):
     from deepagents import create_deep_agent
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.store.memory import InMemoryStore
 
-    await service.POLICIES.put("default", IncidentPolicy(enabled=True, workspace_id="T1"))
+    await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1"))
     await service.INCIDENTS.put(
         "incident",
         Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-ctx"),
@@ -180,7 +180,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     # The scripted model ends its turn in plain text, so the reply requirement
     # posts on its behalf; that path is covered in its own suite.
     monkeypatch.setattr(
-        "openswe.slack.tools.reply.slack_reply", AsyncMock(return_value={"success": True})
+        "openswe.slack.tools.reply.send_slack_reply", AsyncMock(return_value={"success": True})
     )
     config = _incident_config(
         **({"incident_request": "Open a PR for the confirmed fix"} if requested_action else {})

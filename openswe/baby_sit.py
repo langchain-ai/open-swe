@@ -4,17 +4,16 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
-from langgraph_sdk import get_client
-from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Row, Select, func, literal, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
+from openswe import event_claims
 from openswe.database import postgres
-from openswe.database.store_imports import StoreImport
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.ci import (
@@ -31,48 +30,45 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repositories import Repository
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.slack.client import GitHubPrRef, post_slack_thread_reply
 from openswe.source_context import SourceContext
-from openswe.store import delete_value, now_iso, search_all_entries
 from openswe.tasks.store import Task, TaskMembership
-from openswe.thread_ids import baby_sit_lock_thread_id
-from openswe.threads.creation import create_lock_thread
 from openswe.utils.json_types import JsonObject
+from openswe.utils.time import now_iso
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
-_STORE_NAMESPACE = ["baby_sit_watches"]
 _STATE_KEY = "baby_sit"
 WATCH_CRON_KIND = "baby_sit_watch"
+WATCH_JOB_KIND = "baby_sit"
 WATCH_SCHEDULE = "*/10 * * * *"
 MAX_RETRIES_PER_HEAD = 3
 MAX_DISPATCH_KEYS = 30
 MAX_DELIVERY_IDS = 50
 MAX_ALERT_KEYS = 30
 MAX_EVALUATION_ERRORS = 3
-WATCH_LOCK_TTL_MINUTES = 5
+WATCH_LOCK_TTL = timedelta(minutes=5)
+_WATCH_LOCK_SCOPE = "baby_sit_watch"
 
 
 @asynccontextmanager
 async def _watch_lock(key: str) -> AsyncIterator[bool]:
-    client = get_client()
-    lock_id = baby_sit_lock_thread_id(key)
     try:
-        await create_lock_thread(client, lock_id, ttl_minutes=WATCH_LOCK_TTL_MINUTES)
-    except ConflictError:
-        yield False
-        return
+        acquired = await event_claims.claim(_WATCH_LOCK_SCOPE, key, ttl=WATCH_LOCK_TTL)
     except Exception:
         logger.warning("Failed to acquire baby-sit lock for %s", key, exc_info=True)
+        acquired = False
+    if not acquired:
         yield False
         return
     try:
         yield True
     finally:
         try:
-            await client.threads.delete(lock_id)
+            await event_claims.release(_WATCH_LOCK_SCOPE, key)
         except Exception:
             logger.warning("Failed to release baby-sit lock for %s", key, exc_info=True)
 
@@ -204,27 +200,6 @@ class BabySitWatches:
         remaining = PullRequest.task_state.op("-")(_STATE_KEY)
         await self._update(key, {"task_state": func.nullif(remaining, literal({}, JSONB))})
 
-    async def import_store(self) -> StoreImport:
-        """Move the Store's watches in; a watch PostgreSQL already has wins."""
-        moved = 0
-        for entry in await search_all_entries(_STORE_NAMESPACE):
-            try:
-                watch = BabySitWatch.model_validate(entry.value)
-                if watch.thread_id and await self.get(watch.key) is None:
-                    await watch.join_task(title=watch.pr_url)
-                    await self.save(watch)
-            except ValueError:
-                # Unreadable, or its thread's workspace is gone: one stale watch
-                # must not keep every later one in the Store.
-                logger.warning(
-                    "Dropping a baby-sit watch the Store import cannot attach to a task",
-                    extra={"store_key": entry.key},
-                    exc_info=True,
-                )
-            await delete_value(_STORE_NAMESPACE, entry.key)
-            moved += 1
-        return StoreImport(moved=moved)
-
     @staticmethod
     def _select() -> Select[str, str, int, UUID | None, JsonObject | None, str | None]:
         return (
@@ -282,39 +257,29 @@ def watch_key(owner: str, repo: str, pr_number: int) -> str:
     return f"{owner.strip().lower()}/{repo.strip().lower()}#{pr_number}"
 
 
-async def _create_watch_cron(key: str) -> str:
-    cron = await get_client().crons.create(
-        "scheduler",
-        schedule=WATCH_SCHEDULE,
-        input={"task": "baby_sit", "watch_key": key},
-        config={"configurable": {"task": "baby_sit", "watch_key": key}},
-        metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
-        timezone="UTC",
-    )
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
-    if not isinstance(cron_id, str) or not cron_id:
-        raise RuntimeError("baby-sit cron creation did not return a cron_id")
-    return cron_id
+def _watch_job_key(key: str) -> str:
+    return f"{WATCH_JOB_KIND}:{key}"
 
 
-async def _ensure_watch_cron(key: str) -> str:
-    crons = await get_client().crons.search(
+async def _ensure_watch_job(key: str) -> str:
+    job = await queue.schedule(
+        WATCH_JOB_KIND,
+        {"watch_key": key},
+        cron=WATCH_SCHEDULE,
+        key=_watch_job_key(key),
         metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
-        limit=10,
     )
-    cron_ids = [
-        cron_id
-        for cron in crons or []
-        if isinstance(cron, dict) and isinstance((cron_id := cron.get("cron_id")), str) and cron_id
-    ]
-    if cron_ids:
-        for duplicate in cron_ids[1:]:
-            try:
-                await get_client().crons.delete(duplicate)
-            except Exception:
-                logger.warning("Failed to delete duplicate baby-sit cron %s", duplicate)
-        return cron_ids[0]
-    return await _create_watch_cron(key)
+    return str(job.id)
+
+
+async def adopt_agent_server_cron(key: str) -> bool:
+    """Move an active watch's Agent Server cron onto a job; ``False`` once it has stopped."""
+    watch = await WATCHES.get(key)
+    if watch is None or not watch.active:
+        return False
+    watch.cron_id = await _ensure_watch_job(key)
+    await WATCHES.save(watch)
+    return True
 
 
 async def start_watch(
@@ -360,15 +325,14 @@ async def start_watch(
     await watch.join_task(title=title)
     watch = await WATCHES.save(watch)
     try:
-        watch.cron_id = await _ensure_watch_cron(key)
+        watch.cron_id = await _ensure_watch_job(key)
         return await WATCHES.save(watch)
     except Exception:
         if existing is None:
-            if watch.cron_id:
-                try:
-                    await get_client().crons.delete(watch.cron_id)
-                except Exception:
-                    logger.warning("Failed to roll back baby-sit cron %s", watch.cron_id)
+            try:
+                await queue.cancel_key(_watch_job_key(key))
+            except Exception:
+                logger.warning("Failed to roll back baby-sit job %s", key, exc_info=True)
             await WATCHES.delete(key)
         raise
 
@@ -377,14 +341,13 @@ async def stop_watch(key: str) -> bool:
     watch = await WATCHES.get(key)
     if not watch:
         return False
-    if watch.cron_id:
-        try:
-            await get_client().crons.delete(watch.cron_id)
-        except Exception:
-            logger.warning("Failed to delete baby-sit cron %s", watch.cron_id, exc_info=True)
-            watch.active = False
-            await WATCHES.save(watch)
-            return True
+    try:
+        await queue.cancel_key(_watch_job_key(key))
+    except Exception:
+        logger.warning("Failed to delete baby-sit job %s", key, exc_info=True)
+        watch.active = False
+        await WATCHES.save(watch)
+        return True
     await WATCHES.delete(key)
     return True
 

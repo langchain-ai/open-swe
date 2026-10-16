@@ -15,7 +15,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.slack import solo_threads
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
-from tests.slack.test_slack_solo_threads import _Harness, _Store
+from tests.slack.test_slack_solo_threads import _Harness
 
 slack_breakout_tool = importlib.import_module("openswe.slack.tools.start_new_thread")
 
@@ -110,7 +110,6 @@ class _FakeThreadsClient:
 class _FakeClient:
     def __init__(self, captured: dict[str, Any]) -> None:
         self.threads = _FakeThreadsClient(captured)
-        self.store = _Store()
 
 
 @pytest.fixture(autouse=True)
@@ -198,6 +197,7 @@ async def test_web_breakout_does_not_post_or_bind_slack(
         (None, "C1", None, "none", "openai:gpt-6.1-sol", "none"),
     ],
 )
+@pytest.mark.usefixtures("registry_db")
 async def test_slack_breakout_thread_success(
     monkeypatch: pytest.MonkeyPatch,
     explicit: str | None,
@@ -271,7 +271,6 @@ async def test_slack_breakout_thread_success(
         return {"run_id": "run-123"}
 
     async def fake_store_mapping(
-        client: Any,
         channel_id: str,
         thread_ts: str,
         run_id: str,
@@ -281,7 +280,6 @@ async def test_slack_breakout_thread_success(
     ) -> None:
         captured["stored_mappings"].append(
             {
-                "client": client,
                 "channel_id": channel_id,
                 "thread_ts": thread_ts,
                 "run_id": run_id,
@@ -290,9 +288,8 @@ async def test_slack_breakout_thread_success(
             }
         )
 
-    async def fake_bind(client: Any, channel_id: str, thread_ts: str, thread_id: str) -> str:
+    async def fake_bind(channel_id: str, thread_ts: str, thread_id: str) -> str:
         captured["binding"] = {
-            "client": client,
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "thread_id": thread_id,
@@ -302,7 +299,6 @@ async def test_slack_breakout_thread_success(
     fake_client = _FakeClient(captured)
     routing = _Harness()
     routing.history = [{"ts": new_ts, "user": "BOT", "bot_id": "B1", "text": "breakout"}]
-    fake_client.store = routing.store
     monkeypatch.setattr(solo_threads.SlackClient, "bot", routing.bot)
     monkeypatch.setattr(solo_threads, "slack_thread_mutation_lock", routing.mutation_lock)
     config = _config()

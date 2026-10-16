@@ -18,6 +18,7 @@ from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.pr_links import SlackPullRequestLink
+from openswe.slack.records import SlackMessage
 from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 
@@ -103,6 +104,17 @@ def _message_update_payload(*, bot_message: bool = False) -> dict[str, Any]:
     }
 
 
+def _delivered(triggering_user_id: str = "U1", agent_thread_id: str = "t1") -> SlackMessage:
+    return SlackMessage(
+        channel_id="C1",
+        message_ts="1786573369.551099",
+        run_id="run-1",
+        thread_ts="1786573300.000000",
+        triggering_user_id=triggering_user_id,
+        agent_thread_id=agent_thread_id,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
@@ -118,21 +130,14 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: _FakeClient())
+    monkeypatch.setattr(slack_events.event_claims, "claim", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(
         webhook_common,
         "lookup_slack_run_mapping",
-        AsyncMock(
-            return_value={
-                "run_id": "run-1",
-                "thread_ts": "1786573300.000000",
-                "triggering_user_id": "U1",
-                "agent_thread_id": "t1",
-            }
-        ),
+        AsyncMock(return_value=_delivered()),
     )
     monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
@@ -375,9 +380,7 @@ async def test_message_update_background_task_rejects_mismatched_delivery_mappin
     value: str,
 ) -> None:
     lookup_run = cast(AsyncMock, webhook_common.lookup_slack_run_mapping)
-    delivered = dict(lookup_run.return_value)
-    delivered[field] = value
-    lookup_run.return_value = delivered
+    lookup_run.return_value = _delivered(**{field: value})
     process = AsyncMock()
     monkeypatch.setattr(slack_service, "process_slack_mention", process)
     background_tasks = _FakeBackgroundTasks()
@@ -479,12 +482,7 @@ async def test_message_update_retries_until_delivery_mapping_exists(
     lookup_run = AsyncMock(
         side_effect=[
             None,
-            {
-                "run_id": "run-1",
-                "thread_ts": "1786573300.000000",
-                "triggering_user_id": "U1",
-                "agent_thread_id": "t1",
-            },
+            _delivered(),
         ]
     )
     sleep = AsyncMock()

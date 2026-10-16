@@ -1,6 +1,5 @@
 """Storage for explicit thread feedback and historical submissions."""
 
-import logging
 from datetime import datetime
 from typing import Literal
 
@@ -11,14 +10,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.database.store_imports import StoreImport, run_store_import
-from openswe.store import delete_value, search_entries
 from openswe.utils.json_types import JsonObject
 
-logger = logging.getLogger(__name__)
-
 Rating = Literal["bad", "good", "other"]
-LEGACY_FEEDBACK_NAMESPACE = ["thread_feedback"]
 
 
 class Feedback(BaseModel):
@@ -60,38 +54,5 @@ class FeedbackRecords:
                 )
             )
 
-    async def import_store(self) -> StoreImport:
-        """Move feedback from the LangGraph Store.
-
-        A record already in PostgreSQL wins unless the Store holds the person's
-        answer and PostgreSQL does not, so nobody is asked twice.
-        """
-        moved = 0
-        answered = ("completed", "dismissed")
-        while page := await search_entries(LEGACY_FEEDBACK_NAMESPACE):
-            for entry in page:
-                upsert = insert(ThreadFeedback).values(thread_id=entry.key, value=entry.value)
-                if entry.value.get("status") in answered:
-                    upsert = upsert.on_conflict_do_update(
-                        index_elements=[ThreadFeedback.thread_id],
-                        set_={"value": entry.value, "updated_at": func.clock_timestamp()},
-                        where=ThreadFeedback.value["status"].astext.not_in(answered),
-                    )
-                else:
-                    upsert = upsert.on_conflict_do_nothing()
-                async with postgres.session() as session:
-                    await session.execute(upsert)
-                await delete_value(entry.namespace or LEGACY_FEEDBACK_NAMESPACE, entry.key)
-            moved += len(page)
-        return StoreImport(moved=moved)
-
 
 FEEDBACK = FeedbackRecords()
-
-
-async def run_feedback_import() -> None:
-    """Drain thread feedback from the Store in the background, so a backlog never delays startup."""
-    try:
-        await run_store_import("thread_feedback", FEEDBACK.import_store)
-    except Exception:
-        logger.exception("Importing thread feedback from the LangGraph Store failed")

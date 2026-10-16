@@ -11,7 +11,6 @@ from openswe.remote_runtime.tokens import (
     sign_runtime_token,
     verify_runtime_token,
 )
-from scripts.export_remote_reviewer_spec import SPEC_PATH, render_spec
 
 RUN = RemoteRun(
     thread_id="thread-1",
@@ -26,6 +25,80 @@ def token_secret(monkeypatch: pytest.MonkeyPatch) -> None:
         "REMOTE_RUNTIME_TOKEN_SECRET",
         "current-signing-key-0123456789abcdef,previous-signing-key-0123456789abcdef",
     )
+
+
+@pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
+def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from openswe.utils.model import provider_model_kwargs
+
+    main = ModelChoice("openai:gpt-6.1-sol", {})
+    session = RunSession(
+        ToolSurface(models=SurfaceModels(main=main, subagent=main, use_gateway=False)),
+        {},
+        None,
+        started_here=True,
+    )
+    choice = session.model_for(
+        {
+            "model_route": "default",
+            "requested_model": requested,
+            "requested_effort": "medium",
+        }
+    )
+
+    assert choice.model_id == requested
+    assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
+
+
+async def test_app_lifespan_exits_without_managed_deep_agents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.api.app import app, lifespan
+    from openswe.remote_runtime.client import RemoteRuntimeConfigurationError
+
+    monkeypatch.delenv("MDA_RUNTIME_URL", raising=False)
+
+    with pytest.raises(RemoteRuntimeConfigurationError, match="MDA_RUNTIME_URL is required"):
+        async with lifespan(app):
+            pass
+
+
+async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepare_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import openswe.reviewer as reviewer
+    from openswe.github.thread_token import (
+        invalidate_cached_github_token,
+        resolve_thread_github_token,
+    )
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def mint(*, repositories: list[str] | None = None) -> tuple[str, str | None]:
+        assert repositories == ["widgets"]
+        return "ghs_reviewer", None
+
+    monkeypatch.setattr(reviewer, "get_github_app_installation_token_with_expiry", mint)
+    await invalidate_cached_github_token(RUN.thread_id)
+    config = {"configurable": {**RUN.configurable, "thread_id": RUN.thread_id, "source": "github"}}
+    session = RunSession(
+        ToolSurface(
+            middleware=[
+                reviewer.PrepareReviewerRunMiddleware(
+                    thread_id=RUN.thread_id, config=config, use_gateway=False
+                )
+            ]
+        ),
+        config,
+        None,
+        started_here=False,
+    )
+
+    await session.join({"messages": [], "run_prepared": True}, None)
+
+    assert await resolve_thread_github_token(config) == "ghs_reviewer"
 
 
 def test_run_token_round_trips_the_signed_run() -> None:
@@ -126,7 +199,52 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
-def test_remote_reviewer_spec_matches_the_tools_the_backend_serves() -> None:
-    assert SPEC_PATH.read_text(encoding="utf-8") == render_spec(), (
-        "Run `uv run python -m scripts.export_remote_reviewer_spec`"
-    )
+async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
+    """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
+    from langchain.agents import create_agent
+    from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.tools import StructuredTool
+    from langchain_quickjs import CodeInterpreterMiddleware
+
+    from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+
+    def integration(name: str) -> StructuredTool:
+        async def run(query: str) -> str:
+            return query
+
+        return StructuredTool.from_function(coroutine=run, name=name, description=name)
+
+    async def build(config: object, surface: ToolSurface) -> None:
+        surface.dynamic = DynamicToolMiddleware(
+            {"MCP": [integration("mcp_search"), integration("mcp.dotted")]}
+        )
+        core = [integration(name) for name in ("read_file", "manage_thread", "slack_reply")]
+        middleware: list[AgentMiddleware] = [
+            surface.dynamic,
+            CodeInterpreterMiddleware(ptc=[integration("mcp_search")]),
+        ]
+        surface.graph = create_agent(
+            FakeListChatModel(responses=[]), tools=core, middleware=middleware
+        )
+        surface.code_mode = True
+        surface.middleware = middleware
+        choice = ModelChoice("openai:gpt-6.1-sol", {})
+        surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
+
+    async def start_models(cfg: object) -> object:
+        raise AssertionError("not asked for")
+
+    graph = RemoteGraph("agent", build, start_models)
+    catalog = await graph.hook(RUN, "catalog", {"run_id": "run-1"})
+
+    assert isinstance(catalog, dict)
+    tools = catalog["tools"]
+    assert isinstance(tools, list)
+    names = {tool["name"] for tool in tools if isinstance(tool, dict)}
+    assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
+    assert "eval" not in names
+    assert catalog["code_only"] == ["manage_thread", "mcp_search"]
+    assert catalog["also_from_code"] == ["read_file"]

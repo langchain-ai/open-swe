@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from e2e_env import (
     BASE_BRANCH,
     DEMO_CHANNEL,
@@ -124,8 +125,7 @@ with open("CHANGELOG.md", "a") as changelog:
 PY
 git add -A
 git commit -m "{EXPEDITE_PR_TITLE}"
-git push origin {FEATURE_BRANCH}
-echo PUSHED_OK
+echo COMMITTED_OK
 """.strip()
 
 # Only a test file changes, and the card never draws tests: the votes cast on
@@ -167,7 +167,6 @@ def greet(name):
 EOF
 git add -A
 git commit -m "{PR_TITLE}"
-git push origin {FEATURE_BRANCH}
 cd ..
 git clone "$E2E_SECOND_REMOTE" companion
 cd companion
@@ -180,8 +179,7 @@ def connect():
 EOF
 git add -A
 git commit -m "{SECOND_PR_TITLE}"
-git push origin {SECOND_FEATURE_BRANCH}
-echo BOTH_PUSHED_OK
+echo BOTH_COMMITTED_OK
 """.strip()
 
 _MANY_FILES_IMPLEMENT_SCRIPT = f"""
@@ -242,9 +240,26 @@ curl --fail --silent --show-error \
   "{FAKE_GITHUB_API}/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
-# The system prompt of the most recent model call, so specs can assert what the
-# agent was actually told (e.g. the workspace section) rather than infer it.
-LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
+
+class SystemPromptRecord:
+    """The system prompt of the most recent model call, so specs can assert what the
+    agent was actually told (e.g. the workspace section) rather than infer it.
+
+    The harness serves it. A model running in another process, as on the Managed
+    Deep Agents server, sends each prompt there through ``report_to``.
+    """
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.report_to: str | None = None
+
+    def record(self, text: str) -> None:
+        self.text = text
+        if self.report_to is not None:
+            httpx.post(self.report_to, json={"text": text}, timeout=10).raise_for_status()
+
+
+LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
@@ -1199,10 +1214,18 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-expedite-ack",
         ),
         _tool_step(
-            "Making the change and pushing the branch.",
+            "Making the change.",
             "execute",
             {"command": _EXPEDITE_SETUP_SCRIPT},
             "call-expedite-setup",
+        ),
+        # A clone in the same command leaves nothing for the workflow push guard to
+        # inspect, so the push runs on its own.
+        _tool_step(
+            "Pushing the branch.",
+            "execute",
+            {"command": f"git -C repo push origin {FEATURE_BRANCH}"},
+            "call-expedite-push",
         ),
         _tool_step(
             "Opening a pull request that is ready for review.",
@@ -1284,10 +1307,22 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-multi-ack",
         ),
         _tool_step(
-            "Implementing and pushing both repository changes.",
+            "Implementing both repository changes.",
             "execute",
             {"command": _MULTI_REPO_SCRIPT},
             "call-multi-repos",
+        ),
+        _tool_step(
+            "Pushing the primary branch.",
+            "execute",
+            {"command": f"git -C repo push origin {FEATURE_BRANCH}"},
+            "call-multi-push-primary",
+        ),
+        _tool_step(
+            "Pushing the companion branch.",
+            "execute",
+            {"command": f"git -C companion push origin {SECOND_FEATURE_BRANCH}"},
+            "call-multi-push-companion",
         ),
         _tool_step(
             "Opening the primary pull request.",
@@ -1582,7 +1617,7 @@ class FakeScriptedChatModel(BaseChatModel):
     ) -> ChatResult:
         for message in messages:
             if isinstance(message, SystemMessage):
-                LAST_SYSTEM_PROMPT["text"] = _text(message.content)
+                LAST_SYSTEM_PROMPT.record(_text(message.content))
                 break
         humans = _script_humans(messages)
         context = ScriptContext(

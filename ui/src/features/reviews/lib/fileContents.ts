@@ -1,8 +1,8 @@
 import { api, type ReviewDiffFile, type ReviewFileContents } from "@/lib/api"
 
-// Patch-parsed diffs only carry the lines the patch included. Pierre asks for
-// full contents the first time a viewer expands context, and "Add to Chat"
-// needs them to slice a snippet, so both share one in-flight request per file.
+// Patch-parsed diffs only carry the lines the patch included. Review diffs load
+// full contents on mount to highlight in context, Pierre asks when a viewer
+// expands context, and "Add to Chat" slices snippets, so all share one request.
 const pending = new Map<string, Promise<ReviewFileContents>>()
 
 function key(

@@ -27,10 +27,10 @@ from openswe.dashboard.oauth import (
 )
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import now_iso
 from openswe.users import User, UserPreferences, UserPreferencesPatch
 from openswe.users.records import UserRecords
 from openswe.utils.json_types import JsonObject
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 

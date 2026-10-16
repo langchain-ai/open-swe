@@ -16,6 +16,7 @@ from openswe.dashboard.workspace_settings import (
     upsert_workspace_overrides,
 )
 from openswe.mcp import cards, managed, routes, runtime
+from openswe.users.models import User
 
 GATEWAY_ID = "01a0f8da-0f4b-7817-b2da-27b7bfa5f0f8"
 
@@ -184,7 +185,7 @@ async def test_gateway_status_names_the_services_already_connected(monkeypatch):
     ]
 
 
-async def test_only_the_instance_picks_the_gateway(fake_store):
+async def test_only_the_instance_picks_the_gateway(registry_db):
     await upsert_workspace_overrides(
         "oss", WorkspaceSettingsUpdate(managed_tools_gateway_id=GATEWAY_ID)
     )
@@ -235,7 +236,7 @@ def private_thread(monkeypatch, owner: str) -> dict[str, str]:
 
 async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
     async def discover(record, namespace):
-        assert record.url.endswith(f"/v1/managed-tools/gateways/{GATEWAY_ID}/mcp")
+        assert record.url.endswith(f"/v1/managed-tools/kits/{GATEWAY_ID}/mcp")
         assert record.connection_headers()["Authorization"] == "Bearer alice-langsmith-token"
         return [
             Tool(name=name, input_schema={"type": "object"})
@@ -287,26 +288,16 @@ async def test_langsmith_outage_drops_only_the_gateway(monkeypatch):
 
 
 @pytest.fixture
-def card_store(monkeypatch) -> dict[tuple[tuple[str, ...], str], dict[str, object]]:
-    items: dict[tuple[tuple[str, ...], str], dict[str, object]] = {}
-
-    async def get_item(namespace, key):
-        value = items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(namespace, key, value):
-        items[(tuple(namespace), key)] = value
-
-    store = SimpleNamespace(get_item=get_item, put_item=put_item)
+async def card_store(monkeypatch, registry_db) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    await User.sign_in("github", "1", login="alice")
+    await User.sign_in("github", "2", login="bob")
     thread = {"metadata": {"source": "slack", "github_login": "carol", "workspace": "eng"}}
     monkeypatch.setattr(
         cards,
         "langgraph_client",
-        lambda: SimpleNamespace(
-            store=store, threads=SimpleNamespace(get=AsyncMock(return_value=thread))
-        ),
+        lambda: SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=thread))),
     )
-    return items
 
 
 async def test_card_resumes_once_its_own_services_are_connected(monkeypatch, card_store):
@@ -407,7 +398,7 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
         ),
     )
     post = AsyncMock(return_value={"success": True})
-    monkeypatch.setattr(tool, "slack_reply", post)
+    monkeypatch.setattr(tool, "send_slack_reply", post)
 
     result = await tool.connect_managed_tools(["linear"], {"reply_surface": "slack"}, "call-1")
 
@@ -421,7 +412,7 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
         f"/dashboard/api/my-managed-tools/{GATEWAY_ID}/connect/mt-1",
     )
     assert parse_qs(parsed.query) == {"thread_id": ["t"], "card": ["call-1"]}
-    assert (await cards.ConnectCard.load("t", "call-1")).services == ["mt-1"]
+    assert (await cards.ConnectCard.load("t", "call-1", "alice", GATEWAY_ID)).services == ["mt-1"]
     assert result["continues_automatically"] is True
 
     # The Slack call ends the turn, so "already connected" must still reach the person.

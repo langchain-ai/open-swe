@@ -45,7 +45,6 @@ from openswe.github.http import (
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
-from openswe.github.repo_names import display_repo_name
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
@@ -53,6 +52,7 @@ from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
@@ -72,7 +72,6 @@ from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
-from openswe.utils.thread_ops import langgraph_client
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
@@ -270,13 +269,11 @@ def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
 
 async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
     try:
-        await langgraph_client().runs.create(
-            None,
-            "scheduler",
-            input={"task": SCHEDULER_TASK, "request_id": str(request.id), "step": step},
+        await queue.schedule(
+            SCHEDULER_TASK,
+            {"request_id": str(request.id), "step": step},
+            due_at=datetime.now(UTC) + after,
             metadata={"kind": SCHEDULER_TASK, "request_id": str(request.id), "step": step},
-            after_seconds=int(after.total_seconds()),
-            on_completion="delete",
         )
     except Exception:
         logger.warning(
@@ -294,8 +291,9 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
         return RequestResult(
             success=False,
             error=(
-                "This pull request has an open expedited review card. Dismiss it before "
-                "asking for a standard review."
+                "This pull request has an outstanding expedited review request. "
+                "A standard review cannot run concurrently. Cancel the expedited request "
+                "before asking for a standard review."
                 + (f" Open in Slack: {permalink}" if permalink else "")
             ),
             request_id=str(active.id),
@@ -546,7 +544,7 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     if isinstance(added, Outcome):
         return added
     pr = added.pull_request
-    label = f"<{pr.url}|{display_repo_name(f'{pr.owner}/{pr.repo}')}#{pr.number}>"
+    label = f"<{pr.url}|{pr.label}>"
     if others := {pick.user_id for pick in added.picks}:
         await ReviewPicks(added).drop(
             others,
@@ -652,7 +650,7 @@ async def assign(
     if isinstance(reviewer, Outcome):
         return _failure(reviewer.message)
     pr = request.pull_request
-    label = f"<{pr.url}|{display_repo_name(f'{pr.owner}/{pr.repo}')}#{pr.number}>"
+    label = f"<{pr.url}|{pr.label}>"
     theirs = coverage.of(github_login) if coverage is not None else []
     if replace and (
         others := {
@@ -1280,7 +1278,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         )
         sent = await send_dm(
             participant.user.slack_user_id,
-            f"Reminder: Open SWE picked you to review <{pr.url}|{display_repo_name(f'{pr.owner}/{pr.repo}')}#{pr.number}> "
+            f"Reminder: Open SWE picked you to review <{pr.url}|{pr.label}> "
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
@@ -1363,7 +1361,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
             "next_waits_until": choice.until.isoformat() if isinstance(choice, Wait) else "",
         },
     )
-    label = f"<{pr.url}|{display_repo_name(f'{pr.owner}/{pr.repo}')}#{pr.number}>"
+    label = f"<{pr.url}|{pr.label}>"
     await ReviewPicks(request).drop(
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
@@ -1425,7 +1423,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     )
     await ReviewPicks(request).drop(
         {pick.user_id for pick in request.picks},
-        f"You no longer need to review <{pr.url}|{display_repo_name(f'{pr.owner}/{pr.repo}')}#{pr.number}> "
+        f"You no longer need to review <{pr.url}|{pr.label}> "
         f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
     )
     return "not_asked"

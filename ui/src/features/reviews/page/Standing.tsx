@@ -289,14 +289,6 @@ function Row({
       <span className="min-w-0 flex-1 truncate text-xs text-secondary">
         {children}
       </span>
-      {expandable && (
-        <CaretRightIcon
-          className={cn(
-            "size-3 shrink-0 text-secondary transition-transform",
-            expanded && "rotate-90"
-          )}
-        />
-      )}
     </>
   )
   return (
@@ -316,7 +308,25 @@ function Row({
         </div>
       )}
       {action && (
-        <div className="flex shrink-0 items-center gap-space-2">{action}</div>
+        <div className="flex shrink-0 items-center gap-space-2 empty:hidden">
+          {action}
+        </div>
+      )}
+      {expandable && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden
+          onClick={onToggle}
+          className="-my-space-1 flex shrink-0 items-center self-stretch py-space-1"
+        >
+          <CaretRightIcon
+            className={cn(
+              "size-3 text-secondary transition-transform",
+              expanded && "rotate-90"
+            )}
+          />
+        </button>
       )}
     </div>
   )

@@ -14,8 +14,8 @@ from openswe.dashboard.user_preferences import (
     UserPreferencesUpdate,
     set_user_preferences,
 )
-from openswe.store import now_iso
 from openswe.users import User, UserPreferencesPatch
+from openswe.utils.time import now_iso
 
 SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
 
@@ -34,7 +34,6 @@ PROFILE_SETTING_KEYS = frozenset(
 PREFERENCE_SETTING_KEYS = frozenset(
     {
         "default_visibility",
-        "local_tracing_project",
         "default_workspace",
         "follow_up_behavior",
     }

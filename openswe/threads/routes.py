@@ -4,17 +4,14 @@ import json
 import logging
 from time import perf_counter
 from typing import Annotated, Any, Literal
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
-from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
@@ -75,22 +72,11 @@ from openswe.threads.runs import (
     create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
-from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
-
-
-@router.get("/me/local-trace-url/{thread_id}")
-async def api_get_local_trace_url(
-    thread_id: UUID,
-    session: dict[str, str] = SESSION_DEP,
-) -> dict[str, str | None]:
-    preferences = await get_user_preferences(session["sub"])
-    project = preferences["local_tracing_project"] or ENV.LANGSMITH_PROJECT.get()
-    return {"trace_url": await get_langsmith_trace_url(str(thread_id), project_name=project)}
 
 
 @router.get("/threads")
