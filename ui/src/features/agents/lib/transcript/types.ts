@@ -78,6 +78,7 @@ export interface TranscriptTurnRow {
 export interface TranscriptSender {
   login: string
   kind: string
+  display_name?: string | null
 }
 
 export interface TranscriptMessageRow {

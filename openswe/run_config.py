@@ -104,6 +104,8 @@ class RunConfig(BaseModel):
     github_login: str | None = None
     github_user_id: str | None = None
     user_email: str | None = None
+    # The API key or workflow behind a system thread's run.
+    started_by_id: str | None = None
 
     # Repository
     repo: Repo | None = None
@@ -271,6 +273,15 @@ class RunConfig(BaseModel):
         if self.thread_id or self.source != "mcp" or not self.github_login:
             return None
         return self.github_login
+
+    @property
+    def sender_id(self) -> str | None:
+        """Who the run acts for, in the form ``Principal.sender_id`` records."""
+        if self.github_login:
+            return f"github:{self.github_login}"
+        if self.started_by_id:
+            return f"system:{self.started_by_id.replace(':', '/')}"
+        return None
 
     @property
     def is_eval(self) -> bool:

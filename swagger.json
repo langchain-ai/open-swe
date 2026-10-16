@@ -6821,6 +6821,36 @@
         "title": "ThreadComment",
         "type": "object"
       },
+      "ThreadMoveRequest": {
+        "description": "Where to move a thread: onto the caller's machine through a bridge, or to the cloud.",
+        "properties": {
+          "sandbox_bridge_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Bridge Id"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "const": "cloud",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "ThreadMoveRequest",
+        "type": "object"
+      },
       "ThreadRenameBody": {
         "properties": {
           "title": {
@@ -18808,6 +18838,66 @@
           }
         ],
         "summary": "Api Thread History",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/move": {
+      "post": {
+        "operationId": "api_move_thread_dashboard_api_threads__thread_id__move_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Move Thread Dashboard Api Threads  Thread Id  Move Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Move Thread",
         "tags": [
           "dashboard",
           "threads"

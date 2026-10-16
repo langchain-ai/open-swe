@@ -174,6 +174,27 @@ async def test_owner_can_publish_thread_without_retaining_admin_capabilities(
     )
 
 
+@pytest.mark.parametrize(
+    "binding",
+    [
+        {"sandbox_id": "bridge:b1", "sandbox_kind": "bridge", "sandbox_bridge_client": "cli"},
+        {"sandbox_id": "sbx", "sandbox_handoff_from": "bridge:b1"},
+    ],
+)
+async def test_a_thread_on_its_owners_machine_stays_theirs(private_thread, binding):
+    thread, client = private_thread
+    thread["metadata"].update(binding)
+    with pytest.raises(HTTPException) as exc:
+        await handlers.share_thread_with_workspace("private-thread", "alice")
+    assert exc.value.status_code == 409
+    client.threads.update.assert_not_awaited()
+    # Shared before such threads were kept private.
+    shared = {**thread["metadata"], "visibility": "public"}
+    assert summary.thread_is_promptable(shared, "alice")
+    assert not summary.thread_is_promptable(shared, "bob")
+    assert not summary.thread_is_promptable(shared, "admin")
+
+
 @pytest.mark.parametrize("login", ["bob", "admin"])
 async def test_only_owner_can_publish_even_when_admin_can_read(private_thread, login):
     _, client = private_thread
