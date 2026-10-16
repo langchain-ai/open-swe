@@ -1,4 +1,4 @@
-{{ login }} {{ "approved" if approved else "denied" }} Open SWE opening PRs as them in this thread, after `open_pull_request` stopped waiting for their answer.
+{{ login }} {{ "approved" if approved else "denied" }} Open SWE opening the requested PR as them ({{ request.owner }}/{{ request.repo }}, {{ request.head }} → {{ request.base }}), after `open_pull_request` stopped waiting for their answer.
 {% if approved %}
 Call `open_pull_request` again now to open the pull request it was blocked on.
 {% else %}

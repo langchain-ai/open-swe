@@ -97,13 +97,21 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
 
 
 async def _status() -> str:
-    return (await ThreadActAs.load("thread-1")).decision_for("alice") or "pending"
+    thread = await ThreadActAs.load("thread-1")
+    request = next(iter(thread.requests.values()))
+    return thread.decision_for("alice", request) or "pending"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("action", "status", "always_allow"),
-    [("approve", "approved", False), ("always_allow", "approved", True), ("deny", "denied", False)],
+    [
+        ("approve", "approved", False),
+        ("allow_once", "approved", False),
+        ("allow_thread", "approved", False),
+        ("always_allow", "approved", True),
+        ("deny", "denied", False),
+    ],
 )
 async def test_the_persons_answer_is_recorded_and_announced(stack, action, status, always_allow):
     await slack_routes.slack_interactivity(_request(action, stack.fingerprint), BackgroundTasks())
@@ -112,7 +120,7 @@ async def test_the_persons_answer_is_recorded_and_announced(stack, action, statu
     stack.ephemeral.assert_awaited_once_with(
         "C1",
         "U-ALICE",
-        f"`alice` {status} Open SWE opening PRs as them in this thread.",
+        f"`alice`: {act_as_slack._LABELS[action]}.",
         thread_ts="1.0",
     )
     user_id, channel_id, note = stack.concierge.await_args.args

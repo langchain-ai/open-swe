@@ -1,4 +1,4 @@
-"""Requests to act as a thread participant, one per thread and person, in thread metadata.
+"""PR-specific consent requests and thread-wide decisions in thread metadata.
 
 Each request and each decision is its own top-level metadata key: thread metadata
 updates merge per key, so a stale request write can never erase a decision, and
@@ -6,6 +6,7 @@ two people's requests never overwrite each other.
 """
 
 import hashlib
+import json
 import logging
 from collections.abc import Mapping
 from typing import Literal, Self
@@ -80,22 +81,26 @@ class ThreadActAs:
     def is_shared(self) -> bool:
         return len(self._participants) > 1
 
-    def for_login(self, login: str) -> ActAsRequest | None:
-        return self.requests.get(ActAsRequest.fingerprint_for(self.thread_id, login))
-
-    def decision_for(self, login: str) -> Decision | None:
-        decision = self.decisions.get(ActAsRequest.fingerprint_for(self.thread_id, login))
+    def decision_for(self, login: str, request: ActAsRequest | None = None) -> Decision | None:
+        decision = self.decisions.get(request.fingerprint) if request else None
+        decision = decision or self.decisions.get(
+            ActAsRequest.fingerprint_for(self.thread_id, login)
+        )
         return decision.decision if decision is not None else None
 
     async def request(
         self, login: str, *, owner: str, repo: str, head: str, base: str, title: str
     ) -> ActAsRequest:
-        """The open request for ``login``, created on first ask."""
-        existing = self.for_login(login)
+        """Reuse consent only for the same author, repository and PR branches."""
+        identity = json.dumps(
+            [self.thread_id, login.lower(), owner.lower(), repo.lower(), head, base]
+        )
+        fingerprint = hashlib.sha256(identity.encode()).hexdigest()[:32]
+        existing = self.requests.get(fingerprint)
         if existing is not None:
             return existing
         request = ActAsRequest(
-            fingerprint=ActAsRequest.fingerprint_for(self.thread_id, login),
+            fingerprint=fingerprint,
             login=login,
             owner=owner,
             repo=repo,
@@ -116,7 +121,9 @@ class ThreadActAs:
         request.wake_on_answer = wake
         await self._update({_REQUEST_PREFIX + request.fingerprint: request.model_dump()})
 
-    async def decide(self, request: ActAsRequest, *, approved: bool, always_allow: bool) -> bool:
+    async def decide(
+        self, request: ActAsRequest, *, approved: bool, always_allow: bool, per_pr: bool = False
+    ) -> bool:
         """Record the first answer; ``False`` when the request was already answered."""
         if request.fingerprint in self.decisions or not await claim_slack_event(
             f"act-as-decision:{self.thread_id}:{request.fingerprint}"
@@ -125,8 +132,13 @@ class ThreadActAs:
         decision = ActAsDecision(
             decision="approved" if approved else "denied", decided_at=now_iso()
         )
-        self.decisions[request.fingerprint] = decision
-        await self._update({_DECISION_PREFIX + request.fingerprint: decision.model_dump()})
+        updates = {request.fingerprint: decision}
+        if not per_pr:
+            updates[ActAsRequest.fingerprint_for(self.thread_id, request.login)] = decision
+        self.decisions.update(updates)
+        await self._update(
+            {_DECISION_PREFIX + key: value.model_dump() for key, value in updates.items()}
+        )
         if always_allow:
             patch = UserPreferencesPatch(act_as_always_allowed=True)
             if await User.update_preferences(request.login, patch) is None:

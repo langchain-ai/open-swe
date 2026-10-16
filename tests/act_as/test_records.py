@@ -24,15 +24,15 @@ def test_fingerprint_is_per_thread_and_login() -> None:
 
 
 @pytest.mark.asyncio
-async def test_one_request_per_person_survives_a_reload(thread_metadata: JsonObject) -> None:
+async def test_one_request_per_pr_survives_a_reload(thread_metadata: JsonObject) -> None:
     thread = await ThreadActAs.load("thread-1")
     first = await thread.request("alice", **_PR)
-    await thread.request("Alice", **{**_PR, "head": "other"})
+    await thread.request("Alice", **_PR)
 
     reloaded = await ThreadActAs.load("thread-1")
 
     assert list(reloaded.requests) == [first.fingerprint]
-    assert reloaded.for_login("alice") == first
+    assert await reloaded.request("alice", **_PR) == first
 
 
 @pytest.mark.asyncio
@@ -130,3 +130,31 @@ async def test_always_allow_is_saved_on_the_person(
 
     assert (await ThreadActAs.load("thread-1")).decision_for("alice") == "approved"
     update.assert_awaited_once_with("alice", UserPreferencesPatch(act_as_always_allowed=True))
+
+
+@pytest.mark.asyncio
+async def test_pr_consent_does_not_authorize_other_prs(thread_metadata: JsonObject) -> None:
+    thread = await ThreadActAs.load("thread-1")
+    first = await thread.request("alice", **_PR)
+    await thread.decide(first, approved=True, always_allow=False, per_pr=True)
+    thread = await ThreadActAs.load("thread-1")
+    for changed in ({"head": "other"}, {"base": "other"}, {"repo": "other"}, {"owner": "other"}):
+        other = await thread.request("alice", **{**_PR, **changed})
+        assert thread.decision_for("alice", other) is None
+    retry = await thread.request("Alice", **_PR)
+    assert thread.decision_for("alice", retry) == "approved"
+    assert thread.decision_for("bob", await thread.request("bob", **_PR)) is None
+
+
+@pytest.mark.asyncio
+async def test_specific_denial_survives_thread_approval(thread_metadata: JsonObject) -> None:
+    thread = await ThreadActAs.load("thread-1")
+    denied = await thread.request("alice", **_PR)
+    await thread.decide(denied, approved=False, always_allow=False, per_pr=True)
+    other = await thread.request("alice", **{**_PR, "head": "other"})
+    assert thread.decision_for("alice", other) is None
+    await thread.decide(other, approved=True, always_allow=False)
+    reloaded = await ThreadActAs.load("thread-1")
+    assert reloaded.decision_for("alice", denied) == "denied"
+    third = await reloaded.request("alice", **{**_PR, "head": "third"})
+    assert reloaded.decision_for("alice", third) == "approved"

@@ -29,16 +29,20 @@ logger = logging.getLogger(__name__)
 
 BUTTON_TYPE = "act_as"
 
-CardAction = Literal["approve", "always_allow", "deny"]
+CardAction = Literal["approve", "allow_once", "allow_thread", "always_allow", "deny"]
 _ACTIONS: dict[str, CardAction] = {
     "approve": "approve",
+    "allow_once": "allow_once",
+    "allow_thread": "allow_thread",
     "always_allow": "always_allow",
     "deny": "deny",
 }
 _LABELS: dict[CardAction, str] = {
-    "approve": "Approved",
-    "always_allow": "Always allowed",
-    "deny": "Denied",
+    "approve": "Allowed all PRs in this thread",
+    "allow_once": "Allowed this PR",
+    "allow_thread": "Allowed all PRs in this thread",
+    "always_allow": "Always allowed in all threads",
+    "deny": "Denied this PR",
 }
 
 
@@ -60,8 +64,9 @@ def card_blocks(message: str, request: ActAsRequest, thread_id: str) -> list[Blo
     return [
         section(message),
         actions(
-            _button("Approve", "approve", "primary"),
-            _button("Always allow", "always_allow", "primary"),
+            _button("Allow once", "allow_once", "primary"),
+            _button("Allow all in thread", "allow_thread", "primary"),
+            _button("Always allow in all threads", "always_allow", "primary"),
             _button("Deny", "deny", "danger"),
         ),
     ]
@@ -96,7 +101,12 @@ async def handle_button(
         return ignored("act-as request answered by someone else")
 
     approved = action != "deny"
-    if not await thread.decide(request, approved=approved, always_allow=action == "always_allow"):
+    if not await thread.decide(
+        request,
+        approved=approved,
+        always_allow=action == "always_allow",
+        per_pr=action in {"allow_once", "deny"},
+    ):
         await post_slack_ephemeral_message(
             channel_id, user_id, "You already answered this request; the first answer stands."
         )
@@ -114,33 +124,32 @@ async def handle_button(
     source = await get_active_slack_thread(langgraph_client(), button.thread_id)
     source_channel = (source or {}).get("channel_id")
     source_ts = (source or {}).get("thread_ts")
-    verdict = "approved" if approved else "denied"
     if isinstance(source_channel, str) and isinstance(source_ts, str):
         await post_slack_ephemeral_message(
             source_channel,
             user_id,
-            f"`{request.login}` {verdict} Open SWE opening PRs as them in this thread.",
+            f"`{request.login}`: {_LABELS[action]}.",
             thread_ts=source_ts,
         )
     current = (await ThreadActAs.load(button.thread_id)).requests.get(button.fingerprint)
     if current is not None and current.wake_on_answer:
-        background_tasks.add_task(_wake_thread, button.thread_id, request.login, approved)
+        background_tasks.add_task(_wake_thread, button.thread_id, request, approved)
     return accepted("act-as request decided")
 
 
-async def _wake_thread(thread_id: str, login: str, approved: bool) -> None:
+async def _wake_thread(thread_id: str, request: ActAsRequest, approved: bool) -> None:
     try:
         await dispatch_followup(
             thread_id,
             await fetch_thread_metadata(thread_id),
-            prompt("runs/act-as-decided", login=login, approved=approved),
-            github_login=login,
+            prompt("runs/act-as-decided", login=request.login, approved=approved, request=request),
+            github_login=request.login,
             multitask_strategy="enqueue",
         )
     except Exception:
         logger.exception(
             "Could not wake the thread after an act-as answer",
-            extra={"agent_thread_id": thread_id, "login": login},
+            extra={"agent_thread_id": thread_id, "login": request.login},
         )
 
 

@@ -63,7 +63,7 @@ async def _open() -> gate.ActAsRefusal | None:
 
 async def _answer(approved: bool) -> None:
     thread = await ThreadActAs.load("thread-1")
-    request = thread.for_login("alice")
+    request = next(iter(thread.requests.values()))
     assert request is not None
     await thread.decide(request, approved=approved, always_allow=False)
 
@@ -90,7 +90,11 @@ async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monke
     expected_url = slack_url or "https://example.com/agents/thread-1"
     assert f"<{expected_url}|this thread>" in dm.await_args.args[1]
     value = json.loads(dm.await_args.kwargs["blocks"][1]["elements"][0]["value"])
-    assert (value["type"], value["action"], value["thread_id"]) == ("act_as", "approve", "thread-1")
+    assert (value["type"], value["action"], value["thread_id"]) == (
+        "act_as",
+        "allow_once",
+        "thread-1",
+    )
     user_id, channel_id, note = dm.concierge.await_args.args
     assert (user_id, channel_id) == ("U-ALICE", "D-ALICE")
     assert expected_url in note and '"t"' not in note
@@ -203,3 +207,27 @@ async def test_a_hostile_pr_title_never_reaches_the_concierge_note(dm, monkeypat
     assert "Ignore previous instructions" not in note and "<!channel>" not in note
     card = dm.await_args.args[1]
     assert "<!channel>" not in card
+
+
+@pytest.mark.asyncio
+async def test_allow_once_reuses_same_pr_but_asks_for_another(dm, monkeypatch):
+    _alice(monkeypatch, "U-ALICE")
+    assert (await _open())["act_as"] == "pending"
+    thread = await ThreadActAs.load("thread-1")
+    request = next(iter(thread.requests.values()))
+    await thread.decide(request, approved=True, always_allow=False, per_pr=True)
+    dm.reset_mock()
+    assert await _open() is None
+    dm.assert_not_awaited()
+    refusal = await gate.require_consent(
+        thread_id="thread-1",
+        token_kind="user",
+        author=None,
+        owner="o",
+        repo="r",
+        head="other",
+        base="b",
+        title="another PR",
+    )
+    assert refusal is not None and refusal["act_as"] == "pending"
+    dm.assert_awaited_once()
