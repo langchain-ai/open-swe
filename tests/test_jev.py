@@ -194,19 +194,24 @@ async def test_opening_model_and_effort_share_one_request_with_independent_decis
         )
 
 
-async def test_thread_search_keeps_likely_matches_best_first(transport: InstallTransport) -> None:
+async def test_thread_search_judges_each_thread_alone_and_drops_failed_calls(
+    transport: InstallTransport,
+) -> None:
+    nouls = {"DM fix": 0.7, "Docs": 0.2, "Slack DMs drop messages": 0.9}
+    seen: list[str] = []
+
     def handle(request: httpx2.Request) -> httpx2.Response:
-        payload = json.loads(request.read())
-        assert payload["state"]["query"] == "slack dm bug"
-        assert payload["state"]["threads"]["a"]["pull_requests"] == [{"title": "Fix DM routing"}]
+        state = json.loads(request.read())["state"]
+        title = state["thread"]["title"]
+        seen.append(title)
+        assert state["query"] == "slack dm bug"
+        if title == "Flaky":
+            return httpx2.Response(503, json={"error": "unavailable"})
         return httpx2.Response(
             200,
             json={
                 "model": "jev-1.13.0",
-                "answers": {
-                    thread_id: {"type": "noul", "noul": noul}
-                    for thread_id, noul in {"a": 0.7, "b": 0.2, "c": 0.9, "x": 0.99}.items()
-                },
+                "answers": {"match": {"type": "noul", "noul": nouls[title]}},
             },
         )
 
@@ -215,6 +220,8 @@ async def test_thread_search_keeps_likely_matches_best_first(transport: InstallT
         {"id": "a", "title": "DM fix", "pullRequests": [{"title": "Fix DM routing"}]},
         {"id": "b", "title": "Docs"},
         {"id": "c", "title": "Slack DMs drop messages"},
+        {"id": "d", "title": "Flaky"},
     ]
     ranked = await rank_threads("slack dm bug", threads)
+    assert sorted(seen) == sorted(thread["title"] for thread in threads)
     assert [(thread["id"], thread["relevance"]) for thread in ranked] == [("c", 0.9), ("a", 0.7)]

@@ -1,12 +1,20 @@
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from math import isfinite
 from typing import Literal
 
 import httpx2
-from langchain_typesafe import Choice, ClassifierResponse, Question, State, TypeSafeClassifier
+from langchain_typesafe import (
+    Choice,
+    ClassifierRequest,
+    ClassifierResponse,
+    Question,
+    State,
+    TypeSafeClassifier,
+)
 
 from openswe.config import ENV
 from openswe.utils.gateway import gateway_base_url
@@ -45,29 +53,47 @@ class JevUnavailableError(RuntimeError):
     """Neither a TypeSafe key nor a LangSmith gateway key is configured."""
 
 
+@asynccontextmanager
+async def _jev_classifier(timeout: float) -> AsyncIterator[TypeSafeClassifier]:
+    typesafe_key = ENV.TYPESAFE_API_KEY.optional()
+    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
+    if not typesafe_key and not gateway_key:
+        raise JevUnavailableError("Jev needs TYPESAFE_API_KEY or a LangSmith gateway key")
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
+        yield TypeSafeClassifier(
+            model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
+            api_key=typesafe_key or gateway_key,
+            **({} if typesafe_key else {"base_url": gateway_base_url()}),
+            async_client=client,
+        )
+
+
 async def classify_with_jev(
     state: State,
     questions: Mapping[str, Question],
     *,
     timeout: float,
 ) -> ClassifierResponse:
-    typesafe_key = ENV.TYPESAFE_API_KEY.optional()
-    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-    if not typesafe_key and not gateway_key:
-        raise JevUnavailableError("Jev needs TYPESAFE_API_KEY or a LangSmith gateway key")
-    async with (
-        asyncio.timeout(timeout),
-        httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client,
-    ):
-        classifier = TypeSafeClassifier(
-            model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
-            api_key=typesafe_key or gateway_key,
-            **({} if typesafe_key else {"base_url": gateway_base_url()}),
-            async_client=client,
-        )
+    async with asyncio.timeout(timeout), _jev_classifier(timeout) as classifier:
         return await classifier.ainvoke(
-            {"state": state, "questions": dict(questions)},
-            config={"tags": ["nostream"]},
+            {"state": state, "questions": dict(questions)}, config={"tags": ["nostream"]}
+        )
+
+
+async def classify_each_with_jev(
+    requests: Sequence[ClassifierRequest],
+    *,
+    timeout: float,
+    max_concurrency: int,
+) -> list[ClassifierResponse | Exception]:
+    """Classify each request on its own; a failed request yields its exception."""
+    async with asyncio.timeout(timeout), _jev_classifier(timeout) as classifier:
+        # abatch returns exceptions in place, but is typed `list[Output]`:
+        # https://github.com/langchain-ai/langchain/issues/41276
+        return await classifier.abatch(  # ty: ignore[invalid-return-type]
+            list(requests),
+            config={"tags": ["nostream"], "max_concurrency": max_concurrency},
+            return_exceptions=True,
         )
 
 
