@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
+_DEPENDENT_TOOL_ARGUMENTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "list_comments": (("statusUpdateType", "statusUpdateId"),),
+    "save_comment": (("statusUpdateType", "statusUpdateId"),),
+}
 
 type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
@@ -177,6 +181,15 @@ def _wrap_tool(
                 raise ToolException("MCP connection changed; start a new run")
             if not record.allows_tool(definition.name):
                 raise ToolException("This tool is no longer allowed by the MCP connection settings")
+            required = definition.input_schema.get("required", [])
+            arguments = {
+                key: value
+                for key, value in arguments.items()
+                if key in required or value not in ("", None)
+            }
+            for dependent, sibling in _DEPENDENT_TOOL_ARGUMENTS.get(definition.name, ()):
+                if sibling not in arguments:
+                    arguments.pop(dependent, None)
             fresh = await as_langchain_tool(definition, _client(record, namespace))
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")

@@ -1,12 +1,18 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import langgraph_sdk
 import pytest
+from langchain.agents import create_agent
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from mcp.types import CallToolResult, TextContent, Tool
+from pydantic import JsonValue
 
 from openswe.mcp import MCPConnection, runtime
-from tests.mcp_helpers import fake_mcp_server
+from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+from openswe.sandboxes.tool_runtime import ToolSurface
+from tests.mcp_helpers import Transport, fake_mcp_server
 
 
 def record(name="linear", **fields):
@@ -167,3 +173,79 @@ async def test_failed_lookup_blocks_loaded_tool_without_falling_back(remote, cap
     tool = (await runtime.load_mcp_tools(workspace, user))[0]
     assert "MCP call failed" in await tool.ainvoke({})
     assert "private store details" not in caplog.text
+
+
+@pytest.mark.parametrize("tool_name", ["list_comments", "save_comment"], ids=["list", "5-save"])
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        pytest.param(
+            {
+                "issueId": "HEA-51",
+                "cursor": "",
+                "statusUpdateId": "",
+                "statusUpdateType": "project",
+            },
+            {"issueId": "HEA-51"},
+            id="1-drop-optional-placeholders-and-dependent-enum",
+        ),
+        pytest.param(
+            {"issueId": "HEA-51", "cursor": "next-page"},
+            {"issueId": "HEA-51", "cursor": "next-page"},
+            id="2-preserve-nonempty-optional",
+        ),
+        pytest.param(
+            {"issueId": "", "cursor": None, "statusUpdateType": "project"},
+            {"issueId": ""},
+            id="3-preserve-empty-required-and-drop-null-optional",
+        ),
+        pytest.param(
+            {"issueId": None, "statusUpdateId": None, "statusUpdateType": "project"},
+            {"issueId": None},
+            id="3-preserve-null-required",
+        ),
+        pytest.param(
+            {"issueId": "HEA-51", "statusUpdateId": "update-1", "statusUpdateType": "project"},
+            {"issueId": "HEA-51", "statusUpdateId": "update-1", "statusUpdateType": "project"},
+            id="4-preserve-dependent-enum-with-id",
+        ),
+    ],
+)
+async def test_loaded_mcp_arguments_are_sanitized_through_dynamic_tool_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    arguments: dict[str, JsonValue],
+    expected: dict[str, JsonValue],
+) -> None:
+    definition = Tool(
+        name=tool_name,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "issueId": {"type": ["string", "null"]},
+                "cursor": {"type": ["string", "null"]},
+                "statusUpdateId": {"type": ["string", "null"]},
+                "statusUpdateType": {"type": "string", "enum": ["project", "initiative"]},
+            },
+            "required": ["issueId"],
+        },
+    )
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[definition]))
+
+    async def call(
+        transport: Transport, name: str, forwarded: dict[str, JsonValue]
+    ) -> CallToolResult:
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(forwarded))])
+
+    fake_mcp_server(monkeypatch, call=call)
+    connection = source(("workspace_mcps",), {"linear": record(allowed_tools=[tool_name])})
+    tools = await runtime.load_mcp_tools(connection)
+    dynamic = DynamicToolMiddleware({"Linear": tools})
+    graph = create_agent(FakeListChatModel(responses=[]), middleware=[dynamic])
+    surface = ToolSurface(graph=graph, dynamic=dynamic)
+    await surface.prepare({})
+    result = await surface.invoke("thread-1", {}, {}, tools[0].name, arguments)
+    assert result["status"] == "success"
+    content = result["content"]
+    assert isinstance(content, list) and isinstance(content[0], dict)
+    assert json.loads(str(content[0]["text"])) == expected
