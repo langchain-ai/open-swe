@@ -29,11 +29,9 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from openswe.api.agent_server_auth import backend_call
-from openswe.config import ENV
 from openswe.jobs import queue
 from openswe.remote_runtime.asgi import (
     StatusRecorder,
-    configurable_of,
     forward,
     json_body,
     read_body,
@@ -46,7 +44,7 @@ from openswe.remote_runtime.client import (
     MDA_RUNTIME,
     RUNTIME_METADATA_KEY,
 )
-from openswe.remote_runtime.proxy import LOCAL_HEADER, MdaRuntime, runs_on_mda
+from openswe.remote_runtime.proxy import LOCAL_HEADER
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
 from openswe.threads.runtimes import RUNTIMES
@@ -259,30 +257,16 @@ class ThreadRouter:
             send, 200, [thread.as_langgraph(query.select) for thread in await query.run()]
         )
 
-    def _mda(self) -> MdaRuntime:
-        runtime = RUNTIMES.mda_runtime
-        if runtime is None:
-            raise LookupError("MDA_RUNTIME_URL is not configured")
-        return runtime
-
-    async def _claim_for_mda(
-        self, thread: IndexedThread, assistant_id: JsonValue, configurable: Mapping[str, JsonValue]
-    ) -> IndexedThread:
+    async def _claim_for_mda(self, thread: IndexedThread, assistant_id: JsonValue) -> IndexedThread:
         """Move a fresh thread to MDA for its first agent or reviewer run or state.
 
-        With ``MDA_ALL_THREADS`` every such thread moves; otherwise those of people
-        (or workspaces) who chose MDA. Other graphs, and threads with checkpoints
-        here already, stay on this deployment.
+        Other graphs, and threads with checkpoints here already, stay on this deployment.
         """
         if (
             thread.runtime == "mda"
             or not isinstance(assistant_id, str)
             or assistant_id not in HOSTED_GRAPHS
-            or RUNTIMES.mda_runtime is None
             or await RUNTIMES.local.has_history(thread.thread_id)
-            or not (
-                ENV.MDA_ALL_THREADS.get_bool() or await runs_on_mda(thread.metadata, configurable)
-            )
         ):
             return thread
         await index.set_runtime(thread.thread_id, "mda")
@@ -314,14 +298,12 @@ class ThreadRouter:
                 await _not_found(send, thread_id)
                 return
             thread = await self._index_new(thread_id, {}, if_exists="do_nothing")
-        thread = await self._claim_for_mda(
-            thread, payload.get("assistant_id"), configurable_of(payload)
-        )
+        thread = await self._claim_for_mda(thread, payload.get("assistant_id"))
         # Busy before the answer reaches the caller, so a run that ends at once
         # is not marked busy after its run-complete webhook settled it.
         recorder = StatusRecorder(send, on_success=None if cron else _marks_busy(thread_id))
         if thread.runtime == "mda":
-            mda = self._mda()
+            mda = RUNTIMES.mda_runtime
             await mda.ensure_remote_thread(thread_id)
             rewritten = await mda.run_payload(thread_id, payload)
             await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
@@ -338,11 +320,9 @@ class ThreadRouter:
             return
         params = command.get("params")
         if command.get("method") == "run.start" and isinstance(params, dict):
-            thread = await self._claim_for_mda(
-                thread, params.get("assistant_id"), configurable_of(params)
-            )
+            thread = await self._claim_for_mda(thread, params.get("assistant_id"))
             if thread.runtime == "mda":
-                reply = await self._mda().start_command_run(thread_id, command, params)
+                reply = await RUNTIMES.mda_runtime.start_command_run(thread_id, command, params)
                 if reply.get("type") == "success":
                     await index.set_status(thread_id, "busy")
                 await send_json(send, 200, reply)
@@ -358,7 +338,7 @@ class ThreadRouter:
         thread = await self._thread(thread_id)
         if thread is not None:
             graph = thread.metadata.get("graph_id") or "agent"
-            await self._claim_for_mda(thread, graph, {})
+            await self._claim_for_mda(thread, graph)
         await self._to_runtime(scope, receive, send, body, thread_id)
 
     async def _copy(self, send: Send, thread_id: str) -> None:
@@ -389,7 +369,7 @@ class ThreadRouter:
     ) -> None:
         thread = await self._thread(thread_id)
         if thread is not None and thread.runtime == "mda":
-            mda = self._mda()
+            mda = RUNTIMES.mda_runtime
             await mda.ensure_remote_thread(thread_id)
             await forward(mda.http, scope, send, body)
             return

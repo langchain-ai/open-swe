@@ -68,7 +68,7 @@ class _SdkThreads:
 
 
 class Runtimes:
-    """This deployment's Agent Server, and the MDA deployment when one is configured."""
+    """This deployment's Agent Server, and the MDA deployment."""
 
     def __init__(self) -> None:
         self._mda: MdaRuntime | None = None
@@ -79,20 +79,15 @@ class Runtimes:
         return _SdkThreads(get_client(headers={LOCAL_HEADER: "1"}))
 
     @property
-    def mda_runtime(self) -> MdaRuntime | None:
+    def mda_runtime(self) -> MdaRuntime:
         url = mda_runtime_url()
-        if url is None:
-            return None
         if self._mda is None or self._mda.url != url:
             self._mda = MdaRuntime(url)
         return self._mda
 
     @property
     def mda(self) -> _SdkThreads:
-        runtime = self.mda_runtime
-        if runtime is None:
-            raise LookupError("MDA_RUNTIME_URL is not configured")
-        return _SdkThreads(runtime.sdk())
+        return _SdkThreads(self.mda_runtime.sdk())
 
     def runs_on(self, runtime: Runtime) -> _SdkThreads:
         return self.mda if runtime == "mda" else self.local

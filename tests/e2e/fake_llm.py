@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from e2e_env import (
     BASE_BRANCH,
     DEMO_CHANNEL,
@@ -239,9 +240,26 @@ curl --fail --silent --show-error \
   "{FAKE_GITHUB_API}/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
-# The system prompt of the most recent model call, so specs can assert what the
-# agent was actually told (e.g. the workspace section) rather than infer it.
-LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
+
+class SystemPromptRecord:
+    """The system prompt of the most recent model call, so specs can assert what the
+    agent was actually told (e.g. the workspace section) rather than infer it.
+
+    The harness serves it. A model running in another process, as on the Managed
+    Deep Agents server, sends each prompt there through ``report_to``.
+    """
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.report_to: str | None = None
+
+    def record(self, text: str) -> None:
+        self.text = text
+        if self.report_to is not None:
+            httpx.post(self.report_to, json={"text": text}, timeout=10).raise_for_status()
+
+
+LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
@@ -1599,7 +1617,7 @@ class FakeScriptedChatModel(BaseChatModel):
     ) -> ChatResult:
         for message in messages:
             if isinstance(message, SystemMessage):
-                LAST_SYSTEM_PROMPT["text"] = _text(message.content)
+                LAST_SYSTEM_PROMPT.record(_text(message.content))
                 break
         humans = _script_humans(messages)
         context = ScriptContext(

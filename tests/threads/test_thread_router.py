@@ -98,7 +98,7 @@ class _Runtimes:
 
 
 class _Harness:
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, *, chose_mda: bool = False) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.forwarded: list[tuple[str, dict[str, JsonValue]]] = []
         self.reached_here: list[str] = []
         self.local_status = 200
@@ -115,11 +115,6 @@ class _Harness:
         self.runtimes = _Runtimes(mda_runtime)
         monkeypatch.setattr(router, "RUNTIMES", self.runtimes)
 
-        async def runs_on_mda(
-            _metadata: Mapping[str, JsonValue] | None, _configurable: Mapping[str, JsonValue]
-        ) -> bool:
-            return chose_mda
-
         async def context(
             configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
         ) -> dict[str, JsonValue]:
@@ -128,7 +123,6 @@ class _Harness:
             )
             return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
-        monkeypatch.setattr(router, "runs_on_mda", runs_on_mda)
         monkeypatch.setattr(proxy, "remote_run_context", context)
         monkeypatch.setattr(proxy, "get_tracer_project", lambda: "open-swe-test")
 
@@ -224,6 +218,10 @@ async def test_a_run_goes_to_its_threads_runtime_and_marks_the_thread_busy(
 ) -> None:
     harness = _Harness(monkeypatch)
     await index.create(THREAD, runtime=runtime, metadata={"owner_login": "ada"})
+    if runtime == "local":
+        # A thread whose runs left checkpoints here before every new thread ran on MDA.
+        await harness.runtimes.local.create(THREAD, {"owner_login": "ada"})
+        harness.runtimes.local.threads[THREAD]["values"] = {"messages": [{"content": "hi"}]}
     run = {
         "assistant_id": "agent",
         "input": {},
@@ -249,16 +247,16 @@ async def test_a_refused_run_leaves_the_thread_idle(monkeypatch: pytest.MonkeyPa
     harness.local_status = 409
     await index.create(THREAD, runtime="local")
 
-    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent"})
+    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "review-scout"})
 
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "idle"
 
 
-async def test_a_fresh_thread_moves_to_mda_when_its_person_chose_it(
+async def test_a_fresh_agent_thread_moves_to_mda(
     monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:
-    harness = _Harness(monkeypatch, chose_mda=True)
+    harness = _Harness(monkeypatch)
     await harness.request(
         "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada"}}
     )
@@ -295,11 +293,10 @@ async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.parametrize(("assistant_id", "moves"), [("agent", True), ("review-scout", False)])
-async def test_mda_all_threads_moves_every_agent_thread_but_no_other_graph(
+async def test_only_agent_and_reviewer_threads_move_to_mda(
     monkeypatch: pytest.MonkeyPatch, secret: None, assistant_id: str, moves: bool
 ) -> None:
-    monkeypatch.setenv("MDA_ALL_THREADS", "true")
-    harness = _Harness(monkeypatch, chose_mda=False)
+    harness = _Harness(monkeypatch)
     await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": {}})
 
     await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": assistant_id})
@@ -312,7 +309,6 @@ async def test_mda_all_threads_moves_every_agent_thread_but_no_other_graph(
 async def test_a_first_state_write_moves_a_fresh_thread_to_mda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("MDA_ALL_THREADS", "true")
     harness = _Harness(monkeypatch)
     await harness.request(
         "POST", "/threads", {"thread_id": THREAD, "metadata": {"graph_id": "agent"}}

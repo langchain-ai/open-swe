@@ -355,9 +355,9 @@ async def create_durable_run(
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread. With MDA_RUNTIME_URL
-    set, threads of people who chose Managed Deep Agents run there; the request
-    goes here regardless and ``openswe.remote_runtime.proxy`` routes it.
+    means the caller already created and titled the thread. Agent and reviewer
+    threads run on Managed Deep Agents; the request goes here regardless and
+    ``openswe.remote_runtime.proxy`` routes it.
     """
     client = client or dispatch_client()
     if thread_title is not None:

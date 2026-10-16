@@ -8,11 +8,10 @@ the MDA deployment. This middleware sits in front of the core ``/threads`` and
 where a thread's runs execute.
 
 - Starting an ``agent`` or ``reviewer`` run on a thread with no local history
-  claims the thread for MDA (``runtime: mda`` in its metadata) when its person
-  turned on ``run_on_mda`` (the thread's owner, else whoever started the run),
-  or, for threads no person starts, when its workspace did. The run is created on the ``open-swe`` graph, with the run's
-  configurable moved into a signed run token in its context. Every other thread
-  runs here, so the choice is fixed for each thread's lifetime.
+  claims the thread for MDA (``runtime: mda`` in its metadata). The run is
+  created on the ``open-swe`` graph, with the run's configurable moved into a
+  signed run token in its context. Threads whose runs already left checkpoints
+  here, and other graphs, keep running here.
 - Every run, state, history and stream request for a claimed thread is forwarded.
 - ``GET /threads/{id}`` and ``POST /threads/search`` answer from this deployment,
   with each claimed thread's run-derived fields (status, values, interrupts,
@@ -38,9 +37,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from openswe.api.agent_server_auth import backend_call
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.remote_runtime.asgi import (
-    configurable_of,
     forward,
     json_body,
     read_body,
@@ -56,9 +53,6 @@ from openswe.remote_runtime.client import (
     mda_runtime_url,
     remote_run_context,
 )
-from openswe.run_config import RunConfig
-from openswe.threads.oswe_thread import OsweThreadMetadata
-from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -153,15 +147,13 @@ class MdaRuntime:
         self._unclaimed.remember(thread_id)
         return False
 
-    async def claim(self, thread_id: str, configurable: Mapping[str, JsonValue]) -> bool:
-        """Claim a fresh ``thread_id`` for MDA if the person it runs for chose MDA."""
+    async def claim(self, thread_id: str) -> bool:
+        """Claim ``thread_id`` for MDA unless runs already left checkpoints here."""
         if await self.hosts(thread_id):
             return True
         thread = await self.local_thread(thread_id)
         if thread is not None and (thread.get("values") or thread.get("status") != "idle"):
             # Runs already here keep running where their checkpoints are.
-            return False
-        if not await runs_on_mda(thread, configurable):
             return False
         if thread is None:
             # Run creation with `if_not_exists=create`: the index thread is made here first.
@@ -304,36 +296,6 @@ class MdaRuntime:
         return set().union(*found)
 
 
-async def runs_on_mda(
-    thread: Mapping[str, JsonValue] | None, configurable: Mapping[str, JsonValue]
-) -> bool:
-    """Whether a fresh thread runs on MDA: its person's ``run_on_mda``, else its workspace's.
-
-    The person is the thread's owner, else whoever started the run. Threads no
-    person starts (API keys, workflows, system reviews) follow their workspace.
-    """
-    raw_metadata = thread.get("metadata") if thread is not None else None
-    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
-    owner = OsweThreadMetadata.model_validate(metadata)
-    run = RunConfig.parse(dict(configurable))
-    login = (owner.owner_login or run.github_login or "").strip()
-    try:
-        if login:
-            return (await User.preferences_for_login(login)).run_on_mda
-        workspace = run.workspace_slug or metadata.get("workspace")
-        settings = await cached_workspace_settings(
-            workspace if isinstance(workspace, str) else None
-        )
-        return settings.get("run_on_mda") is True
-    except Exception:
-        logger.warning(
-            "Could not load the Managed Deep Agents setting; running here",
-            exc_info=True,
-            extra={"owner_login": login},
-        )
-        return False
-
-
 def _may_route(scope: Scope) -> bool:
     """Whether a request is one this proxy may send to MDA."""
     path: str = scope["path"]
@@ -358,10 +320,8 @@ class MdaThreadProxy:
             self._route, *auth_middleware.args, **auth_middleware.kwargs
         )
 
-    def runtime(self) -> MdaRuntime | None:
+    def runtime(self) -> MdaRuntime:
         url = mda_runtime_url()
-        if url is None:
-            return None
         if self._runtime is None or self._runtime.url != url:
             self._runtime = MdaRuntime(url)
         return self._runtime
@@ -371,17 +331,16 @@ class MdaThreadProxy:
             scope["type"] != "http"
             or Headers(scope=scope).get(LOCAL_HEADER)
             or not _may_route(scope)
-            or self.runtime() is None
         ):
             await self.app(scope, receive, send)
             return
         await self._authenticated(scope, receive, send)
 
     async def _route(self, scope: Scope, receive: Receive, send: Send) -> None:
-        runtime = self.runtime()
-        if runtime is None or not backend_call(scope):
+        if not backend_call(scope):
             await self.app(scope, receive, send)
             return
+        runtime = self.runtime()
         path: str = scope["path"]
         thread_match = _THREAD_PATH.match(path)
         is_search = bool(_SEARCH_PATH.match(path)) and scope["method"] == "POST"
@@ -427,7 +386,7 @@ class MdaThreadProxy:
                 payload is not None
                 and isinstance(assistant_id, str)
                 and assistant_id in HOSTED_GRAPHS
-                and await runtime.claim(thread_id, configurable_of(payload))
+                and await runtime.claim(thread_id)
             ):
                 await runtime.ensure_remote_thread(thread_id)
                 rewritten = await runtime.run_payload(thread_id, payload)
@@ -479,7 +438,7 @@ class MdaThreadProxy:
             and params.get("assistant_id") in HOSTED_GRAPHS
         )
         if is_hosted_start and command is not None and isinstance(params, dict):
-            if await runtime.claim(thread_id, configurable_of(params)):
+            if await runtime.claim(thread_id):
                 await self._start_run(runtime, send, thread_id, command, params)
                 return
         elif await runtime.hosts(thread_id):

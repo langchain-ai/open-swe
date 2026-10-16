@@ -55,6 +55,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.notifications import LISTENER
     from openswe.jobs.kinds import WORKER as JOB_WORKER
     from openswe.jobs.kinds import start_jobs
+    from openswe.remote_runtime.client import validate_mda_startup_config
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.transcript import listener as transcript_listener
@@ -66,6 +67,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    validate_mda_startup_config()
     database.require_configured()
     await database.migrate()
     try:

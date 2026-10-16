@@ -11,7 +11,6 @@ from openswe.remote_runtime.tokens import (
     sign_runtime_token,
     verify_runtime_token,
 )
-from openswe.users import UserPreferences
 
 RUN = RemoteRun(
     thread_id="thread-1",
@@ -51,6 +50,19 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
 
     assert choice.model_id == requested
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
+
+
+async def test_app_lifespan_exits_without_managed_deep_agents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.api.app import app, lifespan
+    from openswe.remote_runtime.client import RemoteRuntimeConfigurationError
+
+    monkeypatch.delenv("MDA_RUNTIME_URL", raising=False)
+
+    with pytest.raises(RemoteRuntimeConfigurationError, match="MDA_RUNTIME_URL is required"):
+        async with lifespan(app):
+            pass
 
 
 def test_run_token_round_trips_the_signed_run() -> None:
@@ -255,16 +267,6 @@ async def _through_proxy(
         proxy.MdaRuntime, "local", staticmethod(lambda: _Client(_LocalThreads(local)))
     )
     monkeypatch.setattr(proxy.MdaRuntime, "sdk", lambda _self: _Client(_RemoteThreads()))
-
-    async def preferences(login: str) -> UserPreferences:
-        return UserPreferences(run_on_mda=login in MDA_LOGINS)
-
-    monkeypatch.setattr(proxy.User, "preferences_for_login", preferences)
-
-    async def workspace_settings(workspace: str | None) -> dict[str, object]:
-        return {"run_on_mda": workspace in MDA_WORKSPACES}
-
-    monkeypatch.setattr(proxy, "cached_workspace_settings", workspace_settings)
     forwarded: list[dict[str, object]] = []
 
     def mda(request: httpx.Request) -> httpx.Response:
@@ -303,17 +305,15 @@ async def _through_proxy(
 
 FRESH_THREAD = "00000000-0000-4000-8000-000000000001"
 LEGACY_THREAD = "00000000-0000-4000-8000-000000000002"
-MDA_LOGINS = frozenset({"ada"})
-MDA_WORKSPACES = frozenset({"platform"})
 
 
-def _fresh_run(owner: str, starter: str) -> tuple[dict[str, dict[str, object]], dict[str, object]]:
+def _fresh_run() -> tuple[dict[str, dict[str, object]], dict[str, object]]:
     local: dict[str, dict[str, object]] = {
         FRESH_THREAD: {
             "thread_id": FRESH_THREAD,
             "status": "idle",
             "values": None,
-            "metadata": {"owner_login": owner},
+            "metadata": {"owner_login": "ada"},
         }
     }
     run: dict[str, object] = {
@@ -322,7 +322,7 @@ def _fresh_run(owner: str, starter: str) -> tuple[dict[str, dict[str, object]], 
         "config": {
             "configurable": {
                 "repo": {"owner": "acme", "name": "widgets"},
-                "github_login": starter,
+                "github_login": "ada",
                 "__event_streaming_v2": True,
             }
         },
@@ -333,7 +333,7 @@ def _fresh_run(owner: str, starter: str) -> tuple[dict[str, dict[str, object]], 
 async def test_mda_proxy_claims_a_fresh_thread_and_signs_its_run_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    local, run_body = _fresh_run(owner="ada", starter="ada")
+    local, run_body = _fresh_run()
 
     reached_here, forwarded = await _through_proxy(
         monkeypatch, local, "POST", f"/threads/{FRESH_THREAD}/runs", run_body
@@ -378,7 +378,7 @@ async def test_mda_proxy_acts_only_on_requests_the_agent_server_authenticates(
             on_error=auth.on_error,
         ),
     )
-    local, run_body = _fresh_run(owner="ada", starter="ada")
+    local, run_body = _fresh_run()
 
     reached_here, forwarded = await _through_proxy(
         monkeypatch, local, "POST", f"/threads/{FRESH_THREAD}/runs", run_body
@@ -413,7 +413,7 @@ async def test_mda_proxy_forwards_only_the_backend_under_custom_auth(
             auth.ConditionalAuthenticationMiddleware, backend=SignedIn(), on_error=auth.on_error
         ),
     )
-    local, run_body = _fresh_run(owner="ada", starter="ada")
+    local, run_body = _fresh_run()
 
     reached_here, forwarded = await _through_proxy(
         monkeypatch, local, "POST", f"/threads/{FRESH_THREAD}/runs", run_body
@@ -421,43 +421,6 @@ async def test_mda_proxy_forwards_only_the_backend_under_custom_auth(
 
     assert bool(forwarded) is is_forwarded
     assert reached_here == ([] if is_forwarded else [f"/threads/{FRESH_THREAD}/runs"])
-
-
-@pytest.mark.parametrize(("workspace", "claimed"), [("platform", True), ("default", False)])
-async def test_mda_proxy_runs_threads_no_person_starts_where_their_workspace_chose(
-    monkeypatch: pytest.MonkeyPatch, workspace: str, claimed: bool
-) -> None:
-    local: dict[str, dict[str, object]] = {
-        FRESH_THREAD: {
-            "thread_id": FRESH_THREAD,
-            "status": "idle",
-            "values": None,
-            "metadata": {"owner_type": "system", "workspace": workspace},
-        }
-    }
-    run_body = {"assistant_id": "reviewer", "input": None, "config": {"configurable": {}}}
-
-    reached_here, forwarded = await _through_proxy(
-        monkeypatch, local, "POST", f"/threads/{FRESH_THREAD}/runs", run_body
-    )
-
-    assert bool(forwarded) is claimed
-    assert reached_here == ([] if claimed else [f"/threads/{FRESH_THREAD}/runs"])
-
-
-async def test_mda_proxy_runs_threads_here_unless_their_owner_chose_mda(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The owner decides, even when someone who chose MDA starts the run.
-    local, run_body = _fresh_run(owner="bob", starter="ada")
-
-    reached_here, forwarded = await _through_proxy(
-        monkeypatch, local, "POST", f"/threads/{FRESH_THREAD}/runs", run_body
-    )
-
-    assert reached_here == [f"/threads/{FRESH_THREAD}/runs"]
-    assert forwarded == []
-    assert local[FRESH_THREAD]["metadata"] == {"owner_login": "bob"}
 
 
 async def test_mda_proxy_leaves_threads_with_local_history_where_they_are(
