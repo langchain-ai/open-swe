@@ -70,6 +70,10 @@ async def test_thread_status_uses_agent_session_and_falls_back_without_agent_vie
             ("assistant.threads.setStatus", ""),
         ]
     ]
+    slack_api.calls.clear()
+    slack_api.respond({"ok": False, "error": "internal_error"})
+    assert not await slack_utils.set_slack_thread_status("C1", "1.0", "")
+    assert [method for method, _ in slack_api.calls] == ["agents.sessions.setStatus"]
 
 
 async def test_slack_stream_rate_limit_preserves_retry_after(slack_api):

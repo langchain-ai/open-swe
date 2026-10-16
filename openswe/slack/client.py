@@ -999,10 +999,22 @@ async def stop_slack_stream(
             raise
 
 
+_TRANSIENT_SLACK_ERRORS = (
+    "rate_limited",
+    "http_error",
+    "invalid_response",
+    "invalid_slack_response",
+    "internal_error",
+    "fatal_error",
+    "service_unavailable",
+    "request_timeout",
+)
+
+
 async def _set_agent_session_status(channel_id: str, thread_ts: str, status: str) -> bool:
     """Set a thread's agent session status, which carries Slack's native Stop button.
 
-    Apps without Agent view reject this, so callers fall back to the assistant status.
+    Returns False when Slack has no agent session there; transient failures raise.
     """
     try:
         data = await _slack_stream_call(
@@ -1010,6 +1022,8 @@ async def _set_agent_session_status(channel_id: str, thread_ts: str, status: str
             {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
         )
     except SlackStreamError as exc:
+        if exc.code.startswith(_TRANSIENT_SLACK_ERRORS):
+            raise
         logger.info("Slack agent session status unavailable: %s", exc.code)
         return False
     if data.get("warning"):
@@ -1023,9 +1037,11 @@ async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) 
 
     if channel_id.startswith("D") and thread_ts == CONCIERGE_TS:
         return True
-    if await _set_agent_session_status(channel_id, thread_ts, "processing" if status else "active"):
-        return True
     try:
+        if await _set_agent_session_status(
+            channel_id, thread_ts, "processing" if status else "active"
+        ):
+            return True
         await _slack_stream_call(
             "assistant.threads.setStatus",
             {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
