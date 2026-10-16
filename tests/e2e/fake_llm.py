@@ -41,6 +41,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
@@ -274,6 +275,7 @@ SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
 SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
 SLACK_REPLY_SEGMENTS_MARKER = "E2E_SLACK_REPLY_SEGMENTS"
+EVAL_DESCRIPTION_MARKER = "E2E_EVAL_DESCRIPTION"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -1091,6 +1093,39 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_desktop_reply_step),
     ),
+    # Code-mode calls, each labeled with the description the dashboard shows.
+    "eval_description": (
+        _tool_step(
+            "Acknowledging the request.",
+            "slack_reply",
+            {"message": "On it!", "response_type": "progress"},
+            "call-eval-ack",
+        ),
+        _tool_step(
+            "Counting with code.",
+            "eval",
+            {
+                "display_description": "Count the files in the repository",
+                "code": "['greet.py', 'README.md'].length",
+            },
+            "call-eval-count",
+        ),
+        _tool_step(
+            "Checking the greeting with code.",
+            "eval",
+            {
+                "display_description": "Check the greeting the helper returns",
+                "code": "`Hello, ${'Ada'}!`",
+            },
+            "call-eval-greeting",
+        ),
+        _tool_step(
+            "Reporting back.",
+            "slack_reply",
+            {"message": "The repository has 2 files."},
+            "call-eval-reply",
+        ),
+    ),
     "slack_reply_order": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -1513,6 +1548,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: SLACK_REPLY_ORDER_MARKER in ctx.first_text,
     ),
     ScriptRule(
+        "eval_description",
+        lambda ctx: ctx.human_count <= 1 and EVAL_DESCRIPTION_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
     ),
@@ -1600,12 +1639,19 @@ class FakeScriptedChatModel(BaseChatModel):
         "max_input_tokens": 128_000,
     }
     script: list[Any] = []
+    described_tool_names: list[str] = []
 
     @property
     def _llm_type(self) -> str:
         return "fake-scripted"
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
+        self.described_tool_names = [
+            spec["function"]["name"]
+            for offered in tools
+            if (spec := convert_to_openai_tool(offered)).get("type") == "function"
+            and "display_description" in spec["function"].get("parameters", {}).get("required", [])
+        ]
         return self
 
     def _generate(
@@ -1627,6 +1673,8 @@ class FakeScriptedChatModel(BaseChatModel):
             pending_text=_latest_turn_text(messages),
         )
         script = _script_for(context)
+        if EVAL_DESCRIPTION_MARKER in context.first_text:
+            assert self.described_tool_names == ["eval"], self.described_tool_names
 
         last_human = max(
             (

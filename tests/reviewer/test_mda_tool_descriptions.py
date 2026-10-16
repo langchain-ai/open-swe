@@ -1,38 +1,50 @@
-"""The model labels each tool call, and the tool runs without the label."""
+"""The model labels each call of a described tool, and the tool runs without the label."""
 
+import sys
 from collections.abc import Sequence
-from typing import Any
+from pathlib import Path
 
 from langchain.agents import create_agent
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
-from openswe.middleware.tool_descriptions import DISPLAY_DESCRIPTION, ToolDescriptionMiddleware
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
+
+from rt.middleware import DISPLAY_DESCRIPTION, DescribedToolsMiddleware
 
 
 class ScriptedModel(BaseChatModel):
     responses: list[AIMessage]
-    bound: list[dict[str, Any]] = []
+    described: list[str] = []
     calls: int = 0
 
     @property
     def _llm_type(self) -> str:
         return "tool-descriptions-test"
 
-    def bind_tools(self, tools: Sequence[object], **kwargs: Any) -> ScriptedModel:
-        self.bound = [
-            convert_to_openai_tool(t)["function"] for t in tools if isinstance(t, BaseTool)
+    def bind_tools(self, tools: Sequence[object], **kwargs: object) -> ScriptedModel:
+        self.described = [
+            t.name
+            for t in tools
+            if isinstance(t, BaseTool)
+            and convert_to_openai_tool(t)["function"]["parameters"]["required"][0]
+            == DISPLAY_DESCRIPTION
         ]
         return self
 
-    def _generate(self, *args: Any, **kwargs: Any) -> ChatResult:
+    def _generate(self, *args: object, **kwargs: object) -> ChatResult:
         raise NotImplementedError
 
     async def _agenerate(
-        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
     ) -> ChatResult:
         self.calls += 1
         return ChatResult(generations=[ChatGeneration(message=self.responses[self.calls - 1])])
@@ -65,13 +77,12 @@ async def test_tool_runs_without_the_description_the_model_gave_it() -> None:
     agent = create_agent(
         model,
         tools=[count_lines],
-        middleware=[ToolDescriptionMiddleware(frozenset({"count_lines"}))],
+        middleware=[DescribedToolsMiddleware({"count_lines": "What this call does."})],
     )
 
     result = await agent.ainvoke({"messages": [{"role": "user", "content": "how long?"}]})
 
-    [schema] = model.bound
-    assert schema["parameters"]["required"][0] == DISPLAY_DESCRIPTION
+    assert model.described == ["count_lines"]
     assert received == ["README.md"]
     issued, answered = result["messages"][1], result["messages"][2]
     assert isinstance(issued, AIMessage)

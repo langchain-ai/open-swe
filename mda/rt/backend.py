@@ -99,6 +99,8 @@ class Catalog(BaseModel):
     code_only: list[str] = []
     # Tools the model calls both directly and from code mode.
     also_from_code: list[str] = []
+    # Tools the model labels each call of, with what the label argument tells it.
+    described: dict[str, str] = {}
 
 
 class PhaseReply(BaseModel):
