@@ -5,8 +5,7 @@
   "graphs": {
     "agent": "openswe.graphs.agent:traced_agent",
     "reviewer": "openswe.graphs.reviewer:traced_reviewer_agent",
-    "review-scout": "openswe.graphs.review_scout:traced_review_scout",
-    "scheduler": "openswe.graphs.scheduler:get_scheduler"
+    "review-scout": "openswe.graphs.review_scout:traced_review_scout"
   },
   "dependencies": [
     "."
