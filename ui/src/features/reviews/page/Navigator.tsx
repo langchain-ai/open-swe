@@ -463,8 +463,8 @@ function FileRow({
           className="flex shrink-0 gap-space-1 font-mono text-xxs tabular-nums"
           title={`${file.additions} lines added, ${file.deletions} lines deleted`}
         >
-          <span className="text-success-strong">+{file.additions}</span>
-          <span className="text-error-strong">−{file.deletions}</span>
+          <span className="text-success-secondary">+{file.additions}</span>
+          <span className="text-error-secondary">−{file.deletions}</span>
         </span>
         {viewed && (
           <CheckIcon
