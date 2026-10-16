@@ -189,7 +189,7 @@ async def _report_receipt_purge(_job: Job) -> None:
 async def _wake_thread(job: Job) -> None:
     # Never retried: a run the server started before the client saw an error would start twice.
     try:
-        run_id = await run_thread_wakeup(job.payload)
+        run_id = await run_thread_wakeup(job.payload, job_id=str(job.id), due_at=job.due_at)
     except Exception:
         logger.exception("Thread wakeup failed", extra={"job_id": str(job.id)})
         return
