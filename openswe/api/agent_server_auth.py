@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from typing import Final
 
 from langgraph_sdk import Auth
+from starlette.authentication import AuthCredentials
 from starlette.requests import HTTPConnection
 from starlette.types import Scope
 
@@ -39,6 +40,25 @@ def _backend_keys() -> set[str]:
 
 def is_backend(permissions: Sequence[str]) -> bool:
     return BACKEND_PERMISSION in permissions
+
+
+def backend_call(scope: Scope) -> bool:
+    """Whether app middleware may answer or forward this call without the Agent Server.
+
+    Only the backend's calls may skip the Agent Server's resource authorization;
+    others go on to its routes, which apply it. The SDK's in-process transport
+    mounts at ``/noauth``, which no request can set.
+    """
+    from langgraph_api.config import USES_CUSTOM_AUTH
+
+    root_path = scope.get("root_path", "")
+    credentials = scope.get("auth")
+    return (
+        not USES_CUSTOM_AUTH
+        or root_path == "/noauth"
+        or root_path.startswith("/noauth/")
+        or (isinstance(credentials, AuthCredentials) and is_backend(credentials.scopes))
+    )
 
 
 @auth.authenticate

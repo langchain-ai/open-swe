@@ -102,18 +102,19 @@ class ServedToolsMiddleware(AgentMiddleware):
 
     The backend's tools act on its sandbox, so they stay offered even where MDA's
     filesystem middleware drops one it cannot back itself, such as ``execute``.
+    Hidden tools stay registered, so a call by name still runs, as in-process.
     """
 
-    def __init__(self, tools: Sequence[BaseTool], excluded: frozenset[str]) -> None:
-        self._tools = [tool for tool in tools if tool.name not in excluded]
-        self._excluded = excluded
+    def __init__(self, tools: Sequence[BaseTool], hidden: frozenset[str]) -> None:
+        self._tools = [tool for tool in tools if tool.name not in hidden]
+        self._hidden = hidden
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        offered = [t for t in request.tools if getattr(t, "name", None) not in self._excluded]
+        offered = [t for t in request.tools if getattr(t, "name", None) not in self._hidden]
         names = {getattr(tool, "name", None) for tool in offered}
         missing = [tool for tool in self._tools if tool.name not in names]
         return await handler(request.override(tools=[*offered, *missing]))

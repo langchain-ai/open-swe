@@ -11,7 +11,6 @@ from openswe.middleware.model_selection import ModelSelectionState, SelectedRout
 from openswe.run_config import RunConfig
 from openswe.thread_feedback import FEEDBACK, Feedback
 from openswe.utils.langsmith import create_langsmith_thread_feedback
-from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
 
@@ -36,7 +35,7 @@ async def submit_thread_feedback(
     run_id = str(runtime.config.get("run_id") or cfg.run_id or "")
     persisted_route = runtime.state.get("model_route") if runtime.state else None
     route: SelectedRoute | None = normalize_route(persisted_route) if persisted_route else None
-    async with agent_thread_pr_state_lock(langgraph_client(), cfg.thread_id):
+    async with agent_thread_pr_state_lock(cfg.thread_id):
         record = await FEEDBACK.get(cfg.thread_id)
         record = record or Feedback(event_id=f"tool:{run_id}", answer_run_id=run_id)
         record.status = "completed"

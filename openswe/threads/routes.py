@@ -41,6 +41,7 @@ from openswe.threads.handlers import (
     get_dashboard_thread_queued_messages,
     get_dashboard_thread_state,
     interrupt_transcript_turns,
+    move_thread,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -430,6 +431,29 @@ async def api_share_thread_with_workspace(
     session: dict[str, str] = SESSION_DEP,
 ) -> dict[str, object]:
     return await share_thread_with_workspace(thread_id, session["sub"], email=session.get("email"))
+
+
+class ThreadMoveRequest(BaseModel):
+    """Where to move a thread: onto the caller's machine through a bridge, or to the cloud."""
+
+    sandbox_bridge_id: str | None = None
+    target: Literal["cloud"] | None = None
+
+
+@router.post("/threads/{thread_id}/move")
+@audit_endpoint
+async def api_move_thread(
+    thread_id: str,
+    body: ThreadMoveRequest,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, object]:
+    return await move_thread(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+        bridge_id=body.sandbox_bridge_id,
+        target=body.target,
+    )
 
 
 @router.post("/threads/{thread_id}/continue-private")

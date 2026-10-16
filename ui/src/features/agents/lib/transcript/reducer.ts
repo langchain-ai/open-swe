@@ -66,6 +66,8 @@ export interface TranscriptMessageState {
   attachments: ReadonlyArray<TranscriptAttachment>
   /** The GitHub login of a human message's sender, when the server knows it. */
   senderLogin: string | null
+  /** What a system message's sender is called when its text introduces no name. */
+  senderName?: string
   /** Invocation an AI message ran under, when the provider reported usage. */
   invocationId?: string
   createdAt: string
@@ -184,6 +186,7 @@ function indexMessages(
       namespace: row.namespace,
       attachments: row.attachments ?? [],
       senderLogin: row.sender?.login ?? null,
+      senderName: row.sender?.display_name ?? undefined,
       invocationId: row.usage?.invocation_id ?? undefined,
       createdAt: row.created_at,
     }
@@ -617,6 +620,7 @@ export function applyEvent(
         namespace: [],
         attachments: payload.attachments,
         senderLogin: payload.sender?.login ?? null,
+        senderName: payload.sender?.display_name ?? undefined,
         createdAt: at,
       })
       break
@@ -697,6 +701,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
         senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
+        senderName: payload.sender?.display_name ?? existing?.senderName,
         invocationId: payload.usage?.invocation_id ?? undefined,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
@@ -958,7 +963,8 @@ function buildHumanMessage(
           structuredSurface: parsed.surface,
           structuredSenderName:
             entity?.displayName ??
-            (entity?.handle ? `@${entity.handle}` : undefined),
+            (entity?.handle ? `@${entity.handle}` : undefined) ??
+            row.senderName,
           structuredSenderNote:
             entity?.senderType !== "bot" &&
             entity?.openSweAccount === "unlinked"
