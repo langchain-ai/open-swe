@@ -543,7 +543,7 @@ async def _settle_slack_thinking_status(
             metadata = thread_metadata(await client.threads.get(thread_id))
         if await _task_has_active_runs(client, thread_id):
             return True
-        if await delegated_work_active(client, thread_id):
+        if await delegated_work_active(client, thread_id, metadata=metadata):
             return await restore_slack_thinking_status(channel_id, thread_ts)
         waiting = bool(metadata.get(RUNNING_BACKGROUND_TASKS_KEY))
         if not waiting:
