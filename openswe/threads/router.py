@@ -1,14 +1,12 @@
 """Serve the Agent Server's thread API from the PostgreSQL thread index.
 
-``ThreadIndexMirror`` keeps the index beside the Agent Server with
-``THREAD_STORE=dual``. With ``THREAD_STORE=postgres``, ``ThreadRouter`` sits where
-``MdaThreadProxy`` does, in front of the core ``/threads`` and ``/runs`` routes, so every client
-(the dashboard, the CLI and the backend's own ``client.threads``) keeps working
-unchanged:
+``ThreadRouter`` sits in front of the core ``/threads`` and ``/runs`` routes, so
+every client (the dashboard, the CLI and the backend's own ``client.threads``)
+keeps working unchanged:
 
 - Creating, reading, updating, deleting, searching and counting threads is
   answered from the index; each change is copied to the runtimes that keep the
-  thread, so its runs and traces see it and the old proxy could take over again.
+  thread, so its runs and traces see it.
 - A thread's runs, state, history, commands and streams go to its runtime: this
   deployment's Agent Server for ``local`` threads, Managed Deep Agents for
   ``mda`` ones. A run started there marks the thread busy; the run-complete
@@ -29,11 +27,8 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from openswe.api.agent_server_auth import backend_call
-from openswe.config import ENV
-from openswe.jobs import queue
 from openswe.remote_runtime.asgi import (
     StatusRecorder,
-    configurable_of,
     forward,
     json_body,
     read_body,
@@ -46,10 +41,9 @@ from openswe.remote_runtime.client import (
     MDA_RUNTIME,
     RUNTIME_METADATA_KEY,
 )
-from openswe.remote_runtime.proxy import LOCAL_HEADER, MdaRuntime, runs_on_mda
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
-from openswe.threads.runtimes import RUNTIMES
+from openswe.threads.runtimes import LOCAL_HEADER, RUNTIMES
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +56,6 @@ _THREAD: Final = re.compile(r"^(?:/noauth)?/threads/(?P<thread_id>[0-9a-fA-F-]{3
 _CANCEL_MANY: Final = re.compile(r"^(?:/noauth)?/runs/cancel$")
 _CREATE_RUN: Final = re.compile(r"^/runs(?:/stream|/wait)?$")
 _CREATE_CRON: Final = "/runs/crons"
-THREAD_SYNC_JOB: Final = "thread_index_sync"
 
 
 def _routed(scope: Scope) -> bool:
@@ -259,30 +252,16 @@ class ThreadRouter:
             send, 200, [thread.as_langgraph(query.select) for thread in await query.run()]
         )
 
-    def _mda(self) -> MdaRuntime:
-        runtime = RUNTIMES.mda_runtime
-        if runtime is None:
-            raise LookupError("MDA_RUNTIME_URL is not configured")
-        return runtime
-
-    async def _claim_for_mda(
-        self, thread: IndexedThread, assistant_id: JsonValue, configurable: Mapping[str, JsonValue]
-    ) -> IndexedThread:
+    async def _claim_for_mda(self, thread: IndexedThread, assistant_id: JsonValue) -> IndexedThread:
         """Move a fresh thread to MDA for its first agent or reviewer run or state.
 
-        With ``MDA_ALL_THREADS`` every such thread moves; otherwise those of people
-        (or workspaces) who chose MDA. Other graphs, and threads with checkpoints
-        here already, stay on this deployment.
+        Other graphs, and threads with checkpoints here already, stay on this deployment.
         """
         if (
             thread.runtime == "mda"
             or not isinstance(assistant_id, str)
             or assistant_id not in HOSTED_GRAPHS
-            or RUNTIMES.mda_runtime is None
             or await RUNTIMES.local.has_history(thread.thread_id)
-            or not (
-                ENV.MDA_ALL_THREADS.get_bool() or await runs_on_mda(thread.metadata, configurable)
-            )
         ):
             return thread
         await index.set_runtime(thread.thread_id, "mda")
@@ -314,14 +293,12 @@ class ThreadRouter:
                 await _not_found(send, thread_id)
                 return
             thread = await self._index_new(thread_id, {}, if_exists="do_nothing")
-        thread = await self._claim_for_mda(
-            thread, payload.get("assistant_id"), configurable_of(payload)
-        )
+        thread = await self._claim_for_mda(thread, payload.get("assistant_id"))
         # Busy before the answer reaches the caller, so a run that ends at once
         # is not marked busy after its run-complete webhook settled it.
         recorder = StatusRecorder(send, on_success=None if cron else _marks_busy(thread_id))
         if thread.runtime == "mda":
-            mda = self._mda()
+            mda = RUNTIMES.mda_runtime
             await mda.ensure_remote_thread(thread_id)
             rewritten = await mda.run_payload(thread_id, payload)
             await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
@@ -338,11 +315,9 @@ class ThreadRouter:
             return
         params = command.get("params")
         if command.get("method") == "run.start" and isinstance(params, dict):
-            thread = await self._claim_for_mda(
-                thread, params.get("assistant_id"), configurable_of(params)
-            )
+            thread = await self._claim_for_mda(thread, params.get("assistant_id"))
             if thread.runtime == "mda":
-                reply = await self._mda().start_command_run(thread_id, command, params)
+                reply = await RUNTIMES.mda_runtime.start_command_run(thread_id, command, params)
                 if reply.get("type") == "success":
                     await index.set_status(thread_id, "busy")
                 await send_json(send, 200, reply)
@@ -358,7 +333,7 @@ class ThreadRouter:
         thread = await self._thread(thread_id)
         if thread is not None:
             graph = thread.metadata.get("graph_id") or "agent"
-            await self._claim_for_mda(thread, graph, {})
+            await self._claim_for_mda(thread, graph)
         await self._to_runtime(scope, receive, send, body, thread_id)
 
     async def _copy(self, send: Send, thread_id: str) -> None:
@@ -389,7 +364,7 @@ class ThreadRouter:
     ) -> None:
         thread = await self._thread(thread_id)
         if thread is not None and thread.runtime == "mda":
-            mda = self._mda()
+            mda = RUNTIMES.mda_runtime
             await mda.ensure_remote_thread(thread_id)
             await forward(mda.http, scope, send, body)
             return
@@ -402,95 +377,3 @@ class ThreadRouter:
             await self._to_runtime(scope, receive, send, body, thread_id)
             return
         await self.app(scope, receive, send)
-
-
-class ThreadIndexMirror:
-    """ASGI middleware writing each thread change the Agent Server makes to the index too.
-
-    With ``THREAD_STORE=dual`` the Agent Server, behind ``MdaThreadProxy``, still
-    answers every thread call. Once it has made a change, the thread is copied
-    here as the Agent Server now has it, and a started run marks it busy, so
-    moving reads to the index finds it current. A copy that fails is retried
-    from a job; the caller already has the Agent Server's answer.
-    """
-
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or Headers(scope=scope).get(LOCAL_HEADER) or not _routed(scope):
-            await self.app(scope, receive, send)
-            return
-        path: str = scope["path"]
-        method: str = scope["method"]
-        match = _THREAD.match(path)
-        if match is None:
-            if method == "POST" and _THREADS.match(path):
-                await self._made(scope, receive, send)
-            else:
-                await self.app(scope, receive, send)
-            return
-        thread_id, rest = match["thread_id"], match["rest"] or ""
-        if rest in {"", "/"} and method in {"PATCH", "DELETE"}:
-            recorder = StatusRecorder(send)
-            await self.app(scope, receive, recorder)
-            if recorder.succeeded:
-                await _sync_soon(thread_id)
-        elif method == "POST" and rest == "/copy":
-            await self._made(scope, receive, send)
-        elif method == "POST" and _CREATE_RUN.match(rest):
-            await self.app(
-                scope, receive, StatusRecorder(send, on_success=self._started(thread_id))
-            )
-        elif method == "POST" and rest == "/commands":
-            body = await read_body(receive)
-            command = json_body(body) or {}
-            started = self._started(thread_id) if command.get("method") == "run.start" else None
-            await self.app(scope, replay(body, receive), StatusRecorder(send, on_success=started))
-        else:
-            await self.app(scope, receive, send)
-
-    async def _made(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """A thread created or copied: indexed by the id the Agent Server answered with."""
-        recorder = StatusRecorder(send, keep_body=True)
-        await self.app(scope, receive, recorder)
-        made = json_body(recorder.body) if recorder.succeeded else None
-        thread_id = made.get("thread_id") if made else None
-        if isinstance(thread_id, str):
-            await _sync_soon(thread_id)
-
-    def _started(self, thread_id: str) -> Callable[[], Awaitable[None]]:
-        async def started() -> None:
-            if await _sync_soon(thread_id):
-                await index.set_status(thread_id, "busy")
-
-        return started
-
-
-async def sync_thread(thread_id: str) -> None:
-    """Index a thread as the local Agent Server has it now, or drop it once it is gone there."""
-    await index.sync(thread_id, lambda: RUNTIMES.local.indexed(thread_id))
-
-
-async def _sync_soon(thread_id: str) -> bool:
-    """Sync a thread now, or, when that fails, from a job that retries; whether it synced now."""
-    try:
-        await sync_thread(thread_id)
-        return True
-    except Exception:
-        logger.warning(
-            "Copying a thread change to the index failed; retrying from a job",
-            extra={"thread_id": thread_id},
-            exc_info=True,
-        )
-    try:
-        await queue.schedule(
-            THREAD_SYNC_JOB, {"thread_id": thread_id}, key=f"{THREAD_SYNC_JOB}:{thread_id}"
-        )
-    except Exception:
-        logger.error(
-            "Could not queue a retry for a thread change; the index misses it",
-            extra={"thread_id": thread_id},
-            exc_info=True,
-        )
-    return False

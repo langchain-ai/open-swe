@@ -8,20 +8,21 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 import pytest
+from langchain_core.runnables.config import var_child_runnable_config
 
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.protocol import JsonObject
 from openswe.bridge.store import Bridge, BridgeStore, ClaimedRequest
 
-OWNER = "test-user"
+OWNER = "github:alice"
 THREAD_ID = "thread-1"
 
 Reply = Callable[[ClaimedRequest], JsonObject]
 
 
-async def _open() -> Bridge:
+async def _open(owner: str = OWNER) -> Bridge:
     bridge = await BridgeStore.register(
-        owner_id=OWNER,
+        owner_id=owner,
         hostname="laptop.local",
         root_path="/Users/test/project",
         label=None,
@@ -56,7 +57,7 @@ def _cli(
 
 async def test_execute_round_trips_through_the_queue(registry_db: None) -> None:
     bridge = await _open()
-    backend = BridgeSandboxBackend(bridge_id=bridge.bridge_id, thread_id=THREAD_ID)
+    backend = BridgeSandboxBackend(bridge=bridge, thread_id=THREAD_ID)
     cli = _cli(
         bridge.bridge_id,
         result=lambda _request: {"output": "hi\n", "exit_code": 0, "truncated": False},
@@ -74,7 +75,7 @@ async def test_execute_round_trips_through_the_queue(registry_db: None) -> None:
 
 async def test_an_error_reply_surfaces_as_an_exception(registry_db: None) -> None:
     bridge = await _open()
-    backend = BridgeSandboxBackend(bridge_id=bridge.bridge_id, thread_id=THREAD_ID)
+    backend = BridgeSandboxBackend(bridge=bridge, thread_id=THREAD_ID)
     cli = _cli(bridge.bridge_id, error="the CLI lost its shell")
 
     with pytest.raises(RuntimeError, match="the CLI lost its shell"):
@@ -85,7 +86,7 @@ async def test_an_error_reply_surfaces_as_an_exception(registry_db: None) -> Non
 
 async def test_closing_the_bridge_ends_a_waiting_request(registry_db: None) -> None:
     bridge = await _open()
-    backend = BridgeSandboxBackend(bridge_id=bridge.bridge_id, thread_id=THREAD_ID)
+    backend = BridgeSandboxBackend(bridge=bridge, thread_id=THREAD_ID)
 
     async def close_once_claimed() -> None:
         for _ in range(500):
@@ -99,3 +100,33 @@ async def test_closing_the_bridge_ends_a_waiting_request(registry_db: None) -> N
     with pytest.raises(RuntimeError, match="bridge closed"):
         await backend.aexecute("sleep 60", timeout=5)
     await closer
+
+
+@pytest.mark.parametrize(
+    ("owner", "owners_run", "others_run"),
+    [
+        (OWNER, {"github_login": "Alice"}, {"github_login": "mallory"}),
+        ("system:api_key/1", {"started_by_id": "api_key:1"}, {"github_login": "alice"}),
+        (OWNER, {"github_login": "alice"}, {}),
+    ],
+)
+async def test_only_the_owners_runs_reach_the_machine(
+    registry_db: None, owner: str, owners_run: JsonObject, others_run: JsonObject
+) -> None:
+    bridge = await _open(owner)
+    token = var_child_runnable_config.set({"configurable": owners_run})
+    try:
+        backend = await BridgeSandboxBackend.connect(THREAD_ID, bridge.bridge_id)
+    finally:
+        var_child_runnable_config.reset(token)
+
+    token = var_child_runnable_config.set({"configurable": others_run})
+    try:
+        with pytest.raises(PermissionError):
+            await BridgeSandboxBackend.connect(THREAD_ID, bridge.bridge_id)
+        # A connection outlives the run that opened it.
+        with pytest.raises(PermissionError):
+            await backend.aexecute("id", timeout=5)
+    finally:
+        var_child_runnable_config.reset(token)
+    assert await BridgeStore.claim(bridge.bridge_id, limit=8) == []

@@ -37,8 +37,6 @@ Run options:
   --thread <id>    Continue an existing thread
   --model <id>     Agent model id (needs --effort to take effect)
   --effort <name>  Reasoning effort for --model
-  --visibility <v> workspace (default) or private; API keys and CI always
-                   start system threads
 
 Piped input is attached below the prompt, or is the prompt when none is given.
 Stdout carries only the result the agent reports. The exit code is the one it
@@ -126,13 +124,6 @@ async function authStatusCommand(): Promise<number> {
   return 0
 }
 
-const VISIBILITIES = ["workspace", "private"] as const
-type Visibility = (typeof VISIBILITIES)[number]
-
-function isVisibility(value: string): value is Visibility {
-  return (VISIBILITIES as readonly string[]).includes(value)
-}
-
 interface RunOptions {
   thread: string | undefined
   visibility: string | undefined
@@ -142,6 +133,13 @@ interface RunOptions {
 }
 
 async function runCommand(options: RunOptions): Promise<number> {
+  // Still accepted so scripts that asked for private threads keep working.
+  if (options.visibility !== undefined && options.visibility !== "private") {
+    fail(
+      "--visibility is always private: whoever can prompt a thread runs commands on this machine"
+    )
+    return 2
+  }
   const prompt = composePrompt(options.prompt, await readPipedStdin())
   if (!prompt) {
     fail("a prompt is required, as arguments or on stdin")
@@ -153,19 +151,8 @@ async function runCommand(options: RunOptions): Promise<number> {
     return 1
   }
   const { credential } = config
-  let visibility: Visibility = "workspace"
-  if (options.visibility !== undefined) {
-    if (!isVisibility(options.visibility)) {
-      fail("--visibility must be workspace or private")
-      return 2
-    }
-    if (credential.machine) {
-      fail("API keys and CI start system threads; --visibility does not apply")
-      return 2
-    }
-    visibility = options.visibility
-  }
-  const threadType = credential.machine ? "system" : visibility
+  // Whoever can prompt a person's thread runs commands on this machine.
+  const threadType = credential.machine ? "system" : "private"
   const root = process.cwd()
   const api = new ApiClient(config.backend, credential)
 

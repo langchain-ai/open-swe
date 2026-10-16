@@ -83,8 +83,9 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         onClick={() => void availability.refetch()}
       />
     )
-  const label =
-    requestReview.isPending || active
+  const label = requestReview.isPending
+    ? "Requesting…"
+    : active
       ? "Review requested"
       : requestReview.isError
         ? "Retry review request"
@@ -107,6 +108,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       )}
       <PullRequestActionButton
         label={label}
+        loading={requestReview.isPending}
         disabled={
           reason !== null ||
           availability.isPending ||

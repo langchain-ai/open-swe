@@ -51,8 +51,8 @@ The CLI uses the first credential it finds:
    stored.
 
 An API key and a workflow are machines: their threads are always `system`
-threads. A person's threads are `workspace` threads unless `--visibility
-private` is passed.
+threads. A person's threads are always private: whoever can prompt one runs
+commands on this machine.
 
 ### Sign in as a person
 
@@ -153,7 +153,6 @@ Options:
 | `--thread <id>` | Continue a thread oswe started on this machine, from the directory it serves. Refused while another oswe process is serving it. |
 | `--model <id>` | Agent model id. The backend only honors it together with `--effort`. |
 | `--effort <name>` | Reasoning effort for `--model`. |
-| `--visibility private` | Start a private thread instead of a workspace one. People only. |
 
 Piped input is attached below the prompt inside `<stdin>` tags, or is the whole
 prompt when no arguments are given. Stdin is only read when it is a pipe or a
