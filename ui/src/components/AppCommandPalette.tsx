@@ -26,13 +26,11 @@ import type { AppCommand } from "@/lib/appCommands"
 import type { PullRequestSearchResult } from "@/lib/api"
 import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearch"
 import type { AgentThread } from "@/features/agents/lib/types"
-import {
-  useInfiniteThreadsPages,
-  useThreadSearch,
-} from "@/features/agents/lib/queries"
+import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { useChatRoutes } from "@/lib/chatRoutes"
+import { useAiSearchStream } from "@/lib/useAiSearchStream"
 
 interface CommandResult {
   id: string
@@ -50,7 +48,7 @@ interface CloudThreadResult {
 
 interface PullRequestResult {
   id: string
-  kind: "pull-request"
+  kind: "pull-request" | "related-pull-request"
   label: string
   pr: PullRequestSearchResult
 }
@@ -59,12 +57,21 @@ type PaletteResult = CommandResult | CloudThreadResult | PullRequestResult
 
 const AI_SEARCH_DEBOUNCE_MS = 500
 const AI_SEARCH_MIN_LENGTH = 3
+const AI_SEARCH_SHOWN = 8
+
+type RelatedThread = AgentThread & { relevance: number }
+type RelatedPullRequest = PullRequestSearchResult & { relevance: number }
+
+const threadKey = (thread: RelatedThread) => thread.id
+const pullRequestKey = (pr: PullRequestSearchResult) =>
+  `${pr.repo}#${pr.number}`
 
 const RESULT_ICONS = {
   command: CommandIcon,
   "cloud-thread": ChatCircleIcon,
   "related-thread": SparkleIcon,
   "pull-request": GitPullRequestIcon,
+  "related-pull-request": SparkleIcon,
 } as const
 
 function resultGroup(result: PaletteResult): string {
@@ -77,6 +84,8 @@ function resultGroup(result: PaletteResult): string {
       return "Related threads"
     case "pull-request":
       return "Pull requests"
+    case "related-pull-request":
+      return "Related pull requests"
   }
 }
 
@@ -191,9 +200,17 @@ export function AppCommandPalette({
     !actionsOnly &&
     aiQuery === trimmedQuery &&
     aiQuery.length >= AI_SEARCH_MIN_LENGTH
-  const relatedThreads = useThreadSearch(
-    { q: aiQuery, scope: "interactive", limit: 8 },
-    { enabled: aiSearchEnabled }
+  const relatedThreads = useAiSearchStream<RelatedThread>(
+    aiSearchEnabled
+      ? `/threads/search?${new URLSearchParams({ q: aiQuery, scope: "interactive" })}`
+      : null,
+    threadKey
+  )
+  const relatedPullRequests = useAiSearchStream<RelatedPullRequest>(
+    aiSearchEnabled
+      ? `/pull-requests/related?${new URLSearchParams({ q: aiQuery })}`
+      : null,
+    pullRequestKey
   )
   const results = useMemo(() => {
     const keywordResults = buildPaletteResults(
@@ -206,39 +223,46 @@ export function AppCommandPalette({
         result.kind === "cloud-thread" ? [result.thread.id] : []
       )
     )
-    const relatedResults: Array<CloudThreadResult> = aiSearchEnabled
-      ? (relatedThreads.data?.items ?? [])
-          .filter((thread) => !shownThreadIds.has(thread.id))
-          .map((thread) => ({
-            id: `related:${thread.id}`,
-            kind: "related-thread",
-            label: thread.title,
-            thread,
-          }))
-      : []
+    const relatedThreadResults = relatedThreads.matches
+      .filter((thread) => !shownThreadIds.has(thread.id))
+      .slice(0, AI_SEARCH_SHOWN)
+      .map((thread): CloudThreadResult => ({
+        id: `related:${thread.id}`,
+        kind: "related-thread",
+        label: thread.title,
+        thread,
+      }))
+    const keywordPullRequests =
+      open && !actionsOnly
+        ? (pullRequests.data?.pages.flatMap((page) => page.pull_requests) ?? [])
+        : []
+    const shownPullRequests = new Set(keywordPullRequests.map(pullRequestKey))
+    const pullRequestResult =
+      (kind: PullRequestResult["kind"]) =>
+      (pr: PullRequestSearchResult): PullRequestResult => ({
+        id: `${kind}:${pullRequestKey(pr)}`,
+        kind,
+        label: pr.title || `${pr.repo} #${pr.number}`,
+        pr,
+      })
     return [
       ...keywordResults,
-      ...relatedResults,
-      ...(open && !actionsOnly
-        ? (pullRequests.data?.pages.flatMap((page) =>
-            page.pull_requests.map((pr): PullRequestResult => ({
-              id: `pr:${pr.repo}#${pr.number}`,
-              kind: "pull-request",
-              label: pr.title || `${pr.repo} #${pr.number}`,
-              pr,
-            }))
-          ) ?? [])
-        : []),
+      ...relatedThreadResults,
+      ...keywordPullRequests.map(pullRequestResult("pull-request")),
+      ...relatedPullRequests.matches
+        .filter((pr) => !shownPullRequests.has(pullRequestKey(pr)))
+        .slice(0, AI_SEARCH_SHOWN)
+        .map(pullRequestResult("related-pull-request")),
     ]
   }, [
     actionsOnly,
-    aiSearchEnabled,
     cloudThreads.data?.pages,
     commands,
     query,
     open,
     pullRequests.data,
-    relatedThreads.data,
+    relatedPullRequests.matches,
+    relatedThreads.matches,
   ])
   const resultGroups = useMemo(() => {
     const grouped = new Map<string, Array<PaletteResult>>()
@@ -253,9 +277,9 @@ export function AppCommandPalette({
     onOpenChange(false)
     if (result.kind === "command") {
       void result.command.run?.()
-    } else if (result.kind !== "pull-request" && result.thread.reviewPage) {
+    } else if ("thread" in result && result.thread.reviewPage) {
       void navigate(reviewPageRoute(result.thread.reviewPage))
-    } else if (result.kind !== "pull-request") {
+    } else if ("thread" in result) {
       void navigate({
         to: chat.thread,
         params: { threadId: result.thread.id },
@@ -270,7 +294,10 @@ export function AppCommandPalette({
     }
   }
 
-  const searchingRelated = aiSearchEnabled && relatedThreads.isFetching
+  const searchingRelated =
+    relatedThreads.status === "streaming" ||
+    relatedPullRequests.status === "streaming"
+  const relatedScanned = relatedThreads.scanned + relatedPullRequests.scanned
   const showLoading =
     (cloudThreads.isFetching || pullRequests.isSearching || searchingRelated) &&
     results.length === 0
@@ -348,7 +375,7 @@ export function AppCommandPalette({
                           />
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
-                            {result.kind === "pull-request" && (
+                            {"pr" in result && (
                               <span className="ml-space-2 text-xs text-secondary">
                                 {result.pr.repo} #{result.pr.number} ·{" "}
                                 {result.pr.state}
@@ -366,7 +393,9 @@ export function AppCommandPalette({
                 {searchingRelated && (
                   <div className="flex items-center gap-space-2 px-space-3 py-space-2 text-xs text-secondary">
                     <Spinner size="xs" />
-                    Finding related threads…
+                    {relatedScanned
+                      ? `Searching with AI… ${relatedScanned} checked`
+                      : "Searching with AI…"}
                   </div>
                 )}
                 {pullRequests.hasNextPage && !actionsOnly && (

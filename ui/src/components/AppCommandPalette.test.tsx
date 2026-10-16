@@ -12,6 +12,15 @@ const mocks = vi.hoisted(() => ({
   fetchNextPage: vi.fn(),
   cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
   relatedThread: { id: "related-1", title: "Slack DM fix" } as AgentThread,
+  relatedPullRequest: {
+    repo: "langchain-ai/open-swe",
+    number: 7,
+    url: "https://github.com/langchain-ai/open-swe/pull/7",
+    title: "Route DMs to the concierge",
+    body: "",
+    state: "open",
+    relevance: 0.8,
+  },
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -30,14 +39,16 @@ vi.mock("@/features/agents/lib/queries", () => ({
     isFetchingNextPage: false,
     fetchNextPage: mocks.fetchNextPage,
   }),
-  useThreadSearch: (
-    _params: { q: string },
-    { enabled }: { enabled?: boolean }
-  ) => ({
-    data: enabled
-      ? { items: [mocks.cloudThread, mocks.relatedThread] }
-      : undefined,
-    isFetching: false,
+}))
+vi.mock("@/lib/useAiSearchStream", () => ({
+  useAiSearchStream: (path: string | null) => ({
+    matches: !path
+      ? []
+      : path.startsWith("/threads/")
+        ? [mocks.cloudThread, mocks.relatedThread]
+        : [mocks.relatedPullRequest],
+    scanned: path ? 10 : 0,
+    status: path ? "streaming" : "idle",
   }),
 }))
 vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
@@ -86,7 +97,7 @@ describe("AppCommandPalette", () => {
     expect(mocks.fetchNextPage).toHaveBeenCalledOnce()
   })
 
-  it("adds AI-related threads the keyword results do not already show", () => {
+  it("adds AI-related threads and pull requests the keyword results do not already show", () => {
     vi.useFakeTimers()
     render(
       <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
@@ -101,6 +112,9 @@ describe("AppCommandPalette", () => {
     expect(screen.getByText("Related threads")).toBeTruthy()
     expect(screen.getByText("Slack DM fix")).toBeTruthy()
     expect(screen.getAllByText("Cloud result")).toHaveLength(1)
+    expect(screen.getByText("Related pull requests")).toBeTruthy()
+    expect(screen.getByText("Route DMs to the concierge")).toBeTruthy()
+    expect(screen.getByText("Searching with AI… 20 checked")).toBeTruthy()
   })
 
   it("closes on Escape", () => {

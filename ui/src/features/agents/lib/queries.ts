@@ -18,7 +18,6 @@ import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
-  ThreadSearchParams,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -68,9 +67,6 @@ export const agentThreadKeys = {
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
     ["agent-threads", "lists", "infinite-pages", params] as const,
-  // Outside `lists`: thread mutations must not re-run a Jev ranking.
-  search: (params: ThreadSearchParams) =>
-    ["agent-threads", "search", params] as const,
 }
 
 export function invalidateAgentThreadLists(queryClient: QueryClient): void {
@@ -1447,20 +1443,6 @@ export function useInfiniteThreadsPages(
     refetchInterval: refreshInterval,
   })
   return pagesQuery
-}
-
-/** Threads Jev judges a natural-language query describes, best match first. */
-export function useThreadSearch(
-  params: ThreadSearchParams,
-  options: { enabled?: boolean } = {}
-) {
-  return useQuery({
-    queryKey: agentThreadKeys.search(params),
-    queryFn: () => agentsApi.searchThreads(params),
-    enabled: options.enabled,
-    staleTime: 60_000,
-    retry: false,
-  })
 }
 
 export function useThreadsPage(

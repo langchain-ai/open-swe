@@ -1,15 +1,18 @@
 import asyncio
 import json
-from collections.abc import Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine
 
 import httpx2
 import pytest
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel, ConfigDict
 
 from openswe.dashboard.options import available_requested_models
 from openswe.model_request import ModelRequestIntent, infer_requested_model
 from openswe.threads.ai_search import rank_threads
+from openswe.utils.ai_search_stream import ai_search_response
 from openswe.utils.jev import JevDecision, select_jev_choice
+from openswe.utils.jev_search import JevSearch
 
 type ResponseHandler = (
     Callable[[httpx2.Request], httpx2.Response]
@@ -225,3 +228,50 @@ async def test_thread_search_judges_each_thread_alone_and_drops_failed_calls(
     ranked = await rank_threads("slack dm bug", threads)
     assert sorted(seen) == sorted(thread["title"] for thread in threads)
     assert [(thread["id"], thread["relevance"]) for thread in ranked] == [("c", 0.9), ("a", 0.7)]
+
+
+async def test_search_stream_reports_each_page_before_judging_the_next(
+    transport: InstallTransport,
+) -> None:
+    requested: list[int] = []
+
+    async def pages() -> AsyncIterator[list[dict[str, str]]]:
+        for page in range(2):
+            requested.append(page)
+            yield [
+                {"id": f"{page}-{i}", "title": f"{'down' if page else 'up'} {i}"} for i in range(10)
+            ]
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        title = json.loads(request.read())["state"]["thread"]["title"]
+        if title.startswith("down"):
+            return httpx2.Response(503, json={"error": "unavailable"})
+        noul = 0.9 if int(title.split()[1]) % 2 == 0 else 0.1
+        return httpx2.Response(
+            200, json={"model": "jev-1.13.0", "answers": {"match": {"type": "noul", "noul": noul}}}
+        )
+
+    transport(handle)
+    search = JevSearch("up", "thread", instructions="Does the thread match the query?")
+    response = ai_search_response(
+        search.stream(pages(), _Card.model_validate),
+        lambda item, relevance: {"id": item["id"], "relevance": relevance},
+    )
+    frames = aiter(response.body_iterator)
+
+    first = str(await anext(frames))
+    assert requested == [0]
+    assert first.startswith("event: batch\n")
+    batch = json.loads(first.split("data: ", 1)[1])
+    assert batch["scanned"] == 10
+    assert [match["id"] for match in batch["matches"]] == ["0-0", "0-2", "0-4", "0-6", "0-8"]
+
+    last = str(await anext(frames))
+    assert last.startswith("event: failed\n")
+    assert json.loads(last.split("data: ", 1)[1])["scanned"] == 10
+
+
+class _Card(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    title: str

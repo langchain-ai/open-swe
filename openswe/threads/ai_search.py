@@ -1,90 +1,58 @@
 """Natural-language thread search: Jev judges which recent threads a query describes."""
 
-import logging
-from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import datetime
 
-from langchain_typesafe import ClassifierResponse, Noul
 from pydantic import BaseModel, ConfigDict, Field
 
 from openswe.prompts import prompt
 from openswe.threads.listing import DashboardThreadScope, list_dashboard_threads_page
-from openswe.utils.jev import classify_each_with_jev
+from openswe.utils.jev_search import JEV_SEARCH_PAGE_SIZE, JevBatch, JevSearch
 
 AI_SEARCH_CANDIDATES = 60
-_AI_SEARCH_TIMEOUT_SECONDS = 10.0
-_MATCH_THRESHOLD = 0.5
-_JEV_CONCURRENCY = 16
-
-logger = logging.getLogger(__name__)
+AI_SEARCH_SCAN_CAP = 200
 
 
-async def search_dashboard_threads(
-    login: str,
-    *,
-    email: str | None,
-    query: str,
-    scope: DashboardThreadScope,
-    limit: int,
-) -> list[dict[str, object]]:
-    page = await list_dashboard_threads_page(
-        login, email=email, limit=AI_SEARCH_CANDIDATES, scope=scope
+def stream_thread_matches(
+    login: str, *, email: str | None, query: str, scope: DashboardThreadScope
+) -> AsyncIterator[JevBatch[dict[str, object]]]:
+    """Judge the person's threads newest first, a page at a time, up to the scan cap."""
+    return _thread_search(query).stream(
+        _recent_thread_pages(login, email=email, scope=scope), _ThreadCard.model_validate
     )
-    return (await rank_threads(query, page["items"]))[:limit]
 
 
 async def rank_threads(
     query: str, threads: Sequence[Mapping[str, object]]
 ) -> list[dict[str, object]]:
-    """Keep the threads Jev thinks `query` is looking for, most likely first.
+    """Keep the threads Jev thinks `query` is looking for, most likely first."""
+    matches = await _thread_search(query).rank(threads, _ThreadCard.model_validate)
+    return [with_relevance(match.item, match.relevance) for match in matches]
 
-    Each thread is its own Jev request, since Jev answers every question against one state.
-    """
-    if not threads:
-        return []
-    today = datetime.now(UTC).date().isoformat()
-    question = Noul(instructions=prompt("threads/search-match"))
-    responses = await classify_each_with_jev(
-        [
-            {
-                "state": {
-                    "query": query,
-                    "today": today,
-                    "thread": _ThreadCard.model_validate(thread).model_dump(
-                        mode="json", exclude_none=True
-                    ),
-                },
-                "questions": {"match": question},
-            }
-            for thread in threads
-        ],
-        timeout=_AI_SEARCH_TIMEOUT_SECONDS,
-        max_concurrency=_JEV_CONCURRENCY,
-    )
-    failures = [response for response in responses if isinstance(response, Exception)]
-    if failures and len(failures) == len(responses):
-        raise failures[0]
-    if failures:
-        logger.warning(
-            "Jev could not judge some threads",
-            extra={"failed": len(failures), "candidates": len(responses)},
-            exc_info=failures[0],
+
+def with_relevance(thread: Mapping[str, object], relevance: float) -> dict[str, object]:
+    return {**thread, "relevance": round(relevance, 3)}
+
+
+def _thread_search(query: str) -> JevSearch:
+    return JevSearch(query, "thread", instructions=prompt("threads/search-match"))
+
+
+async def _recent_thread_pages(
+    login: str, *, email: str | None, scope: DashboardThreadScope
+) -> AsyncIterator[list[dict[str, object]]]:
+    for offset in range(0, AI_SEARCH_SCAN_CAP, JEV_SEARCH_PAGE_SIZE):
+        page = await list_dashboard_threads_page(
+            login, email=email, limit=JEV_SEARCH_PAGE_SIZE, offset=offset, scope=scope
         )
-    matches = sorted(
-        (
-            (answer.noul, index)
-            for index, response in enumerate(responses)
-            if isinstance(response, ClassifierResponse)
-            and (answer := response.nouls.get("match")) is not None
-            and answer.noul >= _MATCH_THRESHOLD
-        ),
-        key=lambda match: match[0],
-        reverse=True,
-    )
-    return [{**threads[index], "relevance": round(score, 3)} for score, index in matches]
+        items: list[dict[str, object]] = page["items"]
+        if items:
+            yield items
+        if not page["hasMore"]:
+            return
 
 
-class _PullRequestCard(BaseModel):
+class _LinkedPullRequest(BaseModel):
     title: str | None = None
     state: str | None = None
 
@@ -101,6 +69,6 @@ class _ThreadCard(BaseModel):
     automation: str | None = Field(None, validation_alias="automationName")
     status: str | None = None
     resolved: bool = False
-    pull_requests: list[_PullRequestCard] = Field([], validation_alias="pullRequests")
+    pull_requests: list[_LinkedPullRequest] = Field([], validation_alias="pullRequests")
     created: datetime | None = Field(None, validation_alias="createdAt")
     updated: datetime | None = Field(None, validation_alias="updatedAt")

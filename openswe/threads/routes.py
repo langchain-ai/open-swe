@@ -7,7 +7,6 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from langchain_typesafe.client import TypeSafeError
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
@@ -18,7 +17,7 @@ from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
 from openswe.threads import terminal
-from openswe.threads.ai_search import search_dashboard_threads
+from openswe.threads.ai_search import stream_thread_matches, with_relevance
 from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
@@ -74,7 +73,8 @@ from openswe.threads.runs import (
     create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
-from openswe.utils.jev import JevUnavailableError
+from openswe.utils.ai_search_stream import ai_search_response
+from openswe.utils.jev import JevUnavailableError, ensure_jev_configured
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -260,19 +260,17 @@ async def api_list_threads_page(
 async def api_search_threads(
     q: Annotated[str, Query(min_length=2, max_length=500)],
     scope: DashboardThreadScope = "all",
-    limit: Annotated[int, Query(ge=1, le=20)] = 8,
     session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, list[dict[str, object]]]:
+) -> StreamingResponse:
+    """Server-sent events: Jev judges the person's threads newest first, ten at a time."""
     try:
-        items = await search_dashboard_threads(
-            session["sub"], email=session.get("email"), query=q, scope=scope, limit=limit
-        )
+        ensure_jev_configured()
     except JevUnavailableError as exc:
         raise HTTPException(503, "AI search is not configured") from exc
-    except (TypeSafeError, TimeoutError) as exc:
-        logger.exception("AI thread search failed", extra={"scope": scope})
-        raise HTTPException(502, "AI search failed") from exc
-    return {"items": items}
+    return ai_search_response(
+        stream_thread_matches(session["sub"], email=session.get("email"), query=q, scope=scope),
+        with_relevance,
+    )
 
 
 class PullRequestChecksRef(BaseModel):

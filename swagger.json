@@ -12687,6 +12687,55 @@
         ]
       }
     },
+    "/dashboard/api/pull-requests/related": {
+      "get": {
+        "description": "Server-sent events: Jev judges the person's PRs most recently updated first, ten at a time.",
+        "operationId": "api_related_pull_requests_dashboard_api_pull_requests_related_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Related Pull Requests",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
     "/dashboard/api/pull-requests/search": {
       "get": {
         "operationId": "api_search_pull_requests_dashboard_api_pull_requests_search_get",
@@ -18300,6 +18349,7 @@
     },
     "/dashboard/api/threads/search": {
       "get": {
+        "description": "Server-sent events: Jev judges the person's threads newest first, ten at a time.",
         "operationId": "api_search_threads_dashboard_api_threads_search_get",
         "parameters": [
           {
@@ -18328,35 +18378,13 @@
               "title": "Scope",
               "type": "string"
             }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 8,
-              "maximum": 20,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
           }
         ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "items": {
-                      "additionalProperties": true,
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "title": "Response Api Search Threads Dashboard Api Threads Search Get",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
