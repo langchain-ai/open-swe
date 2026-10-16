@@ -209,6 +209,21 @@ class TaskMessage(Base):
             return True
 
     @classmethod
+    async def pending_threads(cls, thread_ids: Sequence[str]) -> set[str]:
+        if not thread_ids or not postgres.configured():
+            return set()
+        async with postgres.session() as session:
+            return set(
+                await session.scalars(
+                    select(cls.thread_id).where(
+                        cls.thread_id.in_(thread_ids),
+                        cls.delivered_at.is_(None),
+                        cls.delivery_attempts < _MAX_ATTEMPTS,
+                    )
+                )
+            )
+
+    @classmethod
     async def forget(cls, thread_id: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(cls).where(cls.thread_id == thread_id))

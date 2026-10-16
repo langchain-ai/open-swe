@@ -29,6 +29,7 @@ import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
+import { HourglassIcon } from "@phosphor-icons/react/dist/ssr/Hourglass"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
@@ -507,6 +508,13 @@ export function SidebarThreadRow({
         )}
         {item.status === "running" ? (
           <RunningIndicator label="Thread running" />
+        ) : item.waitingForDelegatedWork ? (
+          <HourglassIcon
+            size={ICON_SIZE}
+            weight="regular"
+            className="text-icon-secondary"
+            aria-label="Waiting for delegated work"
+          />
         ) : unread ? (
           <span
             className="size-2 rounded-full bg-brand"

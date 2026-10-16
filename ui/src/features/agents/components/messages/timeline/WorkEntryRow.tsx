@@ -15,6 +15,8 @@ import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { Link } from "@langchain/macaw-components/Link"
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { ToolResultBody } from "./ToolResultBody"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { KeyboardEvent, ReactNode } from "react"
@@ -241,6 +243,19 @@ export function WorkEntryRow({
                     {entry.preview}
                   </span>
                 ))}
+              {entry.destinationHref && (
+                <Tooltip title="Open destination thread">
+                  <Link
+                    href={entry.destinationHref}
+                    aria-label="Open destination thread"
+                    className="shrink-0 text-icon-secondary"
+                    onClick={stopRowToggle}
+                    onKeyDown={stopRowToggle}
+                  >
+                    <ArrowUpRightIcon size={14} weight="regular" aria-hidden />
+                  </Link>
+                </Tooltip>
+              )}
               {entry.diffStats && (
                 <span className="flex shrink-0 items-center gap-space-1 font-mono text-xxs text-secondary tabular-nums">
                   <span className="transition-colors group-focus-within/entry:text-success-secondary group-hover/entry:text-success-secondary">

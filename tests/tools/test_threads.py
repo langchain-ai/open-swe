@@ -431,7 +431,10 @@ async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
 
     sent = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
-    assert sent == {"success": True, "mode": mode, "run_id": result["run_id"]}
+    assert sent["success"] is True
+    assert sent["mode"] == mode
+    assert sent["run_id"] == result["run_id"]
+    assert sent["recipient_thread_id"] == "thread-1"
 
 
 async def test_manage_thread_starts_idle_message_with_fixed_command(

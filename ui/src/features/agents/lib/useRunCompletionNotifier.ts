@@ -26,19 +26,20 @@ export function useRunCompletionNotifier(
     const prev = prevStatusRef.current
     for (const thread of threads) {
       const prevStatus = prev.get(thread.id)
+      const status = thread.waitingForDelegatedWork ? "running" : thread.status
       if (prevStatus === undefined) {
-        prev.set(thread.id, thread.status)
+        prev.set(thread.id, status)
         continue
       }
       if (
         thread.taskMembership?.role !== "worker" &&
         prevStatus === "running" &&
-        TERMINAL_STATUSES.has(thread.status) &&
+        TERMINAL_STATUSES.has(status) &&
         !(isViewingThread && thread.id === activeThreadId)
       ) {
         showRunNotification(thread, openThread)
       }
-      prev.set(thread.id, thread.status)
+      prev.set(thread.id, status)
     }
   }, [threads, activeThreadId, openThread])
 }
