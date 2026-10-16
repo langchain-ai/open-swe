@@ -43,9 +43,8 @@ it("warns about a lagging frontend even when it matches the backend-served bundl
   expect((await screen.findByRole("status")).textContent).toContain(
     "New changes are available. Reload to get the latest updates."
   )
-  expect(
-    screen.getByRole("link", { name: "Details" }).getAttribute("href")
-  ).toBe("/my-settings/about")
+  expect(screen.queryByRole("link", { name: "Details" })).toBeNull()
+  expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy()
   client.setQueryData(["session"], session("old"))
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull())
   client.clear()

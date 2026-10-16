@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from deepagents.middleware.subagents import SubAgent
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
@@ -62,7 +62,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.prompts import apply_tool_descriptions, prompt
+from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
     changed_files,
@@ -126,7 +126,7 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
     return {
         "name": "reviewer",
         "description": prompt("reviewer/subagent-description"),
-        "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
+        "system_prompt": common_prompt(REVIEWER_SUBAGENT_SYSTEM_PROMPT),
         "model": model,
         # Subagents compile into their own graphs, so the reviewer's own
         # middleware never wraps their model calls.
@@ -1128,9 +1128,15 @@ async def build_reviewer_agent(
     )
     graph = create_deep_agent(
         model=reviewer_model,
-        system_prompt="",
+        system_prompt=common_prompt(),
         tools=reviewer_tools(),
-        subagents=[_reviewer_subagent(reviewer_subagent_model)],
+        subagents=[
+            {
+                **GENERAL_PURPOSE_SUBAGENT,
+                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
+            },
+            _reviewer_subagent(reviewer_subagent_model),
+        ],
         backend=backend,
         middleware=middleware,
     ).with_config(bindable_config(config))

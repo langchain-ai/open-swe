@@ -64,7 +64,7 @@ from openswe.middleware.conversation_offloading import ConversationOffloadingMid
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
-from openswe.prompts import prompt
+from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -301,7 +301,7 @@ class RunSession:
                     {
                         "name": subagent.name,
                         "description": subagent.description,
-                        "system_prompt": subagent.system_prompt,
+                        "system_prompt": common_prompt(subagent.system_prompt),
                         "tools": None
                         if subagent.tools is None
                         else [name for name in subagent.tools if name in tools],
@@ -398,8 +398,8 @@ class RunSession:
         ]
         await _chain(shaping, capture)(self._request(state, runtime))
         if not captured or captured[0].system_message is None:
-            return ""
-        return captured[0].system_message.text
+            return common_prompt()
+        return common_prompt(captured[0].system_message.text)
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
         """The model the graph's model selection would call next."""
