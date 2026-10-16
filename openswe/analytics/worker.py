@@ -10,16 +10,22 @@ from openswe.database import configured
 
 logger = logging.getLogger(__name__)
 
+_RETENTION_INTERVAL_SECONDS = 3600.0
+
 _STOP = asyncio.Event()
 _WORKER: asyncio.Task[None] | None = None
 
 
 async def run_worker() -> None:
+    loop = asyncio.get_running_loop()
+    retention_due = loop.time()
     while not _STOP.is_set():
         try:
             delivered = await deliver_batch()
             await recompute_dirty_partitions(limit=20)
-            await enforce_retention()
+            if loop.time() >= retention_due:
+                retention_due = loop.time() + _RETENTION_INTERVAL_SECONDS
+                await enforce_retention()
         except Exception:  # noqa: BLE001
             delivered = 0
             logger.warning("Analytics worker iteration failed", exc_info=True)
