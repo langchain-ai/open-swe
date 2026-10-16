@@ -235,6 +235,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await page.goto(`/agents/${threadId}`);
     const sentMessage = page.getByText("On it!", { exact: true });
     await expect(sentMessage).toBeVisible();
+    // Stop only once the delegated task is under way: the model loop runs on
+    // Managed Deep Agents, so its start reaches the transcript a hop after the reply.
+    await expect(
+      page.getByRole("button", { name: /^Delegating .* · 1 action$/ }),
+    ).toBeVisible();
     const stopRun = page.getByRole("button", { name: "Stop run" });
     await expect(stopRun).toBeVisible();
     await stopRun.click();

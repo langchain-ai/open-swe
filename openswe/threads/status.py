@@ -32,6 +32,12 @@ async def refresh_thread_status(thread_id: str) -> ThreadStatus | None:
     return status
 
 
+async def thread_run_error(thread_id: str) -> str | None:
+    """Why the thread's latest run failed, as its runtime recorded it; the index keeps no state."""
+    thread = await index.get(thread_id)
+    return await RUNTIMES.runs_on(thread.runtime if thread else "local").run_error(thread_id)
+
+
 async def reconcile_busy_threads() -> int:
     """Ask the runtime about threads busy for longer than any webhook should take."""
     settled = 0

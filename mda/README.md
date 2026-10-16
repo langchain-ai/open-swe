@@ -15,18 +15,17 @@ The model loop and its checkpoints run here. Everything else is the in-process O
 - **State:** graph state those hooks write that MDA does not know rides in `open_swe_state` and goes back with every call. Custom stream events they emit are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
 
-The run's context carries the signed run token and the models dispatch picked. The proxy also sets the run's LangSmith tracing project to the backend's, so agent and reviewer traces stay in one project whichever runtime runs them. The backend reads the thread and run configuration from the token, never from the request body. This deployment holds no GitHub, Slack or database credentials.
+The run's context carries the signed run token and the models dispatch picked. The backend's thread router also sets the run's LangSmith tracing project to the backend's, so agent and reviewer traces stay in one project whichever runtime runs them. The backend reads the thread and run configuration from the token, never from the request body. This deployment holds no GitHub, Slack or database credentials.
 
 This directory is its own project and is never imported by the backend.
 
 ## Routing
 
-With `MDA_RUNTIME_URL` set, the backend's `openswe.remote_runtime.proxy` middleware routes these threads to this deployment:
+Every agent and reviewer thread runs here. The backend refuses to start without `MDA_RUNTIME_URL`, and its thread router (`openswe.threads.router`), which serves threads from its PostgreSQL thread index, routes these threads' runs to this deployment:
 
-- **Choosing.** Each person picks the runtime with **Run on Managed Deep Agents** under *My settings → Experiments* (the `run_on_mda` preference; the switch shows only when `MDA_RUNTIME_URL` is set). It decides for threads they own, or for threads with no owner whose run they start. Threads no person starts (API keys, GitHub Actions workflows, system reviews) follow the workspace's **Managed Deep Agents** setting, which admins switch in workspace settings. Everything else keeps the in-process graphs on this backend.
-- **Claiming.** Starting an `agent` or `reviewer` run on a thread with no local history, for a person or workspace that chose MDA, claims the thread for MDA (`runtime: mda` in its metadata). The run is created on `open-swe`, with its configurable moved into the signed context. A protocol v2 `run.start` becomes such a run too. A thread stays on the runtime it started on, so turning the switch off later leaves existing MDA threads on MDA.
+- **Claiming.** Starting an `agent` or `reviewer` run on a thread with no local history claims the thread for MDA (`runtime: mda` in its metadata). The run is created on `open-swe`, with its configurable moved into the signed context. A protocol v2 `run.start` becomes such a run too. Threads whose runs left checkpoints on the backend before it required MDA keep running there.
 - **Forwarding.** Every run, state, history, stream and cancel request for a claimed thread is then forwarded here. This covers the dashboard, the CLI and every backend client.
-- **Merging.** `GET /threads/{id}` and `POST /threads/search` still answer from the backend, with run status taken from here.
+- **Indexing.** Thread reads and searches answer from the backend's thread index. A run started here marks the thread busy there, and the run-complete webhook settles it.
 
 ## Configure
 
@@ -43,15 +42,17 @@ The backend:
 
 | Variable | Purpose |
 |---|---|
-| `MDA_RUNTIME_URL` | This deployment's URL; new agent and reviewer threads of people (or, for threads no person starts, workspaces) that turned on `run_on_mda` run here |
+| `MDA_RUNTIME_URL` | This deployment's URL; every new agent and reviewer thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 
 ## Run locally
 
 1. In the repository root `.env`, add `REMOTE_RUNTIME_TOKEN_SECRET` (any random string) and `MDA_RUNTIME_URL=http://localhost:2025`, then start the backend with `make dev`.
-2. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above. Then run `mda dev --port 2025 --no-browser` from `mda`. Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
-3. Turn on **Run on Managed Deep Agents** under *My settings → Experiments*, then use Open SWE as usual: your dashboard, Slack and GitHub threads start here. `uv run python -m evals.reviewer.run_eval --limit 3` runs reviews here without publishing to GitHub.
+2. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above. Then run `make dev-mda` from the repository root. Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
+3. Use Open SWE as usual: your dashboard, Slack and GitHub threads run here. `uv run python -m evals.reviewer.run_eval --limit 3` runs reviews here without publishing to GitHub.
+
+The browser E2E suite runs this project the same way, with a scripted model: `tests/e2e/mda-dev.sh`.
 
 ## Build and deploy
 

@@ -61,10 +61,13 @@ echo "  Slack/GitHub are mocked. Open two browser profiles to be"
 echo "  two users (Alice owns the plan; Bob can comment + request changes)."
 echo
 
+# Agent and reviewer threads run on the Managed Deep Agents server beside it.
+E2E_REAL_LLM="${REAL_LLM}" tests/e2e/mda-dev.sh &
+MDA=$!
 E2E_REAL_LLM="${REAL_LLM}" uv run langgraph dev --config tests/e2e/langgraph.e2e.json \
   --port "${API_PORT}" --no-browser --allow-blocking --no-reload &
 HARNESS=$!
-trap 'kill "${HARNESS}" 2>/dev/null || true' EXIT INT TERM
+trap 'kill "${HARNESS}" "${MDA}" 2>/dev/null || true' EXIT INT TERM
 
 # E2E_HARNESS activates the dev-only proxy plugin in ui/vite.config.ts; an empty
 # API base means the UI calls its own origin (proxied), keeping it same-origin.
