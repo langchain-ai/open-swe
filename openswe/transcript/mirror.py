@@ -52,7 +52,9 @@ async def mirror_thread_metadata(thread_id: str, patch: Mapping[str, object]) ->
         return
     mirrored: JsonObject = {}
     for key, value in patch.items():
-        if key not in MIRRORED_KEYS:
+        if key not in MIRRORED_KEYS and not key.startswith(
+            ("thread_admitted:", "thread_join_requested:")
+        ):
             continue
         try:
             mirrored[key] = cast(JsonValue, to_jsonable_python(value))

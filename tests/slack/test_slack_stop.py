@@ -1,5 +1,6 @@
 import builtins
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -141,8 +142,10 @@ def _patch_handler(
     return dispatched, claimed
 
 
+@pytest.mark.parametrize("admitted", [None, False, True])
 async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_agent_summary(
     monkeypatch: pytest.MonkeyPatch,
+    admitted: bool | None,
 ) -> None:
     client = FakeClient()
     thread_id = await _add_thread(client)
@@ -151,8 +154,19 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     client.runs.by_status["running"] = [{"run_id": "run-running"}]
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
+    if admitted is not None:
+        client.threads.values[thread_id]["metadata"].update(
+            {"owner_login": "owner", "thread_admitted:other": admitted}
+        )
+        monkeypatch.setattr(slack_stop.User, "login_for_slack", AsyncMock(return_value="other"))
     await process_slack_stop_reaction(_event("2.000"), event_id="EvStop")
 
+    if admitted is False:
+        assert claimed == []
+        assert dispatched == []
+        assert client.runs.cancelled == []
+        assert client.threads.updates == []
+        return
     assert claimed == ["EvStop"]
     assert client.runs.cancelled == [
         {

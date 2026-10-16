@@ -28,6 +28,8 @@ from openswe.threads.runs import _build_dashboard_configurable
 from openswe.threads.summary import (
     _assert_thread_postable,
     _assert_thread_promptable,
+    thread_is_bot_triggered,
+    thread_is_promptable,
     thread_is_readable,
 )
 from openswe.utils.thread_ops import langgraph_client
@@ -99,6 +101,8 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
     approved_at = content.get("approved_at") or metadata.get("plan_approved_at")
     return {
         "threadId": thread_id,
+        "canParticipate": thread_is_promptable(metadata, login)
+        and not thread_is_bot_triggered(metadata),
         "status": content.get("status") or metadata.get("plan_status") or PLAN_STATUS_SHARED,
         "html": content.get("html", ""),
         "markdown": content.get("markdown", ""),

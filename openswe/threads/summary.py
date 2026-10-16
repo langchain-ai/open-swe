@@ -22,6 +22,7 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
+from openswe.threads.membership import ThreadMembership
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -96,13 +97,7 @@ def thread_source(metadata: Mapping[str, Any]) -> str:
 
 
 def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:
-    owner = metadata.get("owner_login")
-    return bool(
-        isinstance(owner, str)
-        and owner.strip()
-        and login
-        and owner.strip().lower() == login.strip().lower()
-    )
+    return ThreadMembership("", metadata).is_owner(login)
 
 
 def thread_is_private(metadata: Mapping[str, Any]) -> bool:
@@ -132,9 +127,9 @@ def thread_is_readable(
 
 
 def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool:
-    """Only the owner may prompt, approve, or open a shell into a private thread."""
-    return thread_source(metadata) in _SURFACED_SOURCES and (
-        not thread_is_private(metadata) or thread_is_owner(metadata, login)
+    """Public visibility permits reading; only admitted people may participate."""
+    return thread_source(metadata) in _SURFACED_SOURCES and ThreadMembership("", metadata).admits(
+        login
     )
 
 
@@ -156,6 +151,8 @@ def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) ->
     dashboard keeps it read-only for everyone, admins included.
     """
     if not thread_is_promptable(metadata, login):
+        if not thread_is_private(metadata) and thread_is_readable(metadata, login):
+            raise HTTPException(403, "the thread owner must approve your request to join")
         raise HTTPException(404, "thread not found")
     if thread_is_bot_triggered(metadata):
         raise HTTPException(403, BOT_THREAD_READ_ONLY)

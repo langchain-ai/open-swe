@@ -843,11 +843,11 @@ class ThreadRecord:
         return cls(exists=True, metadata=thread_metadata(thread))
 
     def authorize(self, github_login: str) -> JsonObject:
-        """Reject a private-thread follow-up from someone who may not prompt it."""
-        if thread_is_private(self.metadata) and not thread_is_promptable(
-            self.metadata, github_login
-        ):
-            raise HTTPException(404, "thread not found")
+        """Authorize a follow-up before reading credentials or adding participants."""
+        if self.exists and not thread_is_promptable(self.metadata, github_login):
+            if thread_is_private(self.metadata):
+                raise HTTPException(404, "thread not found")
+            raise HTTPException(403, "the thread owner must approve your request to join")
         return self.metadata
 
     @property
@@ -1080,7 +1080,7 @@ def build_github_issue_comments_text(
 
 
 async def authorize_github_thread(thread_id: str, github_login: str) -> JsonObject:
-    """Reject private-thread follow-ups before reading credentials or dispatching."""
+    """Authorize thread participation before reading credentials or dispatching."""
     return (await ThreadRecord.read(thread_id)).authorize(github_login)
 
 
@@ -1116,9 +1116,9 @@ async def trigger_or_queue_run(
         workspace=workspace,
         token_repositories=token_repositories,
     )
-    if not persisted and token_repositories is not None:
+    if not persisted and (token_repositories is not None or github_login):
         logger.error(
-            "Not starting a GitHub run whose token scope could not be recorded",
+            "Not starting a GitHub run whose authorization could not be recorded",
             extra={"agent_thread_id": thread_id},
         )
         return False

@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 from openswe.database import postgres
+from openswe.threads.summary import thread_is_promptable
 from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.engine import Command, append, delete_transcript
 from openswe.transcript.events import (
@@ -210,6 +211,14 @@ async def test_a_visibility_flip_reaches_the_transcript_read_path(registry_db: N
     stranger = {"sub": "someone-else", "email": "someone-else@example.com"}
 
     await _readable_transcript(thread_id, stranger)
+    metadata = await load_access(thread_id)
+    assert metadata is not None and not thread_is_promptable(metadata, stranger["sub"])
+    await mirror_thread_metadata(thread_id, {"thread_join_requested:someone-else": True})
+    metadata = await load_access(thread_id)
+    assert metadata is not None and not thread_is_promptable(metadata, stranger["sub"])
+    await mirror_thread_metadata(thread_id, {"thread_admitted:someone-else": True})
+    metadata = await load_access(thread_id)
+    assert metadata is not None and thread_is_promptable(metadata, stranger["sub"])
 
     await mirror_thread_metadata(thread_id, {"visibility": "private", "title": "Renamed"})
 

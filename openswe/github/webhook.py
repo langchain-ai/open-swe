@@ -1051,9 +1051,7 @@ async def process_github_pr_comment(
                 extra={"thread_id": thread_id, "pr_number": pr_number},
             )
             return
-        if common.thread_is_private(agent_metadata) and not common.thread_is_promptable(
-            agent_metadata, github_login
-        ):
+        if not common.thread_is_promptable(agent_metadata, github_login):
             return
     email = await User.email_for_login(github_login) or ""
     if email:
@@ -1103,9 +1101,7 @@ async def process_github_pr_comment(
         )
     ):
         return
-    if common.thread_is_private(thread_metadata) and not common.thread_is_promptable(
-        thread_metadata, event_comment["author"]
-    ):
+    if not common.thread_is_promptable(thread_metadata, event_comment["author"]):
         return
 
     fetch_comments = (
@@ -1133,6 +1129,14 @@ async def process_github_pr_comment(
             event_comment=event_comment,
             authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
+    admission_metadata = thread_metadata
+    if "visibility" not in thread_metadata and thread_metadata.get("created_at_ms") is None:
+        admission_metadata = {**thread_metadata, "owner_login": github_login}
+    comments = [
+        comment
+        for comment in comments
+        if common.thread_is_promptable(admission_metadata, comment["author"])
+    ]
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
@@ -1409,7 +1413,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         return
 
     thread_id = github_issue_thread_id(issue_id)
-    existing_thread = await common.thread_exists(thread_id)
+    record = await common.ThreadRecord.read(thread_id)
+    record.authorize(github_login)
+    existing_thread = record.exists
     github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()
     reaction_token = github_token or app_token
@@ -1482,6 +1488,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             )
             comments.sort(key=lambda item: item.get("created_at", ""))
 
+        comments = [item for item in comments if item["author"].lower() == github_login.lower()]
         trusted = await _trusted_authors(github_login, issue_author, comments=comments)
         prompt = build_github_issue_prompt(
             repo_config,
@@ -1526,9 +1533,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         workspace=workspace,
         token_repositories=token_repositories,
     )
-    if not persisted and token_repositories is not None:
+    if not persisted and (token_repositories is not None or github_login):
         common.logger.error(
-            "Not starting a GitHub issue run whose token scope could not be recorded",
+            "Not starting a GitHub issue run whose authorization could not be recorded",
             extra={"agent_thread_id": thread_id},
         )
         return

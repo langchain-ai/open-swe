@@ -46,6 +46,7 @@ from openswe.threads.summary import (
     assert_thread_readable,
     run_status_to_agent_status,
     thread_is_owner,
+    thread_is_promptable,
     thread_source,
 )
 from openswe.transcript.engine import delete_transcript
@@ -389,6 +390,7 @@ async def rename_dashboard_thread(
 ) -> dict[str, Any]:
     client = langgraph_client()
     thread = await _authorized_thread(thread_id, login, email=email)
+    _assert_thread_promptable(thread_metadata(thread), login)
     metadata_update = {"title": title, "title_seed": None, TITLE_LOCKED_KEY: True}
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
@@ -545,7 +547,11 @@ async def continue_thread_privately(
 async def resolve_all_dashboard_threads(login: str, *, email: str | None = None) -> int:
     """Resolve every thread the caller has participated in."""
     client = langgraph_client()
-    threads = await list_unresolved_dashboard_threads(login, email=email)
+    threads = [
+        thread
+        for thread in await list_unresolved_dashboard_threads(login, email=email)
+        if thread_is_promptable(thread_metadata(thread), login)
+    ]
     now_ms = _now_ms()
 
     async def resolve(thread_id: str) -> None:
@@ -569,11 +575,13 @@ async def resolve_dashboard_thread(
 ) -> dict[str, Any]:
     """Mark a thread resolved/unresolved via thread metadata."""
     client = langgraph_client()
-    await _authorized_thread(thread_id, login, email=email)
+    thread = await _authorized_thread(thread_id, login, email=email)
+    _assert_thread_promptable(thread_metadata(thread), login)
     try:
         async with agent_thread_pr_state_lock(thread_id):
             thread = await _authorized_thread(thread_id, login, email=email)
             metadata = thread_metadata(thread)
+            _assert_thread_promptable(metadata, login)
             metadata_update: dict[str, Any] = {
                 "resolved": resolved,
                 "resolved_at_ms": _now_ms() if resolved else None,

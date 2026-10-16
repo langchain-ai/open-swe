@@ -66,7 +66,7 @@ def _run_process(
             "user_email": user_email,
             "workspace": workspace,
         }
-        return None
+        return True
 
     async def fake_resolve_login(email):
         captured["resolved_email"] = email
@@ -79,6 +79,11 @@ def _run_process(
         issue_data = full_issue
     with (
         patch.object(linear_webhook, "linear_issue_thread_id", return_value="thread-1"),
+        patch.object(
+            linear_webhook.common.ThreadRecord,
+            "read",
+            AsyncMock(return_value=linear_webhook.common.ThreadRecord(exists=False, metadata={})),
+        ),
         patch.object(linear_webhook.User, "login_for_email", side_effect=fake_resolve_login),
         patch.object(linear_webhook.common, "dispatch_agent_run", side_effect=fake_dispatch),
         patch.object(
@@ -135,12 +140,17 @@ def test_linear_comment_images_stay_with_their_comments() -> None:
         {
             "id": "comment-1",
             "body": "First ![one](https://example.com/one.png)",
-            "user": {"id": "one", "name": "One"},
+            "user": {"id": "one", "name": "One", "email": "zhen@example.com"},
         },
         {
             "id": "comment-2",
             "body": "Second ![two](https://example.com/two.png)",
-            "user": {"id": "two", "name": "Two"},
+            "user": {"id": "two", "name": "Two", "email": "zhen@example.com"},
+        },
+        {
+            "id": "comment-3",
+            "body": "Unadmitted ![three](https://example.com/three.png)",
+            "user": {"id": "other", "name": "Other", "email": "other@example.com"},
         },
     ]
     data = _issue_data(user_email="zhen@example.com")
@@ -157,3 +167,4 @@ def test_linear_comment_images_stay_with_their_comments() -> None:
     ]
     assert human_messages[0]["content"][1]["image_url"]["url"].endswith("one.png")
     assert human_messages[1]["content"][1]["image_url"]["url"].endswith("two.png")
+    assert len(human_messages) == 2

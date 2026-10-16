@@ -38,6 +38,8 @@ import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
+import { ThreadMembershipControls } from "@/features/agents/components/ThreadMembershipControls"
+import { useThreadMembership } from "@/features/agents/lib/membership"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -154,7 +156,9 @@ export function AgentThreadView({
   const macOffline = runsElsewhere && handoff !== "cloud"
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
+  const membership = useThreadMembership(thread)
   const canPost =
+    membership.canParticipate &&
     !macOffline &&
     !botThread &&
     ((thread.threadCategory !== "automation" && !thread.adminThread) ||
@@ -722,8 +726,12 @@ export function AgentThreadView({
           <AgentThreadHeader
             key={thread.id}
             title={thread.title}
-            onRename={(title) =>
-              renameThread.mutateAsync({ threadId: thread.id, title })
+            readOnly={!membership.canParticipate}
+            onRename={
+              membership.canParticipate
+                ? (title) =>
+                    renameThread.mutateAsync({ threadId: thread.id, title })
+                : undefined
             }
             target={
               localThread || thread.sandboxBridgeClient === "desktop"
@@ -924,6 +932,7 @@ export function AgentThreadView({
           )}
           {!isHydrating && (
             <AgentComposerDock>
+              <ThreadMembershipControls thread={thread} />
               <CodeChannelLink url={thread.codeChannelUrl} />
               {!reviewChat && (
                 <ThreadPullRequests
@@ -947,20 +956,22 @@ export function AgentThreadView({
                 placeholder={
                   macOffline
                     ? "This thread's Mac isn't serving it right now"
-                    : botThread
-                      ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
-                      : canPost
-                        ? hasConversation
-                          ? "Add a follow up"
-                          : "Send the first message"
-                        : "Only workspace admins can send messages in this thread"
+                    : !membership.canParticipate
+                      ? "Owner approval is required to participate"
+                      : botThread
+                        ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
+                        : canPost
+                          ? hasConversation
+                            ? "Add a follow up"
+                            : "Send the first message"
+                          : "Only workspace admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
                 compact
                 disabled={!canPost}
                 busy={isStreaming}
-                activeRun={activeRun}
-                onStop={stopRun}
+                activeRun={canPost ? activeRun : undefined}
+                onStop={canPost ? stopRun : undefined}
                 onSubmit={submitWithExcerpts}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}

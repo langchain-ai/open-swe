@@ -91,10 +91,12 @@ export function AgentThreadHeader({
   onRename,
   visibility,
   onVisibilityChange,
+  readOnly = false,
 }: {
   title?: string | null
   target: keyof typeof TARGET_ICONS
   panelCollapsed: boolean
+  readOnly?: boolean
   onRename?: (title: string) => Promise<unknown>
   thread?: AgentThread
   // Visibility of a thread that does not exist yet.
@@ -191,6 +193,7 @@ export function AgentThreadHeader({
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
+      readOnly={readOnly}
       onTogglePin={() => {
         if (!pinThread.isPending) {
           pinThread.mutate({ threadId: current.id, pinned: !pinned })

@@ -63,8 +63,11 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
 
 
 @pytest.mark.asyncio
-async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
+@pytest.mark.parametrize("channel_id,is_im", [("D1", True), ("C1", False)])
+async def test_owned_thread_does_not_dispatch_when_authorization_metadata_fails(
     monkeypatch: pytest.MonkeyPatch,
+    channel_id: str,
+    is_im: bool,
 ) -> None:
     monkeypatch.setattr(
         slack_webhook.common.ThreadRecord,
@@ -93,8 +96,8 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     with pytest.raises(RuntimeError):
         await slack_webhook._process_slack_mention_impl(
             SlackRequest(
-                channel_id="D1",
-                channel_context={"is_im": True},
+                channel_id=channel_id,
+                channel_context={"is_im": is_im},
                 thread_ts="1.0",
                 event_ts="1.0",
                 user_id="U1",
@@ -106,6 +109,42 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
                 Repo(owner="langchain-ai", name="open-swe"), explicit=True
             ),
         )
+    dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unadmitted_slack_sender_requests_to_join_without_dispatching(monkeypatch):
+    from openswe.threads.membership import ThreadMembership
+
+    monkeypatch.setattr(
+        slack_webhook.common.ThreadRecord,
+        "read",
+        AsyncMock(
+            return_value=webhook_common.ThreadRecord(
+                exists=True,
+                metadata={"source": "slack", "visibility": "public", "owner_login": "alice"},
+            )
+        ),
+    )
+    monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: _FakeClient())
+    monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(slack_webhook.User, "login_for_slack", AsyncMock(return_value="bob"))
+    request_join = AsyncMock(return_value=True)
+    monkeypatch.setattr(ThreadMembership, "request", request_join)
+    ephemeral = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhook.slack_utils, "post_slack_ephemeral_message", ephemeral)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
+
+    assert not await slack_webhook._process_slack_mention_impl(
+        _event_data().model_copy(update={"thread_id": "t1"}),
+        webhook_common.SlackRepoResolution(Repo(owner="langchain-ai", name="open-swe")),
+    )
+    request_join.assert_awaited_once_with("bob")
+    ephemeral.assert_awaited_once()
     dispatch.assert_not_awaited()
 
 

@@ -920,7 +920,25 @@ async def _process_slack_mention_impl(
         ),
         persist_display_name(user_id, user_name) if allowed_bot is None else _resolved(None),
     )
-    thread_metadata = thread_record.authorize(mapped_login or "")
+    from openswe.threads.membership import ThreadMembership
+
+    membership = ThreadMembership(thread_id, thread_record.metadata)
+    if mapped_login and membership.requires_approval and not membership.admits(mapped_login):
+        await membership.request(mapped_login)
+        notice = "The thread owner must approve your request to join before I can act on your messages. Your request is pending in the dashboard; resend your message after approval."
+        dashboard_url = common.dashboard_thread_url(thread_id)
+        await slack_utils.post_slack_ephemeral_message(
+            channel_id,
+            user_id,
+            notice + (f" <{dashboard_url}|View thread>" if dashboard_url else ""),
+            thread_ts=reply_thread_ts or thread_ts,
+        )
+        return False
+    thread_metadata = (
+        thread_record.metadata
+        if not mapped_login and membership.requires_approval
+        else thread_record.authorize(mapped_login or "")
+    )
     # The thread's state only matters once dispatching, but reading it is one of
     # the slowest lookups here and nothing below changes it before the run.
     dispatched_context = asyncio.ensure_future(
@@ -998,14 +1016,23 @@ async def _process_slack_mention_impl(
     )
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
-    if common.thread_is_private(thread_metadata):
+    context_membership = membership
+    if not thread_record.exists and mapped_login:
+        context_membership = ThreadMembership(
+            thread_id, {"owner_login": mapped_login, "visibility": "public"}
+        )
+    if common.thread_is_private(thread_metadata) or context_membership.requires_approval:
         context_messages = [
             message
             for message in context_messages
-            if common.thread_is_promptable(
-                thread_metadata, logins_by_user_id.get(str(message.get("user") or ""), "")
-            )
+            if message.get("user") == bot_user_id
+            or context_membership.admits(logins_by_user_id.get(str(message.get("user") or ""), ""))
         ]
+        logins_by_user_id = {
+            slack_id: login
+            for slack_id, login in logins_by_user_id.items()
+            if context_membership.admits(login)
+        }
         if not message_update:
             source_messages = context_messages
     parsed = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
@@ -1324,7 +1351,7 @@ async def _process_slack_mention_impl(
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",
     )
-    if (visibility == "private" or allowed_bot is not None) and not persisted:
+    if (visibility == "private" or allowed_bot is not None or mapped_login) and not persisted:
         # Dispatch would create the thread itself, with no metadata and so public.
         raise RuntimeError("could not persist thread authorization metadata")
 

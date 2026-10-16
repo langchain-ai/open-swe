@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { admitThreadParticipant } from "./helpers/thread-membership";
 import {
   OTHER_USER,
   SAME_USER,
@@ -751,8 +752,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(stopButton).toHaveCount(0);
   });
 
-  test("a DIFFERENT user can post, and their message is attributed", async ({
+  test("an admitted participant can post, and their message is attributed", async ({
     page,
+    browser,
+    baseURL,
   }) => {
     await loginAs(page, OTHER_USER);
     await openThreadViaSlackLink(page);
@@ -761,7 +764,15 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // The same thread + transcript is visible…
     await expectTranscriptVisible(page);
 
-    // …and a non-owner now gets a composer too (owner-only restriction removed).
+    const owner = await browser.newContext({ baseURL });
+    await owner.request.post("/control/login", { data: SAME_USER });
+    await admitThreadParticipant(
+      owner.request,
+      page.request,
+      threadId,
+      OTHER_USER.login,
+    );
+    await owner.close();
     const composer = composerFor(
       page,
       /Add a follow up|Send the first message/,

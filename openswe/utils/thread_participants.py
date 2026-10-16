@@ -280,6 +280,12 @@ async def resolve_thread_participant_logins(
     else:
         raise ValueError("Unsupported or missing thread source")
 
+    from openswe.threads.membership import ThreadMembership
+
+    membership = ThreadMembership(thread_id, metadata)
+    if membership.requires_approval:
+        logins = {login for login in logins if membership.admits(login)}
+        unresolved_count = 0
     if not logins:
         raise ValueError("No mapped participants were found for the active thread")
     return logins, unresolved_count

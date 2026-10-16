@@ -100,6 +100,8 @@ class Topic(BaseTopic):
     """Keyed: one pull request's live state and review page, from its GitHub
     reviews, checks and comments to the reviewer's findings and the walkthrough."""
 
+    THREAD_MEMBERSHIPS: ClassVar[KeyedTopic[str]]
+
     THREAD_QUEUES: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
 
@@ -216,4 +218,5 @@ Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
+Topic.THREAD_MEMBERSHIPS = KeyedTopic("thread-memberships", authorize_keys=_readable_threads)
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
