@@ -15,17 +15,17 @@ The model loop and its checkpoints run here. Everything else is the in-process O
 - **State:** graph state those hooks write that MDA does not know rides in `open_swe_state` and goes back with every call. Custom stream events they emit are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
 
-The run's context carries the signed run token and the models dispatch picked. The proxy also sets the run's LangSmith tracing project to the backend's, so agent and reviewer traces stay in one project whichever runtime runs them. The backend reads the thread and run configuration from the token, never from the request body. This deployment holds no GitHub, Slack or database credentials.
+The run's context carries the signed run token and the models dispatch picked. The backend's thread router also sets the run's LangSmith tracing project to the backend's, so agent and reviewer traces stay in one project whichever runtime runs them. The backend reads the thread and run configuration from the token, never from the request body. This deployment holds no GitHub, Slack or database credentials.
 
 This directory is its own project and is never imported by the backend.
 
 ## Routing
 
-Every agent and reviewer thread runs here. The backend refuses to start without `MDA_RUNTIME_URL`, and its `openswe.remote_runtime.proxy` middleware routes these threads to this deployment:
+Every agent and reviewer thread runs here. The backend refuses to start without `MDA_RUNTIME_URL`, and its thread router (`openswe.threads.router`), which serves threads from its PostgreSQL thread index, routes these threads' runs to this deployment:
 
 - **Claiming.** Starting an `agent` or `reviewer` run on a thread with no local history claims the thread for MDA (`runtime: mda` in its metadata). The run is created on `open-swe`, with its configurable moved into the signed context. A protocol v2 `run.start` becomes such a run too. Threads whose runs left checkpoints on the backend before it required MDA keep running there.
 - **Forwarding.** Every run, state, history, stream and cancel request for a claimed thread is then forwarded here. This covers the dashboard, the CLI and every backend client.
-- **Merging.** `GET /threads/{id}` and `POST /threads/search` still answer from the backend, with run status taken from here.
+- **Indexing.** Thread reads and searches answer from the backend's thread index. A run started here marks the thread busy there, and the run-complete webhook settles it.
 
 ## Configure
 

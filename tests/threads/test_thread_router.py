@@ -7,11 +7,8 @@ import pytest
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
-from openswe.jobs import queue
-from openswe.remote_runtime import proxy
-from openswe.remote_runtime.proxy import MdaRuntime
 from openswe.remote_runtime.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
-from openswe.threads import index, router
+from openswe.threads import index, router, runtimes
 from openswe.threads.index import Runtime, ThreadStatus
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -85,7 +82,7 @@ class _Threads:
 
 
 class _Runtimes:
-    def __init__(self, mda_runtime: MdaRuntime) -> None:
+    def __init__(self, mda_runtime: runtimes.MdaRuntime) -> None:
         self.local = _Threads()
         self.mda = _Threads()
         self.mda_runtime = mda_runtime
@@ -107,7 +104,7 @@ class _Harness:
             self.forwarded.append((request.url.path, json.loads(request.content or b"{}")))
             return httpx.Response(200, json={"run_id": "remote-run"})
 
-        mda_runtime = MdaRuntime("http://mda.test")
+        mda_runtime = runtimes.MdaRuntime("http://mda.test")
         mda_runtime._http = httpx.AsyncClient(
             base_url=mda_runtime.url, transport=httpx.MockTransport(mda)
         )
@@ -123,8 +120,8 @@ class _Harness:
             )
             return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
-        monkeypatch.setattr(proxy, "remote_run_context", context)
-        monkeypatch.setattr(proxy, "get_tracer_project", lambda: "open-swe-test")
+        monkeypatch.setattr(runtimes, "remote_run_context", context)
+        monkeypatch.setattr(runtimes, "get_tracer_project", lambda: "open-swe-test")
 
         async def app(scope: Scope, receive: Receive, send: Send) -> None:
             self.reached_here.append(scope["path"])
@@ -263,7 +260,13 @@ async def test_a_fresh_agent_thread_moves_to_mda(
     run = {
         "assistant_id": "agent",
         "input": {},
-        "config": {"configurable": {"github_login": "ada", "repo": {"owner": "a", "name": "b"}}},
+        "config": {
+            "configurable": {
+                "github_login": "ada",
+                "repo": {"owner": "a", "name": "b"},
+                "__event_streaming_v2": True,
+            }
+        },
     }
 
     await harness.request("POST", f"/threads/{THREAD}/runs", run)
@@ -274,9 +277,16 @@ async def test_a_fresh_agent_thread_moves_to_mda(
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == indexed.metadata
     assert harness.runtimes.local.threads[THREAD]["metadata"] == indexed.metadata
     [(_, sent)] = harness.forwarded
+    # Nothing the remote graph is handed carries the configurable but the signed token.
+    assert "config" not in sent
+    assert sent["langsmith_tracer"] == {"project_name": "open-swe-test"}
     context = sent["context"]
-    assert isinstance(context, dict) and isinstance(token := context["__run_token"], str)
-    assert verify_runtime_token(token).configurable["github_login"] == "ada"
+    assert isinstance(context, dict) and context["__event_streaming_v2"] is True
+    assert isinstance(token := context["__run_token"], str)
+    assert verify_runtime_token(token).configurable == {
+        "github_login": "ada",
+        "repo": {"owner": "a", "name": "b"},
+    }
 
 
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -304,6 +314,27 @@ async def test_only_agent_and_reviewer_threads_move_to_mda(
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.runtime == ("mda" if moves else "local")
     assert bool(harness.forwarded) is moves
+
+
+async def test_a_run_started_by_command_on_mda_settles_through_the_completion_webhook(
+    monkeypatch: pytest.MonkeyPatch, secret: None
+) -> None:
+    from openswe import dispatch
+
+    monkeypatch.setattr(
+        dispatch, "COMPLETION_WEBHOOK_URL", "https://swe.test/webhooks/run-complete"
+    )
+    harness = _Harness(monkeypatch)
+    await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": {}})
+    command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}}
+
+    await harness.request("POST", f"/threads/{THREAD}/commands", command)
+
+    indexed = await index.get(THREAD)
+    assert indexed is not None and (indexed.runtime, indexed.status) == ("mda", "busy")
+    [(path, sent)] = harness.forwarded
+    assert path == f"/threads/{THREAD}/runs"
+    assert sent["webhook"] == "https://swe.test/webhooks/run-complete"
 
 
 async def test_a_first_state_write_moves_a_fresh_thread_to_mda(
@@ -337,70 +368,6 @@ async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.Mon
     copy = await index.get(str(made["thread_id"]))
     assert copy is not None and copy.runtime == "mda" and copy.metadata == {"title": "source"}
     assert copy.thread_id in harness.runtimes.local.threads
-
-
-async def test_with_dual_writes_each_agent_server_change_reaches_the_index(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _Harness(monkeypatch)
-    local = harness.runtimes.local
-
-    async def agent_server(scope: Scope, receive: Receive, send: Send) -> None:
-        """The Agent Server, answering thread calls as the index is kept beside it."""
-        message = await receive()
-        body = json.loads(message.get("body") or b"{}")
-        path, method = scope["path"], scope["method"]
-        answer: JsonValue = {}
-        if path == "/threads":
-            await local.create(body["thread_id"], body["metadata"])
-            answer = local.threads[body["thread_id"]]
-        elif method == "PATCH":
-            await local.update(THREAD, body["metadata"])
-            answer = local.threads[THREAD]
-        elif method == "DELETE":
-            await local.delete(THREAD)
-        await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": json.dumps(answer).encode()})
-
-    harness.router = router.ThreadIndexMirror(agent_server)
-
-    await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": {"o": "ada"}})
-    await harness.request("PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Fix it"}})
-    indexed = await index.get(THREAD)
-    assert indexed is not None and indexed.metadata == {"o": "ada", "title": "Fix it"}
-
-    # MDA's proxy claims the thread on the Agent Server itself, then starts the run there.
-    await local.update(THREAD, {"runtime": "mda"})
-    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent"})
-    started = await index.get(THREAD)
-    assert started is not None and (started.runtime, started.status) == ("mda", "busy")
-
-    await harness.request("DELETE", f"/threads/{THREAD}")
-    assert await index.get(THREAD) is None
-
-
-async def test_with_dual_writes_a_failed_copy_is_retried_from_a_job(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _Harness(monkeypatch)
-    local = harness.runtimes.local
-    await local.create(THREAD, {"title": "Fix it"})
-
-    async def agent_server(scope: Scope, receive: Receive, send: Send) -> None:
-        await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": b"{}"})
-
-    harness.router = router.ThreadIndexMirror(agent_server)
-    local.reachable = False
-    await harness.request("PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Fix it"}})
-    assert await index.get(THREAD) is None
-
-    local.reachable = True
-    [retry] = await queue.find({})
-    assert retry.payload == {"thread_id": THREAD}
-    await router.sync_thread(THREAD)
-    indexed = await index.get(THREAD)
-    assert indexed is not None and indexed.metadata == {"title": "Fix it"}
 
 
 @pytest.mark.parametrize(("permissions", "from_index"), [([], False), (["openswe:backend"], True)])

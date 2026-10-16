@@ -214,15 +214,6 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "THREAD_STORE",
-    "Where threads are indexed: 'agent_server' (default) keeps the Agent Server as the "
-    "thread index; 'dual' also writes every thread change to PostgreSQL, importing the "
-    "threads it lacks, while the Agent Server still answers; 'postgres' serves thread "
-    "reads, updates and searches from PostgreSQL, still copying changes to the Agent "
-    "Server, and each thread's runs from its runtime. Move through 'dual' to 'postgres'.",
-    default="agent_server",
-)
-ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
     "comma-separated, the first signs and every one verifies. Required.",
