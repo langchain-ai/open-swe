@@ -689,7 +689,12 @@ async def _sandbox_handoff(
             raise HTTPException(409, "only its owner's private thread can move to their machine")
         update: dict[str, Any] = SandboxBridgeBinding.of(bridge).dump()
     elif bridge is None and target == "cloud" and Bridge.bridge_id_of(current) is not None:
-        update = {"sandbox_id": None, "sandbox_kind": None, "sandbox_bridge_client": None}
+        update = {
+            "sandbox_id": None,
+            "sandbox_kind": None,
+            "sandbox_bridge_client": None,
+            "visibility": "private",
+        }
     else:
         return None
     if (await langgraph_client().threads.get(thread_id)).get("status") == "busy":
@@ -704,18 +709,6 @@ async def _sandbox_handoff(
         source = None
     update[HANDOFF_FROM_KEY] = None if source == update["sandbox_id"] else source
     return update
-
-
-async def _bind_thread_to_bridge(
-    thread_id: str, bridge: Bridge, metadata: dict[str, Any]
-) -> dict[str, Any]:
-    binding = SandboxBridgeBinding.of(bridge).dump()
-    await langgraph_client().threads.update(thread_id=thread_id, metadata=binding)
-    logger.info(
-        "Bound a thread to a sandbox bridge",
-        extra={"bridge_id": bridge.bridge_id, "bridge_thread": thread_id},
-    )
-    return {**metadata, **binding}
 
 
 def requested_thread_type(configurable: Mapping[str, Any]) -> ThreadType | None:
@@ -912,6 +905,8 @@ async def _enrich_run_start_command(
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
         visibility = await _requested_visibility(client_configurable, login=login)
+        if sandbox_bridge is not None:
+            visibility = "private"
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
         thread = await create_dashboard_thread_record(
             thread_id,
@@ -925,6 +920,11 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             model_selection=model_selection or "auto",
+            extra_metadata=(
+                SandboxBridgeBinding.of(sandbox_bridge).dump()
+                if sandbox_bridge is not None
+                else None
+            ),
             workspace=await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
                 repo_config,
@@ -932,8 +932,6 @@ async def _enrich_run_start_command(
             ),
         )
         metadata = thread_metadata(thread)
-        if sandbox_bridge is not None:
-            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
         run_model, run_effort = normalize_model_choice(
             metadata.get("resolved_model"), metadata.get("resolved_effort")
         )
@@ -1487,6 +1485,7 @@ async def _create_system_thread_record(
     prompt: str,
     title: str | None,
     repo_config: dict[str, str],
+    sandbox_bridge: Bridge | None = None,
 ) -> dict[str, Any]:
     """Stamp a thread that belongs to a workspace rather than to a person.
 
@@ -1519,6 +1518,8 @@ async def _create_system_thread_record(
         metadata["repo_name"] = repo_config["name"]
     if principal.token_repositories is not None:
         metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(principal.token_repositories)
+    if sandbox_bridge is not None:
+        metadata.update(SandboxBridgeBinding.of(sandbox_bridge).dump())
     client = langgraph_client()
     await create_thread(
         client, thread_id, title=metadata["title"], metadata=metadata, if_exists="raise"
@@ -1601,10 +1602,9 @@ async def _enrich_system_run_start_command(
                 prompt=prompt,
                 title=title if isinstance(title, str) else None,
                 repo_config=repo_config,
+                sandbox_bridge=sandbox_bridge,
             )
         )
-        if sandbox_bridge is not None:
-            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
     else:
         principal.assert_can_post(metadata)
 

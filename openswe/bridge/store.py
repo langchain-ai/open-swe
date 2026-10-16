@@ -137,6 +137,7 @@ class SandboxBridgeBinding(BaseModel):
     sandbox_id: str
     sandbox_kind: Literal["bridge"] = "bridge"
     sandbox_bridge_client: BridgeClient = "cli"
+    visibility: Literal["private"] = "private"
 
     @classmethod
     def of(cls, bridge: Bridge) -> Self:
