@@ -45,6 +45,7 @@ from openswe.threads.summary import (
     _thread_summary,
     assert_thread_readable,
     run_status_to_agent_status,
+    thread_is_bot_triggered,
     thread_is_owner,
     thread_source,
 )
@@ -272,7 +273,11 @@ async def cancel_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_postable(metadata, login, email)
+    bot_triggered = thread_is_bot_triggered(metadata)
+    if bot_triggered:
+        assert_thread_readable(metadata, login, email)
+    else:
+        _assert_thread_postable(metadata, login, email)
 
     try:
         cancelled_run_ids, kept_queued = await _cancel_active_thread_runs(
@@ -294,7 +299,7 @@ async def cancel_dashboard_thread(
     try:
         run_id = (
             None
-            if kept_queued
+            if kept_queued or bot_triggered
             else await dispatch_pending_follow_ups(thread_id, login, metadata, client=client)
         )
     except Exception as exc:  # noqa: BLE001
