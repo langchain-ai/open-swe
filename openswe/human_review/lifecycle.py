@@ -988,7 +988,7 @@ class ReviewPicks:
             for reviewer in released:
                 row.participants.remove(reviewer)
         current = self.request = await HumanReviewRequest.get(request.id) or request
-        label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+        label = f"<{pr.url}|{pr.label}>"
         if current.state != "open":
             for pick in (p for p in current.picks if p.pick_message):
                 await self._tell_withdrawn(

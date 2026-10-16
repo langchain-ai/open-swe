@@ -18,7 +18,7 @@ class UserPreferences(BaseModel):
     # Open SWE acts as this person in shared threads without asking first.
     act_as_always_allowed: bool = False
     # Threads this person starts run their model loop on Managed Deep Agents, when deployed.
-    run_on_mda: bool = False
+    run_on_mda: bool = True
 
 
 class UserPreferencesPatch(BaseModel):

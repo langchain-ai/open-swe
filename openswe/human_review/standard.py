@@ -577,7 +577,7 @@ async def claim(
     if isinstance(added, Outcome):
         return added
     pr = added.pull_request
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    label = f"<{pr.url}|{pr.label}>"
     coverage = await Coverage.load(added) if added.picks else None
     if others := {
         pick.user_id
@@ -720,7 +720,7 @@ async def assign(
     if isinstance(reviewer, Outcome):
         return _failure(reviewer.message)
     pr = request.pull_request
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    label = f"<{pr.url}|{pr.label}>"
     theirs = coverage.of(github_login) if coverage is not None else []
     if replace and (
         others := {
@@ -810,7 +810,7 @@ async def _notify_pick(
     ``named`` is a person naming them, which their automatic-pick opt-out does not cover.
     """
     pr = request.pull_request
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    label = f"<{pr.url}|{pr.label}>"
     await _request_github_review(request, user.login_for("github"))
     minutes = await _assignment_minutes(request)
     why = f" {escape(reason.strip())}" if reason.strip() else ""
@@ -1414,7 +1414,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         waited = _duration(datetime.now(UTC) - (request.created_at or participant.joined_at))
         sent = await send_dm(
             participant.user.slack_user_id,
-            f"Reminder: Open SWE picked you to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+            f"Reminder: Open SWE picked you to review <{pr.url}|{pr.label}> "
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
@@ -1520,7 +1520,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
             "next_waits_until": choice.until.isoformat() if isinstance(choice, Wait) else "",
         },
     )
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    label = f"<{pr.url}|{pr.label}>"
     if not await ReviewPicks(request).drop(
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
@@ -1620,7 +1620,7 @@ async def _notify_author_overdue(request: HumanReviewRequest, ids: str) -> str:
     still = "is" if len(assigned) == 1 else "are"
     waited = _duration(now - (request.created_at or now))
     text = (
-        f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> *{escape(pr.title)}* has waited {waited} "
+        f"<{pr.url}|{pr.label}> *{escape(pr.title)}* has waited {waited} "
         f"for a review since it was requested. {why} {who} {still} still assigned, and Open SWE "
         "is no longer asking anyone else for this code."
     )
@@ -1722,7 +1722,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     )
     await ReviewPicks(request).drop(
         {pick.user_id for pick in request.picks},
-        f"You no longer need to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+        f"You no longer need to review <{pr.url}|{pr.label}> "
         f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
         cause="not_asked",
         reason="posted outside its review channels without asking for a reviewer",
