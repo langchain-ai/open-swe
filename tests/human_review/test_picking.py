@@ -96,18 +96,23 @@ def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
 
 @pytest.mark.parametrize("codeowners", [CodeOwners.parse("* @ada @grace"), None])
 @pytest.mark.parametrize(
-    ("profile", "skip_reason"),
+    ("profile", "classification", "skip_reason"),
     [
-        (None, "opted_out"),
-        ({"display_name": "Ada (oOo)"}, "out_of_office"),
-        ({"status_text": "OOO", "status_expiration": 0}, "out_of_office"),
-        ({"status_text": "On vacation", "status_expiration": 4102444800}, "out_of_office"),
-        ({"status_text": "OOO", "status_expiration": 1}, None),
+        (None, None, "opted_out"),
+        ({"display_name": "Ada (oOo)"}, None, "out_of_office"),
+        ({"display_name": "Ada", "real_name": "Ada Smith (OOO)"}, None, "out_of_office"),
         (
-            {"display_name": "Ada OOO", "status_text": "OOO", "status_expiration": 1},
+            {"status_text": "Vacationing", "status_emoji": ":palm_tree:"},
+            "out_of_office",
             "out_of_office",
         ),
-        ({"status_text": "In a meeting"}, None),
+        ({"status_text": "Out sick"}, "out_of_office", "out_of_office"),
+        ({"status_text": "Back from vacation"}, "not_out_of_office", None),
+        ({"status_text": "OOO", "status_expiration": 1}, None, None),
+        ({"display_name": "Ada OOO", "status_expiration": 1}, None, "out_of_office"),
+        ({"status_text": "In a meeting"}, "not_out_of_office", None),
+        ({"status_text": "OOO"}, None, "availability_unknown"),
+        ({}, None, None),
     ],
 )
 async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
@@ -116,11 +121,14 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     caplog: pytest.LogCaptureFixture,
     codeowners: CodeOwners | None,
     profile: dict[str, object] | None,
+    classification: str | None,
     skip_reason: str | None,
 ) -> None:
     from openswe.expedited_review.eligibility import ChangedFile
     from openswe.human_review import picking
+    from openswe.slack import availability
 
+    monkeypatch.setattr(availability, "select_jev_choice", AsyncMock(return_value=classification))
     ada = User(
         identities=[
             UserIdentity(provider="github", external_id="1", login="ada"),

@@ -3,7 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-_OOO = re.compile(r"\b(?:ooo|out[\s-]+of[\s-]+office|vacation|pto|on leave|on holiday)\b", re.I)
+from openswe.prompts import prompt
+from openswe.utils.jev import select_jev_choice
 
 
 class SlackProfile(BaseModel):
@@ -33,10 +34,22 @@ class SlackUserInfo(BaseModel):
             or self.name.strip()
         )
 
-    def out_of_office(self, now: datetime) -> bool:
-        if re.search(r"\booo\b", self.display_name, re.I):
+    async def out_of_office(self, now: datetime) -> bool | None:
+        names = (self.profile.display_name, self.profile.real_name, self.real_name, self.name)
+        if any(re.search(r"\booo\b", name, re.I) for name in names):
             return True
         status = self.profile
         if status.status_expiration and status.status_expiration <= now.timestamp():
             return False
-        return bool(_OOO.search(status.status_text))
+        if not status.status_text.strip() and not status.status_emoji.strip():
+            return False
+        choice = await select_jev_choice(
+            status.model_dump_json(include={"status_text", "status_emoji"}),
+            question="out_of_office",
+            instructions=prompt("slack/availability-instructions", now=now.isoformat()),
+            criteria={
+                "out_of_office": prompt("slack/availability-away"),
+                "not_out_of_office": prompt("slack/availability-present"),
+            },
+        )
+        return None if choice is None else choice == "out_of_office"

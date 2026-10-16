@@ -66,7 +66,7 @@ class ReviewerAvailability:
     """Slack out-of-office status and Mon–Fri working hours in the person's timezone."""
 
     zone: ZoneInfo | None
-    out_of_office: bool = False
+    out_of_office: bool | None = False
 
     @property
     def zone_name(self) -> str:
@@ -95,8 +95,10 @@ class ReviewerAvailability:
         if not user.slack_user_id:
             return cls(None)
         info = await get_slack_user_info(user.slack_user_id)
-        profile = SlackUserInfo.model_validate(info) if info else SlackUserInfo()
-        away = profile.out_of_office(datetime.now(UTC))
+        if info is None:
+            return cls(None, None)
+        profile = SlackUserInfo.model_validate(info)
+        away = await profile.out_of_office(datetime.now(UTC))
         name = profile.tz
         if not name:
             return cls(None, away)
@@ -362,8 +364,10 @@ async def _choose_reviewer(
         )
     )
     for login in list(people):
-        if hours[login].out_of_office:
-            skipped[login] = "out_of_office"
+        if hours[login].out_of_office is not False:
+            skipped[login] = (
+                "availability_unknown" if hours[login].out_of_office is None else "out_of_office"
+            )
             del people[login]
     logger.info(
         "Filtered reviewer candidates",
