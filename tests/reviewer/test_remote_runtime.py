@@ -53,6 +53,53 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
+@pytest.mark.parametrize("environment", ["preview", "staging", "production"])
+async def test_remote_prompts_include_deployment_context(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    from langgraph.runtime import Runtime
+
+    from openswe.middleware.prepare_run import BasePrepareRunMiddleware
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import (
+        ModelChoice,
+        SurfaceModels,
+        SurfaceSubagent,
+        ToolSurface,
+    )
+
+    monkeypatch.setenv("OPENSWE_ENV", environment)
+    model = ModelChoice("openai:gpt-6.1-sol", {})
+    session = RunSession(
+        ToolSurface(
+            middleware=[BasePrepareRunMiddleware()],
+            models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+            subagents=[SurfaceSubagent("worker", "worker", "subagent instructions")],
+        ),
+        {},
+        None,
+        started_here=True,
+    )
+    main_prompt = await session.system_prompt(
+        {"rendered_system_prompt": "main instructions"}, Runtime()
+    )
+    subagents = session.catalog()["subagents"]
+    assert isinstance(subagents, list)
+    assert isinstance(subagents[0], dict)
+    subagent_prompt = subagents[0]["system_prompt"]
+    assert isinstance(subagent_prompt, str)
+
+    for rendered, original in (
+        (main_prompt, "main instructions"),
+        (subagent_prompt, "subagent instructions"),
+    ):
+        if environment == "production":
+            assert rendered == original
+        else:
+            assert rendered.count(f"**{environment}**") == 1
+            assert rendered.endswith(original)
+
+
 def test_run_token_round_trips_the_signed_run() -> None:
     assert verify_runtime_token(sign_runtime_token(RUN)) == RUN
 
