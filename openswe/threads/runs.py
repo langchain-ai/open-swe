@@ -50,10 +50,8 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import (
-    lookup_slack_thread_run_mapping,
-    update_slack_trace_reply_for_web_handoff,
-)
+from openswe.slack.client import update_slack_trace_reply_for_web_handoff
+from openswe.slack.records import lookup_slack_thread_run_mapping
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -1007,7 +1005,7 @@ async def _enrich_run_start_command(
     metadata_update["updated_at_ms"] = _now_ms()
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             current = await client.threads.get(thread_id)
             metadata = thread_metadata(current)
             if _is_thread_resolved(metadata):
@@ -1274,7 +1272,7 @@ async def steer_running_thread(
     )
     if not relayed_from:
         try:
-            await _notify_slack_web_handoff(thread_id, metadata, client)
+            await _notify_slack_web_handoff(thread_id, metadata)
         except Exception:
             logger.exception(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id
@@ -1455,9 +1453,7 @@ def _slack_thread_context(metadata: Mapping[str, Any]) -> JsonObject | None:
     return context.dump()["slack_thread"]
 
 
-async def _notify_slack_web_handoff(
-    thread_id: str, metadata: Mapping[str, Any], client: Any
-) -> None:
+async def _notify_slack_web_handoff(thread_id: str, metadata: Mapping[str, Any]) -> None:
     if metadata.get("source") != "slack":
         return
     slack_thread = _slack_thread_context(metadata)
@@ -1472,11 +1468,9 @@ async def _notify_slack_web_handoff(
 
     trace_message_ts = slack_thread.get("trace_message_ts")
     if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        mapping = await lookup_slack_thread_run_mapping(client, channel_id, thread_ts)
-        if isinstance(mapping, dict):
-            candidate = mapping.get("trace_message_ts")
-            if isinstance(candidate, str) and candidate:
-                trace_message_ts = candidate
+        mapping = await lookup_slack_thread_run_mapping(channel_id, thread_ts)
+        if mapping is not None:
+            trace_message_ts = mapping.trace_message_ts
     if not isinstance(trace_message_ts, str) or not trace_message_ts:
         logger.info(
             "Skipping Slack web handoff update for thread %s: missing trace message ts", thread_id

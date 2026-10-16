@@ -3,16 +3,18 @@
 Planners place whole hunks, so a chunk can gather related hunks across files and
 no hunk is shared between chunks. A planner may first split a git hunk into
 smaller hunks at changed lines it names. Every changed line is in one chunk, in Other,
-or not yet planned. Lines and splits are followed by content, so the plan carries
-over to a new head: chunks and Other keep the lines that survive, a new line
-joins the chunk that holds the rest of its hunk, and the remaining new or edited
-lines come back unplanned for a planner to place.
+or not yet planned. Lines and splits are followed by content, in order within their
+file, so the plan carries over to a new head: chunks and Other keep the lines that
+survive, a new line joins the chunk that holds the rest of its hunk, and the
+remaining new or edited lines come back unplanned for a planner to place.
 """
 
 import re
-from collections import Counter
+from bisect import bisect_left
+from collections import Counter, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import Self
 from uuid import uuid7
 
@@ -27,6 +29,7 @@ MAX_OTHER_SUMMARY_CHARS = 1_200
 _MAX_ERRORS = 20
 _MAX_UNPLANNED_FILES = 200
 _LINE_NAME_RE = re.compile(r"[+-]\d+")
+_WORD_RE = re.compile(r"\w")
 
 
 class RangeError(ValueError):
@@ -44,9 +47,23 @@ class LineRef(BaseModel, frozen=True):
     def of(cls, line: ChangedLine) -> Self:
         return cls(path=line.path, sign=line.sign, lineno=line.lineno, text=line.text)
 
-    @property
-    def content(self) -> tuple[str, str, str]:
-        return self.path, self.sign, self.text
+    @classmethod
+    def follow(cls, refs: Iterable[Self], changes: list[FileChange]) -> dict[Self, Self]:
+        """Each of ``refs`` mapped to its line in ``changes``, matched by content in diff order.
+
+        Matching in order keeps repeated lines such as a lone ``}`` with their neighbours.
+        """
+        old: dict[tuple[str, Sign], list[Self]] = {}
+        for ref in sorted(set(refs), key=lambda r: r.lineno):
+            old.setdefault((ref.path, ref.sign), []).append(ref)
+        new: dict[tuple[str, Sign], list[Self]] = {}
+        for change in changes:
+            for line in change.lines:
+                new.setdefault((line.path, line.sign), []).append(cls.of(line))
+        followed: dict[Self, Self] = {}
+        for side, before in old.items():
+            followed.update(_align(before, new.get(side, [])))
+        return followed
 
     @classmethod
     def spans(cls, refs: Iterable[Self]) -> list[str]:
@@ -84,6 +101,55 @@ class LineRef(BaseModel, frozen=True):
             )
             for path, lines in by_path.items()
         }
+
+
+def _align[T: LineRef](before: list[T], after: list[T]) -> dict[T, T]:
+    """Pair lines of equal text in order, anchored on lines that appear once on each side.
+
+    A patience-diff alignment: linear apart from sorting, so a large file cannot stall the
+    event loop, and repeated lines such as ``}`` pair in order between their anchors.
+    """
+    counts = Counter(r.text for r in before)
+    later = Counter(r.text for r in after)
+    where = {r.text: j for j, r in enumerate(after) if later[r.text] == 1}
+    unique = [
+        (i, where[r.text]) for i, r in enumerate(before) if counts[r.text] == 1 and r.text in where
+    ]
+    anchors = _increasing(unique)
+    pairs: dict[T, T] = {}
+    edges = [(-1, -1), *anchors, (len(before), len(after))]
+    for (a0, b0), (a1, b1) in pairwise(edges):
+        pool: dict[str, deque[T]] = {}
+        for ref in after[b0 + 1 : b1]:
+            pool.setdefault(ref.text, deque()).append(ref)
+        for ref in before[a0 + 1 : a1]:
+            if bucket := pool.get(ref.text):
+                pairs[ref] = bucket.popleft()
+        if a1 < len(before):
+            pairs[before[a1]] = after[b1]
+    return pairs
+
+
+def _increasing(pairs: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The longest run of ``pairs`` whose second items increase, in order."""
+    tails: list[int] = []
+    ends: list[int] = []
+    previous: list[int] = []
+    for k, (_, j) in enumerate(pairs):
+        at = bisect_left(tails, j)
+        previous.append(ends[at - 1] if at else -1)
+        if at == len(tails):
+            tails.append(j)
+            ends.append(k)
+        else:
+            tails[at] = j
+            ends[at] = k
+    run: list[tuple[int, int]] = []
+    k = ends[-1] if ends else -1
+    while k >= 0:
+        run.append(pairs[k])
+        k = previous[k]
+    return run[::-1]
 
 
 class FileRanges(BaseModel):
@@ -144,6 +210,24 @@ class Hunks:
 
     def key(self, line: ChangedLine) -> tuple[str, str]:
         return line.path, self.names.get(LineRef.of(line), line_name(line))
+
+    def groups(self, lines: Iterable[ChangedLine]) -> dict[tuple[str, str], list[ChangedLine]]:
+        grouped: dict[tuple[str, str], list[ChangedLine]] = {}
+        for line in lines:
+            grouped.setdefault(self.key(line), []).append(line)
+        return grouped
+
+    def fragments(self, before: Self, lines: list[ChangedLine]) -> list[tuple[str, str]]:
+        """Hunks new since ``before`` that hold only braces, punctuation or blank lines."""
+        existing = {
+            frozenset(LineRef.of(line) for line in hunk) for hunk in before.groups(lines).values()
+        }
+        return [
+            key
+            for key, hunk in self.groups(lines).items()
+            if frozenset(LineRef.of(line) for line in hunk) not in existing
+            and not any(_WORD_RE.search(line.text) for line in hunk)
+        ]
 
     def summary(self, lines: list[ChangedLine]) -> str:
         files = {line.path for line in lines}
@@ -269,28 +353,18 @@ class Plan(BaseModel):
     def carried_to(self, head_sha: str, changes: list[FileChange]) -> Self:
         """This plan on a new head, keeping every line that survives by content."""
 
-        def pool() -> dict[tuple[str, str, str], list[LineRef]]:
-            refs: dict[tuple[str, str, str], list[LineRef]] = {}
-            for change in changes:
-                for line in change.lines:
-                    ref = LineRef.of(line)
-                    refs.setdefault(ref.content, []).append(ref)
-            return refs
+        followed = LineRef.follow([*self.planned(), *self.splits], changes)
 
-        planned = pool()
-
-        def take(
-            refs: list[LineRef], available: dict[tuple[str, str, str], list[LineRef]]
-        ) -> list[LineRef]:
-            return [bucket.pop(0) for ref in refs if (bucket := available.get(ref.content))]
+        def take(refs: list[LineRef]) -> list[LineRef]:
+            return [followed[ref] for ref in refs if ref in followed]
 
         moved = type(self).start(head_sha, changes)
         for chunk in self.chunks:
-            if lines := take(chunk.lines, planned):
+            if lines := take(chunk.lines):
                 moved.chunks.append(chunk.model_copy(update={"lines": lines, "code": ""}))
-        moved.other = take(self.other, planned)
+        moved.other = take(self.other)
         moved.other_summary = self.other_summary
-        moved.splits = take(self.splits, pool())
+        moved.splits = take(self.splits)
         moved.gather_hunks(changes)
         return moved
 

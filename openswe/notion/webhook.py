@@ -28,7 +28,7 @@ from openswe.notion.client import NOTION_ERRORS, NotionClient, notion_client
 from openswe.notion.design_gate import DesignDoc, gate_comment, linked_designs, unapproved
 from openswe.notion.models import NotionComment, NotionPage, NotionUser, WebhookEvent
 from openswe.notion.notifications import post_notion_comment, set_task_status
-from openswe.notion.pending import forget_assigner, pending_assigner, remember_assigner
+from openswe.notion.pending import PendingAssigner
 from openswe.notion.properties import (
     date_text,
     page_identifier,
@@ -174,7 +174,7 @@ async def evaluate_task(
         return _ignored("task is already being worked on", page.id)
 
     if not assigner_id:
-        assigner_id = await pending_assigner(page.id)
+        assigner_id = await PendingAssigner.of(page.id)
     if not assigner_id and page.created_by:
         assigner_id = page.created_by.id
     requester = await _requester(client, assigner_id)
@@ -200,7 +200,7 @@ async def evaluate_task(
     blocked_by = unapproved(designs, settings)
     if blocked_by:
         if assigner_id:
-            await remember_assigner(page.id, assigner_id)
+            await PendingAssigner.remember(page.id, assigner_id)
         await post_notion_comment(
             page.id, gate_comment(identifier, blocked_by, settings.design_approved_status)
         )
@@ -216,7 +216,7 @@ async def evaluate_task(
     else:
         await process_notion_task(client, page, repo, requester, designs, settings)
         outcome = "dispatched"
-    await forget_assigner(page.id)
+    await PendingAssigner.forget(page.id)
     return TaskResult(outcome, "started")
 
 

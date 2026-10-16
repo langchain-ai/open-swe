@@ -9,7 +9,7 @@ import pytest
 from langgraph_sdk.client import LangGraphClient
 
 from openswe.threads import listing, pins, summary
-from tests.conftest import FakeStore
+from openswe.users.models import User
 
 
 class ThreadAPI:
@@ -85,8 +85,16 @@ async def thread_api(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[ThreadAPI
         yield api
 
 
+@pytest.fixture
+async def people(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob,admin")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    for external_id, login in enumerate(("alice", "bob", "admin")):
+        await User.sign_in("github", str(external_id), login=login)
+
+
 async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_and_refresh(
-    thread_api: ThreadAPI, fake_store: FakeStore
+    thread_api: ThreadAPI, people: None
 ) -> None:
     thread_api.add("shared", source="slack", github_login="someone-else")
     thread_api.add("private", visibility="private", owner_login="alice")
@@ -108,7 +116,7 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
 
 
 async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(
-    thread_api: ThreadAPI, fake_store: FakeStore
+    thread_api: ThreadAPI, people: None
 ) -> None:
     await pins.pin_thread("alice", "pin")
     thread_api.fail_search = True
@@ -118,7 +126,7 @@ async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(
 
 
 async def test_latest_run_requests_are_bounded_and_legacy_idle_status_is_refreshed(
-    thread_api: ThreadAPI, fake_store: FakeStore
+    thread_api: ThreadAPI, people: None
 ) -> None:
     for index in range(20):
         thread_id = str(index)

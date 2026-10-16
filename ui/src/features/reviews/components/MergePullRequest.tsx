@@ -43,9 +43,13 @@ export function MergePullRequest({
     : mergeMethods.filter((option) =>
         (allowed.data?.mergeMethods ?? []).includes(option)
       )
-  // Never guess between allowed methods: the viewer's pick, the only one, or the last one used here.
   const method =
-    [choice, options.length === 1 ? options[0] : null, preferred].find(
+    [
+      choice,
+      options.length === 1 ? options[0] : null,
+      preferred,
+      "squash" as const,
+    ].find(
       (candidate): candidate is MergeMethod =>
         !!candidate && options.includes(candidate)
     ) ?? null

@@ -6,7 +6,6 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from openswe.credential_scope import private_credential_login
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.mcp.cards import ConnectCard
 from openswe.mcp.managed import (
     Gateway,
@@ -16,13 +15,13 @@ from openswe.mcp.managed import (
     MissingCredential,
     gateway_id,
     gateway_status,
+    instance_gateway,
 )
 from openswe.middleware.require_user_reply import current_reply_surface
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, actions, block_payload, button, context, section
-from openswe.slack.tools.reply import slack_reply
+from openswe.slack.tools.reply import send_slack_reply
 from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 
 def _langsmith_blocks(card: ConnectCard) -> list[Block]:
@@ -87,7 +86,7 @@ def _nothing_to_connect(status: GatewayStatus, services: list[str]) -> tuple[str
     asked = ", ".join(services)
     return (
         f"None of {asked} is waiting to be connected: each is connected already (its tools "
-        f"load on the person's next message) or is not in this gateway. Unconnected: {names}",
+        f"load on the person's next message) or is not in this tool kit. Unconnected: {names}",
         f"{asked} isn't waiting to be connected in the *{status.gateway.name}* managed tools; "
         f"it's either connected already or not one of them. Not connected yet: {names}.",
     )
@@ -98,7 +97,7 @@ async def connect_managed_tools(
     state: Annotated[dict[str, object] | None, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> dict[str, object]:
-    """Offer cards to connect services in this workspace's managed tools."""
+    """Offer cards to connect services in the instance's managed tools."""
     cfg = RunConfig.from_config(get_config())
     try:
         login = await private_credential_login()
@@ -109,12 +108,12 @@ async def connect_managed_tools(
             "success": False,
             "error": "Managed tools only load in private threads; suggest continuing privately",
         }
-    settings = await cached_workspace_settings(cfg.workspace_slug or DEFAULT_WORKSPACE_SLUG)
-    if settings.managed_tools_gateway_id is None:
-        return {"success": False, "error": "This workspace has no managed tools"}
-    gateway = gateway_id(settings.managed_tools_gateway_id)
+    configured = await instance_gateway()
+    if configured is None:
+        return {"success": False, "error": "No managed tools are set up on this Open SWE"}
+    gateway = gateway_id(configured)
     try:
-        status = await gateway_status(login, gateway, [])
+        status = await gateway_status(login, gateway)
     except LangSmithNotConnected:
         status = None
     except ManagedToolsError as exc:
@@ -125,7 +124,7 @@ async def connect_managed_tools(
         # A Slack call ends the turn, so the person must hear something.
         if surface != "slack":
             return None
-        posted = await slack_reply(
+        posted = await send_slack_reply(
             text, "final", blocks=block_payload(blocks) if blocks else None, state=state
         )
         if posted.get("success") is not True:

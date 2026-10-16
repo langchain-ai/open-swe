@@ -11,11 +11,17 @@ the dashboard process that minted the link; if it restarts, the person says "con
 import asyncio
 import logging
 from collections.abc import Coroutine
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
+from uuid import UUID
 
 from pydantic import BaseModel, Field
+from sqlalchemy import ForeignKey, Text, select
+from sqlalchemy.dialects.postgresql import ARRAY, insert
+from sqlalchemy.orm import Mapped, mapped_column
 
+from openswe.database import postgres
+from openswe.database.orm import NOW, Base
 from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.event_claims import claim, release
 from openswe.input_messages import InputMessageContext, SystemIdentity
@@ -31,13 +37,13 @@ from openswe.mcp.managed import (
 )
 from openswe.prompts import prompt
 from openswe.source_context import SourceContext
+from openswe.users.records import UnknownUser, user_id_for_login
 from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
-_CARDS_NAMESPACE = "managed_tools_cards"
 _RESUME_SCOPE = "managed_tools_resume"
 _SENDER: SystemIdentity = {
     "id": "system:managed-tools",
@@ -92,6 +98,17 @@ async def connect_service(login: str, gateway: str, slug: str) -> ConsentLink | 
     return link
 
 
+class ConnectCardRow(Base):
+    __tablename__ = "managed_tools_card"
+
+    thread_id: Mapped[str] = mapped_column(primary_key=True)
+    card_id: Mapped[str] = mapped_column(primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    gateway: Mapped[str]
+    services: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+
 class ConnectCard(BaseModel):
     """A card the agent offered one person in a thread, for one gateway."""
 
@@ -103,18 +120,43 @@ class ConnectCard(BaseModel):
     """Slugs of the services the card offers; empty offers every unconnected one."""
 
     @classmethod
-    async def load(cls, thread_id: str, card_id: str) -> ConnectCard | None:
-        item = await langgraph_client().store.get_item((_CARDS_NAMESPACE, thread_id), card_id)
-        value = item.get("value") if item else None
-        return cls.model_validate(value) if isinstance(value, dict) else None
-
-    async def save(self) -> None:
-        await langgraph_client().store.put_item(
-            (_CARDS_NAMESPACE, self.thread_id), self.card_id, self.model_dump()
+    async def load(
+        cls, thread_id: str, card_id: str, login: str, gateway: str
+    ) -> ConnectCard | None:
+        """The card if the agent offered it to ``login`` for ``gateway``, else ``None``."""
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(ConnectCardRow).where(
+                    ConnectCardRow.thread_id == thread_id,
+                    ConnectCardRow.card_id == card_id,
+                    ConnectCardRow.user_id == user_id_for_login(login),
+                    ConnectCardRow.gateway == gateway_id(gateway),
+                )
+            )
+        if row is None:
+            return None
+        return cls(
+            thread_id=row.thread_id,
+            card_id=row.card_id,
+            login=login.strip().lower(),
+            gateway=row.gateway,
+            services=row.services,
         )
 
-    def owned_by(self, login: str, gateway: str) -> bool:
-        return self.login.lower() == login.lower() and self.gateway == gateway_id(gateway)
+    async def save(self) -> None:
+        async with postgres.session() as session:
+            user_id = await session.scalar(select(user_id_for_login(self.login)))
+            if user_id is None:
+                raise UnknownUser(self.login)
+            values = {"user_id": user_id, "gateway": self.gateway, "services": self.services}
+            await session.execute(
+                insert(ConnectCardRow)
+                .values(thread_id=self.thread_id, card_id=self.card_id, **values)
+                .on_conflict_do_update(
+                    index_elements=[ConnectCardRow.thread_id, ConnectCardRow.card_id],
+                    set_=values,
+                )
+            )
 
     def button_url(self, slug: str) -> str:
         """Where a Slack button sends the person: Open SWE, never LMT's link itself."""
@@ -135,7 +177,7 @@ class ConnectCard(BaseModel):
             if not await _consented(self.login, self.gateway, auth_id):
                 return
             # Another of the card's services may still be missing; its consent resumes.
-            status = await gateway_status(self.login, self.gateway, [])
+            status = await gateway_status(self.login, self.gateway)
             if status.missing_for(self.services):
                 return
             key = f"{self.thread_id}:{self.card_id}"

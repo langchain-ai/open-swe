@@ -24,8 +24,11 @@ _TEST_SLACK_SECRET = "test-slack-secret"
 
 
 @pytest.fixture(autouse=True)
-def _incidents_policy_store(fake_store) -> None:
-    """The Slack webhook consults the Incidents policy, which lives in the Store."""
+def _no_incident_channels(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Slack webhook offers each event to Incidents first; none of these channels is one."""
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
 
 
 @pytest.fixture(autouse=True)

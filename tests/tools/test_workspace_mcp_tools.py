@@ -25,7 +25,7 @@ async def save(name="example", **kwargs):
 
 
 async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
-    fake_store, monkeypatch
+    registry_db, monkeypatch
 ):
     await save(headers={"Authorization": "old"}, allowed_tools=["search"])
     definitions = [
@@ -63,7 +63,7 @@ async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
     assert len(calls) == 1
 
 
-async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(fake_store, monkeypatch):
+async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(registry_db, monkeypatch):
     await save(allowed_tools=["search"])
     monkeypatch.setattr(
         runtime,
@@ -77,7 +77,7 @@ async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(fake_sto
     assert "disabled" in await tool.ainvoke({})
 
 
-async def test_new_connection_exposes_no_tools_until_admin_selects_them(fake_store, monkeypatch):
+async def test_new_connection_exposes_no_tools_until_admin_selects_them(registry_db, monkeypatch):
     await save()
     monkeypatch.setattr(
         runtime, "_discover_tools", AsyncMock(side_effect=AssertionError("must not connect"))
@@ -85,7 +85,7 @@ async def test_new_connection_exposes_no_tools_until_admin_selects_them(fake_sto
     assert await loader.load_workspace_mcp_tools("default") == []
 
 
-async def test_duplicate_catalog_is_isolated_from_other_connections(fake_store, monkeypatch):
+async def test_duplicate_catalog_is_isolated_from_other_connections(registry_db, monkeypatch):
     await settings.save_workspace_mcp(
         "default",
         "broken",
@@ -110,7 +110,7 @@ async def test_duplicate_catalog_is_isolated_from_other_connections(fake_store, 
 
 
 async def test_expired_catalog_failure_does_not_log_upstream_details(
-    fake_store, monkeypatch, caplog
+    registry_db, monkeypatch, caplog
 ):
     await save(allowed_tools=["search"])
     now = 0
@@ -132,7 +132,7 @@ async def test_expired_catalog_failure_does_not_log_upstream_details(
 
 
 @pytest.mark.parametrize("argument", ["config", "run_manager", "self", "runtime"])
-async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeypatch, argument):
+async def test_remote_arguments_survive_langchain_invocation(registry_db, monkeypatch, argument):
     await save(allowed_tools=["search"])
     definition = Tool(
         name="search",

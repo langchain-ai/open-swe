@@ -3,13 +3,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from openswe.review.assessment_feedback import ASSESSMENTS, FeedbackSubmission, PublishedAssessment
+from openswe.review.assessment_feedback import FeedbackSubmission, PublishedAssessment
 from openswe.review.routes import get_assessment_feedback, submit_assessment_feedback
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
-from tests.conftest import FakeStore
+from tests.conftest import FakeUserRecords
 
 
-async def test_feedback_is_per_person_and_published_assessment(fake_store: FakeStore) -> None:
+async def test_feedback_is_per_person_and_published_assessment(
+    registry_db: None, user_records: FakeUserRecords
+) -> None:
     assessment = PublishedAssessment(
         review_id=123,
         owner="o",
@@ -21,10 +23,8 @@ async def test_feedback_is_per_person_and_published_assessment(fake_store: FakeS
         explanation="Docs only.",
         run_id="c" * 36,
     )
-    await ASSESSMENTS.put("123", assessment)
-    await ASSESSMENTS.put(
-        "124", assessment.model_copy(update={"review_id": 124, "head_sha": "b" * 40})
-    )
+    await assessment.save()
+    await assessment.model_copy(update={"review_id": 124, "head_sha": "b" * 40}).save()
     with (
         patch(
             "openswe.review.assessment_feedback.require_repo_access_for_user",
@@ -75,34 +75,27 @@ async def test_feedback_is_per_person_and_published_assessment(fake_store: FakeS
         assert trace_feedback.await_args_list[1].kwargs["score"] == 0.0
         assert trace_feedback.await_args_list[2].args == trace_feedback.await_args_list[0].args
         assert trace_feedback.await_args_list[2].kwargs["score"] == 0.0
-    assert await ASSESSMENTS.get("123") == assessment
+    assert await PublishedAssessment.get(123) == assessment
 
 
-async def test_trace_failure_does_not_lose_saved_feedback(fake_store: FakeStore) -> None:
-    await ASSESSMENTS.put(
-        "123",
-        PublishedAssessment(
-            review_id=123,
-            owner="o",
-            repo="r",
-            pr_number=1,
-            head_sha="a" * 40,
-            risk_score=1,
-            decision="would_approve",
-            explanation="Docs only.",
-            run_id="c" * 36,
-        ),
-    )
-    assessment = await ASSESSMENTS.get("123")
+async def test_trace_failure_does_not_lose_saved_feedback(
+    registry_db: None, user_records: FakeUserRecords
+) -> None:
+    await PublishedAssessment(
+        review_id=123,
+        owner="o",
+        repo="r",
+        pr_number=1,
+        head_sha="a" * 40,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Docs only.",
+        run_id="c" * 36,
+    ).save()
     with (
         patch(
             "openswe.review.assessment_feedback.require_repo_access_for_user",
             AsyncMock(return_value="t"),
-        ),
-        patch.object(
-            ASSESSMENTS,
-            "get",
-            AsyncMock(side_effect=[assessment, RuntimeError("store unavailable")]),
         ),
         patch(
             "openswe.review.assessment_feedback.create_langsmith_feedback",
@@ -119,20 +112,19 @@ async def test_trace_failure_does_not_lose_saved_feedback(fake_store: FakeStore)
         assert await get_assessment_feedback("o", "r", 1, 123, {"sub": "alice"}) == saved
 
 
-async def test_feedback_cannot_cross_repository_scope(fake_store: FakeStore) -> None:
-    await ASSESSMENTS.put(
-        "123",
-        PublishedAssessment(
-            review_id=123,
-            owner="private",
-            repo="r",
-            pr_number=1,
-            head_sha="a" * 40,
-            risk_score=1,
-            decision="would_approve",
-            explanation="Docs only.",
-        ),
-    )
+async def test_feedback_cannot_cross_repository_scope(
+    registry_db: None, user_records: FakeUserRecords
+) -> None:
+    await PublishedAssessment(
+        review_id=123,
+        owner="private",
+        repo="r",
+        pr_number=1,
+        head_sha="a" * 40,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Docs only.",
+    ).save()
     with (
         patch(
             "openswe.review.assessment_feedback.require_repo_access_for_user",
@@ -155,7 +147,9 @@ async def test_feedback_cannot_cross_repository_scope(fake_store: FakeStore) -> 
     assert error.value.status_code == 403
 
 
-async def test_feedback_tool_uses_private_owner_and_repo_permission(fake_store: FakeStore) -> None:
+async def test_feedback_tool_uses_private_owner_and_repo_permission(
+    registry_db: None, user_records: FakeUserRecords
+) -> None:
     with (
         patch(
             "openswe.tools.submit_review_assessment_feedback.private_credential_login",
@@ -167,19 +161,16 @@ async def test_feedback_tool_uses_private_owner_and_repo_permission(fake_store: 
             "o", "r", 1, 123, FeedbackSubmission(rating="helpful")
         )
 
-    await ASSESSMENTS.put(
-        "123",
-        PublishedAssessment(
-            review_id=123,
-            owner="o",
-            repo="r",
-            pr_number=1,
-            head_sha="a" * 40,
-            risk_score=1,
-            decision="would_approve",
-            explanation="Docs only.",
-        ),
-    )
+    await PublishedAssessment(
+        review_id=123,
+        owner="o",
+        repo="r",
+        pr_number=1,
+        head_sha="a" * 40,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Docs only.",
+    ).save()
     with (
         patch(
             "openswe.tools.submit_review_assessment_feedback.private_credential_login",

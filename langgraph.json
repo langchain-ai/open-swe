@@ -15,17 +15,15 @@
   "http": {
     "app": "openswe.webapp:app"
   },
+  "auth": {
+    "path": "openswe.api.agent_server_auth:auth",
+    "disable_studio_auth": true
+  },
   "checkpointer": {
     "ttl": {
       "strategy": "delete",
       "sweep_interval_minutes": 60,
       "default_ttl": 43200
-    }
-  },
-  "store": {
-    "ttl": {
-      "refresh_on_read": false,
-      "sweep_interval_minutes": 60
     }
   },
   "env": ".env",

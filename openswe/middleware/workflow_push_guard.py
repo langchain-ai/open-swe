@@ -16,6 +16,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langgraph_sdk import get_client
 
+from openswe.middleware.pr_creation_guard import executable_name, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SANDBOX_BACKENDS
@@ -121,15 +122,16 @@ def _backend(thread_id: str | None) -> Any | None:
     return SANDBOX_BACKENDS.get(thread_id) if thread_id else None
 
 
+# What deepagents' local shell backend reports for a command that printed nothing.
+_NO_OUTPUT = "<no output>"
+
+
 def _response_output(response: Any) -> str:
     output = getattr(response, "output", None)
-    if isinstance(output, str):
-        return output
-    if isinstance(response, Mapping):
-        value = response.get("output")
-        if isinstance(value, str):
-            return value
-    return str(response or "")
+    if not isinstance(output, str):
+        value = response.get("output") if isinstance(response, Mapping) else None
+        output = value if isinstance(value, str) else str(response or "")
+    return "" if output.strip() == _NO_OUTPUT else output
 
 
 def _response_ok(response: Any) -> bool:
@@ -141,6 +143,88 @@ def _response_ok(response: Any) -> bool:
         if isinstance(value, int):
             return value == 0
     return True
+
+
+# Control operators, which a shell honors with or without surrounding spaces.
+_SHELL_OPERATOR = re.compile(r"(&&|\|\||[;&|()])")
+
+
+def _command_words(command: str) -> list[str]:
+    """``command``'s words, with control operators split off even where written unspaced."""
+    return [
+        part for token in shell_tokens(command) for part in _SHELL_OPERATOR.split(token) if part
+    ]
+
+
+def _chained_push_dirs(command: str) -> list[str | None]:
+    """The repositories ``command`` pushes from where the push is not the whole command.
+
+    A push is located by ``git -C dir push`` or the ``cd dir`` before it; ``None``
+    is the shell's own working directory.
+    """
+    if _parse_git_push(command) is not None:
+        return []
+    tokens = _command_words(command)
+    dirs: list[str | None] = []
+    cwd: str | None = None
+    for index, token in enumerate(tokens):
+        if token == "cd" and index + 1 < len(tokens):
+            cwd = tokens[index + 1]
+            continue
+        if executable_name(token) != "git":
+            continue
+        repo_dir = cwd
+        position = index + 1
+        while position < len(tokens) and tokens[position].startswith("-"):
+            if tokens[position] in {"-C", "-c"} and position + 1 < len(tokens):
+                if tokens[position] == "-C":
+                    repo_dir = tokens[position + 1]
+                position += 2
+                continue
+            position += 1
+        if position < len(tokens) and tokens[position] == "push":
+            dirs.append(repo_dir)
+    return dirs
+
+
+async def _may_push_workflow_changes(backend: Any, repo_dir: str | None) -> bool:
+    """Whether a push from ``repo_dir`` could carry ``.github/workflows`` changes.
+
+    Pending edits count: a chained ``git commit`` may commit them before the push.
+    A repository that cannot be inspected counts too, such as one the same
+    command clones: nothing shows what it would push.
+    """
+    pending = await _run_git(
+        backend, repo_dir, "status --porcelain --untracked-files=all -- .github/workflows"
+    )
+    if not pending.ok or pending.output:
+        return True
+    for base in ("@{upstream}", "origin/HEAD"):
+        unpushed = await _run_git(
+            backend,
+            repo_dir,
+            f"diff --name-only {shlex.quote(f'{base}...HEAD')} -- .github/workflows",
+        )
+        if unpushed.ok:
+            return bool(unpushed.output)
+    return True
+
+
+def _chained_push_message(request: ToolCallRequest) -> ToolMessage:
+    content = {
+        "status": "error",
+        "error_type": "WorkflowPushMustStandAlone",
+        "error": (
+            "This command pushes as part of a longer command, and that push could carry "
+            "GitHub workflow file changes, so Open SWE cannot show the thread owner what it "
+            "pushes. Nothing ran. Commit first, then run the push on its own (for example "
+            "`git -C <repo> push -u origin <branch>`); workflow changes then go to the "
+            "thread owner for approval."
+        ),
+    }
+    return ToolMessage(
+        content=json.dumps(content), tool_call_id=_tool_call_id(request) or "", status="error"
+    )
 
 
 def _parse_git_push(command: str) -> ParsedGitPush | None:
@@ -612,6 +696,24 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         change = await self._change_for_request(request)
-        if change is None:
-            return await handler(request)
-        return await self._handle_change_async(request, handler, change)
+        if change is not None:
+            return await self._handle_change_async(request, handler, change)
+        if await self._chained_workflow_push(request):
+            return _chained_push_message(request)
+        return await handler(request)
+
+    async def _chained_workflow_push(self, request: ToolCallRequest) -> bool:
+        """Whether ``request`` pushes workflow changes as one step of a longer command."""
+        if _tool_name(request) not in {"execute", "background_execute"}:
+            return False
+        command = _tool_args(request).get("command")
+        if not isinstance(command, str):
+            return False
+        dirs = _chained_push_dirs(command)
+        backend = _backend(_thread_id(request)) if dirs else None
+        if backend is None:
+            return False
+        for repo_dir in dirs:
+            if await _may_push_workflow_changes(backend, repo_dir):
+                return True
+        return False

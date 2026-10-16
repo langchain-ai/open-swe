@@ -324,8 +324,6 @@ def _tool_addition_builder(
         _ANTHROPIC_TOOL_ADDITION_MODELS
     ):
         return _anthropic_tool_addition
-    # Not subclasses: the desktop Codex model lifts every system message into
-    # ``instructions`` and raises on a non-text block.
     if (
         type(chat_model) is ChatOpenAI
         and chat_model.use_responses_api is True

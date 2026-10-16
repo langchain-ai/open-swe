@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
-from langgraph_sdk.schema import Config
+from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -36,31 +36,28 @@ from openswe.database.postgres import transaction
 from openswe.dispatch import create_durable_run
 from openswe.github.comments import fence_github_comment_body
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import InputMessageContext, build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
+from openswe.jobs import queue
 from openswe.prompts import prompt
-from openswe.review.styles import normalize_repo_full_name
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
-from openswe.store import delete_value, get_value, now_iso, now_ms, search_all_values
 from openswe.threads.access import agent_version_metadata, resolve_run_email
 from openswe.threads.creation import create_thread
 from openswe.users import User
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.time import now_iso, now_ms
 from openswe.webhooks.common import enforce_public_repo_org_gate, repo_private_from_payload
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
 
-# The LangGraph Store namespaces automations lived in before PostgreSQL; read
-# only by the one-time import.
-SCHEDULES_NAMESPACE: list[str] = ["agent_schedules"]
-SCHEDULE_RUN_STATE_NAMESPACE: list[str] = ["agent_schedule_run_state"]
 _AGENT_ASSISTANT_ID = "agent"
-_SCHEDULER_ASSISTANT_ID = "scheduler"
+AGENT_SCHEDULE_JOB_KIND = "agent_schedule"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 GitHubEvent = Literal[
     "issues.opened", "pull_request.opened", "pull_request.closed", "pull_request.merged"
@@ -250,14 +247,6 @@ def normalize_cron_schedule(raw: str) -> str:
 
 def _derive_name(prompt: str) -> str:
     return prompt.strip().splitlines()[0][:80] or "Scheduled agent"
-
-
-def _repo_full_name(repo: dict[str, str] | None) -> str | None:
-    if not repo:
-        return None
-    owner = repo.get("owner")
-    name = repo.get("name")
-    return f"{owner}/{name}" if owner and name else None
 
 
 def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
@@ -481,74 +470,109 @@ async def _ensure_dashboard_github_token(login: str) -> None:
         raise HTTPException(401, "github token unavailable, re-login required")
 
 
-def _build_cron_config(automation_id: str) -> Config:
-    return {"configurable": {"schedule_id": automation_id}}
-
-
 async def _create_cron(
-    automation_id: str, trigger_id: uuid.UUID, cron: str, created_by: str | None
+    automation_id: str,
+    trigger_id: uuid.UUID,
+    cron: str,
+    created_by: str | None,
+    *,
+    by: uuid.UUID | None,
 ) -> str:
-    created = await langgraph_client().crons.create(
-        _SCHEDULER_ASSISTANT_ID,
-        schedule=cron,
-        input={"schedule_id": automation_id, "trigger_id": str(trigger_id)},
-        config=_build_cron_config(automation_id),
+    job = await queue.schedule(
+        AGENT_SCHEDULE_JOB_KIND,
+        {"schedule_id": automation_id, "trigger_id": str(trigger_id)},
+        cron=cron,
+        key=f"{AGENT_SCHEDULE_JOB_KIND}:{trigger_id}",
         metadata={
-            "kind": "agent_schedule",
+            "kind": AGENT_SCHEDULE_JOB_KIND,
             "schedule_id": automation_id,
             "created_by": created_by,
-            "owner_type": "system",
-            "visibility": "public",
             **agent_version_metadata(),
         },
+        by=by,
     )
-    cron_id = (
-        created.get("cron_id") if isinstance(created, dict) else getattr(created, "cron_id", None)
-    )
-    if not isinstance(cron_id, str) or not cron_id:
-        raise RuntimeError("cron creation did not return a cron_id")
-    return cron_id
+    return str(job.id)
 
 
 async def _delete_cron(cron_id: str | None) -> bool:
     if not cron_id:
         return True
     try:
-        await langgraph_client().crons.delete(cron_id)
+        if not await queue.cancel(uuid.UUID(cron_id)):
+            # A trigger whose Agent Server cron was never moved to a job still holds it.
+            await _delete_agent_server_cron(cron_id)
     except Exception:
-        logger.warning("Could not delete schedule cron", extra={"cron_id": cron_id}, exc_info=True)
+        logger.warning("Could not delete schedule job", extra={"cron_id": cron_id}, exc_info=True)
         return False
     return True
 
 
-async def _delete_orphan_crons(automation_id: str, keep: set[str]) -> None:
-    """Delete crons for ``automation_id`` that no trigger owns any more.
+async def _delete_agent_server_cron(cron_id: str) -> None:
+    try:
+        await langgraph_client().crons.delete(cron_id)
+    except NotFoundError:
+        return
 
-    A cron whose delete failed when its trigger was removed keeps firing; the
+
+async def _delete_orphan_crons(automation_id: str, keep: set[str]) -> None:
+    """Delete jobs for ``automation_id`` that no trigger owns any more.
+
+    A job whose delete failed when its trigger was removed keeps firing; the
     next time it does, it finds itself here and goes.
     """
     try:
-        crons = await langgraph_client().crons.search(
-            assistant_id=_SCHEDULER_ASSISTANT_ID,
-            metadata={"schedule_id": automation_id},
-            limit=100,
-        )
+        jobs = await queue.find({"schedule_id": automation_id})
     except Exception:
         logger.warning(
-            "Could not look up orphaned automation crons",
+            "Could not look up orphaned automation jobs",
             extra={"schedule_id": automation_id},
             exc_info=True,
         )
         return
     settled_before = datetime.now(UTC) - _NEW_CRON_GRACE
-    for cron in crons:
-        cron_id = cron.get("cron_id")
-        created_at = _timestamp(cron.get("created_at"))
-        # An edit makes its crons before it saves the triggers that own them.
-        if created_at is not None and created_at > settled_before:
-            continue
-        if isinstance(cron_id, str) and cron_id not in keep:
-            await _delete_cron(cron_id)
+    for job in jobs:
+        # An edit makes its jobs before it saves the triggers that own them.
+        if job.created_at <= settled_before and str(job.id) not in keep:
+            await _delete_cron(str(job.id))
+
+
+async def adopt_agent_server_cron(
+    cron_id: str,
+    automation_id: str,
+    trigger_id: str | None,
+    schedule: str,
+    created_by: str | None,
+) -> bool:
+    """Move the trigger an Agent Server cron fired for onto a job; ``False`` for an orphan.
+
+    A cron from before trigger ids names none; the trigger holding it is the one.
+    """
+    if trigger_id is None:
+        async with transaction() as conn:
+            held_by = await conn.scalar(
+                text(
+                    "SELECT id FROM automation_trigger "
+                    "WHERE automation_id = CAST(:automation_id AS uuid) AND cron_id = :cron_id"
+                ),
+                {"automation_id": automation_id, "cron_id": cron_id},
+            )
+        if held_by is None:
+            return False
+        trigger_id = str(held_by)
+    job_id = await _create_cron(automation_id, uuid.UUID(trigger_id), schedule, created_by, by=None)
+    async with transaction() as conn:
+        held = await conn.scalar(
+            text(
+                "UPDATE automation_trigger SET cron_id = :job_id "
+                "WHERE id = CAST(:trigger_id AS uuid) AND cron_id IN (:cron_id, :job_id) "
+                "RETURNING 1"
+            ),
+            {"job_id": job_id, "trigger_id": trigger_id, "cron_id": cron_id},
+        )
+    if held:
+        return True
+    await _delete_cron(job_id)
+    return False
 
 
 async def _create_crons(
@@ -558,14 +582,22 @@ async def _create_crons(
     *,
     enabled: bool,
     created_by: str,
+    saved_by: str,
 ) -> list[str | None]:
     """One cron per schedule trigger of an enabled automation; all or nothing."""
+    saver = await User.for_login("github", saved_by)
     cron_ids: list[str | None] = []
     try:
         for trigger, trigger_id in zip(triggers, trigger_ids, strict=True):
             if enabled and isinstance(trigger, ScheduleTrigger):
                 cron_ids.append(
-                    await _create_cron(automation_id, trigger_id, trigger.cron, created_by)
+                    await _create_cron(
+                        automation_id,
+                        trigger_id,
+                        trigger.cron,
+                        created_by,
+                        by=None if saver is None else saver.id,
+                    )
                 )
             else:
                 cron_ids.append(None)
@@ -645,24 +677,6 @@ def _test_run_repo(record: dict[str, Any]) -> str | None:
     return None
 
 
-def _report_to_slack(record: dict[str, Any], prompt_text: str) -> str:
-    """``prompt_text`` asking for the Slack report a stored destination used to post."""
-    channel = record.get("slack_channel_id")
-    if not isinstance(channel, str) or not channel.upper().startswith(("C", "G")):
-        return prompt_text
-    when = (
-        "When a run takes a concrete action, post"
-        if record.get("slack_notification_mode") == "on_action"
-        else "Post"
-    )
-    return f"{prompt_text}\n\n{when} a short summary of the outcome to <#{channel.upper()}>."
-
-
-def _work_in_repo(prompt_text: str, repo: str | None) -> str:
-    """``prompt_text`` naming ``repo``, for a schedule that used to start runs there."""
-    return f"{prompt_text}\n\nScheduled runs work in `{repo}`." if repo else prompt_text
-
-
 async def create_agent_schedule(
     login: str,
     body: ScheduleCreateBody,
@@ -692,7 +706,7 @@ async def create_agent_schedule(
     automation_id = str(uuid.uuid4())
     trigger_ids = [uuid.uuid4() for _ in triggers]
     cron_ids = await _create_crons(
-        automation_id, triggers, trigger_ids, enabled=True, created_by=login
+        automation_id, triggers, trigger_ids, enabled=True, created_by=login, saved_by=login
     )
     try:
         async with transaction() as conn:
@@ -798,6 +812,7 @@ async def update_agent_schedule(
             trigger_ids,
             enabled=enabled,
             created_by=existing["created_by"],
+            saved_by=login,
         )
     assignments = ", ".join(f"{key} = :{key}" for key in columns)
     try:
@@ -859,128 +874,6 @@ async def delete_workspace_automations(workspace: str) -> int:
             {"slug": workspace},
         )
     return len(records)
-
-
-def _legacy_triggers(record: dict[str, Any]) -> tuple[list[TriggerConfig], str | None]:
-    trigger = record.get("trigger") or "schedule"
-    repo = _repo_full_name(record.get("repo") if isinstance(record.get("repo"), dict) else None)
-    if trigger == "schedule":
-        schedule = record.get("schedule")
-        return ([ScheduleTrigger(cron=schedule)] if isinstance(schedule, str) else []), (
-            record.get("cron_id") if isinstance(record.get("cron_id"), str) else None
-        )
-    # Older releases only had this one event trigger, which always named a repo.
-    if trigger == "github_issue_opened" and repo:
-        return [GitHubTrigger(repo=repo, events=["issues.opened"])], None
-    return [], None
-
-
-async def _import_store_automation(
-    record: dict[str, Any], run_states: dict[str, dict[str, Any]]
-) -> bool:
-    """Copy one stored automation into PostgreSQL; ``True`` when this call inserted it."""
-    imported = False
-    schedule_id = record.get("id")
-    if not isinstance(schedule_id, str) or _uuid(schedule_id) is None:
-        logger.error("Skipping an unreadable stored automation", extra={"schedule_id": schedule_id})
-        return False
-    workspace = _record_workspace(record)
-    workspace_id = await WORKSPACES.id_for_slug(workspace)
-    triggers, cron_id = _legacy_triggers(record)
-    if workspace_id is None or not triggers:
-        logger.warning(
-            "Dropping a stored automation that cannot be imported",
-            extra={"schedule_id": schedule_id, "workspace": workspace},
-        )
-        await _delete_cron(cron_id)
-        await delete_value(SCHEDULES_NAMESPACE, schedule_id)
-        await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
-        return False
-    state = {**record, **run_states.get(schedule_id, {})}
-    async with transaction() as conn:
-        inserted = await conn.execute(
-            text(
-                "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, model, "
-                "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
-                "user_email, last_thread_id, last_run_id, last_triggered_at, last_error, "
-                "last_error_at) VALUES (:id, "
-                ":workspace_id, :name, :prompt, :admin_thread, :model, :effort, :base_branch, "
-                ":branch_prefix, :enabled, :created_by, :updated_by, :user_email, "
-                ":last_thread_id, :last_run_id, :last_triggered_at, :last_error, "
-                ":last_error_at) ON CONFLICT (id) DO NOTHING "
-                "RETURNING 1"
-            ),
-            {
-                "id": uuid.UUID(schedule_id),
-                "workspace_id": workspace_id,
-                "name": str(record.get("name") or _derive_name(str(record.get("prompt") or ""))),
-                # Schedules no longer name a repository and automations no longer
-                # post to Slack themselves; the prompt keeps both.
-                "prompt": _report_to_slack(
-                    record,
-                    _work_in_repo(
-                        str(record.get("prompt") or ""),
-                        None
-                        if record.get("trigger") not in (None, "schedule")
-                        else _repo_full_name(
-                            record.get("repo") if isinstance(record.get("repo"), dict) else None
-                        ),
-                    ),
-                ),
-                "admin_thread": record.get("admin_thread") is True,
-                "model": record.get("model") or "Default",
-                "effort": record.get("effort"),
-                "base_branch": record.get("base_branch") or "main",
-                "branch_prefix": record.get("branch_prefix"),
-                "enabled": bool(record.get("enabled")),
-                "created_by": record.get("created_by") or "",
-                "updated_by": record.get("updated_by") or record.get("created_by") or "",
-                "user_email": record.get("user_email") or "",
-                "last_thread_id": state.get("last_thread_id"),
-                "last_run_id": state.get("last_run_id"),
-                "last_triggered_at": _timestamp(state.get("last_triggered_at")),
-                "last_error": state.get("last_error"),
-                "last_error_at": _timestamp(state.get("last_error_at")),
-            },
-        )
-        if inserted.first() is not None:
-            await _insert_triggers(
-                conn,
-                schedule_id,
-                triggers,
-                [uuid.uuid4() for _ in triggers],
-                [cron_id if isinstance(t, ScheduleTrigger) else None for t in triggers],
-            )
-            imported = True
-    await delete_value(SCHEDULES_NAMESPACE, schedule_id)
-    await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
-    return imported
-
-
-async def import_store_automations() -> int:
-    """Copy automations still in the LangGraph Store into PostgreSQL; returns how many.
-
-    Runs at startup and is a no-op once the Store namespaces are empty. Ids are
-    kept, so existing crons keep pointing at their automation. A record whose
-    workspace no longer exists is dropped along with its cron; one that cannot
-    be read stays in the Store, logged, for the next startup.
-    """
-    run_states = {
-        state["schedule_id"]: state
-        for state in await search_all_values(SCHEDULE_RUN_STATE_NAMESPACE)
-        if isinstance(state.get("schedule_id"), str)
-    }
-    imported = 0
-    for record in await search_all_values(SCHEDULES_NAMESPACE):
-        try:
-            imported += await _import_store_automation(record, run_states)
-        except Exception:
-            # One bad record must not keep every later one in the Store.
-            logger.exception(
-                "Could not import a stored automation; it stays in the Store",
-                extra={"schedule_id": record.get("id")},
-            )
-    return imported
 
 
 def _admin_thread_enabled(record: dict[str, Any]) -> bool:
@@ -1759,13 +1652,6 @@ async def launch_scheduled_agent_run(
     """
     record = await get_agent_schedule(schedule_id)
     if not record:
-        if await get_value(SCHEDULES_NAMESPACE, schedule_id) is not None:
-            # Not imported from the Store yet; the import keeps this cron.
-            logger.warning(
-                "Scheduled automation is awaiting its Store import",
-                extra={"schedule_id": schedule_id},
-            )
-            return {"status": "pending_import", "schedule_id": schedule_id}
         await _delete_orphan_crons(schedule_id, keep=set())
         return {"status": "missing", "schedule_id": schedule_id}
     triggers = record.get("triggers") or []

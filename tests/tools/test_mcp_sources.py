@@ -132,6 +132,7 @@ async def test_unavailable_source_does_not_expose_lower_precedence_tools(remote,
 
 async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(remote, monkeypatch):
     from openswe.mcp import user
+    from openswe.mcp.records import UserMCPConnections
 
     metadata = {"visibility": "private", "owner_type": "user", "owner_login": "alice"}
     monkeypatch.setattr(
@@ -145,8 +146,8 @@ async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(remote, monk
         "openswe.run_config.get_config",
         lambda: {"configurable": {"thread_id": "t", "github_login": "alice"}},
     )
-    monkeypatch.setattr(user, "list_user_mcp_records", AsyncMock(return_value=[record()]))
-    monkeypatch.setattr(user, "get_user_mcp", AsyncMock(return_value=record()))
+    monkeypatch.setattr(UserMCPConnections, "records", AsyncMock(return_value=[record()]))
+    monkeypatch.setattr(UserMCPConnections, "get", AsyncMock(return_value=record()))
     tool = (await runtime.load_mcp_tools(user.user_mcp_source("alice")))[0]
     assert (await tool.ainvoke({}))[0]["text"] == "https://linear.example/mcp"
     metadata["visibility"] = "public"

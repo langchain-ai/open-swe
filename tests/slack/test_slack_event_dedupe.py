@@ -14,30 +14,17 @@ from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common as webhook_common
 
 
-class _ConflictError(Exception):
-    pass
-
-
-class _FakeThreads:
+class _FakeClaims:
     def __init__(self) -> None:
-        self.ids: set[str] = set()
+        self.held: set[tuple[str, str]] = set()
         self.lock = asyncio.Lock()
 
-    async def create(self, *, thread_id: str, **_kwargs: Any) -> None:
+    async def claim(self, scope: str, key: str, **_kwargs: Any) -> bool:
         async with self.lock:
-            if thread_id in self.ids:
-                raise _ConflictError
-            self.ids.add(thread_id)
-
-    async def get(self, thread_id: str) -> dict[str, str]:
-        if thread_id not in self.ids:
-            raise KeyError(thread_id)
-        return {"thread_id": thread_id}
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.threads = _FakeThreads()
+            if (scope, key) in self.held:
+                return False
+            self.held.add((scope, key))
+            return True
 
 
 class _FakeBackgroundTasks:
@@ -90,9 +77,9 @@ async def _post(
 
 
 @pytest.fixture(autouse=True)
-def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
+def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClaims:
     slack_events.reset_slack_event_claims()
-    client = _FakeClient()
+    claims = _FakeClaims()
     monkeypatch.setattr(
         "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
     )
@@ -103,17 +90,17 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_events.event_claims, "claim", claims.claim)
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
-    return client
+    return claims
 
 
 async def test_mention_and_message_deliveries_start_one_run(
     monkeypatch: pytest.MonkeyPatch,
-    _patch_slack_webhook: _FakeClient,
+    _patch_slack_webhook: _FakeClaims,
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
@@ -125,10 +112,10 @@ async def test_mention_and_message_deliveries_start_one_run(
     assert first["status"] == "accepted"
     assert second["status"] == "ignored"
     assert len(background_tasks.tasks) == 1
-    assert _patch_slack_webhook.threads.ids == {
-        slack_events._claim_thread_id("Ev1"),
-        slack_events._claim_thread_id("Ev2"),
-        slack_events._claim_thread_id("C1:1786573369.551099"),
+    assert _patch_slack_webhook.held == {
+        ("slack_event", "Ev1"),
+        ("slack_event", "Ev2"),
+        ("slack_event", "C1:1786573369.551099"),
     }
 
 

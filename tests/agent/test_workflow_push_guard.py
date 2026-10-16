@@ -26,15 +26,19 @@ class _Backend:
         workflow_files: str = ".github/workflows/ci.yml",
         inherited_from_main: bool = False,
         workflows_changed_by_merge: bool = True,
+        inspectable: bool = True,
     ) -> None:
         self.workflow_files = workflow_files
         self.inherited_from_main = inherited_from_main
         self.workflows_changed_by_merge = workflows_changed_by_merge
+        self.inspectable = inspectable
         self.commands: list[str] = []
         self.head = "a" * 40
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> _Response:
         self.commands.append(command)
+        if not self.inspectable:
+            return _Response("fatal: not a git repository", 128)
         if "rev-parse --show-toplevel" in command:
             return _Response("/repo\n")
         if "rev-parse --verify refs/remotes/origin/feature" in command:
@@ -354,3 +358,52 @@ async def test_non_workflow_push_runs_without_approval(monkeypatch: pytest.Monke
     assert called is True
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -C /repo add -A && git -C /repo commit -qm 'Add CI' && "
+        "git -C /repo push -u origin feature",
+        "git commit -qam 'Add CI'&&git push",
+        "(cd /repo && git push)",
+        "cd /repo; git push",
+    ],
+    ids=["spaced", "unspaced", "subshell", "semicolon"],
+)
+@pytest.mark.parametrize(
+    ("backend", "refused"),
+    [
+        ({"workflow_files": ".github/workflows/ci.yml"}, True),
+        ({"workflow_files": ""}, False),
+        ({"workflow_files": "<no output>"}, False),
+        # Such as a repository the same command clones: nothing shows what it pushes.
+        ({"inspectable": False}, True),
+    ],
+    ids=["workflow-change", "no-workflow-change", "local-shell-no-output", "uninspectable"],
+)
+async def test_chained_push_runs_only_without_workflow_changes(
+    command: str, backend: dict[str, Any], refused: bool
+) -> None:
+    # The guard can only inspect a push that is the whole command; one chained after
+    # a commit would otherwise carry workflow changes past approval.
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, _Backend(**backend)),
+        thread_id="thread-1",
+    )
+    called = False
+
+    async def handler(_request: Any) -> ToolMessage:
+        nonlocal called
+        called = True
+        return ToolMessage(content="pushed", tool_call_id="call-1")
+
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request(command)), handler
+    )
+
+    assert called is not refused
+    assert isinstance(result, ToolMessage)
+    if refused:
+        assert result.status == "error"
+        assert json.loads(str(result.content))["error_type"] == "WorkflowPushMustStandAlone"

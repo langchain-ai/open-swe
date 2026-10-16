@@ -17,6 +17,8 @@ class UserPreferences(BaseModel):
     experimental_act_as_approval: bool = False
     # Open SWE acts as this person in shared threads without asking first.
     act_as_always_allowed: bool = False
+    # Threads this person starts run their model loop on Managed Deep Agents, when deployed.
+    run_on_mda: bool = False
 
 
 class UserPreferencesPatch(BaseModel):
@@ -36,3 +38,4 @@ class UserPreferencesPatch(BaseModel):
     # A consent control, so never agent-manageable.
     experimental_act_as_approval: bool | None = None
     act_as_always_allowed: bool | None = None
+    run_on_mda: bool | None = None

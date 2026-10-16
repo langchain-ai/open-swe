@@ -59,7 +59,6 @@ class EntryPoint(StrEnum):
     GITHUB = "github"
     SLACK = "slack"
     SCHEDULED = "scheduled"
-    DESKTOP = "desktop"
     API = "api"
     LINEAR = "linear"
     NOTION = "notion"

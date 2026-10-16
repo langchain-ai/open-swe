@@ -201,7 +201,7 @@ async def test_user_followup_can_publish_after_background_completion(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("removed_bot", [False, True])
 async def test_system_pr_uses_bot_even_with_a_triggering_user(
-    monkeypatch, thread_metadata, credentials, fake_store, removed_bot
+    monkeypatch, thread_metadata, credentials, removed_bot
 ):
     opr = importlib.import_module("openswe.tools.open_pull_request")
     thread_metadata.update(owner_type="system")

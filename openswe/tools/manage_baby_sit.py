@@ -82,8 +82,8 @@ async def manage_baby_sit(
         from openswe.baby_sit import WATCHES
 
         watch = await WATCHES.get(key)
-        if watch and watch.thread_id != thread_id:
-            return {"success": False, "error": "This watch belongs to another agent thread"}
+        if watch and not await watch.belongs_to(thread_id):
+            return {"success": False, "error": "This watch belongs to another task"}
         stopped = await stop_watch(key)
         return {"success": True, "stopped": stopped, "watch_key": key}
 
@@ -136,6 +136,7 @@ async def manage_baby_sit(
     try:
         watch = await start_watch(
             pr_ref=pr_ref,
+            title=str(pr.get("title") or pr_url),
             head_sha=pr_head_sha,
             head_ref=pr_head_ref,
             installation_id=installation_id,

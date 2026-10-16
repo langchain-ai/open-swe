@@ -19,14 +19,13 @@ from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     append_slack_web_link_footer,
-    bind_slack_thread_id,
     get_active_slack_thread,
     get_slack_permalink,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
-    store_slack_run_mapping,
 )
 from openswe.slack.http import SlackRequestError
+from openswe.slack.records import bind_slack_thread_id, store_slack_run_mapping
 from openswe.slack.request import SlackRequest
 from openswe.slack.solo_threads import allow_solo_thread_followup
 from openswe.source_context import SourceContext
@@ -413,7 +412,7 @@ async def slack_breakout_thread(
                 }
             await asyncio.sleep(delay)
 
-    await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
+    await bind_slack_thread_id(clean_channel_id, message_ts, thread_id)
     if requester:
         await allow_solo_thread_followup(
             client,
@@ -495,7 +494,6 @@ async def slack_breakout_thread(
     run_id = run.get("run_id") if isinstance(run, dict) else None
     if isinstance(run_id, str) and run_id:
         await store_slack_run_mapping(
-            client,
             clean_channel_id,
             message_ts,
             run_id,

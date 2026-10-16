@@ -34,6 +34,8 @@ from openswe.slack.code_channels import is_code_channel_session, set_session_sta
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
+from openswe.threads.index import index_kept
+from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
@@ -407,7 +409,6 @@ async def _handle_successful_run(
             "channel_id": channel_id,
             "thread_ts": thread_ts,
         },
-        client=client,
     )
     if not scheduled:
         return {"status": "error", "reason": "cost refresh scheduling failed"}
@@ -509,6 +510,14 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    if index_kept():
+        try:
+            await refresh_thread_status(thread_id)
+        except Exception:
+            # The reconcile job settles it later; the rest of completion must still run.
+            logger.warning(
+                "Could not refresh the thread status", extra={"thread_id": thread_id}, exc_info=True
+            )
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
     is_worker = False

@@ -78,6 +78,15 @@ jobs:
               summary.write(f"## Released PRs\n\n{message}\n")
           PY
 
+  deploy-mda:
+    name: Deploy the Managed Deep Agents runtime
+    needs: [typecheck, promote]
+    uses: ./.github/workflows/deploy_mda.yml
+    with:
+      environment: prod
+      ref: ${{ needs.typecheck.outputs.sha }}
+    secrets: inherit
+
   release-desktop-nightly:
     needs: [typecheck, promote]
     uses: ./.github/workflows/desktop-release.yml

@@ -8,8 +8,6 @@ from langgraph.runtime import Runtime
 
 from openswe import reviewer
 
-pytestmark = pytest.mark.usefixtures("fake_store")
-
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     prompt = reviewer._reviewer_system_prompt(

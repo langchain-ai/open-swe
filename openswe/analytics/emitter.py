@@ -45,7 +45,6 @@ _ENTRY_POINTS = {
     "slack": EntryPoint.SLACK,
     "schedule": EntryPoint.SCHEDULED,
     "scheduled": EntryPoint.SCHEDULED,
-    "desktop": EntryPoint.DESKTOP,
     "api": EntryPoint.API,
     "linear": EntryPoint.LINEAR,
     "notion": EntryPoint.NOTION,

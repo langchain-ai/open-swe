@@ -21,7 +21,7 @@ from openswe.review_guide.walk import OnScreen, Reader, Walk
 from openswe.run_config import RunConfig
 from openswe.slack.code_channels import archive_code_channel, set_session_status_result
 from openswe.slack.http import SlackRequestError
-from openswe.slack.tools.reply import slack_reply
+from openswe.slack.tools.reply import send_slack_reply
 from openswe.tools.approve_pull_request import approve_pull_request
 from openswe.tools.mark_pull_request_ready import mark_pull_request_ready
 from openswe.tools.plan_walkthrough import PLANNING_ERRORS
@@ -101,7 +101,7 @@ class _State:
 
     async def post(self, shown: OnScreen) -> dict[str, Any]:
         """Put ``shown`` on screen with its "Next" button, replacing what was there."""
-        posted = await slack_reply(shown.message_text, "progress", options=[NEXT])
+        posted = await send_slack_reply(shown.message_text, "progress", options=[NEXT])
         if posted["success"] is not True:
             return posted
         replaced = self.walk.withdraw()
@@ -304,7 +304,7 @@ async def walkthrough_end(message: str = "", archive: bool = False) -> dict[str,
         part for part in (message.strip(), f"_{state.walk.coverage()}_" if finished else "") if part
     )
     if body or options:
-        posted = await slack_reply(body, "progress", options=options or None)
+        posted = await send_slack_reply(body, "progress", options=options or None)
         if posted["success"] is not True:
             warnings.append(f"could not post the message: {posted['error']}")
     await state.retire(state.walk.withdraw(), "The walkthrough ended")

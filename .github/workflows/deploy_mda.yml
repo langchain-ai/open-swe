@@ -1,0 +1,115 @@
+name: Deploy Managed Deep Agents
+
+# Deploys mda/ to the open-swe-mda-* deployments the backends' MDA_RUNTIME_URL
+# points at. Staging follows main and prod follows the promotion to prod; preview
+# follows the preview tree, which build_preview_branch.yml deploys after the backend.
+# A deployment is skipped when nothing it runs changed since its mda-deployed/<env>
+# tag, which a successful deploy moves, so a failed one is retried next time.
+# Only commits already on main are deployed: `mda deploy` can run project code
+# while it holds the workspace deploy key.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mda/**"
+      - ".github/workflows/deploy_mda.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment to update (deploys the selected ref)
+        type: choice
+        options: [staging, prod]
+        required: true
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      ref:
+        description: Commit to deploy
+        type: string
+        required: true
+
+permissions:
+  # Moves the mda-deployed/<environment> tag to what each deployment runs.
+  contents: write
+
+jobs:
+  deploy:
+    name: Deploy open-swe-mda-${{ matrix.environment }}
+    if: >-
+      github.repository == 'langchain-ai/open-swe'
+      && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(inputs.environment && format('["{0}"]', inputs.environment) || '["staging"]') }}
+    concurrency:
+      group: deploy-mda-${{ matrix.environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Refuse commits that are not on main
+        run: |
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "::error::$(git rev-parse HEAD) is not on main; only main is deployed."
+            exit 1
+          }
+      - name: Check whether the deployment is behind
+        id: changed
+        env:
+          DEPLOYED_TAG: mda-deployed/${{ matrix.environment }}
+        run: |
+          if [[ ! -f mda/agent.py ]]; then
+            echo "mda/agent.py does not exist at this commit; nothing to deploy."
+            echo "deploy=false" >>"$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda .github/workflows/deploy_mda.yml; then
+            echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
+            echo "deploy=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >>"$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.changed.outputs.deploy == 'true'
+      - name: Install the mda CLI
+        if: steps.changed.outputs.deploy == 'true'
+        # Same version mda/ pins.
+        run: uv tool install managed-deepagents==0.9.1
+      - name: Deploy
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+          # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
+          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+        run: |
+          case "$ENVIRONMENT" in
+            preview) backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" ;;
+            staging) backend="https://open-swe-staging-v2-9b910587972955589372b6a585abcfa3.us.langgraph.app" ;;
+            prod) backend="https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app" ;;
+            *) echo "::error::Unknown environment $ENVIRONMENT"; exit 1 ;;
+          esac
+          # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
+          printf 'OPEN_SWE_BACKEND_URL=%s\n' "$backend" >mda/.env
+          mda deploy mda \
+            --name "open-swe-mda-$ENVIRONMENT" \
+            --deployment-type prod \
+            --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
+            --context-strategy overwrite \
+            --yes
+      - name: Record what the deployment runs
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          DEPLOYED_TAG: mda-deployed/${{ matrix.environment }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" \
+            "HEAD:refs/tags/${DEPLOYED_TAG}"

@@ -96,16 +96,12 @@ from openswe.slack.client import (
     get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
-    lookup_slack_run_mapping,  # noqa: F401
-    lookup_slack_thread_id,  # noqa: F401
     parse_slack_ts,  # noqa: F401
     post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
-    resolve_slack_thread_id,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
-    store_slack_run_mapping,  # noqa: F401
     strip_bot_mention,  # noqa: F401
     update_slack_message,
     verify_slack_signature,
@@ -130,6 +126,12 @@ from openswe.slack.feedback import (
     process_slack_reaction_removed,
 )
 from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.records import (  # noqa: F401
+    lookup_slack_run_mapping,
+    lookup_slack_thread_id,
+    resolve_slack_thread_id,
+    store_slack_run_mapping,
+)
 from openswe.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread, ensure_titled_thread
@@ -684,7 +686,7 @@ async def upsert_agent_thread_metadata(
             # "PRs closed" mark no longer applies. Only the PR webhook sets those,
             # and only on PR-linked threads, so take its lock for any such thread
             # and derive the reset from a fresh read rather than the pre-lock one.
-            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+            async with agent_thread_pr_state_lock(thread_id):
                 current = as_thread_dict(await langgraph_client.threads.get(thread_id))
                 current_meta = (
                     current["metadata"] if isinstance(current.get("metadata"), dict) else {}
@@ -1490,7 +1492,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         metadata: dict[str, Any] | None = None
         newly_merged = False
         try:
-            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+            async with agent_thread_pr_state_lock(thread_id):
                 current = await langgraph_client.threads.get(thread_id)
                 metadata = current.get("metadata") if isinstance(current, dict) else None
                 if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:

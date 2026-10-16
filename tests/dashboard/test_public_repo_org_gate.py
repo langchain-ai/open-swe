@@ -38,9 +38,7 @@ def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
     register_github_logins(monkeypatch, "stranger", "insider")
 
 
-async def test_gate_blocks_non_member_on_public_pr_comment(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -80,9 +78,7 @@ async def test_gate_blocks_non_member_on_public_pr_comment(
     assert seen["calls"] == ["stranger"]
 
 
-async def test_gate_allows_org_member_on_public_pr_comment(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_gate_allows_org_member_on_public_pr_comment(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -122,7 +118,7 @@ async def test_gate_allows_org_member_on_public_pr_comment(
     assert called["event"] == "issue_comment"
 
 
-async def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch, registry_db) -> None:
+async def test_gate_skipped_on_private_repo(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -163,7 +159,7 @@ async def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch, regist
     assert seen["calls"] == []
 
 
-async def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch, registry_db) -> None:
+async def test_gate_disabled_when_env_unset(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch, gate="")
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -204,9 +200,7 @@ async def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch, regist
     assert seen["calls"] == []
 
 
-async def test_gate_blocks_non_member_on_public_issue(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_gate_blocks_non_member_on_public_issue(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -241,7 +235,7 @@ async def test_gate_blocks_non_member_on_public_issue(
 
 
 async def test_review_requested_is_unsupported_before_public_repo_gate(
-    fake_store: Any, monkeypatch, registry_db
+    monkeypatch, registry_db
 ) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
@@ -274,9 +268,7 @@ async def test_review_requested_is_unsupported_before_public_repo_gate(
     assert seen["calls"] == []
 
 
-async def test_internal_bot_comment_never_prompts_the_agent(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_internal_bot_comment_never_prompts_the_agent(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 

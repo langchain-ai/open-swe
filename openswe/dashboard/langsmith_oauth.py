@@ -25,8 +25,8 @@ from openswe.dashboard.oauth_credentials import (
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import now_iso
 from openswe.users.records import UnknownUser, UserRecords
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 

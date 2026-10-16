@@ -11,7 +11,6 @@ import re
 import uuid
 
 __all__ = [
-    "baby_sit_lock_thread_id",
     "github_issue_thread_id",
     "linear_issue_thread_id",
     "notion_discussion_thread_id",
@@ -58,10 +57,6 @@ def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> 
 
 def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> str:
     return _url_uuid(f"slack:{channel}:{timestamp}:{nonce or ''}")
-
-
-def baby_sit_lock_thread_id(key: str) -> str:
-    return _url_uuid(f"open-swe:baby-sit-lock:{key}")
 
 
 def linear_issue_thread_id(issue_id: str) -> str:

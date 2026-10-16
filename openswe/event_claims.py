@@ -7,6 +7,8 @@ fails before its side effect releases the claim, so a later delivery of the
 same event (a provider retry or a manual redelivery) runs.
 A claim lapses at ``expires_at`` and can then be taken again. Each claim also
 sweeps a few lapsed ones, so the table stays about as large as the live claims.
+Short-lived mutexes use the same claims, so one whose holder never releases it
+lapses on its own.
 """
 
 from datetime import timedelta
@@ -44,6 +46,19 @@ async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
     async with transaction() as conn:
         await conn.execute(_SWEEP, {"limit": _SWEEP_LIMIT})
         result = await conn.execute(_CLAIM, {"scope": scope, "key": key, "ttl": ttl})
+        return result.first() is not None
+
+
+async def held(scope: str, key: str) -> bool:
+    """Whether someone holds the claim on ``(scope, key)``, for handlers that claim once done."""
+    async with transaction() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT 1 FROM event_claim WHERE scope = :scope AND key = :key "
+                "AND expires_at > clock_timestamp()"
+            ),
+            {"scope": scope, "key": key},
+        )
         return result.first() is not None
 
 
