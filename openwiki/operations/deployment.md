@@ -1,8 +1,11 @@
 ---
 type: operations-guide
 title: Development, Deployment, and Serving
-description: Deploy Open SWE as a single LangGraph service across multiple topologies — local development with Docker PostgreSQL, standalone Docker, LangGraph Platform, Electron desktop, and multiple replicas. Covers environment setup, dashboard mounting, webhook exposure, authentication modes, and durability.
-tags: [deployment, development, docker, langgraph, dashboard, webhooks, desktop, postgresql, operations]
+description: Deploy Open SWE as a single LangGraph service across multiple topologies — local development with Docker PostgreSQL, standalone Docker, LangGraph Platform, Electron desktop, and multiple replicas. Covers environment setup, dashboard mounting, webhook exposure, authentication modes, checkpointer durability, and health checks.
+tags: [deployment, development, docker, langgraph, dashboard, webhooks, desktop, postgresql, operations, migrations, checkpointer]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-2f66613e587b7c57d9be522e
     resource: repo://desktop/README.md
@@ -20,6 +23,10 @@ sources:
     resource: repo://Makefile
   - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
     resource: repo://openswe/api/app.py
+  - id: openwiki-source-035276d8c595782faca6e595
+    resource: repo://openswe/api/health.py
+  - id: openwiki-source-a13697e04823548408653de5
+    resource: repo://openswe/database/postgres.py
   - id: openwiki-source-33b1621aff91e24fa4b85e3f
     resource: repo://openswe/utils/dashboard_ui.py
   - id: openwiki-source-5b54a58d1b51cd490b0e7162
@@ -42,10 +49,7 @@ sources:
     resource: repo://ui/server/backend-proxy.ts
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 ---
 
 # Development, Deployment, and Serving
@@ -67,43 +71,95 @@ The desktop build uses a separate trimmed manifest `langgraph.desktop.json` (Pyt
 
 ### Startup sequence
 
+The FastAPI lifespan handles the complete startup flow in a specific order, with certain failures logged but not blocking server readiness:
+
 ```mermaid
 sequenceDiagram
   participant Boot as Startup
+  participant Validation as Validation
   participant DB as Postgres
+  participant Migrations as Migrations
   participant Store as LangGraph Store
+  participant Admin as Admin
   participant Analytics as Analytics
-  participant Listeners
+  participant Listeners as Listeners
+  participant Build as Build
   participant Ready as Ready to serve
 
-  Boot->>DB: Run migrations
-  Boot->>Store: Import user mappings (once)
-  Boot->>Store: Import concierge mode (once)
-  Boot->>Store: Import user records (once)
-  Boot->>Store: Import automations (once)
-  Boot->>Store: Import skills (once)
+  Boot->>Validation: Validate config (GitHub allowlist, sandbox, LLM)
+  Boot->>Validation: Require POSTGRES_URI configured
+  Boot->>DB: Acquire advisory lock
+  Boot->>DB: Create schema if missing
+  Boot->>Migrations: Run alembic migrations to head
+  Boot->>Store: Import user mappings (idempotent)
+  Boot->>Store: Import concierge mode (idempotent)
+  Boot->>Store: Import user records (idempotent)
+  Boot->>Store: Import automations (idempotent)
+  Boot->>Store: Import skills (idempotent)
   Boot->>DB: Delete analyzer crons (cleanup)
-  Boot->>DB: Sync admin flags
+  Boot->>Admin: Sync admin flags from config
   Boot->>Analytics: Load workspace metadata
-  Boot->>Analytics: Start worker pool
+  Boot->>Analytics: Start pooled worker
   Boot->>Listeners: Start transcript listener
   Boot->>Listeners: Start sandbox-bridge listener
   Boot->>Listeners: Start UI invalidation hub
-  Note over Listeners: failures log warnings only
-  Boot->>Ready: Warm agent build and open graphs
+  Boot->>Listeners: Start notification listener
+  Boot->>Build: Warm agent build
+  Boot->>Build: Open LangGraph runtime
+  Note over Listeners,Build: failures log warnings only
+  Boot->>Ready: Yield to serve requests
 ```
 
 The FastAPI lifespan startup runs in this order:
 
-1. **Database setup:** Validates configuration, runs SQLAlchemy migrations on `POSTGRES_URI`.
-2. **Store imports:** Migrates user mappings, concierge preferences, user records, automations, and skills from LangGraph Store to Postgres (each is idempotent, run once).
-3. **Cleanup:** Deletes legacy review-style analyzer crons that can no longer fire.
-4. **Admin sync:** Admin flags are synced from `CONFIGURED_ADMINS` into the user table.
-5. **Analytics activation:** Workspace records are loaded and reporting metadata is initialized; a pooled analytics event worker starts (reads the Store, writes to Postgres).
-6. **Listeners:** Transcript, sandbox-bridge, and UI invalidation listeners start (handle multi-replica notifications).
-7. **Build warming and ready:** The agent build is warmed for faster first use, then the LangGraph runtime opens all registered graphs.
+1. **Configuration validation:** Validates GitHub login allowlist, sandbox provider startup config, and local dev LLM config. Requires `POSTGRES_URI` to be set.
+2. **Event loop:** Pins a single event loop before queue worker initialization to ensure workers land on the correct loop.
+3. **Database setup:** Acquires an advisory lock (XID `557314367248862439`), creates the `open_swe` schema if it does not exist, and runs Alembic migrations to the latest revision using SQLAlchemy async connections.
+4. **Store imports:** Migrates user mappings, concierge preferences, user records, automations, and skills from LangGraph Store to Postgres (each is idempotent, run once). Failures log warnings.
+5. **Cleanup:** Deletes legacy review-style analyzer crons that can no longer fire. Failures log warnings.
+6. **Admin sync:** Admin flags are synced from `CONFIGURED_ADMINS` into the user table.
+7. **Analytics activation:** Workspace records are loaded and reporting metadata is initialized; a pooled analytics event worker starts (reads the Store, writes to Postgres). Failures log warnings.
+8. **Listeners:** Transcript, sandbox-bridge, UI invalidation, and database notification listeners start (handle multi-replica notifications). Failures log warnings.
+9. **Build warming and ready:** The agent build is warmed for faster first use, then the LangGraph runtime opens all registered graphs. Failures log warnings.
 
-Failures in imports, cleanup, analytics, listeners, or worker startup (steps 2–6) log warnings but do not prevent the server from running; the dashboard and API remain available, though affected features may degrade.
+Failures in any step except setup and migrations (steps 1–3) log warnings but do not prevent the server from running; the dashboard and API remain available, though affected features may degrade.
+
+### Database migrations
+
+Database migrations are Alembic-based and live in `openswe/database/migrations/versions/`. Each migration is a Python module implementing `upgrade()` and `downgrade()` functions.
+
+**Migration lifecycle:**
+
+- **Execution:** `openswe.database.migrate()` is called during lifespan startup and runs once (protected by an advisory lock to prevent concurrent migrations across replicas).
+- **Schema:** Migrations run against the `open_swe` schema after the startup sequence creates it if missing.
+- **Versioning:** Alembic tracks executed revision IDs in `open_swe.alembic_version`; upgrades run only new revisions.
+- **Per-migration transactions:** Each migration runs in its own transaction, so partial failures roll back cleanly.
+- **Preview environment:** On the `preview` environment (detected via `OPENSWE_ENV`), superseded revisions—those already stamped but now beneath another revision in the rebased chain—are deleted from the version table so the new chain applies cleanly.
+
+**Recent migrations** include user management, workspace configuration, event tracking, automated workflow approvals, sandbox tooling, thread transcripts, skill storage, task coordination, event subscriptions, and review guide features.
+
+### Checkpointer and state durability
+
+Checkpointer configuration is declared in `langgraph.json` under the `checkpointer` key with TTL settings:
+
+- **Strategy:** `delete` (async delete-based cleanup)
+- **Sweep interval:** 60 minutes (cleanup runs every hour in the background)
+- **Default TTL:** 43,200 minutes (30 days; checkpoints older than this are eligible for deletion)
+
+**Durability guarantee:**
+
+- Threads that restart within 60 minutes preserve their checkpoint state
+- Beyond 60 minutes, checkpoints may be cleaned up asynchronously
+- Multiple replicas share the same checkpoint storage (Postgres-backed), so a failed replica can resume threads on another replica as long as the database and Redis remain available
+
+### Health checks and readiness
+
+The backend exposes health check endpoints:
+
+- **`GET /health`:** Returns `{"status": "healthy"}` immediately; always responsive
+- **`POST /webhooks/run-complete`:** Token-verified webhook handler for run completion notifications
+
+Neither endpoint performs database connectivity checks. A deployment using scale-to-zero hosting is unsupported because background runs rely on Redis and Postgres workers staying available between webhook deliveries.
 
 ## API and router configuration
 
@@ -381,6 +437,7 @@ Multiple replicas of the same deployment share a Postgres database and Redis ins
 - **Sandbox bridges:** The bridge listener waits for cross-replica sandbox operations (file I/O, networking)
 - **Analytics worker:** Reads from the Store and writes to Postgres
 - **UI invalidations:** The hub broadcasts updates to connected dashboard clients across all replicas
+- **Database notifications:** A listener subscribes to PostgreSQL NOTIFY for cross-replica coordination
 
 If a listener fails to start, the replica continues; affected features degrade (threads driven from other replicas may not receive updates) but the replica remains operational.
 
@@ -443,4 +500,3 @@ make swagger
 ```
 
 Regenerates `swagger.json` from the FastAPI app's OpenAPI schema.
-schema.

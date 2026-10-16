@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:07368bc6dabbaa0427f311b4e756828aa36a30adec23203bdef3dd52ddda4b2b",
+  "pageVersion": "sha256:0986f6f2cee186f1ef54bc44f5ed1e9c637871c474b3d8860f3a1d06a7a9ff8d",
   "claims": [
     {
       "id": "claim_dbbc3ca9eca441849138011e70eadf76",
@@ -299,10 +299,102 @@
           "version": "repo-lines-v1:sha256:276e4df6a6a88fa322ddcbee6e0c20f7959465e79c13b03b8cdf5400cffadc41:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE1NDBmY2VmMmJhNWZlZWEzMjUzMDE2ZDdmMGVkZWYyZTlmMmU2ZWQ4MWZjYjZlMjMwMjhkOGQ2ZDY1ZDIzMjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE0ZWI2ZDAxNGNkZjE5YjgzN2ZhNWFhYTg4ODEzZGZhNjM3MjcxNDZjMzQ2MWRkYmU3YTE5YjBmYmI1ZmExNGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYxYTJhMTNkMjlkZGRmMWFkNGRkMTlkODAyMTRmMTkxNTQ0MmQ4ZGFkNjRjMDViYzRmNmEyMzU3MjkyYmE5YTYifQ"
         }
       ]
+    },
+    {
+      "id": "claim_75b79796ec0447adb772c5ccb37abd71",
+      "statement": "The browser opens a server-sent events stream at GET /dashboard/api/ui-invalidations?t=... with topic names and staleness ages; the invalidation hub manages a single shared PostgreSQL LISTEN connection across replicas, with each replica tracking subscribed Stream topics in memory and delivering push notifications when invalidations commit.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/ui_invalidations/hub.py#L1-L100",
+          "version": "repo-lines-v1:sha256:5180eb4d9f6f3f6e2c9cec25f9eba460918242b7699be158de9c05b49be97cb7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI1Yzg5N2Q5ZTIyYThlYmFmMTlhODFmYzMzZTU3MWJmZGRhNTRhZGRlNGUyYjUzM2UwODU2NDczMDM3ZDk3ODA3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyNWNkMmU1ZDA1ZTUwNzdiMDNlODQ5NzE3ZmEyY2JjM2MwYzliNDRmYjcyOTU5OTg2YjAzYzhjZmJjNDZiOTYzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5MWZmN2RhZGE5ZTg2MGZhNDc2OTBjMDUwMWU5ZWFkOWY3ODMwYjljYWU4MDI5ODE0OWQzZjliM2Y2MjIzNzUyIn0"
+        },
+        {
+          "resource": "repo://openswe/ui_invalidations/routes.py#L39-L51",
+          "version": "repo-lines-v1:sha256:c4543006ffd819da63b6869d7abaef018476459153bd75c721054740e4f2f538:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4Y2I5ZDcyYTdmZDM0MzE3ZDM5ODU0MGM3MTg5NTY5NGE1NDQyYWRlNTJiNDhjMWQwYmU3Mjk2MDY1NDNmYjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA5ZjkzMDgzYzE5NzEyMWI5ODI3MDBiYThhZmFiZDE3MjJjZjFkM2U3NDA0NTA5ZTgwZWZhMjcyNDdmNjJmMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhiMDcxY2UwNzhjMGEzYjFhOGQ0MWExMzkzYTdhZGM0ZGUzMmIyYzMxMGRjM2NmNjRkOTJjY2FmY2JkZmEyMmQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0d1647383cb8482b8fbad6d19726f7e0",
+      "statement": "The UI invalidation stream first reports which subscribed topics were invalidated within the staleness window (accounting for PostgreSQL lag), then emits every subsequent invalidation once per frame, so clients refetch only the stale queries while avoiding polling and staying synchronized across network gaps.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/ui_invalidations/hub.py#L28-L100",
+          "version": "repo-lines-v1:sha256:d621cc0f7a76cfffe9f5e2be597fa7cab0d4d1026a1ead20a939e4ebbcc5dfd1:eyJzZWxlY3RlZExpbmVDb3VudCI6NzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwNjE0YjY2NzQxYzgyNWFmNWVhNzdkMzFjYmVlNGE3ZDkyNGUyYmZmZWNlYzZlYjhhMTUwY2UzNTgxNjg1ZjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1Y2QyZTVkMDVlNTA3N2IwM2U4NDk3MTdmYTJjYmMzYzBjOWI0NGZiNzI5NTk5ODZiMDNjOGNmYmM0NmI5NjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU5YjI0YzY1Y2IwMTg5ODI0Nzk5OGY3NTY3ZDg3NzIwNTY0YmZlMWEzOGIxYzhmNWY5ZWFiZjZiNTE0ODcyMTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkxZmY3ZGFkYTllODYwZmE0NzY5MGMwNTAxZTllYWQ5Zjc4MzBiOWNhZTgwMjk4MTQ5ZDNmOWIzZjYyMjM3NTIifQ"
+        },
+        {
+          "resource": "repo://openswe/ui_invalidations/routes.py#L39-L51",
+          "version": "repo-lines-v1:sha256:c4543006ffd819da63b6869d7abaef018476459153bd75c721054740e4f2f538:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4Y2I5ZDcyYTdmZDM0MzE3ZDM5ODU0MGM3MTg5NTY5NGE1NDQyYWRlNTJiNDhjMWQwYmU3Mjk2MDY1NDNmYjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA5ZjkzMDgzYzE5NzEyMWI5ODI3MDBiYThhZmFiZDE3MjJjZjFkM2U3NDA0NTA5ZTgwZWZhMjcyNDdmNjJmMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhiMDcxY2UwNzhjMGEzYjFhOGQ0MWExMzkzYTdhZGM0ZGUzMmIyYzMxMGRjM2NmNjRkOTJjY2FmY2JkZmEyMmQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_92d3e79024034ff5a34609f480032085",
+      "statement": "A Topic is a fully qualified name (e.g., workspaces, threads/thread-id, review-styles/owner/repo); authorization checks which topic keys a session may hear before allowing the subscription, ensuring that keyed topics do not expose private records.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/ui_invalidations/topics.py#L1-L80",
+          "version": "repo-lines-v1:sha256:caf5184801302020f981ca74ee10e4914d342d5f90ed7c4135be6b913c9e79fc:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3YjdlODBkNTQxMzEyNmNkYzA5YWE2YWFmYWJjOGFlNTY2MzM3NmZhMzMyM2ExZWYzMmZiYWQ4ZjcxZGYyM2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiMjk1ODkwZjBmZmExNDRmZmVmYTJiYjZhYzBhZWMwMDMxMDI1OWU0Y2RjOTIyZjgzMGJkNjk3MDJjZGNiOWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc2YmQxMWFlYmEzZDhlZWY1NjA2OWI4MTQ3ZmQ4MDkzN2Q5NDNmODZmMzFjMzUzMDkwYTJlYTJlNmU1ZjI0MGIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_024c89c9995e42899943f1ad3e7cab4b",
+      "statement": "Review styles hold an approval mode (which delegates approval authority to the analyzer when set) and a repository-held prompt that steers the analyzer behavior; readings return summaries containing findings; concurrent analysis attempts return 409 to prevent redundant work.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/review/routes.py#L141-L152",
+          "version": "repo-lines-v1:sha256:7ab70c2d2dfc079e713b986c40fbe67e1c222ce48fe962ccd964159529aa4ae1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzZTU4MjZhYzM2NDIyNzVmOTUwYjgxOGJkNjhhYzZhYjdmNjFlZDNhNGM2YWQ2YTFmYjQwOWQ3MjQxMGRjYjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0Mjk2ZWQ2NDNkZGI5MWVjZGFhOWFhMDJlOGFjNzg3NzcyZjU3OTc3NTdhMmU3ZDE3ODczY2JmNTA2NDI0ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkMjNkYWU2ZTgyZjUzN2M2MTkyM2JmOGMyNDdiMjRkZjgxZDcxZmU2YTViNGY1MGIyYmM1NWRjZGM4NGNkODgifQ"
+        },
+        {
+          "resource": "repo://openswe/review/routes.py#L161-L170",
+          "version": "repo-lines-v1:sha256:d095ea3ec3e34d8bb0431a9e74d13111b9eacd1cd1c2b5f686047b2783805c94:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdlZGY3YjBkOTIxZGVhZWIzMmZmNGI5ZDE5MzhlY2U4NzAxMTA4M2ZjYTcxMWFmMzhjYWY0ZjI0MmIzNzgzMTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4MTA5NjE5ZGQ3Nzk4YmExZjgzMWEyZTI4NDU1ZjUwN2NkNTQwMTcxYWVjMDI1YThiZmIwNjBjM2ZjNTZiNGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMzNjJjN2I5NzM5OTJhZTYyNjRiYTU4MDIzY2ZhMzA2M2I5NzIxZmM2NzAyZDRhZGUzMWU3NzJmNjQ5NzBjMWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxYmNjZWI2ZTEzMzg0YTlmMWViNDNkMGNlMmFjODFlZmE3N2Y2NjcxNGZmNTA4NTM3ODMzZWJkODU3MDA4MjEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c757020d27c44e78a9a4d72c88a164e9",
+      "statement": "PR review findings are retrieved in batches via POST /dashboard/api/reviews/summaries (up to 100 references per call), and include tool-generated issues (code smells, security, etc.) surfaced alongside the human review conversation; review_conversation router manages the async chat interface for proposing comments and sharing insights.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/review/routes.py#L141-L170",
+          "version": "repo-lines-v1:sha256:222b2ad9d00c6697c5ae708bd12a7ab5d66009449766f0a5e2001368a31a99bc:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzZTU4MjZhYzM2NDIyNzVmOTUwYjgxOGJkNjhhYzZhYjdmNjFlZDNhNGM2YWQ2YTFmYjQwOWQ3MjQxMGRjYjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4MTA5NjE5ZGQ3Nzk4YmExZjgzMWEyZTI4NDU1ZjUwN2NkNTQwMTcxYWVjMDI1YThiZmIwNjBjM2ZjNTZiNGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0Mjk2ZWQ2NDNkZGI5MWVjZGFhOWFhMDJlOGFjNzg3NzcyZjU3OTc3NTdhMmU3ZDE3ODczY2JmNTA2NDI0ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxYmNjZWI2ZTEzMzg0YTlmMWViNDNkMGNlMmFjODFlZmE3N2Y2NjcxNGZmNTA4NTM3ODMzZWJkODU3MDA4MjEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8f09d01d1cb042e5a8c15c7993f7711f",
+      "statement": "The dashboard displays agent runs using the LangGraph v3 protocol stream, receiving state snapshots and intermediate event frames from /threads/{id}/stream; events include tool invocations with schemas and outputs, state updates, and checkpoint markers for real-time progress display.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/handlers.py#L148-L186",
+          "version": "repo-lines-v1:sha256:0b389efdd47734a7ab08eac893c665bc1c147ba69768f010aca4d6f67b7fa3b9:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImViZjE5ZjBlOTVhZTQ5N2Y0YWJjMTUyODRmMDZjMmVkNWQzZTgxNjdkOTUwOGFiNWE1MTBiNTIxMjA1ZDk4ZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViOTI1MDAxZjQ5ODE1OGRhMWI4M2VmMmNmMmI4ZDA3NmQyMzVkZmQ2ZjYzZmE3NDViMDNmMjEzNDc3MjE5MDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmMGE0YjJmNDY3MzU2ODUxMTdlYTdiNWI0MDFlMjhjYmNlZThkYjVkY2RkNzc3ODZiMWYwZWNjNmI3MDhmOWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ2OTI3OWI2ZTY1NTNjNmI5ZTczODE1ZjU1YmFmNTJmZWE2ODljZmEwNDFlNWYyZjQ1MDI0ZDBlN2Y1MDUzN2IifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_738ba5c7885a4db4a020e1c0968137c4",
+      "statement": "Subagent visibility in the UI is determined by tool events in the run manifest; tool events carrying subagent thread IDs are rendered as clickable references, allowing users to navigate into nested invocations; tool events also provide schema, input parameters, and parsed output for domain-specific UI visualizations.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/threads/handlers.py#L148-L186",
+          "version": "repo-lines-v1:sha256:0b389efdd47734a7ab08eac893c665bc1c147ba69768f010aca4d6f67b7fa3b9:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImViZjE5ZjBlOTVhZTQ5N2Y0YWJjMTUyODRmMDZjMmVkNWQzZTgxNjdkOTUwOGFiNWE1MTBiNTIxMjA1ZDk4ZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViOTI1MDAxZjQ5ODE1OGRhMWI4M2VmMmNmMmI4ZDA3NmQyMzVkZmQ2ZjYzZmE3NDViMDNmMjEzNDc3MjE5MDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmMGE0YjJmNDY3MzU2ODUxMTdlYTdiNWI0MDFlMjhjYmNlZThkYjVkY2RkNzc3ODZiMWYwZWNjNmI3MDhmOWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ2OTI3OWI2ZTY1NTNjNmI5ZTczODE1ZjU1YmFmNTJmZWE2ODljZmEwNDFlNWYyZjQ1MDI0ZDBlN2Y1MDUzN2IifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2a0d28706c70499ea30f4558690408ec",
+      "statement": "On desktop runs, the UI avoids exposing tool results containing credentials or artifacts; instead it renders locally-scoped results from the supervised backend that are safe to display in the browser, preventing credential leakage while preserving the LangGraph protocol.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/desktop.py#L63-L97",
+          "version": "repo-lines-v1:sha256:4c7d172e6b090db728c1fabcf7332115cbccfd78d98d80ff7ab8c9be24b0fe67:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAwNzUxMzk0YmJiZjAzNjUxZTVkM2M3MTk2NjEyYmJmYjdlNjk1OGQ1Y2ViNmI5ZDJhZDVkNDhkMTljYTMwMDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5NDAxM2VmZGU4YTQ4MDFiYmRiM2RlNTViMDE0M2EzNzgzYTBhYzU4MjcxZmNhMWM2MDA0NjQ0ODEzMWI2MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAyZjE3YmNlZmIzN2NkMTM2YjRmOWFlMmYzZTk0MTU4NWEzMTQzMGZjODI5NTQ5YTlmNDlhN2I4MWEzNGNjNDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-13T15:44:17.388Z"
+    "at": "2026-10-15T13:12:32.024Z"
   }
 }

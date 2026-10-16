@@ -1,8 +1,11 @@
 ---
 type: architecture-component
-title: Middleware Stack and Interceptors
+title: Middleware Stack and Request Processing
 description: Ordering-sensitive middleware around the coding agent and reviewer model and tool loops. Catalogs all middleware, their ordering, responsibilities, and how they shape agent behavior across models, tools, and state.
 tags: [middleware, agent, reviewer, model-call, tool-call, fallback, guardrails, PrepareRunState]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-41baa38c611462fcbcd00a78
     resource: repo://openswe/middleware/deliver_event_matches.py
@@ -28,6 +31,8 @@ sources:
     resource: repo://openswe/middleware/repair_orphaned_tool_calls.py
   - id: openwiki-source-7f78050909c084a5110d4c49
     resource: repo://openswe/middleware/settle_review_check.py
+  - id: openwiki-source-16e333a939d057e31c63690d
+    resource: repo://openswe/middleware/subdir_agents.py
   - id: openwiki-source-bd1d4cc6fca6c87a8b1fe988
     resource: repo://openswe/middleware/task_retry.py
   - id: openwiki-source-54936c5fc8d4f07851a05349
@@ -40,13 +45,10 @@ sources:
     resource: repo://openswe/server.py
   - id: openwiki-source-10026b2dd7b7368bb04e27f0
     resource: repo://tests/sandbox/test_reviewer_sandbox_recovery.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 ---
 
-# Middleware Stack and Interceptors
+# Middleware Stack and Request Processing
 
 `build_agent(config)` in `openswe/server.py` composes ordered middleware into `create_deep_agent` to form the Deep Agents graph. The middleware list is an onion: earlier entries wrap later entries, so an outer layer can intercept, modify, or handle exceptions from every inner layer. This makes order part of the runtime contract, not an implementation detail. Middleware is categorized by responsibility: model-selection, tool-related, run-setup, flow-control, and integration-specific. Each intercepts at distinct points in the model-tool-state loop and mutates the `PrepareRunState` or global state in a coordinated sequence.
 
@@ -62,7 +64,7 @@ These middleware select, validate, or route model choices:
   Allows the agent to route requests between a primary and alternate model based on configured routing rules and request characteristics. Only installed when `model_selection` is provided. Permits resuming a routing task if adaptive routing is subsequently disabled.
 
 - **`ModelFallbackMiddleware`** (conditional, installed only when a different fallback model is available)  
-  Wraps the model call in a retry loop that alternates between primary and fallback models on transient errors using exponential backoff with jitter. It retries on 5xx/429-class HTTP statuses, connection/timeout errors, and the `TimeoutError` emitted by `ModelCallTimeoutMiddleware`. An immediate `model-not-available` provider error triggers a user-facing `AIMessage`. When all attempts fail, it returns a terminal outage message by default; `surface_outage_message=False` re-raises the final error instead.
+  Wraps the model call in a retry loop that alternates between primary and fallback models on transient errors using exponential backoff with jitter. It retries on 5xx/429-class HTTP statuses, connection/timeout errors, and the `TimeoutError` emitted by `ModelCallTimeoutMiddleware`. An immediate provider model access error (`model_not_available` / `model_not_found`) short-circuits to a user-facing `AIMessage` without retrying. When all attempts fail, it returns a terminal outage message by default; `surface_outage_message=False` re-raises the final error instead.
 
 - **`ImageModelFallbackMiddleware`** (conditional, installed only when vision support mismatch detected)  
   Routes image-bearing requests to a vision-capable fallback model when the primary model does not support images. When no fallback is available, image content is omitted with a warning.
@@ -78,10 +80,10 @@ These middleware control, validate, or handle tool execution:
   Filters disallowed tool names from model requests. Applied after dynamic tools are loaded.
 
 - **`SubdirAgentsReadMiddleware`**  
-  Contributes applicable ancestor `AGENTS.md` instructions once per thread, allowing configuration inheritance from parent directories.
+  Contributes applicable ancestor `AGENTS.md` instructions once per thread, allowing configuration inheritance from parent directories. When a `read_file` succeeds, appends applicable ancestor AGENTS.md files with instructions indicating which scope they apply to and noting that more deeply nested instructions take precedence.
 
 - **`ToolErrorMiddleware`**  
-  Converts unhandled tool exceptions into `ToolMessage(status="error")` JSON carrying error type, error text, and tool name, allowing the model to self-correct. Treats the sandbox as unreachable when `SandboxConnectionError` (except `SandboxServerReloadError`) or `ResourceNotFoundError` for the sandbox occurs: notifies the user once and re-raises to end the run rather than looping. `SandboxRetryableConnectionError` is converted to a `sandbox_transient` error message because the SDK guarantees the command never started.
+  Converts unhandled tool exceptions into `ToolMessage(status="error")` JSON carrying error type, error text, and tool name, allowing the model to self-correct. Treats the sandbox as unreachable when `SandboxConnectionError` (except `SandboxServerReloadError`) or `ResourceNotFoundError` for the sandbox resource occurs: notifies the user once and re-raises to end the run rather than looping. `SandboxRetryableConnectionError` is converted to a `sandbox_transient` error message because the SDK guarantees the command never started.
 
 - **`ToolRetryMiddleware`** (wraps only `task` tool)  
   Retries delegated task calls up to two times with initial delay 1 second, maximum delay 10 seconds. `task_retry_on` retries on 5xx/429 statuses, transient exception names, and notably `ModelCallTimeoutError` from subagents (which lack their own fallback middleware). On exhaustion, `task_on_failure` returns structured `failed` data for prompt/context errors and re-raises all others.
@@ -177,7 +179,7 @@ The coding-agent middleware chain is outer to inner. Each wraps the next, formin
 
 | # | Middleware | Type | Condition |
 |---|---|---|---|
-| 1 | FilesystemMiddleware | tool-related | always |
+| 1 | FilesystemMiddleware | run-setup | always |
 | 2 | AnthropicPromptCachingMiddleware | optimization | always |
 | 3 | ConversationOffloadingMiddleware | run-setup | always |
 | 4 | PrepareAgentRunMiddleware | run-setup | always |
@@ -301,7 +303,7 @@ It retries on:
 - `TimeoutError` (from `ModelCallTimeoutMiddleware`)
 
 Special cases:
-- **Provider access error** (`model-not-available`): immediately returns a user-facing `AIMessage` without retrying.
+- **Provider model access error** (`model_not_available` / `model_not_found`): immediately returns a user-facing `AIMessage` without retrying, because the model is genuinely not available to the API key.
 - **Exhausted budget**: returns an outage `AIMessage` by default; `surface_outage_message=False` re-raises the final error.
 
 ### Task-call retry flow
@@ -358,7 +360,7 @@ When a run is interrupted after a tool call is submitted but before its result i
 
 ### Model not available
 
-When a provider reports model unavailability (e.g., `anthropic.BadRequestError` with code 1010 or `openai.NotFoundError`), `ModelFallbackMiddleware` immediately converts this to a user-visible `AIMessage` describing the outage and model name. It does not retry, because the model is genuinely not available to the API key; retrying would not help.
+When a provider reports model unavailability (e.g., `anthropic.BadRequestError` with code `model_not_available` or `openai.NotFoundError` with code `model_not_found`), `ModelFallbackMiddleware` immediately converts this to a user-visible `AIMessage` describing the outage and model name. It does not retry, because the model is genuinely not available to the API key; retrying would not help.
 
 ## Safe changes and focused tests
 

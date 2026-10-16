@@ -36,10 +36,10 @@ sources:
     resource: repo://openswe/threads/proxy.py
   - id: openwiki-source-5c84530a3d0edb1fb15187f1
     resource: repo://openswe/threads/runs.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+    at: 2026-10-15T13:12:32.024Z
 ---
 
 # Inbound Invocation to Durable Run
@@ -122,7 +122,7 @@ Inputs are not arbitrary prompt strings at the graph boundary. `human_input` and
 
 ## Durable dispatch and completion
 
-`dispatch_agent_run` is the single agent/reviewer dispatch contract. It refuses ambiguous calls that combine prebuilt input with raw content/identity arguments, selects the graph with `assistant_id`, and delegates to `create_durable_run`. The latter defaults to `multitask_strategy="interrupt"`, `durability="sync"`, and `stream_resumable=True`; callers such as untagged Slack follow-ups can explicitly select `enqueue`. Sync durability checkpoints each step, so an interruption or process recycle can resume from a checkpoint rather than losing the run.
+`dispatch_agent_run` is the single agent/reviewer dispatch contract. It refuses ambiguous calls that combine prebuilt input with raw content/identity arguments, selects the graph with `assistant_id`, and delegates to `create_durable_run`. The latter defaults to `multitask_strategy="interrupt"`, `durability="async"`, and `stream_resumable=True`; callers such as untagged Slack follow-ups can explicitly select `enqueue`. Async durability checkpoints each step while the next one runs, so a crash or process recycle can resume from at most a step back instead of losing the run.
 
 Every created run is marked for Protocol v2 streaming via the `__event_streaming_v2` configuration key, includes the v2 stream modes (`values`, `updates`, `messages`, `custom`, `tasks`, `checkpoints`) and subgraphs, and receives an `invocation_id` (with legacy `prepare_run_id` alias) in both configurable state and metadata. This preserves tools/lifecycle and nested-agent visibility for runs that the dashboard did not start, and lets a later client replay the stream.
 

@@ -1,10 +1,11 @@
 ---
 type: "Reference"
 title: "Quick Start: Navigate the Open SWE Codebase"
-openwiki_generated: true
+description: "Route readers through the wiki hierarchy based on their task: starting a dev loop, understanding entrypoints and execution boundaries, tracing request flows, and choosing detailed guides by concern."
+tags: [quickstart, wiki, navigation, entrypoints, developer-setup, architecture]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
@@ -42,9 +43,8 @@ sources:
     resource: repo://tests/e2e/playwright.desktop.config.ts
   - id: openwiki-source-7ef60dc4372e1a33c7728fe6
     resource: repo://tests/e2e/README.md
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 ---
-
 
 # Quick Start: Navigate the Open SWE Codebase
 

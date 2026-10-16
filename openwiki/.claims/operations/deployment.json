@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:b492974a61755a256923ce09b1412ee4cb2be5910a43b8ad7e4f47fe363db149",
+  "pageVersion": "sha256:eaa54af34e9aaf481e8ad66983c59711ddca4328fac3d8706fdb6dc8abfa881b",
   "claims": [
     {
       "id": "claim_0e227b88b5d94fd5924bb5c89a53831e",
@@ -304,11 +304,15 @@
     },
     {
       "id": "claim_15a10d49566b4e37aa1edc28ccbb0019",
-      "statement": "The FastAPI lifespan startup sequence runs database migrations, imports workspace and user records from the LangGraph Store into Postgres (no-op if already done), syncs admin flags, loads analytics workspace metadata, starts the pooled analytics worker, starts the transcript and bridge listeners for multi-replica notifications, and starts the UI invalidation hub; import/analytics/listener failures log warnings but do not prevent startup.",
+      "statement": "The FastAPI lifespan startup sequence validates configuration, pins an event loop, acquires a database advisory lock, creates the open_swe schema and runs alembic migrations, imports workspace data from the LangGraph Store into Postgres (idempotent steps), deletes legacy analyzer crons, syncs admin flags, starts an analytics worker, starts transcript/bridge/UI-invalidation/notification listeners, warms the agent build, and opens LangGraph graphs; import/analytics/listener failures log warnings but do not prevent startup.",
       "evidence": [
         {
-          "resource": "repo://openswe/api/app.py",
-          "version": "repo-file-v1:sha256:a5b4653ecbe2b48d86d66b1c859011fe13bf9dee8e8598bfdf6aef86641d59f9"
+          "resource": "repo://openswe/api/app.py#L46-L179",
+          "version": "repo-lines-v1:sha256:7f0ce0f1dd78f57fbc15eabe32ce3027b6b8af7457b4b049a5e806cae5776bd4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTM0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4N2NmZjNmMTc4NDJkZWM2ZTdlOTFjM2UzYjhmY2UwYTgyMmZjMzExMjczODFiMDBmNDRhOWYxMzMzMzAzYTJlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI4YzU4MzAzNmU0OTBjMWI3ZDYyNzI2MDRiZDdiNzdkMmE3OTBlYjhhZjBmYTNhMGU0NzE4MmQ3OTA3YmU4ZTk0IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI3ZTZlMzhmYjQzNTY3ZjFjNDczYTU4NDE4MWU2N2JjYjRjMjgyZDc0MDUzNzRhYTEyZDlmODJjNDY1OTVjNDhiIn0"
+        },
+        {
+          "resource": "repo://openswe/database/postgres.py#L212-L225",
+          "version": "repo-lines-v1:sha256:96ea83b1ef56c68d5fbcaab5acadca94ca94928eaa8718375d946ec746585725:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5ODAzMWM1MmJmOWZmZDMwN2E2ODkwZTFkM2ZiYjAxMzQ3YzQyMDk2NDNmZDYzMjhhY2VjYjk0ZTUxYmU3MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViYTA5MjMxMzFmYWNkZjA5OWMzYTU3ODJhZGYxMzE0MjM1NjI2OWMxMTdiMDNlM2RmMmY3MGFiNjkzMzUxNWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkZGVmZTYxZmQzNjZjNWViZTRiZDQ2YzFmNDdhYjk4ZjNmMzdjOGY1OWVkOWZiY2RhMTJhNmM2ZjU1ZDEzNWIifQ"
         }
       ]
     },
@@ -351,10 +355,54 @@
           "version": "repo-file-v1:sha256:1f868e9b5bae59c99c9710aa63f934dc4933f923f47bb7d4b2d0bdfcb1d49690"
         }
       ]
+    },
+    {
+      "id": "claim_77afc56f796d453592b9f33defa9ed44",
+      "statement": "Alembic-based database migrations in openswe/database/migrations/versions/ run at startup within an advisory lock (XID 557314367248862439), create the open_swe schema if missing, and execute only new revisions tracked in alembic_version; on the preview environment, rebased branch heads that become superseded are deleted from the version table to apply the new chain cleanly.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/database/postgres.py#L212-L256",
+          "version": "repo-lines-v1:sha256:23cccebca5efcfa1476e22b13cf4bb325081db0c9c454af8f8aa0b80e1dceef3:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5ODAzMWM1MmJmOWZmZDMwN2E2ODkwZTFkM2ZiYjAxMzQ3YzQyMDk2NDNmZDYzMjhhY2VjYjk0ZTUxYmU3MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViYTA5MjMxMzFmYWNkZjA5OWMzYTU3ODJhZGYxMzE0MjM1NjI2OWMxMTdiMDNlM2RmMmY3MGFiNjkzMzUxNWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI3OGRiYzdkOWM0NmE5MTQ2YTM1NWEyZGY2N2ZhNWVhMzM4M2U3YWExMWQ5MDgzNWQ1NzI5YTJiNmUyMWQyZGEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8ba51c998b4446ecb9282e606845579b",
+      "statement": "LangGraph checkpointer configuration declares a delete strategy with 60-minute sweep intervals and 43,200-minute (30-day) default TTL; threads restarting within 60 minutes preserve checkpoint state, beyond which checkpoints are eligible for deletion, and multiple replicas share checkpoint storage so a failed replica can resume threads on another as long as database and Redis remain available.",
+      "evidence": [
+        {
+          "resource": "repo://Dockerfile",
+          "version": "repo-file-v1:sha256:6a549a4623048ef6495c26220f2b5ba2243c09bff44e4692865af68de110aee5"
+        },
+        {
+          "resource": "repo://langgraph.json",
+          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
+        }
+      ]
+    },
+    {
+      "id": "claim_759d1d9de90e41b598a64af568f94833",
+      "statement": "The backend exposes GET /health returning {\"status\": \"healthy\"} and POST /webhooks/run-complete for token-verified run completion; neither performs database connectivity checks, and deployments using scale-to-zero hosting are unsupported because background runs rely on Redis and Postgres workers staying available.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/api/health.py",
+          "version": "repo-file-v1:sha256:1a849478057417743c7a2644d7cdde296be16c4e347e31d1753de5bfb9488b77"
+        }
+      ]
+    },
+    {
+      "id": "claim_b643c53f6e24498386c9bcaca153906b",
+      "statement": "Multiple replicas share Postgres for state and Redis for workers; cross-replica communication includes transcript listener (Store writes), sandbox-bridge listener (file I/O), analytics worker (Store-to-Postgres), UI invalidation hub (dashboard updates), and database notification listener (PostgreSQL NOTIFY), with listener startup failures logged as warnings that allow the replica to continue with degraded feature support.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/api/app.py#L138-L176",
+          "version": "repo-lines-v1:sha256:012770b36aad64d4e1cacf4377bf1a9fac957b235636c7fd5883211f5b300bfb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkYTVjNjZlMTdiMTQ1Mzk3ODM0YjhjODU0ZGM0MTkzZTIxMjUxODBhODk5NmExNGMzMTg4MzMyNmIyZWZiY2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YzNiYTUyY2IxOGYxYmVjNmFlY2IyYTljNjRjOTY3M2VhYjg5NmQyMjM3YmU3NzMwYmEzMGQ1OTM3MDhkMjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhmZjNiNmQzNmVlNzdiYmI4NTQ0MWUxNTc1ZmY0OWY3NTE5YjQ3M2ZlYmE3MjY1NTEwMjUyOTBjMThlNmM3ZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE0OGVhOWU3NTc3ZDg4ZDhjMzA5MjJmMTM3ZTgxY2RkYjdmNWJmYjI4ZDczYTA2MmNmMWQzZjc4MzQwNGM5MjkifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-13T15:44:17.388Z"
+    "at": "2026-10-15T13:12:32.024Z"
   }
 }

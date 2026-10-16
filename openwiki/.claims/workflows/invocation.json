@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:cb312415d57ae7d3d91ab05c85e4942f2d325ab44120596b898506e6d4d549d3",
+  "pageVersion": "sha256:70aa4598bb6d6ff13b948c9bc5bea6f8f12043061dedf7f105fc43e1bdd94d47",
   "claims": [
     {
       "id": "claim_e57ed64c311b4d20943e40a2357f8026",
@@ -246,11 +246,11 @@
     },
     {
       "id": "claim_234b876e81f94851a8e9d7a7cd6a3e9f",
-      "statement": "create_durable_run defaults to interrupt multitasking, sync durability, resumable streaming, Protocol v2 stream configuration and subgraphs, and correlates configurable state and metadata with invocation_id (legacy prepare_run_id).",
+      "statement": "create_durable_run defaults to interrupt multitasking, async durability, resumable streaming, Protocol v2 stream configuration and subgraphs, and correlates configurable state and metadata with invocation_id (legacy prepare_run_id).",
       "evidence": [
         {
           "resource": "repo://openswe/dispatch.py#L342-L434",
-          "version": "repo-lines-v1:sha256:6fd90753e6f4d582cf91822d8cc9287eb627b24da8d039d3c96ffdfe38d24f85:eyJzZWxlY3RlZExpbmVDb3VudCI6OTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1Y2FiY2JkOGFkOTJhYTM0MGYyNjcyM2I2Yjk2YjlhNzEzOWIzYTMzNWU3MDM4ZTdhMDAwYTE0OTJkMmRjNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjczM2U4NDg3Yzg1ZGZkY2Y5ZmE3YjkzYzc0NmM5NDYyNWFlNDdlMTIwYzc5N2U3OTFlNzM3ZjllZDdmZmM3M2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhiMDAxODNiNTFjYjY4MmMzNWYzZjFjYzAzMWY5YmMyMTEyMmIyOGI5MTBjMWY0NWQ4ZDNjMmE1YzYzZmE5OTQifQ"
+          "version": "repo-lines-v1:sha256:ad85e84d9abcc87efe0ec191b80d981fd035b29d83f4bcd86674ee4481794772:eyJzZWxlY3RlZExpbmVDb3VudCI6OTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1Y2FiY2JkOGFkOTJhYTM0MGYyNjcyM2I2Yjk2YjlhNzEzOWIzYTMzNWU3MDM4ZTdhMDAwYTE0OTJkMmRjNDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjczM2U4NDg3Yzg1ZGZkY2Y5ZmE3YjkzYzc0NmM5NDYyNWFlNDdlMTIwYzc5N2U3OTFlNzM3ZjllZDdmZmM3M2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhiMDAxODNiNTFjYjY4MmMzNWYzZjFjYzAzMWY5YmMyMTEyMmIyOGI5MTBjMWY0NWQ4ZDNjMmE1YzYzZmE5OTQifQ"
         }
       ]
     },
@@ -293,6 +293,6 @@
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-13T15:44:17.388Z"
+    "at": "2026-10-15T13:12:32.024Z"
   }
 }

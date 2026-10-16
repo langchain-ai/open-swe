@@ -5,7 +5,7 @@ description: Test organization, fixture strategies, E2E setup, and focused valid
 tags: [testing, pytest, vitest, playwright, e2e, fixtures, isolation, fakes]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-24f77a48f966a05631988d08
     resource: repo://desktop/package.json

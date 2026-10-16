@@ -5,7 +5,7 @@ description: How the primary Deep Agents coding graph is assembled per executabl
 tags: [agent-graph, deep-agents, langgraph, middleware, subagents, sandbox, tools, factory]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
@@ -27,12 +27,12 @@ sources:
     resource: repo://openswe/sandboxes/lifecycle.py
   - id: openwiki-source-919e16feae379651f2cbc1c9
     resource: repo://openswe/server.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 ---
 
 # Coding Agent Assembly and Execution
 
-`get_agent(config)` and its internal `_get_agent` async factory in `openswe/server.py` compose the primary coding agent graph for an executable thread run. The factory is the customization seam for sandbox providers, model policy, tool surfaces, skills routes, subagents, and middleware.
+`get_agent(config)` and its internal `_get_agent` async factory in `openswe/server.py` compose the primary coding agent graph for an executable thread run. The factory is the customization seam for sandbox providers, model policy, tool surfaces, skills routes, subagents, and middleware. All per-thread state lives in the sandbox and thread metadata; the agent graph itself is stateless and rebuilt per thread.
 
 ## Entry and execution gate
 
@@ -46,7 +46,7 @@ The factory then binds the graph using `bindable_config(config)`, which strips `
 
 `profile_login` is the person who triggered the run; it controls authorization and credentialed integrations. In contrast, model choices and repository instructions are stored in thread settings—initially seeded from a profile but then retained by the thread—so a later participant does not silently replace durable decisions.
 
-The factory creates a cached `SandboxBackendProxy` and starts its reconnect task immediately, before resolving the rest of the graph. For desktop runs, the reconnect callback returns a `LocalShellBackend`; for hosted runs, it calls `ensure_sandbox_for_thread` with the workspace slug, which resolves the sandbox environment from thread metadata, refreshes proxy credentials, or creates and binds a new sandbox. The lifecycle deliberately raises for an unreachable existing sandbox rather than replacing potentially uncommitted work; a deleted sandbox is replaced because retaining its stale id would permanently block the thread.
+The factory creates a cached `SandboxBackendProxy` and starts its reconnect task immediately, before resolving the rest of the graph. For desktop runs, the reconnect callback returns a `LocalShellBackend` via `create_desktop_backend`; for hosted runs, it calls `ensure_sandbox_for_thread` with the workspace slug, which resolves the sandbox environment from thread metadata, refreshes proxy credentials, or creates and binds a new sandbox. The lifecycle deliberately raises for an unreachable existing sandbox rather than replacing potentially uncommitted work; a deleted sandbox is replaced because retaining its stale id would permanently block the thread.
 
 ## Model and effort routing
 
@@ -126,7 +126,7 @@ The subagent's `mode` is `fork`, meaning it branches and collects results back i
 
 ## Middleware assembly and ordering
 
-The parent middleware list is ordered outermost to innermost, making order part of the runtime contract:
+The parent middleware list is ordered outermost to innermost, making order part of the runtime contract. Middleware hierarchy concerns are separated: parent middleware does not wrap the independently-compiled subagent.
 
 **Layer 1: Outermost context and offloading**
 - FilesystemMiddleware (backend offload handling, binary content routing)

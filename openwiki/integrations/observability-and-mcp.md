@@ -34,10 +34,10 @@ sources:
     resource: repo://openswe/utils/errors.py
   - id: openwiki-source-78aaabb479325754c1118320
     resource: repo://openswe/utils/langsmith.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+    at: 2026-10-15T13:12:32.024Z
 ---
 
 # Observability, Tracing, and MCP
@@ -77,7 +77,7 @@ After a run completes, cost is enriched and tracked by two independent systems:
 1. **Immediate recording** of completion status and model-call token counts (input, output, total) via `record_agent_invocation_completion`.
 2. **Cost refresh scheduling** with bounded retries at delays (15, 30, 60, 120, 240 seconds) if cost is not immediately available from LangSmith.
 
-The refresh function `run_agent_cost_refresh` queries LangSmith thread stats to retrieve total invocation cost, correlating by `invocation_id` or `prepare_run_id` metadata, then stores the cost via `record_agent_invocation_cost`. If cost retrieval fails with a 4xx error (except 408/429), the error is treated as terminal and no further retries are scheduled; otherwise, timeouts and 5xx errors schedule the next attempt.
+The refresh function `run_agent_cost_refresh` queries LangSmith thread stats to retrieve total invocation cost, correlating by `invocation_id` or `prepare_run_id` metadata, then stores the cost via `record_agent_invocation_cost`. Terminal 4xx errors (except 408/429 which are retryable) halt further attempts; timeouts and 5xx errors schedule the next attempt.
 
 ### Session cost tracking
 
@@ -120,7 +120,7 @@ MCP connections are organized in a three-tier hierarchy: **instance** (globally 
 
 - **Instance tier** (`openswe/mcp/instance.py`): Connections stored in `["instance_mcps"]` that every run can access. The tier adopts and migrates pre-workspace records from the flat `["workspace_mcps"]` namespace on first read, ensuring backward compatibility.
 - **Workspace tier** (`openswe/mcp/workspace.py`): Connections stored under `["workspace_mcps", <slug>]`, where `<slug>` is the lowercase workspace identifier. Each workspace has its own set of connections.
-- **User tier** (`openswe/mcp/user.py`): Personal connections stored under `["user_mcps", <login>]`, scoped to a GitHub login and visible only in runs where that login is the triggering user.
+- **User tier** (`openswe/mcp/user.py`): Personal connections stored under `["user_mcps", <login>]`, scoped to a GitHub login and visible only in runs where that login is the triggering user. Authorization checks that the connection lookup is made only for private threads whose owner is the current login.
 
 Each tier exposes its own admin UI route for creation, validation, token refresh, and discovery. A connection is a reusable MCP server reference with a name, URL, transport (streamable_http or SSE), optional headers (including OAuth token URLs and client secrets), and an optional allowlist of tool names to expose. Stored tokens are encrypted at rest with `openswe.encryption`.
 

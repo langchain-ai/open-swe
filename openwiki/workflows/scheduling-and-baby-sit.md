@@ -18,6 +18,8 @@ sources:
     resource: repo://openswe/completion.py
   - id: openwiki-source-d0edf7555209b3e6418b5c5f
     resource: repo://openswe/github/routes.py
+  - id: openwiki-source-6b99105488d7c23beda1e5ad
+    resource: repo://openswe/graphs/scheduler.py
   - id: openwiki-source-34d496899c8a38f20f349e4f
     resource: repo://openswe/reconcile.py
   - id: openwiki-source-685dc33e7199aa1f6e402f7a
@@ -47,7 +49,7 @@ sources:
 generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+    at: 2026-10-15T13:12:32.024Z
 ---
 
 # Scheduling, Background Work, and CI Monitoring

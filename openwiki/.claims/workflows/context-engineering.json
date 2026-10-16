@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:8ae5ed561d0b9f203102d1b34b43f9ae1022feb4ee9a2e04c7feacf7e23ac2ab",
+  "pageVersion": "sha256:5d2d0608f736bf173f00072dde49a530be4957aee82e34dfd9343ff4da21b210",
   "claims": [
     {
       "id": "claim_a92a213a430c4e9e8cac73490f5ecdb8",
@@ -63,26 +63,30 @@
       "statement": "The main prompt requires root AGENTS.md after repository setup and gives it precedence over custom, environment, and sender instructions; SubdirAgentsReadMiddleware injects unread ancestor AGENTS.md files after successful reads without failing the read when candidates fail.",
       "evidence": [
         {
-          "resource": "repo://openswe/middleware/subdir_agents.py#L138-L193",
-          "version": "repo-lines-v1:sha256:419cabf2d80b2be79355eb1bd4b4183419c06270652522342edde678c0eba94c:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg5N2Y3NjY5MTA5MzU0NjkwZmE0NTgyNzRhZDc4N2Y4MDRhOTE4YzY4ZDcxY2ZhOWYyMDdmNzU5NGVkNWVjZDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhlMTE2Y2U5ZTMwNTYwZDBjNGM0MzVhYzAzMzdlYjU4ZDA1NGVlMWQwM2UzN2U0MTMyNTc2MTAyNGVlYzNmY2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEwNjZhNDM5NmMwMjE4YzVhMTIwZmJmYjgwNzVjMmY0YzNlZDVkMDliZjdjMGU2YTkzNGE5YzlhYTNlM2NmYzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://openswe/middleware/subdir_agents.py#L146-L193",
+          "version": "repo-lines-v1:sha256:1937138d2dbab86e78b2d836e9ef2c3ef6b43bbafd1acf2b9745902f500b727a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyZmFkMDM1OWE5ZDc5YjMyMGJiNWFlMzQ3OWRlNTkzNjE3NzIwZWMyOWI2ZGU2Njc3OTdlZTZhMjRhYzJiZGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhlMTE2Y2U5ZTMwNTYwZDBjNGM0MzVhYzAzMzdlYjU4ZDA1NGVlMWQwM2UzN2U0MTMyNTc2MTAyNGVlYzNmY2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MjIzMTA2ZmQ4NzQyYjcwZWEyMzNmOWRjMzU5ZjRiMDJiYmIwNjliNzI4M2VlZjc2MjQ5OTUxNmJkN2I5YzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
           "resource": "repo://openswe/prompt.py#L153-L202",
           "version": "repo-lines-v1:sha256:a23a34d643531efe75da8472e1cd11281995c1190e0ce128c489b89f7bfef797:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhOWQ4NzViMjQ4Yzc2ZmNkZDlmMzJkYzI5NWRmOGI2MWEwMzY1NmNkYzJlZDU5NDdhOGIwZjcxMzg4NzYyNzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNkYmJkN2Q5ZDVhMThlYmNkNWUzYzM1YmE1MTQxZjBkZmJkNTU2NzI5OWIwZDI4Y2Y4MGY5ZjljNDFkMThkZjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://openswe/resources/prompts/system/main.md.jinja#L21-L21",
-          "version": "repo-lines-v1:sha256:19bf2b6b2d7a3f76ac476ed313a14961c63ce37bbec4c722f5b468c60866148c:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTliZjJiNmIyZDdhM2Y3NmFjNDc2ZWQzMTNhMTQ5NjFjNjNjZTM3YmJlYzRjNzIyZjViNDY4YzYwODY2MTQ4YyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTliZjJiNmIyZDdhM2Y3NmFjNDc2ZWQzMTNhMTQ5NjFjNjNjZTM3YmJlYzRjNzIyZjViNDY4YzYwODY2MTQ4YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjU1OWRhZWRmYzc2OWNlMzM0OTZlOWVjODJjYzJjMGI5MDdkMzljNWVlNzE5MGU4MTYzZjQ3YjE3ODNkMWE5YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzZjMDk4ZDExZjMxNGI5OTI4Mzc0ZjVlYWJiN2Y5N2Y2YjI5NjZjYTEzMDdhZGM3NmUzNWZlNzM0YWM5MTY1ZSJ9"
+          "resource": "repo://openswe/resources/prompts/system/repository-setup.md.jinja#L17-L17",
+          "version": "repo-lines-v1:sha256:ebe0123ab2aeddfe786b8e3fd038b21d23509fc85704193ccb6506ab353ac887:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWJlMDEyM2FiMmFlZGRmZTc4NmI4ZTNmZDAzOGIyMWQyMzUwOWZjODU3MDQxOTNjY2I2NTA2YWIzNTNhYzg4NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZWJlMDEyM2FiMmFlZGRmZTc4NmI4ZTNmZDAzOGIyMWQyMzUwOWZjODU3MDQxOTNjY2I2NTA2YWIzNTNhYzg4NyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzUzYzQ5YmViYmJiN2UzYTk5YTRkNTViMDc5NTcyODIxZjQ0MTI0MGNhNjI0OTI3MzI0MDJjMzJlMzEyOWE4NyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDM4NjZhNWI4NzRlMWU3ZDM1N2NhMzFkNmY2NGU2MDQ1YWFjYmZjNTc3MTMyYTZmZTNmNmM0MzJmOWRmOGM0MiJ9"
         }
       ]
     },
     {
       "id": "claim_282e5b4fad564013a5bb705707b832ea",
-      "statement": "Reviewer convention context is fetched deterministically from GitHub at the PR reference, with a 64 KiB cap and AGENTS.md then CLAUDE.md fallback only on 404; changed-file ancestor instructions are fetched independently and concurrently in shallow-to-deep order.",
+      "statement": "Reviewer fetches root convention document from GitHub Contents at the PR base SHA, preferring AGENTS.md and falling back to CLAUDE.md only on 404; non-200 responses, network failures, and oversized content (>64 KiB) yield no root context. Changed-file ancestor instructions are fetched independently and concurrently in shallow-to-deep order with up to 8 concurrent requests.",
       "evidence": [
         {
-          "resource": "repo://openswe/utils/agents_md.py#L46-L195",
-          "version": "repo-lines-v1:sha256:8e27b893f7d7e2c96215497d56db7a4f032edb33d5d89c4e833d4ef9935a441d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJlMDg2ZWQ3YzY5Nzk2N2E5MjZjNWE0YTc4ZWNkODZiYjVmYTZmOTk5MzQwZTBjNzJiYzQ0ODI1OTEwZWMzOGIyIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJmYTExYzA1NjdkMGE1ZjllOWIxMzVmNjVjZDI1MzcyZGZkNjI4Nzc1ZjdjMWVkMjUzZjhiYWQ0MmRkMmQ2NjY5IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJjMGIxNmNmYTkyMWUxYTY1MTZkNjdjZWRhMjc3ZmViNjY3MzU1MjBiNTg0NDhhZGE4NDM2ZGIzNzg5N2Q5MzJlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+          "resource": "repo://openswe/utils/agents_md.py#L121-L197",
+          "version": "repo-lines-v1:sha256:ac5e73788a6e80fb9f3644ba7c178d4ddbab7f2b0e64d60358c0b7f68cabe69f:eyJzZWxlY3RlZExpbmVDb3VudCI6NzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEyMDEwNTM3YzFjYmM3Mjk2NTBjMWUwM2E3MzJjNTU5MGE5NDFhYjNkYTYxZDc2ZGUwMDEwYmQ2OWIzZGU0OGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhMTFjMDU2N2QwYTVmOWU5YjEzNWY2NWNkMjUzNzJkZmQ2Mjg3NzVmN2MxZWQyNTNmOGJhZDQyZGQyZDY2NjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/utils/agents_md.py#L48-L118",
+          "version": "repo-lines-v1:sha256:8fd1a2b76783017cf4b002d9b5d793c6856dbcc9285d32f8e5149367dfbb92cc:eyJzZWxlY3RlZExpbmVDb3VudCI6NzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUwODZlZDdjNjk3OTY3YTkyNmM1YTRhNzhlY2Q4NmJiNWZhNmY5OTkzNDBlMGM3MmJjNDQ4MjU5MTBlYzM4YjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwYjE2Y2ZhOTIxZTFhNjUxNmQ2N2NlZGEyNzdmZWI2NjczNTUyMGI1ODQ0OGFkYTg0MzZkYjM3ODk3ZDkzMmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRlMGQwOGVlMGViNjdjYjUzMzcyNWE2ODAxNzhkOTMzMDc2M2I3Nzc5MjlkMGE3MmVmMjE1YzkyYTgwZTA2NzYifQ"
         }
       ]
     },
@@ -151,10 +155,34 @@
           "version": "repo-lines-v1:sha256:c6d7d1a528a7668bcb6a45bb79a6a3d7cae369db6ed4d7062a9f922c14e6ffd5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3NmZmOTY5MjYyYjU5MTIyYmQ0YWY4ODVlYjBmNTQwN2VmMjY3OGY2MjE3Zjk1N2I2OWRkYjQyZTJiMGY4NTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAwYzNjMDgzMDY3MmIwYTk0ZTQ4MDgyNzcwOWU4MzVlNTNmN2M5NGNlZTQ0MDZjNGE3ZTQ1NzVjMzk5OWFmMGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYxNTdjN2Y2MjNlZGQ1OTExN2Q5YmU4MzI4NGM1OWNlNmExY2EyODI3ZGIxYTA5NjA3ZjEyOTA5NThkNDIyZmYifQ"
         }
       ]
+    },
+    {
+      "id": "claim_df0eace226984a229bcea21df55105d4",
+      "statement": "Approval mode for reviewer runs—dry_run (comment only), off (no approval), or approve (GitHub approval)—is selected per repository from review_styles LangGraph Store. The mode determines whether approval_policy_for_review fetches .open-swe/APPROVALS.md from the default branch.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/review/approvals.py#L38-L52",
+          "version": "repo-lines-v1:sha256:552522acc70be13fe054d87b82722310a61a3b054c2de6ac5e8ef2d7550be39c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVjZWM5OTA0YmUwMTYxYmMzYjY0YTZkMWJkOTZjYWE5MzhkMDQ3YmY5ZjczNGVlYTY5OWUwZjkyZWUxZDE4NzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhMjZiMTA1ZDg4YzRkNDhiYjZjYmFhYjUzOTI4N2U2NGE4YTFjYjg1Yjk3YzJiOWVmMTE2YzVkNzZiNTk4YjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/review/styles.py#L23-L91",
+          "version": "repo-lines-v1:sha256:6cda3591a9e60f896180f2369e5c5c7bd5a6d6e93db7f8dc87b62452d1c78ad3:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjMjY1ZWEzYjFmZjA5NWZlMzcwMzhhMWY1ZjZkMmU0NzdjYTIzMWJhYmRmNzM1YWNkMWVkM2NlZGZjNzJiZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhMGRmMmFmMWQ5OTMzNDNjM2NkNmQ3OGU4YTA5MjMwN2U5YjMyN2FiMjU1N2UwNjQwNTYyNmRiY2JkNWI4OTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg0YmZiOGRhMjdkOTljNmVkZGY3MDhhZWI5N2EwZDU3M2FjNzEzMTkwM2Y5OWJiYzgzYjQ3NGE4ZWUzOWRlOGYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_dc1b0671b86240e7ac398129cbbe71b1",
+      "statement": "Reviewer materializes trusted skills from the PR base revision into a separate .review-skills directory outside the checkout, preventing PR authors from injecting instructions via SKILL.md. Skills are extracted from .agents/skills or .claude/skills via git archive, and individual extraction failures do not block the review.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/sandboxes/repo_prep.py#L126-L167",
+          "version": "repo-lines-v1:sha256:dd0700de656bc2799b8bf5d9502b1ae2bb469a8446f1de703e69a3d0dff1f478:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM2Yjc2Y2ZiYTk0MDkyNDc0ZmQ2ZjcxZWIwZTdhOGNhZWMzMWE0Y2NlYTIyOWI0OTJhM2FkNjZlZGExNGEyMjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYyYWZkYThlZTI4MjQzM2ZjZjAzZThlNjM1MmVjMmNmZWUzZGEwOTBmYjQ3YWJiZmQ1MDFkZDU4N2Y5NmZlMDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRlNzU3NWMzYjc3NzZjZjJmOWMyYmZiY2E0NGYyMTQ4MTNhNzgyN2VhYTljMzg0NTRjNzAzYjY4OWE3NDQzODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-13T15:44:17.388Z"
+    "at": "2026-10-15T13:12:32.024Z"
   }
 }

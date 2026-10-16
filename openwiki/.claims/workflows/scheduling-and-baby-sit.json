@@ -1,22 +1,22 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:b54a6f13d3241d4a6940734c435195eb5094398d72241ee2088742f9597e4a72",
+  "pageVersion": "sha256:1e2287c3f22eb8b2f50e31cd05920666e951069606ea3585000de49b1ee1843a",
   "claims": [
     {
       "id": "claim_851e23a08e794421a0ac06c407e8a9d0",
       "statement": "The scheduler graph (openswe/scheduler.py) is a single-node StateGraph (START -> launch -> END) registered as the `scheduler` assistant in langgraph.json, and its `_launch` node deterministically routes one cron/run tick to the handler matching the incoming `task`, invoking no LLM.",
       "evidence": [
         {
-          "resource": "repo://langgraph.json#L11-L11",
-          "version": "repo-lines-v1:sha256:4d5cd2fb4f3df884515255b39523f2f8b5472beea9f566ffca204db802561041:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmEwNmJhODM3MmNmMjAwM2Q0MTA5YTVkZDYxNzZmODdkMjNlOTI3NjIwOTFlOGMzOWM4ZWM2NGI0ODBkYzkwNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
+          "resource": "repo://langgraph.json#L10-L10",
+          "version": "repo-lines-v1:sha256:74e6933a0b2c59a70988019758a54f79f221148744ff2a1e0fdeab17e944d72b:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzRlNjkzM2EwYjJjNTlhNzA5ODgwMTk3NThhNTRmNzlmMjIxMTQ4NzQ0ZmYyYTFlMGZkZWFiMTdlOTQ0ZDcyYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNzRlNjkzM2EwYjJjNTlhNzA5ODgwMTk3NThhNTRmNzlmMjIxMTQ4NzQ0ZmYyYTFlMGZkZWFiMTdlOTQ0ZDcyYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGZhNGNlNzNjMjE2ZDkyNWI4YWQ0YWNiOTQzMTI2Mjg2ZWQ3MGIwZmY0ODQyMThkODY4NjkxYjYyMTk3NzI3ZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzExZWNmZTY1ZGNhMTdjNDFlMDNhODJmZTljY2VhNzg4OWJiNWY0ZjdhNzljNjIzNGI4MjZmOWUzZTBlMzI2MiJ9"
+        },
+        {
+          "resource": "repo://openswe/graphs/scheduler.py#L1-L2",
+          "version": "repo-lines-v1:sha256:7f11826a92f9aca8ef59c88dd0ba70d61978def224edf4eedf9b17749f1bfaa5:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzUxNzRjMTYzZWY4NTRkNDZmMWNjM2Y0YTgwODFiMWQ5YjAyNDBkNTE2YWQ0MDk3ZWUxMTg5OTMwNDllMzc2MiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjEsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNGE1ZGYxM2U4MmM2NmQ3Y2U3NTE5MDI1YzNkNWFiYTc4MWViZmZiMWYyYTBiOTM4OTRhMWI4MmRkZDA2ZTlkNyJ9"
         },
         {
           "resource": "repo://openswe/scheduler.py#L113-L118",
           "version": "repo-lines-v1:sha256:7eae2ce6201a24683071e835499d09005df0c8d0d8d38acb46978c32062d294d:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTFiY2JhZTI0ZDczZmVlYWJiNzg5YTZiZDQxNDk5N2VhYjBmMjdhYzJiMzcxYWZiMWU5YmNmY2Y4YTVhZTRhMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNzAwYzZiNjMzOTU0MGM4YWE3YzZlNmYyOTI0MjA3NWZiNGRiNjhlYjM3ZWZhMGJkMTUxZWRkZGUwN2E5MjJiNCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGEyMTY4YjdjOTMxNWVmYTY5MmFmOGI2ZDFlNmIyNjIyNjliODZhNzJjYmMwODEzM2M5ZDIyMjg1NWFiNjg5OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
-        },
-        {
-          "resource": "repo://openswe/scheduler.py#L61-L100",
-          "version": "repo-lines-v1:sha256:4add725aa5d06b23df7a2c446a9c31585ad9ab22e5c773081feb2742d389035a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkMjNiNWYxNzJiYjBlMDJmOTNhYTEzY2JkN2QxZjk5YWI0OWM1NTMyZDE0NGRkYjFmODEwNjI3ZTU3NjdhNDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkYTVjNjZlMTdiMTQ1Mzk3ODM0YjhjODU0ZGM0MTkzZTIxMjUxODBhODk5NmExNGMzMTg4MzMyNmIyZWZiY2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYxNjFlMGE4NWI5NzNjNzRiYTM2MDdjMzc2YzlmNDk4MTI2OTBjNGI5MjM0NzczZDlhODE0MjMyN2Q4MjRhZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcxZTMxZWU5ZThmZTQ4ZjA4MGNkODMyYzU4ZDk5OTA3YWFlNDc3NDQ3MjdmMTRjYzA1ZjNiNTZhODFkZjkxNWQifQ"
         }
       ]
     },
@@ -44,10 +44,6 @@
       "id": "claim_57e56d5d78ff40fab76d5cf2f12301e8",
       "statement": "Dashboard-managed recurring agent schedules validate cron strings with normalize_cron_schedule, which requires a five-field expression and range-checks each field (supporting steps, ranges, and lists) before a schedule is stored.",
       "evidence": [
-        {
-          "resource": "repo://openswe/schedules/store.py#L213-L239",
-          "version": "repo-lines-v1:sha256:4133b3c0d2aeb6273ed7d84a6c0ee45aac8ff62829bb254391788e9888ed978f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0ODRjZjg3NzBhOGEwMDlhNDcxZTFjNWY1MDkzNDczOTQ1MGU0ZjQxOGIyN2NhMjA4YWUzNjAwOTkzODdjYTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyZmJjNGY2OTA3ZTNlZGYxYzEzZGVjZmE5NDVhZTNlMjk4M2I0Y2NmYTgyNTMzMmRjZjQ0NjFjZTUwMjY4ZTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAwYWUyMjkwNTFjYmNkN2E2M2U2YzI3OWFkYjNlYzE1NjIwMGUzMzlmZDYxNmMzNTc4MDI2MzVmNzVjZTU1Y2IifQ"
-        },
         {
           "resource": "repo://openswe/schedules/store.py#L241-L248",
           "version": "repo-lines-v1:sha256:935401d47d8947d0e166d23a6ab5e5f4b68a68f9a57511f991aab7789bebeed0:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDRiMTRjNjg1NWI0MzM4ZjJlZWZmMzJmMjEzZDhkNTQ0ZGNkZGM5YTg0ZjhjZmQwMGFhMDQ0OGRkZjZhMTA4NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOTkzYTEzMDYyZjEwZWU0ZjEyMThkOTNlMzdhNmY4MWQzNDZmZjExZWM3ZTU1ZGQ1NDJlMmQyZDJlZjA3MTFmMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMWEzYTNjZjYwNTkwYWI2OGYyNDViOWMwMTQ1ZDlkMmE2MmE2MzhkNTlmYzZhMTM0ZDQ3NTY0MjVjYjI1ZGVmMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTZlMDc1ZjlmNGU3OTM3OGZkNDRjNWU2NjljNzZmZjNhZTMyNTRlYzVlNDY2NjcyZmFiMjE1NDIyNzIyM2IzZiJ9"
@@ -403,6 +399,6 @@
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-13T15:44:17.388Z"
+    "at": "2026-10-15T13:12:32.024Z"
   }
 }

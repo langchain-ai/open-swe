@@ -3,6 +3,9 @@ type: workflow
 title: Pull Request Creation and Workflow Approval
 description: How the agent creates and manages pull requests with attributed authorship, commits squashing, workflow-file change approval, and metadata recording.
 tags: [pull-request, github, commit, delivery, pr-creation, attribution, workflow-approval]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-6ba47e09f2a30f358f5d7a36
     resource: repo://openswe/github/squash_message.py
@@ -22,10 +25,7 @@ sources:
     resource: repo://openswe/tools/open_pull_request.py
   - id: openwiki-source-3087256f0cd599176fba3c38
     resource: repo://openswe/webhooks/common.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 ---
 
 # Pull Request Creation and Workflow Approval
@@ -85,6 +85,10 @@ Before a branch can be pushed, `WorkflowPushGuardMiddleware` inspects standalone
 4. **Track history:** The per-thread `workflow_push_approvals` store keeps the 20 most recent records. Approved and rejected entries are terminal; any workflow-file change generates a new fingerprint and requires fresh approval.
 
 Pushes without workflow-file changes proceed untouched. Commands with unsafe syntax (shell operators, pipes, or backticks) are left to normal execution, not inspected.
+
+### Approval inherited from base branch
+
+When a branch merges a feature branch that includes workflow-file changes, the middleware detects whether those changes were authored on the feature branch or inherited from the base branch. If inherited (changes exist on the feature parent but not between the feature and the local head), the approval message mentions this and the fingerprint records `inherited_from` to document the source branch.
 
 ## Preflight access checks
 

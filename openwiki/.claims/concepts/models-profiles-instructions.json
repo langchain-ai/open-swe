@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:f7d85b36726e424f7e629373e8621aa39600454c1c221f8944985b865ced3af8",
+  "pageVersion": "sha256:430e4b28bc02c5c88d52e3a7227715ed1bc26c0f4639c397ce9c49d4e9ac532d",
   "claims": [
     {
       "id": "claim_ef765ffe40a34bb6bad1e4c5916b0ee9",
@@ -335,10 +335,24 @@
           "version": "repo-lines-v1:sha256:7f27fdadbe23538a06cf243792a556045ee6d1455ef99982f0f521adb66a1df6:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiZmQ3ZTRmYjY5N2FlMjU0ZTM2YWU2MDM5YmRiODA4MTMzYjE4ZWU0ZDJiZmNlNjc5YTc1ZmNhY2U4OWI1ODgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNWM4MjYzMmZjODJkNGIyYzM0MGY0MjU1OGJhM2RmYTMxYzc2NTVkZjZmY2MxNjhiNGZkY2U1N2ZhYzYwNDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyYmU0ZTQ3MzU5ZTM1MTkyZjI0MDZiYTIxNjUyMzVjZGVlM2JlYjA4NDBjMTgwYjU5MTlhNzVhZDAzZWRkMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ0YjA3N2RlOWJjNDMxMjZkOTgzMzkwZTExOTU3OTRkODIzZWFkN2FkNjE1YWYxZjRjNzlhZjhlNzhkNjJjNzcifQ"
         }
       ]
+    },
+    {
+      "id": "claim_2b917b08629f47758e835417282f0f71",
+      "statement": "Instruction caching leverages Anthropic's prompt caching middleware (AnthropicPromptCachingMiddleware), configured with a 1-hour TTL on all graph models to enable efficient multi-turn conversations by caching stable system prompt and instruction portions.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/chat.py#L33-L96",
+          "version": "repo-lines-v1:sha256:969c8f536281d1679c09541f3ba4f5645581544c75f805c59aa7839819a5f209:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2NmIyYmY5MDg2NTZiMjc5MTNiMTgzNTdiN2M2ZmZkY2RmMDE3MjYzYzhiZmU1NTg0OWFkYzk2ZDU5OGUxZTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiMjJlZTY0ZWY0ODg1ODdmZDM5NTIwOWU2ZmZkZGVhN2Q0ZTQ4MDVjN2ViNmE5ZTRjZWE2NGI2N2RkODE2MGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3MWVmODA1NjIxZTVhN2MzNmJhNTcxY2M2NmRhOGFjOTg1NmNlNTdiYWE4ZDc5ZDZkZTE4YjIzMThhZTE2NDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFiNWZlOTZmMmM0ZTE2ODMyYmUwZGY2YmI1NTAxNjYxNWRlZDE5NmY4ZDY0YmVmZDM3MGIzZjZkNzRlNmZhMjYifQ"
+        },
+        {
+          "resource": "repo://openswe/server.py#L1488-L1488",
+          "version": "repo-lines-v1:sha256:8f0c24739c01819259709e38a4506efbee0eeb5b4101376893c8a5cb64958eda:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGYwYzI0NzM5YzAxODE5MjU5NzA5ZTM4YTQ1MDZlZmJlZTBlZWI1YjQxMDEzNzY4OTNjOGE1Y2I2NDk1OGVkYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOGYwYzI0NzM5YzAxODE5MjU5NzA5ZTM4YTQ1MDZlZmJlZTBlZWI1YjQxMDEzNzY4OTNjOGE1Y2I2NDk1OGVkYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTI3NzkxZWI1MThhNjJlNTZiMjNjNzc1ZTJlNWY2ZTg5NDFiYjI1NjRjYjA5MThhMTNkNzlhZDMyODA2NTNjNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTZhMjQ5YWU0NGEwYTZjY2JkZGViNDBlYTVjYjU0YzExZjY5MGRjYWEyZjA1NTdmMjJmYzExODRiOWZjMTczYSJ9"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-13T15:44:17.388Z"
+    "at": "2026-10-15T13:12:32.024Z"
   }
 }

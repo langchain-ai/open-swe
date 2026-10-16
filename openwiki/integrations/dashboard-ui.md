@@ -34,6 +34,12 @@ sources:
     resource: repo://openswe/threads/summary.py
   - id: openwiki-source-59a48f28b14dd2fa02f2e8c3
     resource: repo://openswe/threads/terminal.py
+  - id: openwiki-source-6922535f6d64f951fd826089
+    resource: repo://openswe/ui_invalidations/hub.py
+  - id: openwiki-source-207041ea6aef8242981dc8d7
+    resource: repo://openswe/ui_invalidations/routes.py
+  - id: openwiki-source-429c2b1da4ee5974be45c5c6
+    resource: repo://openswe/ui_invalidations/topics.py
   - id: openwiki-source-33b1621aff91e24fa4b85e3f
     resource: repo://openswe/utils/dashboard_ui.py
   - id: openwiki-source-cee8c9d42a08db69733a075f
@@ -42,10 +48,10 @@ sources:
     resource: repo://ui/src/lib/dashboard-fetch.ts
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
-generated: { by: "openwiki/0.4.2", at: "2026-10-05T16:54:23.398Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+    at: 2026-10-15T13:12:32.024Z
 ---
 
 # Dashboard and Desktop Clients
@@ -59,6 +65,8 @@ The dashboard is the human-facing surface around the agent: a FastAPI router, a 
 When a dashboard build is available, `agent.utils.dashboard_ui` mounts immutable hashed assets at `/assets` and serves `_shell.html` for HTML navigation requests. It deliberately declines API, webhook, health, LangGraph, docs, metrics, and asset prefixes; a non-HTML request for an unknown UI route is likewise left for the underlying server to return as a 404. The shell is `no-cache` so it can reference a new asset manifest, while hashed assets can be cached for a year. With `DASHBOARD_DEV_SERVER_URL`, the backend instead reverse-proxies non-reserved traffic to Vite, preserving the backend origin and redirect responses. The catch-all is registered last; code which subsequently adds a route must call `keep_dashboard_ui_last`.
 
 `DASHBOARD_STATIC_DIR` selects an explicit build; otherwise the in-repository `ui/.output/public` build is used when present. A build served under a LangGraph mount prefix must be built with the matching `DASHBOARD_BASE_PATH`. The UI router uses Vite's `BASE_URL` as its `basepath`, so client navigation follows that mount.
+
+The dashboard routes aggregate over 30 feature routers, including threads, reviews, schedules, skills, workspaces, profiles, and integrations (Slack, MCP). Each endpoint enforces session authentication, repository access control, and admin-only operations where required.
 
 ```text
 graph TB
@@ -156,11 +164,29 @@ Repository instruction records normalize `owner/repo`; route handlers filter lis
 
 Personal skills are virtual `SKILL.md` files isolated by GitHub login. Organization skills are shared, cursor-paginated, limited to 1,000 records, readable by every session, and writable by administrators only. Schedule listing requires a session, while create, update, trigger, and delete require administration. Workspace-scoped schedule records keep cron configuration separate from run state. Creation writes the record before creating a LangGraph cron and removes it with `502` if creation fails; enabled changes create the replacement cron before deleting the old one, while disabling deletes the cron. Before launch, repository access for the recorded owner is rechecked; failure records an unauthorized run state rather than launching. Successful launch creates an automation thread and resumable durable agent run.
 
+## Real-time UI state invalidation
+
+The browser opens a server-sent events stream at `GET /dashboard/api/ui-invalidations?t=...` with a list of topics and their staleness age (e.g., `t=42.workspaces` means "workspaces data is 42 seconds old"). The invalidation hub in `openswe.ui_invalidations.hub` manages a single shared `LISTENER` PostgreSQL connection that notifies all replicas when a topic changes; each replica's `Stream` registry tracks which topics connected clients need and immediately signals when an invalidation arrives.
+
+The stream first reports which subscribed topics were invalidated within their staleness window (a replay window accounting for PostgreSQL lag and commit delays), then continues to emit every topic as it is invalidated, one per frame. The browser refetches only the invalidated queries; empty, out-of-window, or unauthorized topics are silently dropped. This pattern avoids polling while ensuring that queries stay synchronized with server state changes that happen during client inactivity. A `Topic` is a fully qualified name like `workspaces`, `threads/thread-id`, or `review-styles/owner/repo`, and authorization checks which keys a session may hear before allowing the subscription.
+
+## Pull request reviews and findings display
+
+The dashboard displays and manages PR reviews from `openswe.review.routes`, which serves both direct code review operations and a conversation UI for asynchronous discussion. Review styles hold an approval mode (when set, delegating approval authority to the analyzer), and a repository-held prompt that steers the analyzer behavior. Reading a review returns a summary containing the analyzer's findings; concurrent requests to start a new analysis return `409` to prevent redundant work.
+
+The findings display retrieves review summaries in batches via `POST /dashboard/api/reviews/summaries`, passing a list of up to 100 PR references. Findings include tool-generated issues (code smells, security concerns, etc.) that the UI surfaces alongside the human review conversation. A `review_conversation` router manages the chat interface where reviewers propose comments, approve changes, and share insights asynchronously. The UI permits a terminal or missing analyzer run to be marked completed, allowing a saved prompt change to take effect without rerunning analysis.
+
 ## React UI and deployment proxy
 
 `ui/` is a React/TanStack Start application with TanStack Router, React Query SSR integration, and a Vite/Nitro server build. The browser API layer forms relative `/dashboard/api/*` URLs and uses `credentials: "include"`. In development, Vite proxies backend prefixes (with a localhost default); deployed Nitro explicitly sends `/dashboard/api/**` and `/webhooks/**` to `ui/server/backend-proxy.ts` and requires `DASHBOARD_API_URL` at runtime.
 
 The production proxy retains OAuth redirects with `redirect: "manual"`, forwards request bodies and headers, removes hop-by-hop and reframed response headers, and appends each `Set-Cookie` separately. Server rendering targets `DASHBOARD_API_URL` directly and explicitly forwards the incoming `cookie` header because server-side `credentials: "include"` cannot do so. The Agents layout permits an unauthenticated desktop-local-only mode only at `/agents` and `/agents/local/...`; its shared stream provider chooses local transport only for a local thread and cloud transport otherwise.
+
+## Run stream display and agent events
+
+The dashboard displays agent runs using the LangGraph v3 protocol stream, which carries both state snapshots and intermediate event frames. The thread detail view embeds a stream provider that opens `/threads/{id}/stream` to receive events as the run progresses. Events include tool invocations, state updates, and checkpoint markers, allowing the UI to show real-time progress, tool calls with inputs and outputs, and retrieval windows.
+
+Subagent visibility is determined by the run's manifest: tool events exposing subagent thread IDs are rendered as clickable references in the main thread UI, allowing users to navigate into nested invocations. Tool events carry the full tool schema, input parameters, and parsed output, enabling the UI to render domain-specific visualizations (e.g., file diffs for code review tools, artifact previews for generation tools). On desktop runs, the UI avoids exposing actual tool results containing credentials or artifacts; instead it renders locally-scoped results that come from the supervised backend and are safe to display in the browser.
 
 ## Electron local client and execution boundary
 
@@ -172,7 +198,11 @@ A `source == "desktop"` run selects `LocalShellBackend`, not a cloud sandbox. `l
 
 ## Focused verification
 
-Dashboard thread tests cover image/model compatibility; `run.start` creation metadata; configured-repository display privacy; terminal sandbox readiness; recovery-patch behavior and limits; and the missing-thread command constraint. Activity tests cover run-status refresh, viewing by an authenticated reader, opt-out viewing, and the prohibition on marking a running thread viewed. Desktop changes should also retain the loopback token boundary, health polling, proxy cookie stripping, and termination escalation; UI proxy changes must preserve individual `Set-Cookie` headers and un-followed OAuth redirects.
+Dashboard thread tests cover image/model compatibility; `run.start` creation metadata; configured-repository display privacy; terminal sandbox readiness; recovery-patch behavior and limits; and the missing-thread command constraint. Activity tests cover run-status refresh, viewing by an authenticated reader, opt-out viewing, and the prohibition on marking a running thread viewed. 
+
+Real-time UI invalidation tests should verify that a topic replay correctly reconstructs stale subscriptions on reconnect, that unauthorized topics are filtered before subscription, and that the stream coalesces frames within a sub-second window. Review UI tests should confirm that concurrent analyzer requests are rejected with 409, that a saved prompt can transition a terminal run to completed, and that review findings are correctly filtered by authorization.
+
+Desktop changes should retain the loopback token boundary, health polling, proxy cookie stripping, and termination escalation; UI proxy changes must preserve individual `Set-Cookie` headers and un-followed OAuth redirects. Run stream tests should verify that tool events expose subagent thread IDs, that desktop runs strip credentials from tool results, and that checkpoint events enable offline recovery.
 
 ## Related
 

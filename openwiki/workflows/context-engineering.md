@@ -1,11 +1,11 @@
 ---
-type: "workflow"
-title: "Context and Prompt Engineering"
-description: "Workflow for assembling run input, managing dynamic context deduplication, and constructing layered system prompts from multiple instruction sources."
-tags: ["context-assembly", "prompt-engineering", "system-prompt", "dynamic-context"]
+type: workflow
+title: Context and Prompt Engineering
+description: Workflow for assembling run input, managing dynamic context deduplication, and constructing layered system prompts from multiple instruction sources.
+tags: [context-assembly, prompt-engineering, system-prompt, dynamic-context, agents-md, skills, review-conventions]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-13T15:44:17.388Z
+    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-1685d34aae8025be9332f45a
     resource: repo://openswe/dispatch.py
@@ -19,6 +19,14 @@ sources:
     resource: repo://openswe/prompt.py
   - id: openwiki-source-1c7c5f1a7efc26b4594613d2
     resource: repo://openswe/resources/prompts/system/main.md.jinja
+  - id: openwiki-source-4b3bf000502ef658b64c0b0f
+    resource: repo://openswe/resources/prompts/system/repository-setup.md.jinja
+  - id: openwiki-source-342facea842feb2c43fd9e53
+    resource: repo://openswe/review/approvals.py
+  - id: openwiki-source-eb9e695bef31bca8f88b0c2b
+    resource: repo://openswe/review/styles.py
+  - id: openwiki-source-c5766699cee46f671b69bf81
+    resource: repo://openswe/sandboxes/repo_prep.py
   - id: openwiki-source-919e16feae379651f2cbc1c9
     resource: repo://openswe/server.py
   - id: openwiki-source-76820c5856f1479d850c1ab9
@@ -27,7 +35,7 @@ sources:
     resource: repo://openswe/threads/recent_context.py
   - id: openwiki-source-6cab3229da0697cc82ed6224
     resource: repo://openswe/utils/agents_md.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 ---
 
 # Context and Prompt Engineering
@@ -97,17 +105,33 @@ The complete instruction hierarchy in `construct_system_prompt`, from lowest to 
 5. **`AGENTS.md` at the repository root** — mandatory rules that override all prior instruction sources.
 6. **Scoped `AGENTS.md` files** — injected by `SubdirAgentsReadMiddleware` after successful `read_file` calls, with deeper scopes taking precedence.
 
-## Repository conventions: `AGENTS.md`
+## Repository conventions: AGENTS.md and CLAUDE.md
+
+### Main agent (hosted runs)
 
 The main-agent prompt requires that, after a repository is synchronized or cloned, the agent read the root `AGENTS.md` in full before other work. Its rules override defaults. `SubdirAgentsReadMiddleware` supplies a second, scoped mechanism: after a successful string-result `read_file`, it reads ancestor `AGENTS.md` files from the run sandbox and appends a `<system-reminder>`. Candidates are shallowest to deepest, and the reminder states that deeper scope wins. It tracks loaded paths per thread, treats a direct `AGENTS.md` read as loaded, limits reads to 1,000 lines and 64 KiB (with truncation), and lets a missing, unreadable, non-UTF-8, or otherwise unusable candidate fail without breaking the requested read.
 
-The reviewer cannot assume a sandbox clone. It fetches the root convention document from GitHub Contents at the PR base SHA, preferring `AGENTS.md` and falling back to `CLAUDE.md` only after a 404. A non-200 response, network failure, or content over 64 KiB produces no root context rather than stale fallback rules. It also derives ancestor convention paths for changed files and fetches scoped files concurrently in shallow-to-deep order; each candidate independently skips failures and the ordered results make nested instructions override parent instructions.
+### Reviewer (code review)
+
+The reviewer cannot assume a sandbox clone; instead, it fetches convention documents deterministically from GitHub at the PR base SHA (never the PR head, which the author controls). It prefers `AGENTS.md` and falls back to `CLAUDE.md` only when a 404 indicates the preferred file does not exist. A non-200 response, network failure, or content exceeding 64 KiB produces no root context rather than stale fallback rules, ensuring the reviewer enforces only documented conventions.
+
+The reviewer also derives ancestor convention paths for changed files and fetches scoped files concurrently in shallow-to-deep order, up to 8 concurrent requests. Each candidate independently skips failures (missing, oversized, unreadable, or non-UTF-8 files); the absence of one scoped file does not hide valid instructions in another changed subtree. The ordered results make nested instructions override parent instructions.
+
+Fetching `AGENTS.md` and scoped variants happens in parallel with repo checkout and diff computation during `PrepareReviewerRunMiddleware`. This deterministic loading means the reviewer assesses a pull request against rules that were stable at the PR base, not rules introduced or modified by the PR itself.
+
+## Approval policy selection by review type
+
+The reviewer's approval behavior—whether it only comments (`dry_run`), never approves (`off`), or submits GitHub approvals (`approve`)—is selected per repository from the review style record, persisted in LangGraph Store at the `review_styles` namespace. When a reviewer runs, it fetches the approval policy from `.open-swe/APPROVALS.md` on the **default branch** (not the PR head), ensuring the PR cannot rewrite the criteria it is judged by. If the approval mode is `off`, no policy is fetched or consulted. The mode is configured in the dashboard and applies to all PRs in the repository.
 
 ## Skills: lazily readable prompt extensions
 
 Skills are instructions exposed as virtual `SKILL.md` files rather than copied wholesale into the prompt. A `CompositeBackend` keeps the run backend as default and routes skill prefixes to specialized backends; it strips the route prefix before delegation. Passing those prefixes in `create_deep_agent(skills=[...])` lets deepagents advertise skills while the agent reads full instructions through ordinary `read_file`.
 
 The main graph always mounts repository-bundled `baby-sit` and `html-artifacts` skills read-only at `/bundled-skills/`. Hosted runs additionally mount organization skills read-only at `/organization-skills/` and, when a profile login exists, per-user skills read-only at `/skills/`; the user route is first, so it has priority. Skills are persisted as `/<name>/SKILL.md` under the appropriate store namespace with YAML name/description front matter and a replacement instruction body. Names, sizes, and organization count are bounded; user tools resolve the current GitHub login, while organization-skill tools require an admin. Desktop runs instead source user skills from run state, omit organization skills, and route artifacts away from the project checkout.
+
+### Reviewer: trusted skills from base revision
+
+The reviewer materializes trusted skills from the PR base revision (via `materialize_trusted_skills`) into a separate `.review-skills` directory outside the checkout. This prevents a PR author from injecting instructions into the reviewer prompt by adding or editing a `SKILL.md`. Skills are sourced from `.agents/skills` or `.claude/skills` relative to the repository root, extracted via `git archive` at the trusted base SHA. The extracted paths are then routed to `SkillsMiddleware` for mounting. If extraction fails for a skill directory, the reviewer continues without it; a single missing directory does not prevent skill wiring or the review.
 
 ## Sender context and participation
 
@@ -118,6 +142,10 @@ Sender context includes identity, workspace-admin status, git configuration, col
 ## Recent thread context
 
 The agent's prompt can include a digest of the sender's recent threads for orientation. `recent_thread_context_section` fetches a sender's recent threads filtered by audience rules: `"private"` includes only the sender's own public and privately-owned threads, while `"shared_slack"` further filters to threads in the same Slack workspace and channel. The digest is bounded: up to 5 threads, each title capped at 160 characters, total payload capped at 4,000 characters. The selector enforces a 1-second timeout and scans at most 100 threads to find eligible ones, dropping older entries when the payload exceeds limits. This context is background information, not instructions, and is selected under audience rules that keep private-workspace metadata from leaking into shared conversations.
+
+## Review style and organization guidelines
+
+Reviewer prompts can include optional organization guidelines and a custom repository style prompt, both fetched during `PrepareReviewerRunMiddleware`. These are fail-soft: a store outage or network failure during fetch causes the reviewer to omit that supplement without failing the review. Organization guidelines are cached across review runs in the same workspace. The custom repository style prompt is editor-curated per-repository and supplements the default review guidance with specific technical standards or preferences.
 
 ## Safe change and focused verification
 
