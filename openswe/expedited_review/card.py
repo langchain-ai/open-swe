@@ -44,7 +44,7 @@ def _vote_summary(approval: HumanReviewRequest, author: str) -> str:
 
 def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
-    label = f"{pr.owner}/{pr.repo}#{pr.number}"
+    label = pr.label
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
@@ -256,7 +256,7 @@ def open_card(
     """
     pr = approval.pull_request
     if approval.approved and not approval.awaiting_ready:
-        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        label = pr.label
         heading = f"Expedited review: {_vote_summary(approval, author)}"
         return f"{heading} — {pr.url}", [
             section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
@@ -289,7 +289,7 @@ def closed_card(
     """
     pr = approval.pull_request
     if approval.state in {"merged", "cancelled"}:
-        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        label = pr.label
         return f"Expedited review: {outcome} — {pr.url}", [
             section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
         ]
@@ -310,10 +310,7 @@ def author_status(
     pr = approval.pull_request
     text = f"Expedited review: {outcome} — {pr.url}"
     blocks: list[Block] = [
-        section(
-            f"*Expedited review: {outcome}*\n"
-            f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> {escape(pr.title)}"
-        )
+        section(f"*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
     ]
     if origin_url:
         blocks.append(context(f"Requested from <{origin_url}|this thread>."))
