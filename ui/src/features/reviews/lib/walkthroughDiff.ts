@@ -99,6 +99,14 @@ function runPatch(run: Array<Row>, hunkContext: string | undefined): string {
   return out
 }
 
+const slicedDiffs = new WeakSet<FileDiffMetadata>()
+
+export function canHydrateDiffs(
+  diffs: ReadonlyArray<FileDiffMetadata>
+): boolean {
+  return diffs.every((diff) => !slicedDiffs.has(diff))
+}
+
 const slices = new WeakMap<
   ReviewDiffFile,
   Map<string, FileDiffMetadata | null>
@@ -163,5 +171,6 @@ function sliceFileDiff(
   const sliced = getSingularPatch(slice)
   // Hydration keys its highlight cache on this; without it a slice reuses the whole file's rows.
   sliced.cacheKey = `${file.path}:slice:${hashFileContents(slice)}`
+  slicedDiffs.add(sliced)
   return sliced
 }
