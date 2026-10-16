@@ -315,11 +315,6 @@ ENV.var(
     "Public URL for Slack webhooks and the Sign in with Slack callback; defaults to "
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
-ENV.var(
-    "SLACK_AGENT_VIEW_ENABLED",
-    "Show thread progress as a Slack agent session so Slack offers native Stop. "
-    "Requires Agent view and the agent_session_stopped event.",
-)
 ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 

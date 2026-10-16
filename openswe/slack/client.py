@@ -1000,7 +1000,10 @@ async def stop_slack_stream(
 
 
 async def _set_agent_session_status(channel_id: str, thread_ts: str, status: str) -> bool:
-    """Set a thread's agent session status, which carries Slack's native Stop button."""
+    """Set a thread's agent session status, which carries Slack's native Stop button.
+
+    Apps without Agent view reject this, so callers fall back to the assistant status.
+    """
     try:
         data = await _slack_stream_call(
             "agents.sessions.setStatus",
@@ -1020,10 +1023,8 @@ async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) 
 
     if channel_id.startswith("D") and thread_ts == CONCIERGE_TS:
         return True
-    if ENV.SLACK_AGENT_VIEW_ENABLED.get_bool():
-        return await _set_agent_session_status(
-            channel_id, thread_ts, "processing" if status else "active"
-        )
+    if await _set_agent_session_status(channel_id, thread_ts, "processing" if status else "active"):
+        return True
     try:
         await _slack_stream_call(
             "assistant.threads.setStatus",

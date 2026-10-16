@@ -57,8 +57,9 @@ async def test_concierge_status_does_not_create_slack_threads(slack_api: SlackAP
     assert slack_api.calls == []
 
 
-async def test_agent_view_status_uses_agent_session_for_native_stop(slack_api, monkeypatch):
-    monkeypatch.setenv("SLACK_AGENT_VIEW_ENABLED", "true")
+async def test_thread_status_uses_agent_session_and_falls_back_without_agent_view(slack_api):
+    slack_api.respond({"ok": True})
+    slack_api.respond({"ok": False, "error": "not_allowed"})
     assert await slack_utils.set_slack_thread_status("C1", "1.0", "Thinking…")
     assert await slack_utils.set_slack_thread_status("C1", "1.0", "")
     assert slack_api.calls == [
@@ -66,6 +67,7 @@ async def test_agent_view_status_uses_agent_session_for_native_stop(slack_api, m
         for method, status in [
             ("agents.sessions.setStatus", "processing"),
             ("agents.sessions.setStatus", "active"),
+            ("assistant.threads.setStatus", ""),
         ]
     ]
 
