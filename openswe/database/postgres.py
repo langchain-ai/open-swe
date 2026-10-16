@@ -80,8 +80,8 @@ def engine() -> AsyncEngine:
         _ENGINE = create_async_engine(
             database_uri,
             pool_pre_ping=True,
-            pool_size=ENV.ANALYTICS_POOL_SIZE.get_int(5),
-            max_overflow=ENV.ANALYTICS_POOL_OVERFLOW.get_int(5),
+            pool_size=ENV.ANALYTICS_POOL_SIZE.get_int(20),
+            max_overflow=ENV.ANALYTICS_POOL_OVERFLOW.get_int(20),
             pool_timeout=ENV.ANALYTICS_POOL_TIMEOUT_SECONDS.get_int(5),
             connect_args={"server_settings": {"application_name": "open-swe"}},
         )
