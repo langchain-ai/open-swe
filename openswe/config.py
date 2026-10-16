@@ -205,8 +205,8 @@ ENV.var(
 )
 ENV.var(
     "MDA_RUNTIME_URL",
-    "Managed Deep Agents deployment (mda/) that runs the agent and reviewer graphs "
-    "for people who turn on run_on_mda; unset keeps every run on LANGGRAPH_URL.",
+    "Managed Deep Agents deployment (mda/) that runs the agent and reviewer graphs; "
+    "required, the backend refuses to start without it.",
 )
 ENV.var(
     "MDA_RUNTIME_API_KEY",
@@ -214,23 +214,9 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "THREAD_STORE",
-    "Where threads are indexed: 'agent_server' (default) keeps the Agent Server as the "
-    "thread index; 'dual' also writes every thread change to PostgreSQL, importing the "
-    "threads it lacks, while the Agent Server still answers; 'postgres' serves thread "
-    "reads, updates and searches from PostgreSQL, still copying changes to the Agent "
-    "Server, and each thread's runs from its runtime. Move through 'dual' to 'postgres'.",
-    default="agent_server",
-)
-ENV.var(
-    "MDA_ALL_THREADS",
-    "With THREAD_STORE=postgres and MDA_RUNTIME_URL set, run every new agent and reviewer "
-    "thread on Managed Deep Agents instead of only those of people who chose it.",
-)
-ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
-    "comma-separated, the first signs and every one verifies.",
+    "comma-separated, the first signs and every one verifies. Required.",
     secret=True,
 )
 ENV.var(

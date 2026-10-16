@@ -271,7 +271,7 @@ jobs:
             echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-          paths=(openswe ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
+          paths=(openswe mda ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
           if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
             echo "browser=false" >> "$GITHUB_OUTPUT"
           else
@@ -315,6 +315,10 @@ jobs:
           node-version: 24
       - name: Install Python deps (langgraph dev runtime)
         timeout-minutes: 5
+        run: uv sync --locked
+      - name: Install Python deps (Managed Deep Agents runtime)
+        timeout-minutes: 5
+        working-directory: mda
         run: uv sync --locked
       - run: corepack enable
       # Chromium and the dashboard build are identical across the three shards
@@ -382,6 +386,10 @@ jobs:
           node-version: 24
       - name: Install Python deps (langgraph dev runtime)
         timeout-minutes: 5
+        run: uv sync --locked
+      - name: Install Python deps (Managed Deep Agents runtime)
+        timeout-minutes: 5
+        working-directory: mda
         run: uv sync --locked
       - run: corepack enable
       - name: Install workspace dependencies

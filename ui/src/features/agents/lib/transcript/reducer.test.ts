@@ -230,6 +230,36 @@ describe("transcript snapshot", () => {
     expect(tools[0]?.status).toBe("in_progress")
     expect(tools[0]?.subagentNamespace).toEqual(["task-1"])
   })
+
+  it("nests the tool calls an eval call's code made on its chunk", () => {
+    const state = fromSnapshot(
+      twoTurnSnapshot({
+        tool_calls: [
+          toolCall({
+            tool_call_id: "eval-1",
+            turn_id: "turn-1",
+            name: "eval",
+            started_at: "2026-01-01T00:00:02Z",
+          }),
+          toolCall({
+            tool_call_id: "ptc-ls",
+            turn_id: "turn-1",
+            name: "ls",
+            namespace: ["eval-1"],
+            started_at: "2026-01-01T00:00:03Z",
+          }),
+        ],
+      })
+    )
+    const tools = toMessages(state).flatMap((entry) =>
+      entry.chunks.filter(
+        (chunk): chunk is ToolExecutionChunk => chunk.kind === "tool-execution"
+      )
+    )
+
+    expect(tools.map((tool) => tool.toolCallId)).toEqual(["eval-1"])
+    expect(tools[0]?.calls?.map((call) => call.toolCallId)).toEqual(["ptc-ls"])
+  })
 })
 
 function appended(

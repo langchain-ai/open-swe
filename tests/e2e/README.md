@@ -3,8 +3,10 @@
 This drives the **whole happy path** through two mock UIs:
 
 1. A user asks Open SWE to implement something in a **mock Slack** thread.
-2. The **real agent** runs (via `langgraph dev`): it implements the change in a
-   **local temp-dir sandbox**, pushes a branch, and opens a PR on a **fake GitHub**.
+2. The **real agent** runs: its model loop on a local **Managed Deep Agents**
+   server (the real `mda/` project), its tools and middleware on the backend
+   (`langgraph dev`). It implements the change in a **local temp-dir sandbox**,
+   pushes a branch, and opens a PR on a **fake GitHub**.
 3. It posts the PR link back to the **same Slack thread** — visible in the mock UI.
 
 ## What is faked vs. real
@@ -16,6 +18,7 @@ code runs for real.
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Slack webhook → `process_slack_mention` → run dispatch           | **real** (`openswe.webapp`)                                                  |
 | `get_agent`, deepagents loop, tools, middleware, prompt          | **real**                                                                   |
+| Managed Deep Agents runtime (`mda/`, compiled by `mda build`)    | **real**, served locally by `mda-dev.sh` on `E2E_MDA_PORT` (default 2025)   |
 | `open_pull_request`, `slack_reply` tools                  | **real**                                                                   |
 | Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
 | Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
@@ -44,7 +47,11 @@ so what Playwright asserts on is exactly what the real agent produced.
 - `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece).
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
 - `agent_entrypoint.py` — langgraph `agent` graph: applies patches, re-exports the
-  real `traced_agent`.
+  real `traced_agent`. Agent and reviewer threads run on Managed Deep Agents, so
+  the backend builds this graph for each MDA run's hooks.
+- `mda-dev.sh` + `mda_entrypoint.py` — the Managed Deep Agents server: `mda build`
+  output served by `langgraph dev` as `mda dev` serves it, with the fake model
+  and loopback completion webhooks.
 - `harness.py` — langgraph `http.app`: the real `openswe.webapp` plus the fake
   GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
 - `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote. PR
@@ -123,9 +130,10 @@ or `langgraph dev` (a throwaway `docker run -d -p 5433:5432 -e POSTGRES_PASSWORD
 with `POSTGRES_URI=postgresql://postgres:postgres@localhost:5433/postgres` is enough).
 CI provides one as a job service.
 
-Poke at it by hand (from the repo root):
+Poke at it by hand (from the repo root), each server in its own terminal:
 
 ```bash
+tests/e2e/mda-dev.sh
 uv run langgraph dev --config tests/e2e/langgraph.e2e.json --port 2024 \
   --no-browser --allow-blocking --no-reload
 # open http://127.0.0.1:2024/mock/slack  and  /mock/github

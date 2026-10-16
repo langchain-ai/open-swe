@@ -10,7 +10,7 @@ from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
 from openswe.thread_ids import review_scout_thread_id
-from openswe.utils.thread_ops import thread_run_error
+from openswe.threads.status import thread_run_error
 from openswe.walkthrough.record import WalkthroughView
 
 logger = logging.getLogger(__name__)

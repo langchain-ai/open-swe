@@ -220,7 +220,16 @@ async def control_last_system_prompt() -> JSONResponse:
     """The system prompt of the most recent model call (what the agent was told)."""
     from fake_llm import LAST_SYSTEM_PROMPT
 
-    return JSONResponse({"text": LAST_SYSTEM_PROMPT["text"]})
+    return JSONResponse({"text": LAST_SYSTEM_PROMPT.text})
+
+
+@app.post("/control/last-system-prompt")
+async def control_record_system_prompt(request: Request) -> JSONResponse:
+    """Where the Managed Deep Agents server's fake model reports each system prompt."""
+    from fake_llm import LAST_SYSTEM_PROMPT
+
+    LAST_SYSTEM_PROMPT.text = (await request.json())["text"]
+    return JSONResponse({"ok": True})
 
 
 @app.post("/control/repo-private")

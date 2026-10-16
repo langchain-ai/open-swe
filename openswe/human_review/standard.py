@@ -291,8 +291,9 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
         return RequestResult(
             success=False,
             error=(
-                "This pull request has an open expedited review card. Dismiss it before "
-                "asking for a standard review."
+                "This pull request has an outstanding expedited review request. "
+                "A standard review cannot run concurrently. Cancel the expedited request "
+                "before asking for a standard review."
                 + (f" Open in Slack: {permalink}" if permalink else "")
             ),
             request_id=str(active.id),

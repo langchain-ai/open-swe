@@ -11,6 +11,7 @@ import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import APIStatusError
 
+from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, profiles
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
@@ -169,6 +170,40 @@ async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
     created_metadata = created["metadata"]
     assert isinstance(created_metadata, dict)
     assert created_metadata["workspace"] == "oss"
+
+
+async def test_a_thread_on_the_creators_machine_is_created_private(
+    monkeypatch, registry_db
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    bridge = await BridgeStore.register(
+        owner_id="github:octocat",
+        hostname="laptop.local",
+        root_path="/Users/octocat/app",
+        label=None,
+        bridge_id=None,
+    )
+    assert bridge is not None
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {
+                "configurable": {"thread_type": "workspace", "sandbox_bridge_id": bridge.bridge_id}
+            },
+        },
+    }
+
+    await thread_runs._enrich_run_start_command(
+        "new-tid", "octocat", command, metadata={}, creating=True
+    )
+
+    created_metadata = created["metadata"]
+    assert isinstance(created_metadata, dict)
+    assert created_metadata["sandbox_id"] == bridge.sandbox_id
+    assert created_metadata["visibility"] == "private"
 
 
 async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
