@@ -37,6 +37,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
 | `LANGSMITH_GATEWAY_API_KEY` | Optional gateway key, as on the backend |
+| `OPEN_SWE_BROWSER` | Optional; `1` gives the coding agent Stagehand's `run`, `snapshot` and `screenshot` tools on a LangSmith browser per thread (`rt/browser.py`). The workspace needs the LangSmith browser beta |
 
 The backend:
 

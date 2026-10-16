@@ -100,6 +100,23 @@ wheels = [
 ]
 
 [[package]]
+name = "browserbase"
+version = "1.21.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/b0/11f6bd76b91f4237cfffde1eed741a2b3b6016b6c5169153a39484093c1e/browserbase-1.21.0.tar.gz", hash = "sha256:b2b019d0acc0a5876eae58b4aeb3cf942736e4e3da46571356d612f4504d537e", size = 300177, upload-time = "2026-10-14T07:16:55.192Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/d0/cdd0ca2989e37f403dfefec9c70e6b1d4477afd64aff71cf11ea19f3f5ed/browserbase-1.21.0-py3-none-any.whl", hash = "sha256:b0dfbb858556c3019328c211fa319376388dcd00f22dac5e646b4a1e970e3ef5", size = 169891, upload-time = "2026-10-14T07:16:56.237Z" },
+]
+
+[[package]]
 name = "bsdiff4"
 version = "1.2.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1315,6 +1332,7 @@ dependencies = [
     { name = "managed-deepagents" },
     { name = "mcp" },
     { name = "pydantic" },
+    { name = "stagehand" },
 ]
 
 [package.metadata]
@@ -1329,6 +1347,7 @@ requires-dist = [
     { name = "managed-deepagents", specifier = "==0.9.1" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "pydantic", specifier = ">=2.11" },
+    { name = "stagehand", specifier = "==4.2.1" },
 ]
 
 [[package]]
@@ -2129,6 +2148,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/be/0123026f719d1a7936f214a88b553bb5701e04ff2511147c1dab0c5035eb/sse_starlette-3.5.0.tar.gz", hash = "sha256:75de713aa8a9441513cc283220826da079d982770965b951e9437720e8bafdb2", size = 36794, upload-time = "2026-09-28T17:48:14.7Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/be/e4/cdda14023c316d71493bc54fdffc3dd006631b88866145c9d3cc33e0f1df/sse_starlette-3.5.0-py3-none-any.whl", hash = "sha256:3e6e1070df3f0f5d9cea81496de92dbb72f6721871d99748ece67441dd8b7997", size = 17407, upload-time = "2026-09-28T17:48:13.228Z" },
+]
+
+[[package]]
+name = "stagehand"
+version = "4.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "browserbase" },
+    { name = "httpx" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a7/8c/fb024dcd369b82b0b6dce8b2d872e73c3f135a2219d75cda91478e1e0197/stagehand-4.2.1.tar.gz", hash = "sha256:e969c0b0e2bc569c9f779429f4a022e5a1fb65869c5eab7d0d5417562c103719", size = 501337, upload-time = "2026-10-10T17:38:43.811Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/40/275d0e4742a7a07540034aa3e7a79661f9979f054b42c56d5c1a2568289c/stagehand-4.2.1-py3-none-any.whl", hash = "sha256:437e22dd92f140597801ebe47e80bbf6f05fa3187cf4a55c902ba9ea68b4aee6", size = 513787, upload-time = "2026-10-10T17:38:41.955Z" },
 ]
 
 [[package]]

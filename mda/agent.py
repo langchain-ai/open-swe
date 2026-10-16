@@ -25,6 +25,7 @@ from managed_deepagents import (
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
+from rt.browser import BrowserMiddleware, browser_enabled
 from rt.middleware import (
     BackendRunMiddleware,
     ReportRepliesMiddleware,
@@ -84,6 +85,11 @@ def _code_mode(graph: Graph, from_code: Sequence[BaseTool]) -> list[AgentMiddlew
         return []
     # As the in-process agent's code mode: state per turn, subagents through `task`.
     return [CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")]
+
+
+def _browser(graph: Graph) -> list[AgentMiddleware]:
+    """The coding agent's browser, a LangSmith browser per thread, when this deployment offers one."""
+    return [BrowserMiddleware()] if graph == "agent" and browser_enabled() else []
 
 
 # `mda build` reads the agent's name without running this factory, so its body
@@ -153,6 +159,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(offered, excluded | code_only),
             *_code_mode(context.graph, from_code),
+            *_browser(context.graph),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],
