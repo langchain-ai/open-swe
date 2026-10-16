@@ -288,11 +288,6 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-space-3">
-          {thread?.waitingForDelegatedWork && thread.status !== "running" && (
-            <span role="status" className="text-xs text-secondary">
-              Waiting for delegated work
-            </span>
-          )}
           <span
             role="img"
             aria-label={`Runs on ${target}`}

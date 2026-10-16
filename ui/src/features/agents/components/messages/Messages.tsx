@@ -106,6 +106,7 @@ export const Messages = memo(function MessagesComponent({
   isStreaming,
   streamIsLoading,
   isThinking,
+  isWaitingForDelegatedWork = false,
   settingUpSandbox,
   isOffloading = false,
   reconnectLabel = null,
@@ -244,6 +245,7 @@ export const Messages = memo(function MessagesComponent({
               isActive={
                 !!reconnectLabel ||
                 isOffloading ||
+                isWaitingForDelegatedWork ||
                 (!!(isThinking || streamIsLoading || isStreaming) &&
                   !(
                     isStreaming &&
@@ -256,7 +258,11 @@ export const Messages = memo(function MessagesComponent({
               }
               label={
                 reconnectLabel ??
-                (isOffloading ? "Offloading conversation..." : activityLabel)
+                (isOffloading
+                  ? "Offloading conversation..."
+                  : isWaitingForDelegatedWork
+                    ? "Waiting for delegated work…"
+                    : activityLabel)
               }
             />
           </div>

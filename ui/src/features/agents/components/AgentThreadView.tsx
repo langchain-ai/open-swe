@@ -913,6 +913,9 @@ export function AgentThreadView({
                   streamIsLoading={source.isRunning}
                   scrollControlRef={scrollControlRef}
                   isThinking={isThinking}
+                  isWaitingForDelegatedWork={
+                    thread.waitingForDelegatedWork && !source.isRunning
+                  }
                   isOffloading={source.isOffloading}
                   reconnectLabel={reconnect.label}
                   settingUpSandbox={settingUpSandbox}

@@ -41,6 +41,20 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("shows delegated activity while the parent is idle and clears it when settled", () => {
+    const { rerender } = render(
+      <Messages messages={[]} isStreaming={false} isWaitingForDelegatedWork />,
+      { wrapper }
+    )
+
+    expect(screen.getByRole("status").textContent).toContain(
+      "Waiting for delegated work…"
+    )
+
+    rerender(<Messages messages={[]} isStreaming={false} />)
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,
