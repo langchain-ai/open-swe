@@ -342,7 +342,7 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
-        "run_on_mda": False,
+        "run_on_mda": True,
         "managed_tools_gateway_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
