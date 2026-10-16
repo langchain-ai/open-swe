@@ -206,6 +206,8 @@ Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`.
 
 Jev receives the latest human task text (up to 8,000 characters). Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 
+The same credentials power **Related threads** in the command palette (`GET /dashboard/api/threads/search`). Jev reads the title, repository, branch, pull requests, source, status and dates of the person's 60 most recently updated threads, and answers one yes/no question per thread: does the query describe it? The search returns threads with a yes probability of `0.5` or higher, most likely first, and has a ten-second deadline. Without credentials the endpoint returns `503` and the palette shows only keyword results.
+
 ### Choosing a model in the opening request
 
 New Slack threads and Auto/routed dashboard threads also use Jev to recognize explicit runtime model requests such as "use Opus" or `/model Oppus`. This classification uses the first human request (the triggering message in Slack), up to 8,000 characters, and the available model catalog. It shares Auto routing's credentials, three-second deadline, and confidence cutoff. Title generation runs independently in the background.

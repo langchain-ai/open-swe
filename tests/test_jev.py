@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage
 
 from openswe.dashboard.options import available_requested_models
 from openswe.model_request import ModelRequestIntent, infer_requested_model
+from openswe.threads.ai_search import rank_threads
 from openswe.utils.jev import JevDecision, select_jev_choice
 
 type ResponseHandler = (
@@ -191,3 +192,29 @@ async def test_opening_model_and_effort_share_one_request_with_independent_decis
             if question == failed_question
             else "accepted"
         )
+
+
+async def test_thread_search_keeps_likely_matches_best_first(transport: InstallTransport) -> None:
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        payload = json.loads(request.read())
+        assert payload["state"]["query"] == "slack dm bug"
+        assert payload["state"]["threads"]["a"]["pull_requests"] == [{"title": "Fix DM routing"}]
+        return httpx2.Response(
+            200,
+            json={
+                "model": "jev-1.13.0",
+                "answers": {
+                    thread_id: {"type": "noul", "noul": noul}
+                    for thread_id, noul in {"a": 0.7, "b": 0.2, "c": 0.9, "x": 0.99}.items()
+                },
+            },
+        )
+
+    transport(handle)
+    threads = [
+        {"id": "a", "title": "DM fix", "pullRequests": [{"title": "Fix DM routing"}]},
+        {"id": "b", "title": "Docs"},
+        {"id": "c", "title": "Slack DMs drop messages"},
+    ]
+    ranked = await rank_threads("slack dm bug", threads)
+    assert [(thread["id"], thread["relevance"]) for thread in ranked] == [("c", 0.9), ("a", 0.7)]

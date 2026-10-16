@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppCommandPalette } from "./AppCommandPalette"
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),
   cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
+  relatedThread: { id: "related-1", title: "Slack DM fix" } as AgentThread,
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -29,6 +30,15 @@ vi.mock("@/features/agents/lib/queries", () => ({
     isFetchingNextPage: false,
     fetchNextPage: mocks.fetchNextPage,
   }),
+  useThreadSearch: (
+    _params: { q: string },
+    { enabled }: { enabled?: boolean }
+  ) => ({
+    data: enabled
+      ? { items: [mocks.cloudThread, mocks.relatedThread] }
+      : undefined,
+    isFetching: false,
+  }),
 }))
 vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
   usePullRequestSearch: () => ({ data: undefined }),
@@ -37,6 +47,7 @@ vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.useRealTimers()
 })
 
 const commands: Array<AppCommand> = [
@@ -73,6 +84,23 @@ describe("AppCommandPalette", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load more threads" }))
 
     expect(mocks.fetchNextPage).toHaveBeenCalledOnce()
+  })
+
+  it("adds AI-related threads the keyword results do not already show", () => {
+    vi.useFakeTimers()
+    render(
+      <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
+    )
+
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "cloud" },
+    })
+    expect(screen.queryByText("Related threads")).toBeNull()
+    act(() => vi.advanceTimersByTime(500))
+
+    expect(screen.getByText("Related threads")).toBeTruthy()
+    expect(screen.getByText("Slack DM fix")).toBeTruthy()
+    expect(screen.getAllByText("Cloud result")).toHaveLength(1)
   })
 
   it("closes on Escape", () => {

@@ -6,7 +6,7 @@ from math import isfinite
 from typing import Literal
 
 import httpx2
-from langchain_typesafe import Choice, TypeSafeClassifier
+from langchain_typesafe import Choice, ClassifierResponse, Question, State, TypeSafeClassifier
 
 from openswe.config import ENV
 from openswe.utils.gateway import gateway_base_url
@@ -41,6 +41,36 @@ async def select_jev_choice[ChoiceT: str](
     return next((choice for choice in criteria if choice == choices[question]), None)
 
 
+class JevUnavailableError(RuntimeError):
+    """Neither a TypeSafe key nor a LangSmith gateway key is configured."""
+
+
+async def classify_with_jev(
+    state: State,
+    questions: Mapping[str, Question],
+    *,
+    timeout: float,
+) -> ClassifierResponse:
+    typesafe_key = ENV.TYPESAFE_API_KEY.optional()
+    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
+    if not typesafe_key and not gateway_key:
+        raise JevUnavailableError("Jev needs TYPESAFE_API_KEY or a LangSmith gateway key")
+    async with (
+        asyncio.timeout(timeout),
+        httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client,
+    ):
+        classifier = TypeSafeClassifier(
+            model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
+            api_key=typesafe_key or gateway_key,
+            **({} if typesafe_key else {"base_url": gateway_base_url()}),
+            async_client=client,
+        )
+        return await classifier.ainvoke(
+            {"state": state, "questions": dict(questions)},
+            config={"tags": ["nostream"]},
+        )
+
+
 async def select_jev_choices(
     task: str,
     *,
@@ -51,29 +81,14 @@ async def select_jev_choices(
     tracked = {question: (decisions or {}).get(question) or JevDecision() for question in questions}
     for decision in tracked.values():
         decision.outcome = "classifier_failure"
-        decision.reason = "missing_credentials"
-    typesafe_key = ENV.TYPESAFE_API_KEY.optional()
-    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-    if not typesafe_key and not gateway_key:
-        logger.warning("Jev classification has no API key", extra={"questions": list(questions)})
-        return results
-    for decision in tracked.values():
         decision.reason = "classifier_error"
     try:
-        async with (
-            asyncio.timeout(JEV_TIMEOUT_SECONDS),
-            httpx2.AsyncClient(transport=pooled_transport(), timeout=JEV_TIMEOUT_SECONDS) as client,
-        ):
-            classifier = TypeSafeClassifier(
-                model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
-                api_key=typesafe_key or gateway_key,
-                **({} if typesafe_key else {"base_url": gateway_base_url()}),
-                async_client=client,
-            )
-            response = await classifier.ainvoke(
-                {"state": task, "questions": dict(questions)},
-                config={"tags": ["nostream"]},
-            )
+        response = await classify_with_jev(task, questions, timeout=JEV_TIMEOUT_SECONDS)
+    except JevUnavailableError:
+        for decision in tracked.values():
+            decision.reason = "missing_credentials"
+        logger.warning("Jev classification has no API key", extra={"questions": list(questions)})
+        return results
     except Exception:
         logger.exception("Jev classification failed", extra={"questions": list(questions)})
         return results

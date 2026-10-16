@@ -137,6 +137,16 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
+export interface ThreadSearchParams {
+  q: string
+  scope?: ThreadScope
+  limit?: number
+}
+
+export interface ThreadSearchResults {
+  items: Array<AgentThread & { relevance: number }>
+}
+
 export interface SidebarRepo {
   repoFullName: string
   name: string
@@ -297,6 +307,12 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  searchThreads: ({ q, scope, limit }: ThreadSearchParams) => {
+    const search = new URLSearchParams({ q })
+    if (scope) search.set("scope", scope)
+    if (limit != null) search.set("limit", String(limit))
+    return agentsRequest<ThreadSearchResults>(`/threads/search?${search}`)
+  },
   shareThreadWithWorkspace: (threadId: string) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/share-to-workspace`,
