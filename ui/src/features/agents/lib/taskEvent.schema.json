@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "TaskEventStatus": {
+      "enum": [
+        "success",
+        "error",
+        "timeout",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "TaskRole": {
+      "enum": [
+        "coordinator",
+        "worker"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1,
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "task_id": {
+      "format": "uuid",
+      "title": "Task Id",
+      "type": "string"
+    },
+    "sender_thread_id": {
+      "format": "uuid",
+      "title": "Sender Thread Id",
+      "type": "string"
+    },
+    "sender_role": {
+      "$ref": "#/$defs/TaskRole"
+    },
+    "sender_label": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sender Label"
+    },
+    "kind": {
+      "enum": [
+        "message",
+        "completion"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "status": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaskEventStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "content": {
+      "title": "Content",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "sender_thread_id",
+    "sender_role",
+    "kind",
+    "content"
+  ],
+  "title": "TaskEventMetadata",
+  "type": "object"
+}

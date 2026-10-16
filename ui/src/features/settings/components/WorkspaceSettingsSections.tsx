@@ -3,15 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react"
 import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@langchain/macaw-components/Button"
+import { Select } from "@langchain/macaw-components/Select"
+import { Switch } from "@langchain/macaw-components/Switch"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import {
   useScopedSettings,
@@ -58,14 +52,15 @@ export function TierRow({
       label={label}
       description={description}
       badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
-      badgeClassName={!inherits ? "text-destructive" : undefined}
+      badgeClassName={!inherits ? "text-error-secondary" : undefined}
       control={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-space-2">
           {control}
           {scoped && !inherits && (
             <Button
-              size="sm"
-              variant="ghost"
+              size="xs"
+              color="secondary"
+              variant="plain"
               onClick={() => settings.reset(...fields)}
               aria-label={`Reset ${label} to the instance value`}
             >
@@ -96,7 +91,7 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
       title="LLM Gateway"
       description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. Requires the gateway (private beta) enabled for your organization."
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-default">
         <TierRow
           settings={settings}
           fields={["gateway_enabled"]}
@@ -108,26 +103,18 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
           }
           control={
             <Select
-              items={modes}
+              aria-label="Route through the gateway"
+              options={modes}
               value={mode}
-              onValueChange={(next) => {
-                const value = gatewayModeValue(next as GatewayMode)
+              onChange={(next) => {
+                if (!next) return
+                const value = gatewayModeValue(next)
                 if (value === null && scoped) settings.reset("gateway_enabled")
                 else settings.save({ gateway_enabled: value })
               }}
               disabled={!settings.data}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {modes.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              triggerClassName="w-48"
+            />
           }
         />
       </div>
@@ -147,14 +134,14 @@ export function DefaultRepoSection({
   const scoped = scope.kind === "workspace"
   return (
     <SettingsSection
-      title="Default repository"
+      title="Default Repository"
       description={
         scoped
           ? "Where a run in this workspace lands when nothing names a repository. Any repository the GitHub App can access will do."
           : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
       }
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-default">
         <TierRow
           settings={settings}
           fields={["default_repo"]}
@@ -169,8 +156,7 @@ export function DefaultRepoSection({
                 onRepoChange={(repo) => settings.save({ default_repo: repo })}
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
-                dropdownClassName="w-56"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
                 disabled={!settings.data}
               />
             </div>
@@ -216,14 +202,24 @@ function ModelRow({
       settings={settings}
       fields={[modelField, effortField]}
       label={label}
-      description={description}
+      description={
+        modelField === "default_agent_subagent_model"
+          ? `${description} When this matches the main agent's model, effort follows the parent run. Saved effort applies only to a different model.`
+          : description
+      }
       control={
         <ModelPairControl
+          label={label}
           models={models}
           model={settings.data?.[modelField] ?? null}
           effort={settings.data?.[effortField] ?? null}
           onChange={(model, effort) => settings.save(patch(model, effort))}
           disabled={!settings.data}
+          parentModel={
+            modelField === "default_agent_subagent_model"
+              ? settings.data?.default_agent_model
+              : undefined
+          }
           inheritLabel={
             inheritLabel && settings.scope.kind === "workspace"
               ? "Inherit instance setting"
@@ -255,14 +251,14 @@ export function ModelDefaultsSection({
 
   return (
     <SettingsSection
-      title="Model defaults"
+      title="Model Defaults"
       description={
         scoped
-          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Per-user Cloud Agent selections override the agent defaults."
-          : "Models for runs in every workspace that does not override them. Per-user Cloud Agent selections override the agent defaults."
+          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
+          : "Models for runs in every workspace that does not override them. Each user's Agent settings override the agent defaults."
       }
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-default">
         <TierRow
           settings={settings}
           fields={["model_routing_enabled"]}
@@ -270,8 +266,9 @@ export function ModelDefaultsSection({
           description="Automatically choose a model for each turn. Users can still override this in their personal settings."
           control={
             <Switch
+              aria-label="Adaptive model routing"
               checked={settings.data?.model_routing_enabled ?? false}
-              onCheckedChange={(next) =>
+              onChange={(next) =>
                 settings.save({ model_routing_enabled: next })
               }
               disabled={!settings.data}
@@ -361,11 +358,14 @@ export function ModelDefaultsSection({
 }
 
 interface ModelPairControlProps {
+  /** Names the pickers for assistive tech, e.g. "Open SWE Agent model". */
+  label: string
   models: Array<ModelOption>
   model: string | null
   effort: string | null
   onChange: (model: string, effort: string) => void
   disabled: boolean
+  parentModel?: string | null
   /**
    * When set, the model dropdown gains a leading "unset" option with this
    * label. Selecting it calls {@link onInherit}; an unset `model` renders as
@@ -379,11 +379,13 @@ const INHERIT_VALUE = "__inherit__"
 
 /** A model and reasoning-effort pair. */
 export function ModelPairControl({
+  label,
   models,
   model,
   effort,
   onChange,
   disabled,
+  parentModel,
   inheritLabel,
   onInherit,
 }: ModelPairControlProps) {
@@ -402,10 +404,13 @@ export function ModelPairControl({
   }, [model, effort, inheritFallback])
 
   const isInherit = localModel === INHERIT_VALUE
+  const inheritsParentEffort = Boolean(
+    parentModel && localModel === parentModel
+  )
   const selectedModel = models.find((m) => m.id === localModel)
   const availableEfforts = selectedModel?.efforts ?? []
 
-  const handleModelChange = (value: string | null) => {
+  const handleModelChange = (value: string | undefined) => {
     if (!value) return
     if (value === INHERIT_VALUE) {
       setLocalModel(INHERIT_VALUE)
@@ -423,47 +428,35 @@ export function ModelPairControl({
     onChange(value, nextEffort)
   }
 
-  const handleEffortChange = (value: string | null) => {
+  const handleEffortChange = (value: string | undefined) => {
     if (!value || !localModel || isInherit) return
     setLocalEffort(value)
     onChange(localModel, value)
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-space-2">
       <Select
-        items={modelItems}
-        value={localModel}
-        onValueChange={handleModelChange}
+        aria-label={`${label} model`}
+        options={modelItems}
+        value={localModel || undefined}
+        onChange={handleModelChange}
         disabled={disabled}
-      >
-        <SelectTrigger className="w-40">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {modelItems.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        triggerClassName="w-40"
+      />
       <Select
-        value={localEffort}
-        onValueChange={handleEffortChange}
-        disabled={disabled || !localModel || isInherit}
-      >
-        <SelectTrigger className="w-28">
-          <SelectValue placeholder="effort" />
-        </SelectTrigger>
-        <SelectContent>
-          {availableEfforts.map((e) => (
-            <SelectItem key={e} value={e}>
-              {e}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        aria-label={`${label} reasoning effort`}
+        placeholder="effort"
+        options={
+          inheritsParentEffort
+            ? [{ value: INHERIT_VALUE, label: "Parent run" }]
+            : availableEfforts.map((e) => ({ value: e, label: e }))
+        }
+        value={inheritsParentEffort ? INHERIT_VALUE : localEffort || undefined}
+        onChange={handleEffortChange}
+        disabled={disabled || !localModel || isInherit || inheritsParentEffort}
+        triggerClassName="w-28"
+      />
     </div>
   )
 }

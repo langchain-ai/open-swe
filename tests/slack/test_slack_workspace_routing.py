@@ -1,37 +1,36 @@
 """Slack-started threads route through the shared workspace resolver.
 
 Resolution order is tag, repository, Slack channel, the triggering user's
-default, then the instance default -- see ``agent.workspaces.routing``. These
+default, then the instance default -- see ``openswe.workspaces.routing``. These
 tests cover the tag spelling change and one end-to-end dispatch through
 channel routing; ``tests/workspaces/test_routing.py`` covers the resolver
 itself.
 """
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.dashboard.workspace_settings import (
+from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from agent.run_config import Repo
-from agent.slack import webhook as slack_webhooks
-from agent.slack.request import SlackRequest
-from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import FakeStore
+from openswe.run_config import Repo
+from openswe.slack import webhook as slack_webhooks
+from openswe.slack.request import SlackRequest
+from openswe.webhooks import common as webhook_common
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
-# Workspaces are rows; workspace settings are still Store records, so the tests that
-# read one keep the store double as well.
+# Workspaces are rows.
 _needs_workspace_rows = pytest.mark.usefixtures("registry_db")
 
 
 @_needs_workspace_rows
 async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An image in a bound channel is checked against that workspace's model.
 
@@ -57,6 +56,11 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
         return None
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(
+        webhook_common.ThreadRecord,
+        "read",
+        AsyncMock(return_value=webhook_common.ThreadRecord(exists=False, metadata={})),
+    )
     monkeypatch.setattr(webhook_common, "fetch_slack_thread_messages", fake_thread_messages)
     monkeypatch.setattr(webhook_common, "fetch_image_block", no_image_block)
 
@@ -101,7 +105,6 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
 @pytest.mark.parametrize("inherited_workspace", [None, "oss"])
 async def test_a_bound_channel_outranks_a_named_repository(
     monkeypatch: pytest.MonkeyPatch,
-    fake_store: FakeStore,
     inherited_workspace: str | None,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -111,6 +114,11 @@ async def test_a_bound_channel_outranks_a_named_repository(
         return False
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(
+        webhook_common.ThreadRecord,
+        "read",
+        AsyncMock(return_value=webhook_common.ThreadRecord(exists=False, metadata={})),
+    )
 
     await WORKSPACES.create(WorkspaceCreate(name="Internal", repos=["acme/internal"]), "alice")
     await WORKSPACES.create(
@@ -123,7 +131,7 @@ async def test_a_bound_channel_outranks_a_named_repository(
             "thread_ts": "1700000000.000100",
             "event_ts": "1700000000.000200",
             "user_id": "U123",
-            "text": "<@UBOT> workspace:internal hello" if inherited_workspace else "<@UBOT> hello",
+            "text": "<@UBOT> /workspace:internal hello" if inherited_workspace else "<@UBOT> hello",
             "bot_user_id": "UBOT",
         }
     )

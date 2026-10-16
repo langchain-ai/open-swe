@@ -13,6 +13,6 @@ import patches  # noqa: E402
 
 patches.apply()
 
-from agent.review_scout.graph import traced_review_scout  # noqa: E402
+from openswe.review_scout.graph import traced_review_scout  # noqa: E402
 
 __all__ = ["traced_review_scout"]

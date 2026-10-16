@@ -7,6 +7,7 @@ const FALLBACK_LOCATION = "/agents"
 export const SECTION_ROOTS = [
   "/agents/skills",
   "/agents/automations",
+  "/agents/bots",
   "/agents/reviews",
   "/incidents",
 ] as const

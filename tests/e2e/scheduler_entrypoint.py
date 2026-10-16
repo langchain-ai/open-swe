@@ -15,6 +15,6 @@ import patches  # noqa: E402
 
 patches.apply()
 
-from agent.scheduler import get_scheduler  # noqa: E402
+from openswe.scheduler import get_scheduler  # noqa: E402
 
 __all__ = ["get_scheduler"]

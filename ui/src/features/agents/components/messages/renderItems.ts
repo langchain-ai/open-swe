@@ -1,4 +1,8 @@
 import { parseSqlResult } from "../chat/SqlResultTable"
+import {
+  parseManagedToolsCard,
+  type ManagedToolsCardOffer,
+} from "@/features/agents/lib/managedToolsCard"
 import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
 
 export type RenderItem =
@@ -23,7 +27,12 @@ export type RenderItem =
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
-  | { type: "connection-item"; key: string; chunk: ToolExecutionChunk }
+  | {
+      type: "managed-tools-item"
+      key: string
+      chunk: ToolExecutionChunk
+      offer: ManagedToolsCardOffer
+    }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
@@ -31,14 +40,20 @@ export type RenderItem =
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
-  "connection-item",
+  "managed-tools-item",
   "iframe-item",
 ])
 
-export function splitWorkAndReply(items: Array<RenderItem>): {
-  workItems: Array<RenderItem>
-  replyItems: Array<RenderItem>
-} {
+/** A run of work that folds behind one row, or a reply shown between such runs. */
+export type TurnSegment =
+  | { type: "reply"; item: RenderItem }
+  | { type: "work"; key: string; items: Array<RenderItem> }
+
+/**
+ * Splits a turn at every reply so each stretch of work folds on its own, in the
+ * order it happened. Trailing prose is the turn's answer, so it stays a reply.
+ */
+export function segmentTurn(items: Array<RenderItem>): Array<TurnSegment> {
   let trailingReplyIndex = items.length
   while (trailingReplyIndex > 0) {
     const prev = items[trailingReplyIndex - 1]
@@ -46,21 +61,20 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
     trailingReplyIndex -= 1
   }
 
-  const workItems: Array<RenderItem> = []
-  const replyItems: Array<RenderItem> = []
+  const segments: Array<TurnSegment> = []
   items.forEach((item, index) => {
     if (
-      item.type === "reply-item" ||
-      item.type === "connection-item" ||
-      item.type === "iframe-item" ||
-      index >= trailingReplyIndex
+      index >= trailingReplyIndex ||
+      (item.type !== "text-chunk" && REPLY_ITEM_TYPES.has(item.type))
     ) {
-      replyItems.push(item)
-    } else {
-      workItems.push(item)
+      segments.push({ type: "reply", item })
+      return
     }
+    const last = segments.at(-1)
+    if (last?.type === "work") last.items.push(item)
+    else segments.push({ type: "work", key: `work-${item.key}`, items: [item] })
   })
-  return { workItems, replyItems }
+  return segments
 }
 
 function toolNeedsAttention(
@@ -102,16 +116,12 @@ function attentionItems(
   return []
 }
 
-export function selectCollapsedTurnItems(
+/** The entries of a folded stretch of work that stay visible: approvals, errors, and optionally unfinished calls. */
+export function collapsedWorkItems(
   items: Array<RenderItem>,
   includeUnfinished = false
 ): Array<RenderItem> {
-  const { replyItems } = splitWorkAndReply(items)
-  const replyKeys = new Set(replyItems.map((item) => item.key))
-
-  return items.flatMap((item) =>
-    replyKeys.has(item.key) ? [item] : attentionItems(item, includeUnfinished)
-  )
+  return items.flatMap((item) => attentionItems(item, includeUnfinished))
 }
 
 export function countWorkActions(items: Array<RenderItem>): number {
@@ -266,6 +276,10 @@ export function buildRenderItems(
       }
 
       flushGroups()
+      const offer =
+        chunk.toolKind === "managed-tools"
+          ? parseManagedToolsCard(chunk.output)
+          : null
 
       if (isEditTool(chunk)) {
         items.push({
@@ -285,14 +299,12 @@ export function buildRenderItems(
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })
-      } else if (
-        chunk.toolKind === "service-connection" &&
-        chunk.input?.service === "notion"
-      ) {
+      } else if (offer) {
         items.push({
-          type: "connection-item",
+          type: "managed-tools-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
+          offer,
         })
       } else if (isReplyTool(chunk)) {
         items.push({

@@ -1,7 +1,10 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 
 import { AutomationEditor } from "@/features/automations/components/AutomationEditor"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/macaw-components/Button"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { CalendarXIcon } from "@phosphor-icons/react/dist/ssr/CalendarX"
 import { useAgentSchedules } from "@/features/agents/lib/queries"
 import { pageTitle } from "@/lib/pageTitle"
 
@@ -17,9 +20,9 @@ function EditAutomationPage() {
 
   if (schedulesQuery.isLoading) {
     return (
-      <div className="mx-auto w-full max-w-3xl px-6 py-10">
+      <div className="mx-auto w-full max-w-3xl px-space-5 py-space-7">
         <Skeleton className="h-9 w-64" />
-        <Skeleton className="mt-6 h-32 w-full" />
+        <Skeleton className="mt-space-5 h-32 w-full" />
       </div>
     )
   }
@@ -29,16 +32,20 @@ function EditAutomationPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
-      <p className="text-xs text-muted-foreground">
-        This automation could not be found.
-      </p>
-      <Link
-        to="/agents/automations"
-        className="mt-3 inline-block text-xs text-primary hover:underline"
-      >
-        Back to Automations
-      </Link>
-    </div>
+    <EmptyState
+      className="mx-auto w-full max-w-3xl px-space-5 py-space-9"
+      icon={CalendarXIcon}
+      title="Automation not found"
+      description="This automation could not be found."
+      action={
+        <Button
+          as={<Link to="/agents/automations" />}
+          color="secondary"
+          variant="outlined"
+        >
+          Back to Automations
+        </Button>
+      }
+    />
   )
 }

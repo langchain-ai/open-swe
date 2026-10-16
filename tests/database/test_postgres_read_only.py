@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from agent.database import postgres
+from openswe.database import postgres
 
 
 async def test_read_only_transaction_rejects_writes(registry_db: None) -> None:
@@ -12,11 +12,11 @@ async def test_read_only_transaction_rejects_writes(registry_db: None) -> None:
             await conn.execute(text("CREATE TABLE forbidden_write (id INTEGER)"))
 
 
-async def test_read_only_transaction_rolls_back_and_invalidates_connection(
+async def test_untrusted_read_only_transaction_discards_session_state(
     registry_db: None,
 ) -> None:
     lock_key = 815_196_729
-    async with postgres.read_only_transaction() as conn:
+    async with postgres.untrusted_read_only_transaction() as conn:
         await conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": lock_key})
 
     async with postgres.connection() as conn:

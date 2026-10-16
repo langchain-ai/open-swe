@@ -1,29 +1,21 @@
 import {
-  arrayAt,
   isRecord,
-  numberAt,
   parseJson,
   recordAt,
   stringAt,
   type JsonObject,
 } from "./json.ts"
 import type { Credential } from "./credentials.ts"
-import {
-  identitySchema,
-  threadsPageSchema,
-  type Identity,
-  type ThreadsPage,
-} from "./threads.ts"
-import {
-  humanReviewDismissSchema,
-  humanReviewRequestSchema,
-  pullRequestApiPath,
-  type HumanReviewDismissResult,
-  type HumanReviewRequestResult,
-} from "./review.ts"
-import { uploadedThreadSchema } from "./upload.ts"
-import { cliToolSchema, type CliTool } from "./mcp-catalog.ts"
+import { BridgeHttpApi } from "open-swe-bridge-client"
 import * as z from "zod"
+
+const identitySchema = z.object({
+  login: z.string(),
+  email: z.string().nullish(),
+  is_admin: z.boolean().nullish(),
+})
+
+export type Identity = z.infer<typeof identitySchema>
 
 export class ApiError extends Error {
   constructor(
@@ -42,29 +34,10 @@ export class ProtocolError extends Error {
   }
 }
 
-export interface BridgeSession {
-  bridgeId: string
-  heartbeatIntervalSeconds: number
-  aliveThresholdSeconds: number
-}
-
 /** A pre-encoded request body and the headers that describe it. */
 interface RawBody {
   data: Uint8Array
   headers: Record<string, string>
-}
-
-export interface BridgeRequest {
-  requestId: string
-  method: string
-  params: Record<string, unknown>
-}
-
-export interface CreateBridgeInput {
-  rootPath: string
-  hostname: string
-  label: string | null
-  bridgeId: string | null
 }
 
 export interface EventStreamInput {
@@ -73,8 +46,6 @@ export interface EventStreamInput {
   depth: number
   since: number
 }
-
-export type BridgeReply = { result: JsonObject } | { error: string }
 
 const MAX_DETAIL_CHARS = 600
 
@@ -182,163 +153,11 @@ export class ApiClient {
     await this.send("GET", "/threads?limit=1")
   }
 
-  async listThreadsPage(query: URLSearchParams): Promise<ThreadsPage> {
-    const parsed = threadsPageSchema.safeParse(
-      await this.json("GET", `/threads/page?${query}`)
+  /** The bridge routes, for `Bridge` to serve this machine through. */
+  bridges(): BridgeHttpApi {
+    return new BridgeHttpApi((method, path, options) =>
+      this.json(method, path, options)
     )
-    if (!parsed.success)
-      throw new ProtocolError("/threads/page response is malformed")
-    return parsed.data
-  }
-
-  async mcpTools(): Promise<CliTool[]> {
-    const result = z
-      .array(cliToolSchema)
-      .safeParse(await this.json("GET", "/cli/mcp/tools"))
-    if (!result.success)
-      throw new ProtocolError("/cli/mcp/tools response is malformed")
-    return result.data
-  }
-
-  async mcpInvoke(
-    name: string,
-    args: Record<string, unknown>
-  ): Promise<unknown> {
-    return this.json("POST", `/cli/mcp/tools/${encodeURIComponent(name)}`, {
-      body: args,
-    })
-  }
-
-  /** Create a thread from a gzipped JSONL session upload; returns its id. */
-  async uploadSession(gzippedJsonl: Uint8Array): Promise<string> {
-    const parsed = uploadedThreadSchema.safeParse(
-      await this.json("POST", "/threads/uploads", {
-        raw: {
-          data: gzippedJsonl,
-          headers: {
-            "Content-Type": "application/x-ndjson",
-            "Content-Encoding": "gzip",
-          },
-        },
-      })
-    )
-    if (!parsed.success)
-      throw new ProtocolError("/threads/uploads response is malformed")
-    return parsed.data.id
-  }
-
-  /** Post a Slack review card for a pull request, or return (and re-summarize) the open one. */
-  async requestHumanReview(
-    prUrl: string,
-    body: { inline_summary: string; channel?: string }
-  ): Promise<HumanReviewRequestResult> {
-    const parsed = humanReviewRequestSchema.safeParse(
-      await this.json("POST", `${pullRequestApiPath(prUrl)}/human-review`, {
-        body,
-      })
-    )
-    if (!parsed.success)
-      throw new ProtocolError("human review response is malformed")
-    return parsed.data
-  }
-
-  /** Dismiss a pull request's open review request, as its card's Dismiss button does. */
-  async dismissHumanReviewRequest(
-    prUrl: string,
-    body: { reason?: string }
-  ): Promise<HumanReviewDismissResult> {
-    const parsed = humanReviewDismissSchema.safeParse(
-      await this.json(
-        "POST",
-        `${pullRequestApiPath(prUrl)}/human-review/dismiss`,
-        { body }
-      )
-    )
-    if (!parsed.success)
-      throw new ProtocolError("human review dismissal response is malformed")
-    return parsed.data
-  }
-
-  async createBridge(input: CreateBridgeInput): Promise<BridgeSession> {
-    const payload = await this.json("POST", "/bridges", {
-      body: {
-        root_path: input.rootPath,
-        hostname: input.hostname,
-        label: input.label,
-        bridge_id: input.bridgeId,
-      },
-    })
-    if (!isRecord(payload))
-      throw new ProtocolError("bridge response is not an object")
-    const bridgeId = stringAt(payload, "bridge_id")
-    if (!bridgeId)
-      throw new ProtocolError("bridge response is missing bridge_id")
-    return {
-      bridgeId,
-      heartbeatIntervalSeconds:
-        numberAt(payload, "heartbeat_interval_seconds") ?? 15,
-      aliveThresholdSeconds: numberAt(payload, "alive_threshold_seconds") ?? 60,
-    }
-  }
-
-  async heartbeat(bridgeId: string): Promise<void> {
-    await this.send(
-      "POST",
-      `/bridges/${encodeURIComponent(bridgeId)}/heartbeat`
-    )
-  }
-
-  /** Long-poll for requests, naming the ones already running so a lost response is re-offered. */
-  async pollRequests(
-    bridgeId: string,
-    options: {
-      wait: number
-      limit: number
-      held: readonly string[]
-      signal?: AbortSignal
-    }
-  ): Promise<BridgeRequest[]> {
-    const payload = await this.json(
-      "POST",
-      `/bridges/${encodeURIComponent(bridgeId)}/requests/claim`,
-      {
-        body: { wait: options.wait, limit: options.limit, held: options.held },
-        signal: options.signal,
-      }
-    )
-    const entries = arrayAt(isRecord(payload) ? payload : null, "requests")
-    if (entries === null) {
-      throw new ProtocolError("poll response is missing a requests array")
-    }
-    const requests: BridgeRequest[] = []
-    for (const entry of entries) {
-      if (!isRecord(entry)) continue
-      const requestId = stringAt(entry, "request_id")
-      const method = stringAt(entry, "method")
-      if (!requestId || !method) continue
-      requests.push({
-        requestId,
-        method,
-        params: recordAt(entry, "params") ?? {},
-      })
-    }
-    return requests
-  }
-
-  async respond(
-    bridgeId: string,
-    requestId: string,
-    reply: BridgeReply
-  ): Promise<void> {
-    await this.send(
-      "POST",
-      `/bridges/${encodeURIComponent(bridgeId)}/requests/${encodeURIComponent(requestId)}`,
-      { body: reply }
-    )
-  }
-
-  async deleteBridge(bridgeId: string): Promise<void> {
-    await this.send("DELETE", `/bridges/${encodeURIComponent(bridgeId)}`)
   }
 
   /** Start a run on `threadId`; returns the run id when the server reports one. */

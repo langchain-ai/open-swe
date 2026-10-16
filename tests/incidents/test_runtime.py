@@ -9,10 +9,11 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest
 from langchain_core.messages import HumanMessage
 
-from agent.incidents import documents, runtime, service
-from agent.incidents.models import Incident, IncidentPolicy
-from agent.incidents.report import CONTEXT_MARKER
-from agent.slack.channels import SlackChannel
+from openswe.incidents import documents, runtime, service
+from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.incidents.report import CONTEXT_MARKER
+from openswe.slack.channels import SlackChannel
+from openswe.slack.http import SlackRequestError
 
 CHANNEL = {
     "id": "C1",
@@ -26,9 +27,9 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def incident(fake_store, monkeypatch):
+async def incident(registry_db, monkeypatch):
     policy = IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
-    await service.POLICIES.put("default", policy)
+    await service.POLICIES.put(policy)
     record = Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-ctx")
     await service.INCIDENTS.put(record.id, record)
     metadata = {
@@ -45,9 +46,7 @@ async def incident(fake_store, monkeypatch):
         ),
     )
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
-    monkeypatch.setattr(
-        runtime, "post_slack_thread_reply_with_ts", AsyncMock(return_value=("7.0", None))
-    )
+    monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", AsyncMock(return_value="7.0"))
     return SimpleNamespace(record=record, policy=policy, metadata=metadata)
 
 
@@ -86,9 +85,7 @@ async def test_incident_threads_must_be_system_owned_and_public(incident, change
         await runtime.load_incident_session(config())
 
 
-@pytest.mark.parametrize(
-    "identity", [{"github_login": "octocat"}, {"user_email": "o@x.dev"}, {"local_run": True}]
-)
+@pytest.mark.parametrize("identity", [{"github_login": "octocat"}, {"user_email": "o@x.dev"}])
 async def test_incident_runs_cannot_carry_personal_identity(incident, identity):
     with pytest.raises(PermissionError, match="personal"):
         await runtime.load_incident_session(config(**identity))
@@ -112,7 +109,7 @@ async def test_paused_incidents_stop_automatic_turns_but_answer_questions(incide
     session = await runtime.load_incident_session(config(incident_request="status?"))
     assert session.explicit_request == "status?"
 
-    await service.POLICIES.put("default", IncidentPolicy(enabled=False, workspace_id="T1"))
+    await service.POLICIES.put(IncidentPolicy(enabled=False, workspace_id="T1"))
     with pytest.raises(PermissionError, match="disabled"):
         await runtime.IncidentMiddleware(session).awrap_model_call(request(), AsyncMock())
 
@@ -123,10 +120,11 @@ async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
         request(context_message("1.0")), AsyncMock()
     )
     draft = {"summary": [{"text": "Errors reported", "evidence_ids": ["slack:1.0"]}]}
-    runtime.post_slack_thread_reply_with_ts.return_value = (None, "channel_not_found")
+    runtime.post_slack_thread_reply_with_ts.side_effect = SlackRequestError("channel_not_found")
 
     first = await session._record_incident_report(**draft)
-    runtime.post_slack_thread_reply_with_ts.return_value = ("8.0", None)
+    runtime.post_slack_thread_reply_with_ts.side_effect = None
+    runtime.post_slack_thread_reply_with_ts.return_value = "8.0"
     second = await session._record_incident_report(**draft)
     third = await session._record_incident_report(**draft)
 

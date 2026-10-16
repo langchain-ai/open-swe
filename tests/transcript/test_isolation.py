@@ -13,10 +13,10 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
 
-from agent.database import postgres
-from agent.transcript.attachments import PendingAttachment
-from agent.transcript.engine import Command, append, delete_transcript
-from agent.transcript.events import (
+from openswe.database import postgres
+from openswe.transcript.attachments import PendingAttachment
+from openswe.transcript.engine import Command, append, delete_transcript
+from openswe.transcript.events import (
     MessageAttachment,
     MessageSender,
     RunNotice,
@@ -27,20 +27,20 @@ from agent.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
-from agent.transcript.listener import (
+from openswe.transcript.listener import (
     _SUBSCRIBERS,
     DELETED_VERSION,
     _resync_subscribers,
     subscribe,
 )
-from agent.transcript.mirror import mirror_thread_metadata
-from agent.transcript.routes import (
+from openswe.transcript.mirror import mirror_thread_metadata
+from openswe.transcript.routes import (
     _readable_transcript,
     _stream,
     api_get_thread_attachment,
 )
-from agent.transcript.snapshot import load_access, load_snapshot
-from agent.transcript.turns import settle_run_turn
+from openswe.transcript.snapshot import load_access, load_snapshot
+from openswe.transcript.turns import settle_run_turn
 
 OWNER = "test-user"
 

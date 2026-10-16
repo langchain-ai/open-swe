@@ -4,10 +4,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.analytics import queries, segment
-from agent.analytics import routes as analytics_routes
-from agent.dashboard import oauth, routes
-from agent.database import analytics as database
+from openswe.analytics import queries, segment
+from openswe.analytics import routes as analytics_routes
+from openswe.dashboard import oauth, routes
+from openswe.database import analytics as database
 
 
 @pytest.mark.asyncio

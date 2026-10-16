@@ -5,8 +5,8 @@ from typing import Any, cast
 import pytest
 from httpx2 import Response
 
-from agent.github import webhook as github_webhooks
-from agent.webhooks import common as webhook_common
+from openswe.github import webhook as github_webhooks
+from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
@@ -38,9 +38,7 @@ def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
     register_github_logins(monkeypatch, "stranger", "insider")
 
 
-async def test_gate_blocks_non_member_on_public_pr_comment(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -80,9 +78,7 @@ async def test_gate_blocks_non_member_on_public_pr_comment(
     assert seen["calls"] == ["stranger"]
 
 
-async def test_gate_allows_org_member_on_public_pr_comment(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_gate_allows_org_member_on_public_pr_comment(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -122,7 +118,7 @@ async def test_gate_allows_org_member_on_public_pr_comment(
     assert called["event"] == "issue_comment"
 
 
-async def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch, registry_db) -> None:
+async def test_gate_skipped_on_private_repo(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -163,7 +159,7 @@ async def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch, regist
     assert seen["calls"] == []
 
 
-async def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch, registry_db) -> None:
+async def test_gate_disabled_when_env_unset(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch, gate="")
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -204,9 +200,7 @@ async def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch, regist
     assert seen["calls"] == []
 
 
-async def test_gate_blocks_non_member_on_public_issue(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_gate_blocks_non_member_on_public_issue(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -241,7 +235,7 @@ async def test_gate_blocks_non_member_on_public_issue(
 
 
 async def test_review_requested_is_unsupported_before_public_repo_gate(
-    fake_store: Any, monkeypatch, registry_db
+    monkeypatch, registry_db
 ) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
@@ -274,9 +268,7 @@ async def test_review_requested_is_unsupported_before_public_repo_gate(
     assert seen["calls"] == []
 
 
-async def test_internal_bot_comment_never_prompts_the_agent(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_internal_bot_comment_never_prompts_the_agent(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -319,7 +311,7 @@ async def test_internal_bot_comment_never_prompts_the_agent(
 
 @pytest.mark.asyncio
 async def test_is_user_active_org_member_returns_false_when_no_token(monkeypatch) -> None:
-    from agent.github import org_membership as github_org_membership
+    from openswe.github import org_membership as github_org_membership
 
     async def fake_installation(_org: str) -> int:
         return 1
@@ -359,7 +351,7 @@ class _FakeResponse:
 
 
 def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, Any]:
-    from agent.github import org_membership as github_org_membership
+    from openswe.github import org_membership as github_org_membership
 
     seen: dict[str, Any] = {}
 
@@ -384,7 +376,7 @@ def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, An
 
 @pytest.mark.asyncio
 async def test_is_user_active_org_member_handles_404(monkeypatch) -> None:
-    from agent.github import org_membership as github_org_membership
+    from openswe.github import org_membership as github_org_membership
 
     _patch_membership_http(monkeypatch, _FakeResponse(404))
 
@@ -393,7 +385,7 @@ async def test_is_user_active_org_member_handles_404(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_is_user_active_org_member_active(monkeypatch) -> None:
-    from agent.github import org_membership as github_org_membership
+    from openswe.github import org_membership as github_org_membership
 
     seen = _patch_membership_http(monkeypatch, _FakeResponse(200, {"state": "active"}))
 
@@ -403,7 +395,7 @@ async def test_is_user_active_org_member_active(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_is_user_active_org_member_pending_returns_false(monkeypatch) -> None:
-    from agent.github import org_membership as github_org_membership
+    from openswe.github import org_membership as github_org_membership
 
     _patch_membership_http(monkeypatch, _FakeResponse(200, {"state": "pending"}))
 

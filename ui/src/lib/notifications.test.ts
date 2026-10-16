@@ -1,8 +1,10 @@
 /** @vitest-environment jsdom */
 
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { renderHook } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { AgentThread } from "@/features/agents/lib/types"
+import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   NOTIFICATIONS_PREF_KEY,
   showRunNotification,
@@ -37,6 +39,15 @@ const thread: AgentThread = {
   messages: [],
 }
 
+beforeEach(() => {
+  vi.stubGlobal("Notification", FakeNotification)
+  vi.stubGlobal("localStorage", {
+    getItem: vi.fn((key: string) =>
+      key === NOTIFICATIONS_PREF_KEY ? "true" : null
+    ),
+  })
+})
+
 afterEach(() => {
   FakeNotification.instances = []
   vi.restoreAllMocks()
@@ -45,12 +56,6 @@ afterEach(() => {
 
 describe("showRunNotification", () => {
   it("opens the completed thread when the notification is clicked", () => {
-    vi.stubGlobal("Notification", FakeNotification)
-    vi.stubGlobal("localStorage", {
-      getItem: vi.fn((key: string) =>
-        key === NOTIFICATIONS_PREF_KEY ? "true" : null
-      ),
-    })
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {})
     const openThread = vi.fn()
 
@@ -65,5 +70,41 @@ describe("showRunNotification", () => {
     expect(openThread).toHaveBeenCalledOnce()
     expect(openThread).toHaveBeenCalledWith("thread-123")
     expect(notification.close).toHaveBeenCalledOnce()
+  })
+})
+
+describe("useRunCompletionNotifier", () => {
+  it("notifies for the coordinator but keeps independently listed workers quiet", () => {
+    const coordinator: AgentThread = {
+      ...thread,
+      status: "running",
+      taskMembership: { role: "coordinator", taskId: "task-123" },
+    }
+    const worker: AgentThread = {
+      ...thread,
+      id: "worker-123",
+      status: "running",
+      taskMembership: {
+        role: "worker",
+        taskId: "task-123",
+        coordinatorThreadId: coordinator.id,
+      },
+    }
+    const openThread = vi.fn()
+    const { rerender } = renderHook(
+      (threads: Array<AgentThread>) =>
+        useRunCompletionNotifier(threads, undefined, openThread),
+      { initialProps: [coordinator, worker] }
+    )
+
+    rerender([
+      { ...coordinator, status: "finished" },
+      { ...worker, status: "finished" },
+    ])
+
+    expect(FakeNotification.instances).toHaveLength(1)
+    expect(FakeNotification.instances[0]?.options?.tag).toBe(
+      `run-${coordinator.id}`
+    )
   })
 })

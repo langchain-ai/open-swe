@@ -5,9 +5,9 @@ from typing import Any
 import pytest
 from langchain_core.messages import ToolMessage
 
-from agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
+from openswe.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 
-iframe_tool = importlib.import_module("agent.tools.output_iframe")
+iframe_tool = importlib.import_module("openswe.tools.output_iframe")
 
 
 class _Backend:
@@ -73,7 +73,7 @@ async def test_output_iframe_snapshots_html_and_returns_signed_urls(
         "filename": "chart.html",
     }
     assert backend.commands == [
-        "test -f /workspace/project/chart.html && stat -c %s -- /workspace/project/chart.html",
+        "test -f /workspace/project/chart.html && wc -c < /workspace/project/chart.html",
         "mkdir -p -- /workspace/project/.open-swe/iframe-artifacts/artifact-id && "
         + sandbox_wrap_command(
             "/workspace/project/chart.html",

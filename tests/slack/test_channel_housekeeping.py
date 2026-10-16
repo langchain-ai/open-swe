@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.slack import routes as slack_routes
-from agent.slack.payloads import SlackChannelContext
+from openswe.slack import routes as slack_routes
+from openswe.slack.payloads import SlackChannelContext
 
 JOIN = {
     "type": "message",
@@ -39,7 +39,9 @@ def _request(event: dict[str, Any]) -> Request:
 
 @pytest.fixture
 def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
     calls: dict[str, Any] = {
         "verify_slack_signature": lambda **_: True,
         "resolve_slack_channel_context": AsyncMock(

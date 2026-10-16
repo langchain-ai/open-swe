@@ -10,10 +10,10 @@ from uuid import UUID, uuid7
 
 from sqlalchemy import text
 
-from agent.database import postgres
-from agent.transcript import tool_output
-from agent.transcript.engine import Command, append
-from agent.transcript.events import (
+from openswe.database import postgres
+from openswe.transcript import tool_output
+from openswe.transcript.engine import Command, append
+from openswe.transcript.events import (
     MessageAppended,
     MessageCompleted,
     MessageSender,
@@ -26,8 +26,8 @@ from agent.transcript.events import (
     TurnCompleted,
     TurnRequested,
 )
-from agent.transcript.rebuild import rebuild_thread_projections
-from agent.transcript.snapshot import TranscriptSnapshot, load_snapshot
+from openswe.transcript.rebuild import rebuild_thread_projections
+from openswe.transcript.snapshot import TranscriptSnapshot, load_snapshot
 
 OWNER = "test-user"
 TOOL_OUTPUT = "line of output\n" * 500

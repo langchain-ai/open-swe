@@ -14,11 +14,11 @@ exa_py_stub = types.ModuleType("exa_py")
 exa_py_stub.__dict__["Exa"] = object
 sys.modules.setdefault("exa_py", exa_py_stub)
 
-importlib.import_module("agent.tools.fetch_url")
-importlib.import_module("agent.tools.http_request")
-fetch_url_tool = sys.modules["agent.tools.fetch_url"]
-http_request_tool = sys.modules["agent.tools.http_request"]
-url_safety = importlib.import_module("agent.utils.url_safety")
+importlib.import_module("openswe.tools.fetch_url")
+importlib.import_module("openswe.tools.http_request")
+fetch_url_tool = sys.modules["openswe.tools.fetch_url"]
+http_request_tool = sys.modules["openswe.tools.http_request"]
+url_safety = importlib.import_module("openswe.utils.url_safety")
 
 _NO_JSON = object()
 
@@ -117,9 +117,8 @@ def _patch_public_dns(monkeypatch) -> None:
 
 
 def test_resolve_and_validate_rejects_unsupported_scheme() -> None:
-    is_safe, reason, _, _ = url_safety.resolve_and_validate("ftp://example.com/x")
-    assert is_safe is False
-    assert "scheme" in reason.lower()
+    with pytest.raises(url_safety.UnsafeUrlError, match="scheme"):
+        url_safety.resolve_and_validate("ftp://example.com/x")
 
 
 @pytest.mark.parametrize(
@@ -132,10 +131,9 @@ def test_resolve_and_validate_rejects_private_ranges(monkeypatch, ip: str) -> No
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info(ip, port)],
     )
-    is_safe, reason, hostname, _ = url_safety.resolve_and_validate("http://evil.test/")
-    assert is_safe is False
-    assert "blocked address" in reason
-    assert hostname == "evil.test"
+    with pytest.raises(url_safety.UnsafeUrlError, match="blocked address") as raised:
+        url_safety.resolve_and_validate("http://evil.test/")
+    assert raised.value.url == "http://evil.test/"
 
 
 def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
@@ -144,13 +142,9 @@ def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info("93.184.216.34", port)],
     )
-    is_safe, reason, hostname, addr_infos = url_safety.resolve_and_validate(
-        "https://example.com/path"
-    )
-    assert is_safe is True
-    assert reason == ""
+    hostname, addresses = url_safety.resolve_and_validate("https://example.com/path")
     assert hostname == "example.com"
-    assert addr_infos[0][4][0] == "93.184.216.34"
+    assert addresses == ["93.184.216.34"]
 
 
 def test_pinned_url_rewrites_host_to_ip_keeping_path_and_port() -> None:

@@ -6,7 +6,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
+from openswe.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 
 
 def _make_request(messages: list[object], model: object | None = None) -> ModelRequest[None]:

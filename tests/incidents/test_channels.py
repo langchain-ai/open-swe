@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
-from agent.incidents import channels, service, turns
-from agent.incidents.models import Incident, IncidentPolicy
-from agent.slack.channels import SlackChannel
+from openswe.incidents import channels, service, turns
+from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",
@@ -25,10 +25,8 @@ CHANNEL = {
 
 
 @pytest.fixture
-async def configured(fake_store, monkeypatch):
-    await service.POLICIES.put(
-        "default", IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
-    )
+async def configured(registry_db, monkeypatch):
+    await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1"))
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(channels.User, "login_for_slack", AsyncMock(return_value="sre"))
@@ -54,9 +52,7 @@ async def configured(fake_store, monkeypatch):
     )
     monkeypatch.setattr(channels, "resolve_slack_thread_id", AsyncMock(return_value="thread-1"))
     monkeypatch.setattr(channels, "upsert_agent_thread_metadata", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        channels, "post_slack_thread_reply_with_ts", AsyncMock(return_value=("5.0", None))
-    )
+    monkeypatch.setattr(channels, "post_slack_thread_reply_with_ts", AsyncMock(return_value="5.0"))
     monkeypatch.setattr(
         channels,
         "fetch_slack_thread_messages",
@@ -70,7 +66,7 @@ async def configured(fake_store, monkeypatch):
         ),
     )
     threads = SimpleNamespace(update=AsyncMock())
-    monkeypatch.setattr(channels, "store_client", lambda: SimpleNamespace(threads=threads))
+    monkeypatch.setattr(channels, "get_client", lambda: SimpleNamespace(threads=threads))
     monkeypatch.setattr(turns, "queue_context", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "schedule_automatic_turn", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "dispatch_turn", AsyncMock(return_value={"run_id": "r1"}))
@@ -204,7 +200,6 @@ async def test_resume_reschedules_when_context_is_waiting(enrolled):
 
 async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
     await service.POLICIES.put(
-        "default",
         IncidentPolicy(
             enabled=True, workspace_id="T1", slack_app_id="A1", excluded_channel_ids=["C1"]
         ),

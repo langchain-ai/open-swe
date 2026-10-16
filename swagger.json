@@ -136,6 +136,7 @@
             "type": "string"
           },
           "created_at": {
+            "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
@@ -170,6 +171,147 @@
           "created_at"
         ],
         "title": "AllowedSlackBot",
+        "type": "object"
+      },
+      "AllowedSlackBotEntry": {
+        "description": "What any signed-in user may see of an allowed bot: enough to name its threads.",
+        "properties": {
+          "image_url": {
+            "default": "",
+            "title": "Image Url",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "AllowedSlackBotEntry",
+        "type": "object"
+      },
+      "AnnouncementCreate": {
+        "properties": {
+          "test": {
+            "default": false,
+            "title": "Test",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 3000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AnnouncementCreate",
+        "type": "object"
+      },
+      "AnnouncementSent": {
+        "properties": {
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "test": {
+            "title": "Test",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "test",
+          "recipients"
+        ],
+        "title": "AnnouncementSent",
+        "type": "object"
+      },
+      "AnnouncementSummary": {
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "author",
+          "created_at",
+          "finished_at",
+          "recipients",
+          "sent",
+          "failed"
+        ],
+        "title": "AnnouncementSummary",
+        "type": "object"
+      },
+      "AnnouncementsView": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AnnouncementSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recipients",
+          "items"
+        ],
+        "title": "AnnouncementsView",
         "type": "object"
       },
       "ApiKeyCreate": {
@@ -483,6 +625,16 @@
             ],
             "title": "Delegated From Sandbox Id"
           },
+          "expedited_exclusions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExpeditedExclusions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "request_method": {
             "anyOf": [
               {
@@ -522,6 +674,58 @@
               }
             ],
             "title": "Response Status Code"
+          },
+          "settings_changes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "const": "[REDACTED]",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "propertyNames": {
+                    "enum": [
+                      "before",
+                      "after"
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Changes"
+          },
+          "settings_scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "instance",
+                  "workspace"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Scope"
           },
           "source": {
             "default": "http",
@@ -590,7 +794,7 @@
         "properties": {
           "options": {
             "items": {
-              "$ref": "#/components/schemas/agent__utils__json_types__JsonObject"
+              "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
             },
             "title": "Options",
             "type": "array"
@@ -643,6 +847,15 @@
               }
             ],
             "title": "Bridge Id"
+          },
+          "client": {
+            "default": "cli",
+            "enum": [
+              "cli",
+              "desktop"
+            ],
+            "title": "Client",
+            "type": "string"
           },
           "hostname": {
             "title": "Hostname",
@@ -740,69 +953,6 @@
           "requests"
         ],
         "title": "BridgeRequestsResponse",
-        "type": "object"
-      },
-      "CLIArguments": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "title": "CLIArguments",
-        "type": "object"
-      },
-      "CLIResult": {
-        "properties": {
-          "content": {
-            "$ref": "#/components/schemas/JsonValue"
-          },
-          "status": {
-            "enum": [
-              "success",
-              "error"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "content"
-        ],
-        "title": "CLIResult",
-        "type": "object"
-      },
-      "CLITool": {
-        "properties": {
-          "access": {
-            "enum": [
-              "session",
-              "admin"
-            ],
-            "title": "Access",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "parameters": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Parameters",
-            "type": "object"
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "parameters",
-          "access"
-        ],
-        "title": "CLITool",
         "type": "object"
       },
       "ChallengeResponse": {
@@ -1034,7 +1184,7 @@
               "discriminator": {
                 "mapping": {
                   "line": "#/components/schemas/LineComment",
-                  "thread": "#/components/schemas/ThreadComment"
+                  "thread": "#/components/schemas/ThreadComment-Input"
                 },
                 "propertyName": "kind"
               },
@@ -1043,7 +1193,7 @@
                   "$ref": "#/components/schemas/LineComment"
                 },
                 {
-                  "$ref": "#/components/schemas/ThreadComment"
+                  "$ref": "#/components/schemas/ThreadComment-Input"
                 }
               ]
             },
@@ -1090,6 +1240,25 @@
         "title": "CommentBody",
         "type": "object"
       },
+      "ConnectedService": {
+        "description": "A service in the gateway this person has connected.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "tool_count"
+        ],
+        "title": "ConnectedService",
+        "type": "object"
+      },
       "Conversation": {
         "properties": {
           "items": {
@@ -1097,6 +1266,7 @@
               "discriminator": {
                 "mapping": {
                   "comment": "#/components/schemas/ConversationComment",
+                  "commit": "#/components/schemas/ConversationCommit",
                   "review": "#/components/schemas/ConversationReview"
                 },
                 "propertyName": "kind"
@@ -1107,15 +1277,26 @@
                 },
                 {
                   "$ref": "#/components/schemas/ConversationReview"
+                },
+                {
+                  "$ref": "#/components/schemas/ConversationCommit"
                 }
               ]
             },
             "title": "Items",
             "type": "array"
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewThread"
+            },
+            "title": "Threads",
+            "type": "array"
           }
         },
         "required": [
-          "items"
+          "items",
+          "threads"
         ],
         "title": "Conversation",
         "type": "object"
@@ -1126,6 +1307,10 @@
             "title": "Avatar Url",
             "type": "string"
           },
+          "bot": {
+            "title": "Bot",
+            "type": "boolean"
+          },
           "login": {
             "title": "Login",
             "type": "string"
@@ -1133,7 +1318,8 @@
         },
         "required": [
           "login",
-          "avatar_url"
+          "avatar_url",
+          "bot"
         ],
         "title": "ConversationAuthor",
         "type": "object"
@@ -1198,6 +1384,52 @@
         "title": "ConversationCommentCreate",
         "type": "object"
       },
+      "ConversationCommit": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "kind": {
+            "const": "commit",
+            "default": "commit",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "author",
+          "created_at",
+          "message",
+          "html_url"
+        ],
+        "title": "ConversationCommit",
+        "type": "object"
+      },
       "ConversationRef": {
         "properties": {
           "id": {
@@ -1240,10 +1472,6 @@
             "title": "Id",
             "type": "integer"
           },
-          "inline_comment_count": {
-            "title": "Inline Comment Count",
-            "type": "integer"
-          },
           "kind": {
             "const": "review",
             "default": "review",
@@ -1267,8 +1495,7 @@
           "created_at",
           "body",
           "html_url",
-          "state",
-          "inline_comment_count"
+          "state"
         ],
         "title": "ConversationReview",
         "type": "object"
@@ -1366,6 +1593,13 @@
         ],
         "title": "CreateResponseRequest",
         "type": "object"
+      },
+      "CredentialKind": {
+        "enum": [
+          "oauth",
+          "secret"
+        ],
+        "type": "string"
       },
       "CustomToolCallItem": {
         "properties": {
@@ -1476,6 +1710,135 @@
         "title": "EnabledReviewRepoUpdate",
         "type": "object"
       },
+      "ExcludedHunk": {
+        "additionalProperties": false,
+        "description": "A hunk left off the card.",
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "guideline": {
+            "title": "Guideline",
+            "type": "string"
+          },
+          "header": {
+            "title": "Header",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "digest",
+          "header",
+          "additions",
+          "deletions",
+          "guideline",
+          "reason"
+        ],
+        "title": "ExcludedHunk",
+        "type": "object"
+      },
+      "Exclusion": {
+        "description": "Changes the agent judged to qualify under the target repository's APPROVALS.md.",
+        "properties": {
+          "guideline": {
+            "title": "Guideline",
+            "type": "string"
+          },
+          "hunks": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Hunks",
+            "type": "array"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "guideline",
+          "reason"
+        ],
+        "title": "Exclusion",
+        "type": "object"
+      },
+      "ExpeditedExclusions": {
+        "additionalProperties": false,
+        "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
+        "properties": {
+          "approvals_md_sha256": {
+            "title": "Approvals Md Sha256",
+            "type": "string"
+          },
+          "base_sha": {
+            "title": "Base Sha",
+            "type": "string"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "hunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedHunk"
+            },
+            "title": "Hunks",
+            "type": "array"
+          },
+          "pull_request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request Id"
+          },
+          "requested": {
+            "items": {
+              "$ref": "#/components/schemas/Exclusion"
+            },
+            "title": "Requested",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_sha",
+          "head_sha",
+          "approvals_md_sha256",
+          "requested"
+        ],
+        "title": "ExpeditedExclusions",
+        "type": "object"
+      },
       "FeedbackResponse": {
         "properties": {
           "errors": {
@@ -1492,6 +1855,29 @@
           }
         },
         "title": "FeedbackResponse",
+        "type": "object"
+      },
+      "FeedbackSubmission": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "maxLength": 3000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "rating": {
+            "enum": [
+              "helpful",
+              "unhelpful"
+            ],
+            "title": "Rating",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rating"
+        ],
+        "title": "FeedbackSubmission",
         "type": "object"
       },
       "FileChangeKind": {
@@ -1576,6 +1962,113 @@
         "title": "FunctionCallItem",
         "type": "object"
       },
+      "Gateway": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tool_count"
+        ],
+        "title": "Gateway",
+        "type": "object"
+      },
+      "GatewayStatus": {
+        "description": "What one person sees for a gateway: every service connected, or what is left.",
+        "properties": {
+          "all_required": {
+            "default": false,
+            "title": "All Required",
+            "type": "boolean"
+          },
+          "connected": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedService"
+            },
+            "title": "Connected",
+            "type": "array"
+          },
+          "gateway": {
+            "$ref": "#/components/schemas/Gateway"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/MissingCredential"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "tool_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Count"
+          }
+        },
+        "required": [
+          "gateway",
+          "ready"
+        ],
+        "title": "GatewayStatus",
+        "type": "object"
+      },
+      "GitHubTrigger": {
+        "description": "Fires on events in one repository; its runs work in that repository.",
+        "properties": {
+          "events": {
+            "items": {
+              "enum": [
+                "issues.opened",
+                "pull_request.opened",
+                "pull_request.closed",
+                "pull_request.merged"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Events",
+            "type": "array"
+          },
+          "kind": {
+            "const": "github",
+            "default": "github",
+            "title": "Kind",
+            "type": "string"
+          },
+          "repo": {
+            "minLength": 3,
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "events"
+        ],
+        "title": "GitHubTrigger",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1606,6 +2099,37 @@
           "message"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HumanReviewAvailability": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "blockers": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "permalink": {
+            "default": "",
+            "title": "Permalink",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "active"
+        ],
+        "title": "HumanReviewAvailability",
         "type": "object"
       },
       "HumanReviewDismissBody": {
@@ -1850,6 +2374,24 @@
         "type": "string"
       },
       "JsonValue": {},
+      "LabelChange": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "selected"
+        ],
+        "title": "LabelChange",
+        "type": "object"
+      },
       "LineComment": {
         "description": "A comment on diff lines that lives only in the agent's prompt, not on GitHub.",
         "properties": {
@@ -1904,6 +2446,74 @@
           "body"
         ],
         "title": "LineComment",
+        "type": "object"
+      },
+      "LinearTrigger": {
+        "description": "Fires on issue events in one Linear team.",
+        "properties": {
+          "events": {
+            "items": {
+              "enum": [
+                "issue.created",
+                "issue.labeled"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Events",
+            "type": "array"
+          },
+          "kind": {
+            "const": "linear",
+            "default": "linear",
+            "title": "Kind",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Labels",
+            "type": "array"
+          },
+          "max_runs_per_hour": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Runs Per Hour"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "team": {
+            "maxLength": 10,
+            "minLength": 1,
+            "title": "Team",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team",
+          "events"
+        ],
+        "title": "LinearTrigger",
         "type": "object"
       },
       "MCPConnectionPublic": {
@@ -2156,6 +2766,57 @@
         "title": "MCPToolDescription",
         "type": "object"
       },
+      "ManagedConnectResponse": {
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "connected"
+        ],
+        "title": "ManagedConnectResponse",
+        "type": "object"
+      },
+      "ManagedToolsView": {
+        "description": "The instance's managed tools gateway (none or one), and what the caller still needs.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "gateways": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayStatus"
+            },
+            "title": "Gateways",
+            "type": "array"
+          },
+          "langsmith_connected": {
+            "default": false,
+            "title": "Langsmith Connected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configured",
+          "gateways"
+        ],
+        "title": "ManagedToolsView",
+        "type": "object"
+      },
       "MarkReadyAction": {
         "properties": {
           "action": {
@@ -2268,6 +2929,34 @@
         "title": "MergeAction",
         "type": "object"
       },
+      "MessageIntent": {
+        "properties": {
+          "intent": {
+            "const": "message",
+            "title": "Intent",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "title",
+          "message"
+        ],
+        "title": "MessageIntent",
+        "type": "object"
+      },
       "MessageItem": {
         "properties": {
           "content": {
@@ -2354,7 +3043,7 @@
           "sender": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+                "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
               },
               {
                 "type": "null"
@@ -2373,7 +3062,7 @@
           "usage": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+                "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
               },
               {
                 "type": "null"
@@ -2510,6 +3199,29 @@
           "secret"
         ],
         "title": "MintedApiKey",
+        "type": "object"
+      },
+      "MissingCredential": {
+        "description": "A service in the gateway this person has not connected yet.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "display_name",
+          "kind"
+        ],
+        "title": "MissingCredential",
         "type": "object"
       },
       "ModelList": {
@@ -2713,6 +3425,30 @@
             "default": false,
             "title": "Reviewrequired",
             "type": "boolean"
+          },
+          "reviewers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PullRequestReviewer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewers"
+          },
+          "state": {
+            "default": "open",
+            "enum": [
+              "open",
+              "closed",
+              "merged"
+            ],
+            "title": "State",
+            "type": "string"
           },
           "statusAvailable": {
             "default": false,
@@ -3327,6 +4063,11 @@
             "title": "Auto Fix Ci",
             "type": "boolean"
           },
+          "auto_human_review_enabled": {
+            "default": true,
+            "title": "Auto Human Review Enabled",
+            "type": "boolean"
+          },
           "base_branch": {
             "anyOf": [
               {
@@ -3360,10 +4101,6 @@
             ],
             "title": "Concierge Mode"
           },
-          "default_model": {
-            "title": "Default Model",
-            "type": "string"
-          },
           "default_repo": {
             "anyOf": [
               {
@@ -3374,17 +4111,6 @@
               }
             ],
             "title": "Default Repo"
-          },
-          "default_subagent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Subagent Model"
           },
           "draft_prs": {
             "anyOf": [
@@ -3432,7 +4158,8 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "human_review_requests": {
+          "experimental_mcp_ptc": {
+            "agent_feature_flag": true,
             "anyOf": [
               {
                 "type": "boolean"
@@ -3441,9 +4168,9 @@
                 "type": "null"
               }
             ],
-            "title": "Human Review Requests"
+            "title": "Experimental Mcp Ptc"
           },
-          "model_routing_enabled": {
+          "experimental_task_coordination": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -3452,7 +4179,18 @@
                 "type": "null"
               }
             ],
-            "title": "Model Routing Enabled"
+            "title": "Experimental Task Coordination"
+          },
+          "pr_failure_reactions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Failure Reactions"
           },
           "pr_review_links": {
             "anyOf": [
@@ -3465,7 +4203,7 @@
             ],
             "title": "Pr Review Links"
           },
-          "preserve_sandbox_memory": {
+          "prefer_tools_in_sandbox": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -3474,27 +4212,12 @@
                 "type": "null"
               }
             ],
-            "title": "Preserve Sandbox Memory"
-          },
-          "reasoning_effort": {
-            "title": "Reasoning Effort",
-            "type": "string"
+            "title": "Prefer Tools In Sandbox"
           },
           "recent_thread_context_enabled": {
             "default": false,
             "title": "Recent Thread Context Enabled",
             "type": "boolean"
-          },
-          "review_channel_watch": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Channel Watch"
           },
           "review_draft_prs": {
             "anyOf": [
@@ -3507,27 +4230,23 @@
             ],
             "title": "Review Draft Prs"
           },
-          "slack_onboarding_dismissed": {
-            "default": false,
-            "title": "Slack Onboarding Dismissed",
-            "type": "boolean"
-          },
-          "subagent_reasoning_effort": {
+          "run_on_mda": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "boolean"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Subagent Reasoning Effort"
+            "title": "Run On Mda"
+          },
+          "slack_onboarding_dismissed": {
+            "default": false,
+            "title": "Slack Onboarding Dismissed",
+            "type": "boolean"
           }
         },
-        "required": [
-          "default_model",
-          "reasoning_effort"
-        ],
         "title": "ProfileUpdate",
         "type": "object"
       },
@@ -3712,6 +4431,59 @@
         "title": "PullRequestFixContext",
         "type": "object"
       },
+      "PullRequestLabel": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "title": "PullRequestLabel",
+        "type": "object"
+      },
+      "PullRequestLabels": {
+        "properties": {
+          "available": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestLabel"
+            },
+            "title": "Available",
+            "type": "array"
+          },
+          "selected": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestLabel"
+            },
+            "title": "Selected",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "selected"
+        ],
+        "title": "PullRequestLabels",
+        "type": "object"
+      },
       "PullRequestPreview": {
         "properties": {
           "additions": {
@@ -3861,6 +4633,47 @@
         "title": "PullRequestReviewSubmit",
         "type": "object"
       },
+      "PullRequestReviewer": {
+        "description": "Someone who reviewed the pull request, and where their review stands.\n\nA comment never overrides an earlier approval or change request, as on GitHub.",
+        "properties": {
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatarurl"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "approved",
+              "changes_requested",
+              "dismissed",
+              "commented"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "login",
+          "state"
+        ],
+        "title": "PullRequestReviewer",
+        "type": "object"
+      },
       "PullRequestSearchResult": {
         "properties": {
           "body": {
@@ -3993,6 +4806,61 @@
           "running"
         ],
         "title": "PullRequestThreadStatus",
+        "type": "object"
+      },
+      "QueuedPreview": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
+          },
+          "sender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "sender",
+          "platform",
+          "queued_at"
+        ],
+        "title": "QueuedPreview",
         "type": "object"
       },
       "ReasoningParam": {
@@ -4138,6 +5006,11 @@
             "default": "",
             "title": "Channel",
             "type": "string"
+          },
+          "claimed": {
+            "default": false,
+            "title": "Claimed",
+            "type": "boolean"
           },
           "error": {
             "default": "",
@@ -4429,17 +5302,27 @@
         ],
         "type": "string"
       },
-      "ReviewCommentUpdate": {
+      "ReviewChat": {
         "properties": {
-          "body": {
-            "title": "Body",
+          "assistant_id": {
+            "title": "Assistant Id",
+            "type": "string"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "thread_id": {
+            "title": "Thread Id",
             "type": "string"
           }
         },
         "required": [
-          "body"
+          "available",
+          "assistant_id",
+          "thread_id"
         ],
-        "title": "ReviewCommentUpdate",
+        "title": "ReviewChat",
         "type": "object"
       },
       "ReviewCounts": {
@@ -4501,39 +5384,6 @@
       },
       "ReviewStyle": {
         "properties": {
-          "analysis_run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysis Run Id"
-          },
-          "analysis_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysis Summary"
-          },
-          "analysis_thread_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysis Thread Id"
-          },
           "approval_mode": {
             "anyOf": [
               {
@@ -4549,17 +5399,6 @@
               }
             ],
             "title": "Approval Mode"
-          },
-          "continual_cron_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Continual Cron Id"
           },
           "created_at": {
             "default": "",
@@ -4582,17 +5421,6 @@
             ],
             "title": "Custom Prompt"
           },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
           "full_name": {
             "title": "Full Name",
             "type": "string"
@@ -4606,34 +5434,6 @@
             "default": "",
             "title": "Owner",
             "type": "string"
-          },
-          "prs_sampled": {
-            "default": 0,
-            "title": "Prs Sampled",
-            "type": "integer"
-          },
-          "reviews_sampled": {
-            "default": 0,
-            "title": "Reviews Sampled",
-            "type": "integer"
-          },
-          "status": {
-            "default": "idle",
-            "enum": [
-              "idle",
-              "running",
-              "completed",
-              "failed"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "top_reviewers": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Top Reviewers",
-            "type": "array"
           },
           "updated_at": {
             "default": "",
@@ -4825,6 +5625,272 @@
         "title": "ReviewSummaryRef",
         "type": "object"
       },
+      "ReviewThread": {
+        "description": "An inline thread: its first comment's anchor, then every reply in order.",
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadComment-Output"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "diff_hunk": {
+            "title": "Diff Hunk",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "original_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Line"
+          },
+          "outdated": {
+            "title": "Outdated",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          },
+          "side": {
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Line"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "path",
+          "line",
+          "start_line",
+          "side",
+          "original_line",
+          "diff_hunk",
+          "outdated",
+          "resolved",
+          "comments"
+        ],
+        "title": "ReviewThread",
+        "type": "object"
+      },
+      "ReviewerEvalConfig": {
+        "properties": {
+          "assistant_id": {
+            "title": "Assistant Id",
+            "type": "string"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "experiment_prefix": {
+            "title": "Experiment Prefix",
+            "type": "string"
+          },
+          "langgraph_url": {
+            "title": "Langgraph Url",
+            "type": "string"
+          },
+          "langsmith_project": {
+            "title": "Langsmith Project",
+            "type": "string"
+          },
+          "max_concurrency": {
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "title": "Reasoning Effort",
+            "type": "string"
+          },
+          "score_mode": {
+            "enum": [
+              "all_findings",
+              "surfaced_findings"
+            ],
+            "title": "Score Mode",
+            "type": "string"
+          },
+          "severity_threshold": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Severity Threshold",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name",
+          "experiment_prefix",
+          "max_concurrency",
+          "langsmith_project",
+          "langgraph_url",
+          "assistant_id",
+          "model_id",
+          "reasoning_effort",
+          "score_mode",
+          "severity_threshold"
+        ],
+        "title": "ReviewerEvalConfig",
+        "type": "object"
+      },
+      "ReviewerEvalProgress": {
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "completed",
+          "total"
+        ],
+        "title": "ReviewerEvalProgress",
+        "type": "object"
+      },
+      "ReviewerEvalReport": {
+        "additionalProperties": false,
+        "description": "One progress report from a running eval; each one doubles as its heartbeat.",
+        "properties": {
+          "completed_examples": {
+            "minimum": 0.0,
+            "title": "Completed Examples",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "experiment_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Url"
+          },
+          "log_tail": {
+            "anyOf": [
+              {
+                "maxLength": 12000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Tail"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_examples": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Examples"
+          }
+        },
+        "required": [
+          "status",
+          "completed_examples"
+        ],
+        "title": "ReviewerEvalReport",
+        "type": "object"
+      },
       "ReviewerEvalStart": {
         "properties": {
           "dataset_name": {
@@ -4896,6 +5962,141 @@
         "title": "ReviewerEvalStart",
         "type": "object"
       },
+      "ReviewerEvalStatus": {
+        "description": "The latest reviewer eval, as the admin dashboard shows it.",
+        "properties": {
+          "config_snapshot": {
+            "$ref": "#/components/schemas/ReviewerEvalConfig"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "experiment_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Url"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "langsmith_project": {
+            "title": "Langsmith Project",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "log_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Tail"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewerEvalProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_name": {
+            "title": "Run Name",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "idle",
+              "starting",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Id"
+          }
+        },
+        "required": [
+          "status",
+          "run_name",
+          "langsmith_project",
+          "config_snapshot"
+        ],
+        "title": "ReviewerEvalStatus",
+        "type": "object"
+      },
       "Role": {
         "enum": [
           "user",
@@ -4904,6 +6105,30 @@
           "developer"
         ],
         "type": "string"
+      },
+      "RolloutAccepted": {
+        "properties": {
+          "commits": {
+            "title": "Commits",
+            "type": "integer"
+          },
+          "status": {
+            "const": "accepted",
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "target",
+          "commits"
+        ],
+        "title": "RolloutAccepted",
+        "type": "object"
       },
       "ScheduleCreateBody": {
         "properties": {
@@ -4952,58 +6177,35 @@
             "title": "Prompt",
             "type": "string"
           },
-          "repo": {
-            "anyOf": [
-              {
-                "type": "string"
+          "triggers": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "github": "#/components/schemas/GitHubTrigger",
+                  "linear": "#/components/schemas/LinearTrigger",
+                  "schedule": "#/components/schemas/ScheduleTrigger",
+                  "slack": "#/components/schemas/SlackTrigger"
+                },
+                "propertyName": "kind"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repo"
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule"
-          },
-          "slack_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Channel Id"
-          },
-          "slack_notification_mode": {
-            "default": "always",
-            "enum": [
-              "always",
-              "on_action"
-            ],
-            "title": "Slack Notification Mode",
-            "type": "string"
-          },
-          "trigger": {
-            "default": "schedule",
-            "enum": [
-              "schedule",
-              "github_issue_opened"
-            ],
-            "title": "Trigger",
-            "type": "string"
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ScheduleTrigger"
+                },
+                {
+                  "$ref": "#/components/schemas/GitHubTrigger"
+                },
+                {
+                  "$ref": "#/components/schemas/SlackTrigger"
+                },
+                {
+                  "$ref": "#/components/schemas/LinearTrigger"
+                }
+              ]
+            },
+            "minItems": 1,
+            "title": "Triggers",
+            "type": "array"
           },
           "workspace": {
             "maxLength": 120,
@@ -5014,9 +6216,31 @@
         },
         "required": [
           "prompt",
+          "triggers",
           "workspace"
         ],
         "title": "ScheduleCreateBody",
+        "type": "object"
+      },
+      "ScheduleTrigger": {
+        "properties": {
+          "cron": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Cron",
+            "type": "string"
+          },
+          "kind": {
+            "const": "schedule",
+            "default": "schedule",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cron"
+        ],
+        "title": "ScheduleTrigger",
         "type": "object"
       },
       "ScheduleUpdateBody": {
@@ -5090,70 +6314,42 @@
             ],
             "title": "Prompt"
           },
-          "repo": {
+          "triggers": {
             "anyOf": [
               {
-                "type": "string"
+                "items": {
+                  "discriminator": {
+                    "mapping": {
+                      "github": "#/components/schemas/GitHubTrigger",
+                      "linear": "#/components/schemas/LinearTrigger",
+                      "schedule": "#/components/schemas/ScheduleTrigger",
+                      "slack": "#/components/schemas/SlackTrigger"
+                    },
+                    "propertyName": "kind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ScheduleTrigger"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GitHubTrigger"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SlackTrigger"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LinearTrigger"
+                    }
+                  ]
+                },
+                "minItems": 1,
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Repo"
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule"
-          },
-          "slack_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Channel Id"
-          },
-          "slack_notification_mode": {
-            "anyOf": [
-              {
-                "enum": [
-                  "always",
-                  "on_action"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Notification Mode"
-          },
-          "trigger": {
-            "anyOf": [
-              {
-                "enum": [
-                  "schedule",
-                  "github_issue_opened"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trigger"
+            "title": "Triggers"
           },
           "workspace": {
             "anyOf": [
@@ -5168,6 +6364,63 @@
           }
         },
         "title": "ScheduleUpdateBody",
+        "type": "object"
+      },
+      "SessionCreateBody": {
+        "properties": {
+          "prompt": {
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "pattern": "^[^/\\s]+/[^/\\s]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          },
+          "start": {
+            "default": true,
+            "title": "Start",
+            "type": "boolean"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "enum": [
+                  "public",
+                  "private"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "SessionCreateBody",
         "type": "object"
       },
       "SkillCreate": {
@@ -5322,6 +6575,73 @@
         "title": "SlackChannelOption",
         "type": "object"
       },
+      "SlackTrigger": {
+        "description": "Fires on messages in one Slack channel Open SWE is a member of.",
+        "properties": {
+          "channel": {
+            "maxLength": 40,
+            "minLength": 9,
+            "title": "Channel",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "const": "message.posted",
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Events",
+            "type": "array"
+          },
+          "kind": {
+            "const": "slack",
+            "default": "slack",
+            "title": "Kind",
+            "type": "string"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match"
+          },
+          "max_runs_per_hour": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Runs Per Hour"
+          },
+          "senders": {
+            "default": "anyone",
+            "enum": [
+              "anyone",
+              "people",
+              "bots"
+            ],
+            "title": "Senders",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "events"
+        ],
+        "title": "SlackTrigger",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -5433,7 +6753,7 @@
         "title": "TextAnchor",
         "type": "object"
       },
-      "ThreadComment": {
+      "ThreadComment-Input": {
         "properties": {
           "comment_url": {
             "maxLength": 1000,
@@ -5460,44 +6780,56 @@
         "title": "ThreadComment",
         "type": "object"
       },
-      "ThreadFeedbackResponse": {
+      "ThreadComment-Output": {
         "properties": {
-          "comment": {
-            "default": "",
-            "title": "Comment",
-            "type": "string"
-          },
-          "rating": {
+          "author": {
             "anyOf": [
               {
-                "enum": [
-                  "bad",
-                  "good",
-                  "other"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "review_id": {
+            "anyOf": [
+              {
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Rating"
-          },
-          "status": {
-            "enum": [
-              "unavailable",
-              "ready",
-              "completed",
-              "dismissed"
-            ],
-            "title": "Status",
-            "type": "string"
+            "title": "Review Id"
           }
         },
         "required": [
-          "status"
+          "id",
+          "review_id",
+          "author",
+          "created_at",
+          "body",
+          "html_url"
         ],
-        "title": "ThreadFeedbackResponse",
+        "title": "ThreadComment",
         "type": "object"
       },
       "ThreadRenameBody": {
@@ -5513,6 +6845,19 @@
           "title"
         ],
         "title": "ThreadRenameBody",
+        "type": "object"
+      },
+      "ThreadResolution": {
+        "properties": {
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "resolved"
+        ],
+        "title": "ThreadResolution",
         "type": "object"
       },
       "ThreadResolveBody": {
@@ -5553,7 +6898,7 @@
             "type": "boolean"
           },
           "input": {
-            "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+            "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
           },
           "message_id": {
             "anyOf": [
@@ -5928,17 +7273,6 @@
               }
             ],
             "title": "Follow Up Behavior"
-          },
-          "local_tracing_project": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Local Tracing Project"
           }
         },
         "required": [
@@ -6117,6 +7451,11 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "default": false,
+            "title": "Inherit Default Sandbox",
+            "type": "boolean"
           },
           "kitchen_channel_ids": {
             "items": {
@@ -6415,6 +7754,11 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "default": true,
+            "title": "Inherit Default Sandbox",
+            "type": "boolean"
           },
           "kitchen_channel_ids": {
             "items": {
@@ -6846,6 +8190,29 @@
             ],
             "title": "Gateway Enabled"
           },
+          "human_review_auto_assign_minutes": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Assign Minutes"
+          },
+          "managed_tools_gateway_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Tools Gateway Id"
+          },
           "model_routing_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -6905,6 +8272,17 @@
             ],
             "title": "Review Trace Links"
           },
+          "run_on_mda": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run On Mda"
+          },
           "sandbox_openai_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -6916,6 +8294,18 @@
               }
             ],
             "title": "Sandbox Openai Enabled"
+          },
+          "slack_follow_up_suggestions": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Follow Up Suggestions"
           }
         },
         "title": "WorkspaceSettingsUpdate",
@@ -6981,6 +8371,17 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inherit Default Sandbox"
           },
           "kitchen_channel_ids": {
             "anyOf": [
@@ -7107,73 +8508,13 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
-      "agent__review__assessment_feedback__FeedbackSubmission": {
-        "properties": {
-          "comment": {
-            "default": "",
-            "maxLength": 3000,
-            "title": "Comment",
-            "type": "string"
-          },
-          "rating": {
-            "enum": [
-              "helpful",
-              "unhelpful"
-            ],
-            "title": "Rating",
-            "type": "string"
-          }
-        },
-        "required": [
-          "rating"
-        ],
-        "title": "FeedbackSubmission",
-        "type": "object"
-      },
-      "agent__threads__feedback__FeedbackSubmission": {
-        "properties": {
-          "action": {
-            "default": "submit",
-            "enum": [
-              "submit",
-              "comment",
-              "dismiss"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
-          "comment": {
-            "default": "",
-            "maxLength": 3000,
-            "title": "Comment",
-            "type": "string"
-          },
-          "rating": {
-            "anyOf": [
-              {
-                "enum": [
-                  "bad",
-                  "good"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rating"
-          }
-        },
-        "title": "FeedbackSubmission",
-        "type": "object"
-      },
-      "agent__transcript__events__JsonObject": {
+      "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
         },
         "type": "object"
       },
-      "agent__utils__json_types__JsonObject": {
+      "openswe__utils__json_types__JsonObject": {
         "additionalProperties": true,
         "type": "object"
       }
@@ -7192,6 +8533,79 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/dashboard/api/admin/announcements": {
+      "get": {
+        "operationId": "api_list_announcements_dashboard_api_admin_announcements_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Announcements",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      },
+      "post": {
+        "description": "DM the announcement to everyone, or with ``test`` to the admin alone.",
+        "operationId": "api_send_announcement_dashboard_api_admin_announcements_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnouncementCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementSent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Send Announcement",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      }
+    },
     "/dashboard/api/admin/api-keys": {
       "get": {
         "operationId": "api_list_api_keys_dashboard_api_admin_api_keys_get",
@@ -7346,9 +8760,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Admin Get Reviewer Eval Dashboard Api Admin Evals Reviewer Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewerEvalStatus"
                 }
               }
             },
@@ -7384,9 +8796,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Admin Start Reviewer Eval Dashboard Api Admin Evals Reviewer Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewerEvalStatus"
                 }
               }
             },
@@ -7834,7 +9244,8 @@
                 "merged_prs",
                 "merged_prs_per_thread",
                 "agent_loc",
-                "feedback_given"
+                "feedback_given",
+                "prs_reviewed"
               ],
               "title": "Sort",
               "type": "string"
@@ -8248,20 +9659,27 @@
         "parameters": [
           {
             "in": "query",
-            "name": "code",
-            "required": true,
-            "schema": {
-              "title": "Code",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
             "name": "state",
             "required": true,
             "schema": {
               "title": "State",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
             }
           }
         ],
@@ -8731,95 +10149,6 @@
         "tags": [
           "dashboard",
           "sandbox-bridge"
-        ]
-      }
-    },
-    "/dashboard/api/cli/mcp/tools": {
-      "get": {
-        "operationId": "cli_mcp_tools_dashboard_api_cli_mcp_tools_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/CLITool"
-                  },
-                  "title": "Response Cli Mcp Tools Dashboard Api Cli Mcp Tools Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Cli Mcp Tools",
-        "tags": [
-          "dashboard",
-          "cli-mcp-tools"
-        ]
-      }
-    },
-    "/dashboard/api/cli/mcp/tools/{name}": {
-      "post": {
-        "operationId": "cli_mcp_invoke_dashboard_api_cli_mcp_tools__name__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CLIArguments"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CLIResult"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Cli Mcp Invoke",
-        "tags": [
-          "dashboard",
-          "cli-mcp-tools"
         ]
       }
     },
@@ -9375,6 +10704,265 @@
         ]
       }
     },
+    "/dashboard/api/langsmith/callback": {
+      "get": {
+        "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_description",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error Description"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Langsmith Callback",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
+    "/dashboard/api/langsmith/desktop/exchange": {
+      "post": {
+        "description": "Finish a desktop LangSmith connection with the app's own session.",
+        "operationId": "langsmith_desktop_exchange_dashboard_api_langsmith_desktop_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopConnectExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Langsmith Desktop Exchange Dashboard Api Langsmith Desktop Exchange Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Langsmith Desktop Exchange",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
+    "/dashboard/api/langsmith/login": {
+      "get": {
+        "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_handoff",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Handoff"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1024,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Langsmith Login",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
+    "/dashboard/api/managed-tools/gateways": {
+      "get": {
+        "description": "Gateways an admin can pick for the instance, read with the admin's own LangSmith login.",
+        "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Gateway"
+                  },
+                  "title": "Response Api List Managed Tools Gateways Dashboard Api Managed Tools Gateways Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Managed Tools Gateways",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/mcps": {
       "get": {
         "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
@@ -9741,66 +11329,6 @@
         ]
       }
     },
-    "/dashboard/api/me/local-trace-url/{thread_id}": {
-      "get": {
-        "operationId": "api_get_local_trace_url_dashboard_api_me_local_trace_url__thread_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "title": "Response Api Get Local Trace Url Dashboard Api Me Local Trace Url  Thread Id  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Local Trace Url",
-        "tags": [
-          "dashboard",
-          "threads"
-        ]
-      }
-    },
     "/dashboard/api/me/preferences": {
       "get": {
         "operationId": "api_get_my_preferences_dashboard_api_me_preferences_get",
@@ -9877,16 +11405,16 @@
         ]
       }
     },
-    "/dashboard/api/my-credentials/notion": {
+    "/dashboard/api/my-credentials/langsmith": {
       "delete": {
-        "operationId": "disconnect_my_notion_dashboard_api_my_credentials_notion_delete",
+        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Disconnect My Notion Dashboard Api My Credentials Notion Delete",
+                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
                   "type": "object"
                 }
               }
@@ -9899,21 +11427,21 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Disconnect My Notion",
+        "summary": "Disconnect My Langsmith",
         "tags": [
           "dashboard",
-          "notion"
+          "langsmith"
         ]
       },
       "get": {
-        "operationId": "get_my_notion_status_dashboard_api_my_credentials_notion_get",
+        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get My Notion Status Dashboard Api My Credentials Notion Get",
+                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
                   "type": "object"
                 }
               }
@@ -9926,10 +11454,196 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Get My Notion Status",
+        "summary": "Get My Langsmith Status",
         "tags": [
           "dashboard",
-          "notion"
+          "langsmith"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools": {
+      "get": {
+        "operationId": "api_my_managed_tools_dashboard_api_my_managed_tools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedToolsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api My Managed Tools",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/{gateway}/connect/{slug}": {
+      "get": {
+        "description": "A Slack card button: mint the consent link here, for the signed-in owner only.",
+        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools__gateway__connect__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": true,
+            "schema": {
+              "title": "Card",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Connect Managed Tool From Card",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "post": {
+        "description": "A consent link for one service; from a thread's card, the thread resumes once connected.",
+        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools__gateway__connect__slug__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Thread Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Card"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Connect Managed Tool",
+        "tags": [
+          "dashboard"
         ]
       }
     },
@@ -10168,232 +11882,6 @@
         "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/notion/callback": {
-      "get": {
-        "operationId": "notion_callback_dashboard_api_notion_callback_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": true,
-            "schema": {
-              "title": "State",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "code",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Code"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error_description",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error Description"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Notion Callback",
-        "tags": [
-          "dashboard",
-          "notion"
-        ]
-      }
-    },
-    "/dashboard/api/notion/desktop/exchange": {
-      "post": {
-        "description": "Finish a desktop Notion connection with the app's own session.",
-        "operationId": "notion_desktop_exchange_dashboard_api_notion_desktop_exchange_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DesktopConnectExchange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Notion Desktop Exchange Dashboard Api Notion Desktop Exchange Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Notion Desktop Exchange",
-        "tags": [
-          "dashboard",
-          "notion"
-        ]
-      }
-    },
-    "/dashboard/api/notion/login": {
-      "get": {
-        "operationId": "notion_login_dashboard_api_notion_login_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "redirect_to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Notion Login",
-        "tags": [
-          "dashboard",
-          "notion"
         ]
       }
     },
@@ -11155,8 +12643,11 @@
             "name": "scope",
             "required": false,
             "schema": {
-              "const": "mine",
               "default": "mine",
+              "enum": [
+                "mine",
+                "review-requested"
+              ],
               "title": "Scope",
               "type": "string"
             }
@@ -11552,6 +13043,70 @@
       }
     },
     "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review": {
+      "get": {
+        "operationId": "api_human_review_availability_dashboard_api_repos__owner___repo__pulls__number__human_review_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanReviewAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Human Review Availability",
+        "tags": [
+          "dashboard",
+          "human-review"
+        ]
+      },
       "post": {
         "operationId": "api_request_human_review_dashboard_api_repos__owner___repo__pulls__number__human_review_post",
         "parameters": [
@@ -11900,6 +13455,7 @@
                     "address-comments": "#/components/schemas/AddressCommentsIntent",
                     "comments": "#/components/schemas/CommentBatchIntent",
                     "fix": "#/components/schemas/FixIntent",
+                    "message": "#/components/schemas/MessageIntent",
                     "open": "#/components/schemas/OpenThreadIntent"
                   },
                   "propertyName": "intent"
@@ -11907,6 +13463,9 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/OpenThreadIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MessageIntent"
                   },
                   {
                     "$ref": "#/components/schemas/FixIntent"
@@ -11958,6 +13517,94 @@
         "tags": [
           "dashboard",
           "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/review-assignments": {
+      "get": {
+        "operationId": "api_review_assignments_dashboard_api_review_assignments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated",
+              "enum": [
+                "created",
+                "updated"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenPullRequests"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Review Assignments",
+        "tags": [
+          "dashboard",
+          "human-review"
         ]
       }
     },
@@ -12185,54 +13832,6 @@
         ]
       }
     },
-    "/dashboard/api/review-styles/{full_name}/analyze": {
-      "post": {
-        "operationId": "api_analyze_review_style_dashboard_api_review_styles__full_name__analyze_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "full_name",
-            "required": true,
-            "schema": {
-              "title": "Full Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewStyle"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Analyze Review Style",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
     "/dashboard/api/review-styles/{full_name}/approvals-file": {
       "get": {
         "operationId": "api_get_review_style_approvals_file_dashboard_api_review_styles__full_name__approvals_file_get",
@@ -12281,29 +13880,34 @@
         ]
       }
     },
-    "/dashboard/api/review-styles/{full_name}/cancel": {
+    "/dashboard/api/reviewer-eval/report": {
       "post": {
-        "operationId": "api_cancel_review_style_dashboard_api_review_styles__full_name__cancel_post",
+        "operationId": "report_reviewer_eval_dashboard_api_reviewer_eval_report_post",
         "parameters": [
           {
-            "in": "path",
-            "name": "full_name",
-            "required": true,
+            "in": "header",
+            "name": "X-Open-SWE-Eval-Token",
+            "required": false,
             "schema": {
-              "title": "Full Name",
+              "default": "",
+              "maxLength": 512,
+              "title": "X-Open-Swe-Eval-Token",
               "type": "string"
             }
           }
         ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewStyle"
-                }
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewerEvalReport"
               }
-            },
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
             "description": "Successful Response"
           },
           "422": {
@@ -12317,15 +13921,9 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Cancel Review Style",
+        "summary": "Report Reviewer Eval",
         "tags": [
-          "dashboard",
-          "review"
+          "reviewer-eval"
         ]
       }
     },
@@ -12553,9 +14151,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Review Chat Dashboard Api Reviews  Owner   Repo   Pr Number  Chat Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewChat"
                 }
               }
             },
@@ -12877,72 +14473,6 @@
       }
     },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments": {
-      "get": {
-        "operationId": "api_list_review_comments_dashboard_api_reviews__owner___repo___pr_number__comments_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api List Review Comments Dashboard Api Reviews  Owner   Repo   Pr Number  Comments Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Review Comments",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      },
       "post": {
         "operationId": "api_post_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments_post",
         "parameters": [
@@ -13012,93 +14542,6 @@
           }
         ],
         "summary": "Api Post Review Comment",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}": {
-      "patch": {
-        "operationId": "api_update_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments__comment_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "comment_id",
-            "required": true,
-            "schema": {
-              "title": "Comment Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewCommentUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Update Review Comment Dashboard Api Reviews  Owner   Repo   Pr Number  Comments  Comment Id  Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Update Review Comment",
         "tags": [
           "dashboard",
           "review"
@@ -13441,7 +14884,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/agent__review__assessment_feedback__FeedbackSubmission"
+                "$ref": "#/components/schemas/FeedbackSubmission"
               }
             }
           },
@@ -13662,6 +15105,139 @@
           }
         ],
         "summary": "Api Get Review Image",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/labels": {
+      "get": {
+        "operationId": "api_get_pull_request_labels_dashboard_api_reviews__owner___repo___pr_number__labels_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestLabels"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Pull Request Labels",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "patch": {
+        "operationId": "api_change_pull_request_label_dashboard_api_reviews__owner___repo___pr_number__labels_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Change Pull Request Label",
         "tags": [
           "dashboard",
           "review"
@@ -14318,6 +15894,169 @@
           }
         ],
         "summary": "Api Submit Pull Request Review",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/threads/{comment_id}/replies": {
+      "post": {
+        "operationId": "api_reply_to_review_thread_dashboard_api_reviews__owner___repo___pr_number__threads__comment_id__replies_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "title": "Comment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationCommentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadComment-Output"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reply To Review Thread",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/threads/{thread_node_id}/resolution": {
+      "put": {
+        "operationId": "api_set_review_thread_resolution_dashboard_api_reviews__owner___repo___pr_number__threads__thread_node_id__resolution_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "thread_node_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadResolution"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Review Thread Resolution",
         "tags": [
           "dashboard",
           "review"
@@ -15535,6 +17274,38 @@
         ]
       }
     },
+    "/dashboard/api/slack/allowed-bots/directory": {
+      "get": {
+        "description": "Names and avatars of allowed bots, for the Bots view every user can open.",
+        "operationId": "api_allowed_slack_bot_directory_dashboard_api_slack_allowed_bots_directory_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AllowedSlackBotEntry"
+                  },
+                  "title": "Response Api Allowed Slack Bot Directory Dashboard Api Slack Allowed Bots Directory Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Allowed Slack Bot Directory",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/allowed-bots/{team_id}/{bot_id}": {
       "delete": {
         "operationId": "api_remove_allowed_slack_bot_dashboard_api_slack_allowed_bots__team_id___bot_id__delete",
@@ -15825,6 +17596,22 @@
         "parameters": [
           {
             "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
             "name": "desktop_handoff",
             "required": false,
             "schema": {
@@ -16002,6 +17789,55 @@
           "dashboard",
           "threads"
         ]
+      },
+      "post": {
+        "operationId": "api_create_session_dashboard_api_threads_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Create Session Dashboard Api Threads Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Session",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
       }
     },
     "/dashboard/api/threads/page": {
@@ -16127,7 +17963,8 @@
               "enum": [
                 "all",
                 "interactive",
-                "automation"
+                "automation",
+                "bot"
               ],
               "title": "Scope",
               "type": "string"
@@ -16147,6 +17984,23 @@
                 }
               ],
               "title": "Automation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bot",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot"
             }
           },
           {
@@ -16177,6 +18031,16 @@
           },
           {
             "in": "query",
+            "name": "owned",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Owned",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -16187,6 +18051,16 @@
               ],
               "title": "Sort By",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hierarchy",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hierarchy",
+              "type": "boolean"
             }
           }
         ],
@@ -16335,6 +18209,16 @@
           },
           {
             "in": "query",
+            "name": "owned",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Owned",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "all",
             "required": false,
             "schema": {
@@ -16422,93 +18306,22 @@
             "application/x-ndjson": {
               "schema": {
                 "type": "string"
-              },
-              "x-first-line-schema": {
-                "$defs": {
-                  "SessionType": {
-                    "const": "claude",
-                    "type": "string"
-                  }
-                },
-                "additionalProperties": false,
-                "description": "The upload's first line: which agent wrote the transcript that follows, and where its work was pushed.",
-                "properties": {
-                  "branch": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Branch"
-                  },
-                  "pr_url": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Pr Url"
-                  },
-                  "repo": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Repo"
-                  },
-                  "type": {
-                    "$ref": "#/$defs/SessionType"
-                  },
-                  "visibility": {
-                    "default": "workspace",
-                    "enum": [
-                      "workspace",
-                      "private"
-                    ],
-                    "title": "Visibility",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "type"
-                ],
-                "title": "SessionUploadHeader",
-                "type": "object"
               }
             }
           },
-          "description": "JSONL, optionally with Content-Encoding: gzip. The first line is a SessionUploadHeader object; every following line is the session transcript, verbatim.",
+          "description": "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. Authorized by the upload_token the upload_session MCP tool returned, as a bearer token.",
           "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Upload Session Dashboard Api Threads Uploads Post",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Upload Session",
         "tags": [
           "dashboard",
@@ -16853,112 +18666,6 @@
         "tags": [
           "dashboard",
           "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/feedback": {
-      "get": {
-        "operationId": "get_thread_feedback_dashboard_api_threads__thread_id__feedback_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadFeedbackResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get Thread Feedback",
-        "tags": [
-          "dashboard",
-          "threads",
-          "thread-feedback"
-        ]
-      },
-      "post": {
-        "operationId": "submit_thread_feedback_dashboard_api_threads__thread_id__feedback_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/agent__threads__feedback__FeedbackSubmission"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadFeedbackResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Submit Thread Feedback",
-        "tags": [
-          "dashboard",
-          "threads",
-          "thread-feedback"
         ]
       }
     },
@@ -17385,6 +19092,58 @@
           }
         ],
         "summary": "Api Get Thread Pull Request Status",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/queued-messages": {
+      "get": {
+        "operationId": "api_get_thread_queued_messages_dashboard_api_threads__thread_id__queued_messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QueuedPreview"
+                  },
+                  "title": "Response Api Get Thread Queued Messages Dashboard Api Threads  Thread Id  Queued Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Queued Messages",
         "tags": [
           "dashboard",
           "threads"
@@ -18252,6 +20011,63 @@
         "tags": [
           "dashboard",
           "threads"
+        ]
+      }
+    },
+    "/dashboard/api/ui-invalidations": {
+      "get": {
+        "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``.",
+        "operationId": "api_ui_invalidations_dashboard_api_ui_invalidations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "T"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Ui Invalidations",
+        "tags": [
+          "dashboard",
+          "ui-invalidations"
         ]
       }
     },
@@ -19338,6 +21154,25 @@
           }
         },
         "summary": "Linear Webhook"
+      }
+    },
+    "/webhooks/rollout": {
+      "post": {
+        "description": "Verify a deployment event, record it, and acknowledge it.",
+        "operationId": "rollout_webhook_webhooks_rollout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolloutAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rollout Webhook"
       }
     },
     "/webhooks/run-complete": {

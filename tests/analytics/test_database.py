@@ -7,8 +7,8 @@ import pytest
 from blockbuster import BlockBuster
 from sqlalchemy import text
 
-from agent.database import analytics as database
-from agent.database import postgres
+from openswe.database import analytics as database
+from openswe.database import postgres
 from tests.analytics.conftest import initialize_database
 
 

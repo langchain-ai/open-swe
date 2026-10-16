@@ -1,47 +1,21 @@
 """Unit tests for GitHub CI read helpers used by the auto-fix flow."""
 
-from typing import Any
+from unittest.mock import MagicMock
 
 import httpx2
 import pytest
 
-from agent.github import ci as github_ci
+from openswe.github import ci as github_ci
+from openswe.github import http as github_http
+from openswe.github.http import GitHubClient, RepoClient
 
 
-class _FakeResponse:
-    def __init__(self, payload: Any = None, error: bool = False) -> None:
-        self._payload = payload if payload is not None else {}
-        self._error = error
-        self.status_code = 200
-        self.headers: dict[str, str] = {}
-
-    def raise_for_status(self) -> None:
-        if self._error:
-            raise httpx2.HTTPError("boom")
-
-    def json(self) -> Any:
-        return self._payload
+def _repo() -> RepoClient:
+    return GitHubClient(MagicMock()).repo("o", "r")
 
 
-class _FakeClient:
-    response: _FakeResponse = _FakeResponse({})
-
-    def __init__(self, **kwargs: Any) -> None:
-        pass
-
-    async def __aenter__(self) -> _FakeClient:
-        return self
-
-    async def __aexit__(self, *_: object) -> None:
-        return None
-
-    async def get(self, url: str, **_: Any) -> _FakeResponse:
-        return type(self).response
-
-
-def _patch(monkeypatch: pytest.MonkeyPatch, payload: Any, error: bool = False) -> None:
-    _FakeClient.response = _FakeResponse(payload, error=error)
-    monkeypatch.setattr(github_ci.httpx2, "AsyncClient", _FakeClient)
+def _response(url: str, payload: object, status: int = 200) -> httpx2.Response:
+    return httpx2.Response(status, json=payload, request=httpx2.Request("GET", url))
 
 
 async def test_required_checks_merge_branch_protection_and_every_ruleset_page(
@@ -79,14 +53,14 @@ async def test_required_checks_merge_branch_protection_and_every_ruleset_page(
 
     async def request(
         _client: object, _method: str, url: str, params: dict[str, str] | None = None, **_: object
-    ) -> _FakeResponse:
+    ) -> httpx2.Response:
         if "/rules/" in url:
-            return _FakeResponse(rules_pages[(params or {})["page"]])
-        return _FakeResponse(branch)
+            return _response(url, rules_pages[(params or {})["page"]])
+        return _response(url, branch)
 
-    monkeypatch.setattr(github_ci, "github_request", request)
+    monkeypatch.setattr(github_http, "github_request", request)
 
-    required = await github_ci.fetch_required_checks(owner="o", repo="r", branch="main", token="t")
+    required = await github_ci.RequiredCheck.for_branch(_repo(), "main")
 
     assert required == {
         github_ci.RequiredCheck("lint"),
@@ -102,39 +76,38 @@ async def test_required_checks_merge_branch_protection_and_every_ruleset_page(
 
 
 async def test_required_checks_unavailable_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def request(*_: object, **__: object) -> _FakeResponse:
-        return _FakeResponse(error=True)
+    async def request(_client: object, _method: str, url: str, **_: object) -> httpx2.Response:
+        return _response(url, {"message": "boom"}, 500)
 
-    monkeypatch.setattr(github_ci, "github_request", request)
+    monkeypatch.setattr(github_http, "github_request", request)
 
-    assert (
-        await github_ci.fetch_required_checks(owner="o", repo="r", branch="main", token="t") is None
-    )
+    assert await github_ci.RequiredCheck.for_branch(_repo(), "main") is None
 
 
-@pytest.mark.asyncio
-async def test_list_commit_statuses_keeps_latest_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch(
-        monkeypatch,
-        {
-            "statuses": [
-                {"id": 2, "context": "ci", "state": "success"},
-                {"id": 1, "context": "ci", "state": "failure"},
-            ]
-        },
-    )
+async def test_commit_statuses_keep_the_latest_per_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def request(_client: object, _method: str, url: str, **_: object) -> httpx2.Response:
+        return _response(
+            url,
+            {
+                "statuses": [
+                    {"id": 2, "context": "ci", "state": "success"},
+                    {"id": 1, "context": "ci", "state": "failure"},
+                ]
+            },
+        )
 
-    statuses = await github_ci.list_commit_statuses(owner="o", repo="r", ref="s", token="t")
+    monkeypatch.setattr(github_http, "github_request", request)
 
-    assert statuses == [{"id": 2, "context": "ci", "state": "success"}]
+    assert await _repo().commit_statuses("s") == [{"id": 2, "context": "ci", "state": "success"}]
 
 
-@pytest.mark.asyncio
-async def test_has_repo_write_permission_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch(monkeypatch, {}, error=True)
-    assert not await github_ci.has_repo_write_permission(
-        owner="o", repo="r", username="bob", token="t"
-    )
-    assert not await github_ci.has_repo_write_permission(
-        owner="o", repo="r", username="", token="t"
-    )
+async def test_write_permission_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def request(_client: object, _method: str, url: str, **_: object) -> httpx2.Response:
+        return _response(url, {"message": "boom"}, 500)
+
+    monkeypatch.setattr(github_http, "github_request", request)
+
+    assert not await _repo().can_write("bob")
+    assert not await _repo().can_write("")

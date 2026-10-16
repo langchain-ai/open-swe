@@ -3,12 +3,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.run_config import Repo
-from agent.slack import failures as slack_failures
-from agent.slack import webhook as slack_webhook
-from agent.slack.payloads import SlackChannelContext
-from agent.slack.request import SlackRequest
-from agent.webhooks import common as webhook_common
+from openswe.run_config import Repo
+from openswe.slack import failures as slack_failures
+from openswe.slack import webhook as slack_webhook
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.request import SlackRequest
+from openswe.webhooks import common as webhook_common
 
 
 class _FakeThreads:
@@ -66,7 +66,11 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
 async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_webhook.common, "authorize_github_thread", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        slack_webhook.common.ThreadRecord,
+        "read",
+        AsyncMock(return_value=webhook_common.ThreadRecord(exists=False, metadata={})),
+    )
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: _FakeClient())
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
@@ -80,11 +84,6 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     monkeypatch.setattr(slack_webhook.User, "login_for_slack", AsyncMock(return_value="alice"))
     monkeypatch.setattr(
         slack_webhook.common, "get_valid_access_token", AsyncMock(return_value="tok")
-    )
-    monkeypatch.setattr(slack_webhook.common, "thread_exists", AsyncMock(return_value=False))
-    monkeypatch.setattr(slack_webhook.common, "get_thread_workspace", AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(
         slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock(return_value=False)

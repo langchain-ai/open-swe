@@ -8,7 +8,7 @@ from langchain.agents.middleware.types import ModelRequest
 
 @pytest.mark.asyncio
 async def test_resumed_public_skill_prompt_excludes_cached_personal_context():
-    from agent.middleware.workspace_skills import WorkspaceSkillsMiddleware
+    from openswe.middleware.workspace_skills import WorkspaceSkillsMiddleware
 
     middleware = WorkspaceSkillsMiddleware(
         backend=StateBackend(), sources=["/organization-skills/", "/bundled-skills/"]

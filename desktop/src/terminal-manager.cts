@@ -1259,5 +1259,6 @@ module.exports = {
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
   getProjectShellEnv,
+  getUserShellEnv,
   sanitizeHistoryChunk,
 };

@@ -17,7 +17,11 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 
-import { SlackIntegrationSection, UsersSection } from "./admin"
+import {
+  SlackIntegrationSection,
+  UsersSection,
+} from "@/features/settings/components/AdminSections"
+import { AnnouncementsSection } from "@/features/settings/components/AnnouncementsSection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 
 afterEach(cleanup)
@@ -85,6 +89,7 @@ describe("UsersSection", () => {
       user_id: String(index),
       github_login: `user-${index}`,
       display_name: "",
+      avatar_url: "",
       email: `user-${index}@example.com`,
       slack_user_id: null,
       is_admin: false,
@@ -114,9 +119,7 @@ describe("UsersSection", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Next" }))
     expect(await screen.findByText("Page 2 of 3")).toBeTruthy()
     fireEvent.click(screen.getByRole("combobox", { name: "Rows per page" }))
-    fireEvent.keyDown(await screen.findByRole("option", { name: "25" }), {
-      key: "Enter",
-    })
+    fireEvent.click(await screen.findByRole("option", { name: "25" }))
     expect(await screen.findByText("1–25 of 30")).toBeTruthy()
     expect(screen.getByText("Page 1 of 2")).toBeTruthy()
 
@@ -131,7 +134,7 @@ describe("UsersSection", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), {
       target: { value: "nobody" },
     })
-    expect(await screen.findByText("No users match your search.")).toBeTruthy()
+    expect(await screen.findByText("No users match your search")).toBeTruthy()
     client.clear()
   })
 })
@@ -202,5 +205,47 @@ describe("ReviewSettings", () => {
         loaded(false)
       )
     )
+  })
+})
+
+describe("AnnouncementsSection", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("sends to everyone only after the admin confirms the exact text", async () => {
+    vi.spyOn(api, "listAnnouncements").mockResolvedValue({
+      recipients: 12,
+      items: [],
+    })
+    const send = vi
+      .spyOn(api, "sendAnnouncement")
+      .mockResolvedValue({ test: false, recipients: 12 })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <AnnouncementsSection />
+      </QueryClientProvider>
+    )
+
+    expect(
+      await screen.findByText("12 people with Slack connected")
+    ).toBeTruthy()
+    fireEvent.change(screen.getByRole("textbox", { name: "Announcement" }), {
+      target: { value: "  We shipped walkthroughs  " },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send to everyone" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("We shipped walkthroughs")).toBeTruthy()
+    expect(send).not.toHaveBeenCalled()
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Send announcement" })
+    )
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith("We shipped walkthroughs", false)
+    )
+    expect(await screen.findByText("Sending to 12 people.")).toBeTruthy()
+    client.clear()
   })
 })

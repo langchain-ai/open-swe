@@ -1,21 +1,18 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Card } from "@langchain/macaw-components/Card"
+import { Text } from "@langchain/macaw-components/Text"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect } from "react"
 
-import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
-import { getReviewConversation } from "@/features/reviews/lib/conversationApi"
 import { rangeLabel } from "@/features/reviews/lib/chatDiffActions"
+import {
+  buildCommentPayload,
+  toPierreSide,
+} from "@/features/reviews/lib/lineRange"
+import { reviewQueries } from "@/features/reviews/page/queries"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
 
 /** A line comment the chat drafted; the user adds it to their pending review or discards it. */
 export function ProposedCommentCard({
@@ -39,16 +36,16 @@ export function ProposedCommentCard({
   const addToReview = () => {
     if (!draft) return
     const { range } = draft.proposal
-    const multiLine = range.startLine < range.endLine
     post.mutate(
-      {
-        path: range.file,
-        line: range.endLine,
-        side: range.side,
-        body: draft.body.trim(),
-        start_line: multiLine ? range.startLine : null,
-        start_side: multiLine ? range.side : null,
-      },
+      buildCommentPayload(
+        range.file,
+        {
+          start: range.startLine,
+          end: range.endLine,
+          side: toPierreSide(range.side),
+        },
+        draft.body.trim()
+      ),
       {
         onSuccess: (review) =>
           drafts?.settle(id, { state: "added", reviewId: review.id }),
@@ -67,8 +64,7 @@ export function ProposedCommentCard({
         comment.line === draft.proposal.range.endLine
     )
   const conversation = useQuery({
-    queryKey: reviewConversationQueryKey(owner, repo, number),
-    queryFn: () => getReviewConversation(owner, repo, number),
+    ...reviewQueries.conversation({ owner, repo, number }),
     enabled: added !== null && pending.loaded && !stillPending,
   })
   const submitted =
@@ -98,9 +94,12 @@ export function ProposedCommentCard({
   const { range } = draft.proposal
   const location = `${range.file}:${rangeLabel(range)}`
   return (
-    <Card size="sm" className="w-full shrink-0" data-testid="proposed-comment">
-      <CardHeader>
-        <CardTitle>
+    <Card
+      className="flex w-full shrink-0 flex-col gap-space-3 p-space-3 text-xs"
+      data-testid="proposed-comment"
+    >
+      <div className="flex flex-col gap-space-1">
+        <Text variant="sm" weight="medium">
           {submitted || outcome?.state === "posted"
             ? "Submitted with your review"
             : outcome?.state === "added"
@@ -108,8 +107,8 @@ export function ProposedCommentCard({
               : outcome?.state === "discarded"
                 ? "Comment discarded"
                 : "Draft review comment"}
-        </CardTitle>
-        <CardDescription>
+        </Text>
+        <div className="min-w-0 text-xs text-secondary">
           {onShow ? (
             <button
               type="button"
@@ -121,44 +120,42 @@ export function ProposedCommentCard({
           ) : (
             <span className="font-mono">{location}</span>
           )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {outcome ? (
-          <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
-            {body}
-          </p>
-        ) : (
-          <Textarea
-            aria-label="Comment body"
-            value={body}
-            onChange={(event) => drafts.edit(id, { body: event.target.value })}
-            rows={4}
+        </div>
+      </div>
+      {outcome ? (
+        <p className="line-clamp-3 whitespace-pre-wrap text-secondary">
+          {body}
+        </p>
+      ) : (
+        <Textarea
+          size="md"
+          aria-label="Comment body"
+          value={body}
+          onChange={(next) => drafts.edit(id, { body: next })}
+          rows={4}
+          disabled={post.isPending}
+        />
+      )}
+      {outcome ? null : (
+        <div className="flex justify-end gap-space-2">
+          <Button
+            size="xs"
+            color="secondary"
+            variant="plain"
             disabled={post.isPending}
-          />
-        )}
-      </CardContent>
-      <CardFooter className="justify-end gap-2">
-        {outcome ? null : (
-          <>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={post.isPending}
-              onClick={() => drafts.settle(id, { state: "discarded" })}
-            >
-              Discard
-            </Button>
-            <Button
-              size="sm"
-              disabled={post.isPending || !body.trim()}
-              onClick={addToReview}
-            >
-              {post.isPending ? "Adding…" : "Add to review"}
-            </Button>
-          </>
-        )}
-      </CardFooter>
+            onClick={() => drafts.settle(id, { state: "discarded" })}
+          >
+            Discard
+          </Button>
+          <Button
+            size="xs"
+            disabled={post.isPending || !body.trim()}
+            onClick={addToReview}
+          >
+            {post.isPending ? "Adding…" : "Add to review"}
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }

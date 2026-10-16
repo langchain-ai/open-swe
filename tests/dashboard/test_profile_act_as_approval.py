@@ -2,9 +2,8 @@
 
 import pytest
 
-from agent.dashboard.profiles import ProfileUpdate, put_my_profile
-from agent.users import User, UserPreferencesPatch
-from tests.conftest import FakeStore
+from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
+from openswe.users import User, UserPreferencesPatch
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -25,7 +24,7 @@ def _update(approval: bool | None) -> ProfileUpdate:
     )
 
 
-async def test_switching_approval_clears_always_allow(fake_store: FakeStore) -> None:
+async def test_switching_approval_clears_always_allow() -> None:
     await User.sign_in("github", "1", login="ada")
     await User.update_preferences(
         "ada", UserPreferencesPatch(experimental_act_as_approval=True, act_as_always_allowed=True)

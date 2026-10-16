@@ -1,6 +1,7 @@
+import { Card } from "@langchain/macaw-components/Card"
 import { useEffect, useState } from "react"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SettingsRow } from "@/components/AppShell"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { buildEnvironmentDiagnostics } from "@/lib/environment-diagnostics"
 import {
@@ -21,18 +22,16 @@ export function AboutSection({ user }: { user: SessionUser }) {
   }, [])
 
   return (
-    <SettingsSection id="about" title="About">
+    <Card id="about" className="divide-y divide-default overflow-hidden p-0">
       {version ? (
         <SettingsRow
           label="Open SWE Desktop"
           control={
-            <span className="text-xs text-muted-foreground">
-              Version {version}
-            </span>
+            <span className="text-xs text-secondary">Version {version}</span>
           }
         />
       ) : null}
-      <div className="space-y-2 p-4 text-xs break-words text-muted-foreground">
+      <div className="flex flex-col gap-space-2 p-space-4 text-xs break-words text-secondary">
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
         </p>
@@ -44,7 +43,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
           getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
         />
       </div>
-    </SettingsSection>
+    </Card>
   )
 }
 
@@ -53,6 +52,20 @@ function IdentityValue({ value }: { value: string | null | undefined }) {
     <code className="select-all">{value}</code>
   ) : (
     <span>Unavailable</span>
+  )
+}
+
+function CommitValue({ value }: { value: string | null }) {
+  if (!value) return <IdentityValue value={value} />
+  return (
+    <a
+      href={`https://github.com/langchain-ai/open-swe/commit/${encodeURIComponent(value)}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline underline-offset-2 hover:text-primary"
+    >
+      <IdentityValue value={value} />
+    </a>
   )
 }
 
@@ -66,7 +79,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
           <p>
             Backend: revision{" "}
             <IdentityValue value={buildInfo.backend.revision_id} />
-            {" · "}commit <IdentityValue value={buildInfo.backend.commit} />
+            {" · "}commit <CommitValue value={buildInfo.backend.commit} />
             {" · "}built{" "}
             {buildInfo.backend.built_at ? (
               <time dateTime={buildInfo.backend.built_at}>
@@ -82,7 +95,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
             Dashboard bundle:{" "}
             {buildInfo.dashboard.served ? (
               <>
-                commit <IdentityValue value={buildInfo.dashboard.commit} />
+                commit <CommitValue value={buildInfo.dashboard.commit} />
                 {" · "}built{" "}
                 {buildInfo.dashboard.built_at ? (
                   <time dateTime={buildInfo.dashboard.built_at}>
@@ -115,18 +128,18 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
         return (
           <p>
             This browser is running: commit{" "}
-            <IdentityValue value={bundle.commit} />
+            <CommitValue value={bundle.commit} />
             {" · "}built{" "}
             <time dateTime={bundle.built_at}>
               {new Date(bundle.built_at).toLocaleString()}
             </time>
             {differs ? (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-warning-secondary">
                 {" "}
                 — different from the bundle the backend reports serving.
               </span>
             ) : buildInfo?.dashboard.served && !comparable ? (
-              <span className="text-muted-foreground">
+              <span className="text-secondary">
                 {" "}
                 — comparison with the backend-served bundle unavailable.
               </span>

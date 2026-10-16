@@ -17,11 +17,6 @@ export type PinnedSort = (typeof PINNED_SORTS)[number]
 export interface SidebarPrefs {
   compact: boolean
   filters: SidebarFilters
-  /**
-   * Pins for local threads. Cloud pins live server-side (`thread_pins`); local
-   * threads only exist on this machine, so their pins do too.
-   */
-  pinnedLocalIds: Array<string>
   /** Repositories pinned into the sidebar's Pinned section. Client-side only. */
   pinnedRepoKeys: Array<string>
   collapsedRepoKeys: Array<string>
@@ -32,6 +27,8 @@ export interface SidebarPrefs {
   collapseSubagentsByDefault: boolean
   /** Thread rows whose fold state differs from the default. */
   collapsedSubagentKeys: Array<string>
+  /** Nav links moved into the "More" menu. */
+  hiddenNavItems: Array<string>
   organize: OrganizeMode
   sortChats: ChatSort
   sortPinned: PinnedSort
@@ -40,13 +37,13 @@ export interface SidebarPrefs {
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   compact: false,
   filters: DEFAULT_SIDEBAR_FILTERS,
-  pinnedLocalIds: [],
   pinnedRepoKeys: [],
   collapsedRepoKeys: [],
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
   collapseSubagentsByDefault: true,
   collapsedSubagentKeys: [],
+  hiddenNavItems: ["/agents/bots", "/incidents"],
   organize: "workspace",
   sortChats: "created",
   sortPinned: "manual",
@@ -83,6 +80,7 @@ function sanitizeFilters(value: unknown): SidebarFilters {
       typeof raw.includeResolved === "boolean"
         ? raw.includeResolved
         : DEFAULT_SIDEBAR_FILTERS.includeResolved,
+    ownedOnly: raw.ownedOnly === true,
   }
 }
 
@@ -115,7 +113,6 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
         ? raw.compact
         : DEFAULT_SIDEBAR_PREFS.compact,
     filters: sanitizeFilters(raw.filters),
-    pinnedLocalIds: asStringArray(raw.pinnedLocalIds),
     pinnedRepoKeys: repoKeys(raw, "pinnedRepoKeys", "pinnedProjectKeys"),
     collapsedRepoKeys: repoKeys(
       raw,
@@ -134,6 +131,9 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
       typeof raw.collapseSubagentsByDefault === "boolean"
         ? asStringArray(raw.collapsedSubagentKeys)
         : [],
+    hiddenNavItems: Array.isArray(raw.hiddenNavItems)
+      ? asStringArray(raw.hiddenNavItems)
+      : DEFAULT_SIDEBAR_PREFS.hiddenNavItems,
     organize: asEnum(
       raw.organize === "project" ? "repo" : raw.organize,
       ORGANIZE_MODES,
@@ -230,14 +230,6 @@ export function useSidebarPrefs() {
     (filters: SidebarFilters) => setPrefs((prev) => ({ ...prev, filters })),
     []
   )
-  const toggleLocalPin = useCallback(
-    (threadId: string) =>
-      setPrefs((prev) => ({
-        ...prev,
-        pinnedLocalIds: toggleMembership(prev.pinnedLocalIds, threadId),
-      })),
-    []
-  )
   const toggleRepoPin = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
@@ -293,6 +285,14 @@ export function useSidebarPrefs() {
       })),
     []
   )
+  const toggleNavItemHidden = useCallback(
+    (to: string) =>
+      setPrefs((prev) => ({
+        ...prev,
+        hiddenNavItems: toggleMembership(prev.hiddenNavItems, to),
+      })),
+    []
+  )
   const setView = useCallback(
     (
       patch: Partial<
@@ -306,13 +306,13 @@ export function useSidebarPrefs() {
     prefs,
     setCompact,
     setFilters,
-    toggleLocalPin,
     toggleRepoPin,
     toggleRepoCollapsed,
     setCollapseSubagentsByDefault,
     toggleSubagentsCollapsed,
     toggleSectionCollapsed,
     expandRepo,
+    toggleNavItemHidden,
     setView,
   }
 }

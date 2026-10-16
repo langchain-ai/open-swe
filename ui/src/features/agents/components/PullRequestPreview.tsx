@@ -1,12 +1,19 @@
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@langchain/macaw-components/HoverCard"
 import { createContext, useContext, useMemo } from "react"
 import type { ComponentProps, ReactNode } from "react"
 
-import { PullRequestHoverCard } from "@/features/agents/components/ThreadPullRequests"
+import {
+  PULL_REQUEST_HOVER_CARD_CLASS,
+  PullRequestHoverCard,
+} from "@/features/agents/components/ThreadPullRequests"
 import type {
   AgentPullRequest,
   AgentPullRequestHealth,
 } from "@/features/agents/lib/types"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface PullRequestPreviewContextValue {
   pullRequests: Map<string, AgentPullRequest>
@@ -105,20 +112,17 @@ export function PreviewablePullRequestLink({
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <a href={href} {...props}>
-            {children}
-          </a>
-        }
-      />
-      <TooltipPopup
-        variant="glass"
+    <HoverCard openDelay={250} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <a href={href} {...props}>
+          {children}
+        </a>
+      </HoverCardTrigger>
+      <HoverCardContent
         side="top"
         align="start"
         sideOffset={8}
-        className="rounded-xl p-3 shadow-2xl"
+        className={PULL_REQUEST_HOVER_CARD_CLASS}
       >
         <PullRequestHoverCard
           pullRequest={pullRequest}
@@ -127,7 +131,7 @@ export function PreviewablePullRequestLink({
           )}
           healthUnavailable={previews.healthUnavailable}
         />
-      </TooltipPopup>
-    </Tooltip>
+      </HoverCardContent>
+    </HoverCard>
   )
 }

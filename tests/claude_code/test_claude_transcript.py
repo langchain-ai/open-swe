@@ -3,7 +3,7 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from agent.claude_code.transcript import (
+from openswe.claude_code.transcript import (
     MISSING_TOOL_RESULT,
     ClaudeTranscript,
     TranscriptError,

@@ -5,10 +5,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.dashboard import oauth, routes
-from agent.database import postgres
-from agent.users.models import User
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.dashboard import oauth, routes
+from openswe.database import postgres
+from openswe.users.models import User, UserIdentity
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 _USER_SESSION = {"sub": "intern", "email": "intern@example.com"}
@@ -35,7 +35,11 @@ async def workspace(monkeypatch: pytest.MonkeyPatch, registry_db: None) -> Async
 
 @pytest.fixture
 async def admin_client(workspace: str) -> AsyncIterator[httpx.AsyncClient]:
-    user = User(display_name="Admin Person", is_admin=True)
+    user = User(
+        display_name="Admin Person",
+        is_admin=True,
+        identities=[UserIdentity(provider="github", external_id="1", login="admin")],
+    )
     async with postgres.session() as session:
         session.add(user)
         await session.flush()

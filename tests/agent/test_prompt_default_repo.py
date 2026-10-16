@@ -2,9 +2,9 @@ import asyncio
 
 import pytest
 
-from agent import server
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.run_config import RunConfig
+from openswe import server
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.run_config import RunConfig
 
 
 @pytest.mark.parametrize(

@@ -1,28 +1,24 @@
 import type { ReactNode } from "react"
 
-import { Sheet, SheetPopup } from "@/components/ui/sheet"
+import { SideSheet } from "@/components/SideSheet"
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
 
+/** The work panel as a right-anchored modal sheet, for windows too narrow to fit it inline. */
 export function RightPanelSheet(props: {
   children: ReactNode
   open: boolean
   onClose: () => void
 }) {
   return (
-    <Sheet
+    <SideSheet
+      side="right"
+      title="Work panel"
+      description="Changes, terminals, and files for this thread."
       open={props.open}
-      onOpenChange={(open) => {
-        if (!open) props.onClose()
-      }}
+      onClose={props.onClose}
+      className={RIGHT_PANEL_SHEET_CLASS_NAME}
     >
-      <SheetPopup
-        side="right"
-        showCloseButton={false}
-        keepMounted
-        className={RIGHT_PANEL_SHEET_CLASS_NAME}
-      >
-        {props.children}
-      </SheetPopup>
-    </Sheet>
+      {props.children}
+    </SideSheet>
   )
 }

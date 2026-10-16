@@ -6,10 +6,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.dashboard import deps, oauth, routes
-from agent.slack.channels import SlackChannel
-from agent.workspaces import routes as workspace_routes
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.dashboard import deps, oauth, routes
+from openswe.slack.channels import SlackChannel
+from openswe.workspaces import routes as workspace_routes
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 
@@ -57,6 +57,7 @@ async def test_create_starts_initial_build_when_setup_is_provided(
             json={
                 "name": "OSS",
                 "repos": ["acme/oss"],
+                "inherit_default_sandbox": False,
                 "setup_script": setup_script,
                 "update_script": "echo update",
             },
@@ -88,7 +89,10 @@ async def test_create_starts_initial_build_when_setup_is_provided(
 
 async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClient) -> None:
     await WORKSPACES.create(
-        WorkspaceCreate(name="OSS", repos=["acme/oss"], setup_script="echo setup"), "admin"
+        WorkspaceCreate(
+            name="OSS", repos=["acme/oss"], setup_script="echo setup", inherit_default_sandbox=False
+        ),
+        "admin",
     )
     with (
         patch.object(workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),

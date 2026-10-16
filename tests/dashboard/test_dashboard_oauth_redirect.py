@@ -9,9 +9,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import auth_routes, routes
-from agent.dashboard.oauth import COOKIE_NAME, GithubUser, decode_session, sanitize_redirect_to
-from agent.users import User
+from openswe.dashboard import auth_routes, routes
+from openswe.dashboard.oauth import (
+    COOKIE_NAME,
+    GithubUser,
+    decode_session,
+    issue_session,
+    sanitize_redirect_to,
+)
+from openswe.users import User
 
 
 def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User) -> AsyncMock:
@@ -19,6 +25,42 @@ def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User) -> AsyncMock:
     sign_in = AsyncMock(return_value=user)
     monkeypatch.setattr(auth_routes.User, "sign_in", sign_in)
     return sign_in
+
+
+@pytest.mark.parametrize(
+    ("configured", "unavailable", "status"),
+    [(True, False, 401), (True, True, 200), (False, False, 200)],
+)
+def test_me_reauthenticates_only_a_confirmed_missing_account(
+    monkeypatch: pytest.MonkeyPatch, configured: bool, unavailable: bool, status: int
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    monkeypatch.setattr(auth_routes.postgres, "configured", lambda: configured)
+    monkeypatch.setattr(
+        auth_routes.User,
+        "for_session",
+        AsyncMock(
+            return_value=None,
+            side_effect=RuntimeError("database unavailable") if unavailable else None,
+        ),
+    )
+    monkeypatch.setattr(
+        auth_routes,
+        "get_user_preferences",
+        AsyncMock(return_value={"follow_up_behavior": "queue"}),
+    )
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(User().id)),
+        )
+        response = client.get("/dashboard/api/me")
+
+    assert response.status_code == status
+    if status == 200:
+        assert response.json()["login"] == "alice"
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:
@@ -456,3 +498,23 @@ def test_web_auth_callback_rejects_missing_state_cookie(monkeypatch) -> None:
 
     assert callback_response.status_code == 400
     assert "oauth state mismatch" in callback_response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"code": "github-code", "state": "mcp-transaction"},
+        {"error": "access_denied", "state": "mcp-transaction"},
+    ],
+)
+def test_auth_callback_hands_mcp_sign_ins_to_the_mcp_server(query: dict[str, str]) -> None:
+    app = FastAPI()
+    app.include_router(routes.router)
+
+    with TestClient(app) as client:
+        response = client.get("/dashboard/api/auth/callback", params=query, follow_redirects=False)
+
+    assert response.status_code == 302
+    location = urlparse(response.headers["location"])
+    assert location.path == "/dashboard/api/auth/mcp/callback"
+    assert parse_qs(location.query) == {key: [value] for key, value in query.items()}

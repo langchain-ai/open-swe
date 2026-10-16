@@ -2,13 +2,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.input_messages import RunInput
-from agent.run_config import RunConfig
-from agent.slack import webhook as slack_webhook
-from agent.slack.request import SlackRequest
-from agent.utils.thread_settings import THREAD_SETTINGS_KEY, ThreadSettings
-from agent.webhooks import common as webhook_common
-from tests.conftest import FakeStore
+from openswe.input_messages import RunInput
+from openswe.run_config import RunConfig
+from openswe.slack import webhook as slack_webhook
+from openswe.slack.request import SlackRequest
+from openswe.utils.thread_settings import THREAD_SETTINGS_KEY, ThreadSettings
+from openswe.webhooks import common as webhook_common
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
 _KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
@@ -27,7 +26,6 @@ _VISION = "anthropic:claude-opus-5-5"
 )
 async def test_slack_followup_uses_the_threads_model_for_image_capability(
     monkeypatch: pytest.MonkeyPatch,
-    fake_store: FakeStore,
     stored_model: str | None,
     default_model: str,
     explicit_model: str | None,
@@ -36,7 +34,6 @@ async def test_slack_followup_uses_the_threads_model_for_image_capability(
 ) -> None:
     _setup_slack_mention_fakes(monkeypatch, {})
     client = slack_webhook.get_langgraph_client()
-    client.store = fake_store
     settings: ThreadSettings = {}
     if stored_model:
         settings = {

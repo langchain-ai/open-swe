@@ -3,8 +3,8 @@ from typing import Any
 
 import pytest
 
-from agent.run_config import RunConfig
-from agent.tools import automations
+from openswe.run_config import RunConfig
+from openswe.tools import automations
 
 
 @pytest.fixture(autouse=True)
@@ -29,8 +29,11 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
     result = await automations.create_automation(
         "Check open pull requests",
         workspace="default",
-        schedule="0 9 * * 1-5",
-        repo="langchain-ai/open-swe",
+        triggers=[
+            automations.schedules.GitHubTrigger(
+                repo="langchain-ai/open-swe", events=["pull_request.closed"]
+            )
+        ],
     )
 
     assert result["ok"] is True
@@ -40,7 +43,7 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
         "allow_admin_thread": True,
         "use_workspace_credentials": False,
     }
-    assert called["body"].repo == "langchain-ai/open-swe"
+    assert called["body"].triggers[0].repo == "langchain-ai/open-swe"
 
 
 async def test_automation_tools_recheck_admin(grant_tool_access: Callable[..., None]) -> None:

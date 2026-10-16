@@ -1,7 +1,7 @@
 from typing import Any
 from unittest.mock import patch
 
-from agent.utils import model
+from openswe.utils import model
 
 
 def _capture() -> tuple[dict[str, Any], Any]:

@@ -10,15 +10,17 @@ from sqlalchemy import select
 from starlette.datastructures import URL
 from starlette.requests import Request
 
-from agent.database import postgres
-from agent.slack import events as slack_events
-from agent.slack import failures as slack_failures
-from agent.slack import routes as slack_routes
-from agent.slack import webhook as slack_service
-from agent.slack.payloads import SlackChannelContext
-from agent.slack.pr_links import SlackPullRequestLink
-from agent.slack.request import SlackRequest
-from agent.webhooks import common as webhook_common
+from openswe.database import postgres
+from openswe.human_review import offer as review_offer
+from openswe.slack import events as slack_events
+from openswe.slack import failures as slack_failures
+from openswe.slack import routes as slack_routes
+from openswe.slack import webhook as slack_service
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.pr_links import SlackPullRequestLink
+from openswe.slack.records import SlackMessage
+from openswe.slack.request import SlackRequest
+from openswe.webhooks import common as webhook_common
 
 
 class _FakeThreads:
@@ -102,12 +104,25 @@ def _message_update_payload(*, bot_message: bool = False) -> dict[str, Any]:
     }
 
 
+def _delivered(triggering_user_id: str = "U1", agent_thread_id: str = "t1") -> SlackMessage:
+    return SlackMessage(
+        channel_id="C1",
+        message_ts="1786573369.551099",
+        run_id="run-1",
+        thread_ts="1786573300.000000",
+        triggering_user_id=triggering_user_id,
+        agent_thread_id=agent_thread_id,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
@@ -115,21 +130,14 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: _FakeClient())
+    monkeypatch.setattr(slack_events.event_claims, "claim", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(
         webhook_common,
         "lookup_slack_run_mapping",
-        AsyncMock(
-            return_value={
-                "run_id": "run-1",
-                "thread_ts": "1786573300.000000",
-                "triggering_user_id": "U1",
-                "agent_thread_id": "t1",
-            }
-        ),
+        AsyncMock(return_value=_delivered()),
     )
     monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
@@ -138,9 +146,52 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
 
 
+@pytest.mark.parametrize(
+    ("event_type", "text", "expected_status"),
+    [
+        ("message", "please ask @openswe about this", "ignored"),
+        ("message", "/model:perf do it", "ignored"),
+        ("message", "/btw why?", "ignored"),
+        ("message", "/breakout fix it", "ignored"),
+        ("message", "<@BOT> help", "accepted"),
+        ("app_mention", "help", "accepted"),
+    ],
+)
+async def test_only_slack_mentions_trigger_normal_channels(
+    event_type: str, text: str, expected_status: str
+) -> None:
+    payload = _message_payload(text, "Ev-mention")
+    payload["event"]["type"] = event_type
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+
+    assert response["status"] == expected_status
+    assert bool(background_tasks.tasks) == (expected_status == "accepted")
+
+
+async def test_a_watched_channel_message_checks_automations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_routes, "_slack_channel_watched", AsyncMock(return_value=True))
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_payload("deploy failed", "Ev-watched"))),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    # Ignored as a conversation, still checked against Slack automations.
+    assert response["status"] == "ignored"
+    assert [task for task, _ in background_tasks.tasks] == [slack_routes._launch_slack_automations]
+
+
 @pytest.mark.parametrize("reply", [False, True])
-async def test_kitchen_messages_start_and_continue_threads_without_tag(
-    monkeypatch: pytest.MonkeyPatch, reply: bool
+@pytest.mark.parametrize("event_type", ["message", "app_mention"])
+async def test_kitchen_messages_preserve_explicit_mentions(
+    monkeypatch: pytest.MonkeyPatch, reply: bool, event_type: str
 ) -> None:
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         return SlackChannelContext(
@@ -149,7 +200,8 @@ async def test_kitchen_messages_start_and_continue_threads_without_tag(
 
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=True))
-    payload = _message_payload("please fix this", f"Ev-kitchen-{reply}")
+    payload = _message_payload("please fix this", f"Ev-kitchen-{reply}-{event_type}")
+    payload["event"]["type"] = event_type
     if not reply:
         del payload["event"]["thread_ts"]
     background_tasks = _FakeBackgroundTasks()
@@ -161,13 +213,20 @@ async def test_kitchen_messages_start_and_continue_threads_without_tag(
     assert response["status"] == "accepted"
     request = cast(SlackRequest, background_tasks.tasks[0][1][0])
     assert request.thread_ts == ("1786573300.000000" if reply else "1786573369.551099")
-    assert request.treat_all_messages_as_mentions is True
-    assert request.kitchen_channel is True
+    assert request.treat_all_messages_as_mentions is (event_type == "message")
+    assert request.kitchen_channel is (event_type == "message")
+    assert request.explicit_mention is (event_type == "app_mention")
 
 
 @pytest.mark.parametrize("kitchen", [False, True])
 @pytest.mark.parametrize(
-    "text", ["<@OTHER> shots fired", "  <@OTHER> shots fired", "<@OTHER> ask <@BOT> later"]
+    "text",
+    [
+        "<@OTHER> shots fired",
+        "  <@OTHER> shots fired",
+        "<@OTHER> ask <@BOT> later",
+        "<@OTHER> /model:perf do it",
+    ],
 )
 async def test_leading_other_user_mention_does_not_trigger(
     monkeypatch: pytest.MonkeyPatch, kitchen: bool, text: str
@@ -268,6 +327,44 @@ async def test_pr_links_are_recorded_without_starting_runs(
     assert {link.team_id for link in links} == {"T1", "T2"}
 
 
+@pytest.mark.parametrize("handled_by", ["", "kitchen", "solo_followup"])
+async def test_a_newly_linked_pull_request_is_offered_for_review_once(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, handled_by: str
+) -> None:
+    monkeypatch.setattr(slack_routes, "watch_post", AsyncMock())
+    monkeypatch.setattr(
+        slack_routes, "is_kitchen_channel", AsyncMock(return_value=handled_by == "kitchen")
+    )
+    monkeypatch.setattr(
+        slack_routes,
+        "allow_solo_thread_followup",
+        AsyncMock(return_value=handled_by == "solo_followup"),
+    )
+    payload = _message_payload("can someone look at https://github.com/lc/repo/pull/7", "Ev-pr")
+    payload["team_id"] = "T1"
+    background_tasks = _FakeBackgroundTasks()
+
+    for _ in range(2):
+        await slack_routes.slack_webhook(
+            cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+        )
+
+    offers = [args for func, args in background_tasks.tasks if func is review_offer.offer_review]
+    # The agent already gets this message, so a suggestion would ask it twice.
+    if handled_by:
+        assert offers == []
+        return
+    assert len(offers) == 1
+    channel_id, thread_ts, reply_thread_ts, user_id, ref = offers[0]
+    assert (channel_id, thread_ts, reply_thread_ts, user_id) == (
+        "C1",
+        "1786573300.000000",
+        "1786573300.000000",
+        "U1",
+    )
+    assert ref.url == "https://github.com/lc/repo/pull/7"
+
+
 async def _run_message_update_task(background_tasks: _FakeBackgroundTasks) -> None:
     func, args = background_tasks.tasks[0]
     await func(*args)
@@ -283,9 +380,7 @@ async def test_message_update_background_task_rejects_mismatched_delivery_mappin
     value: str,
 ) -> None:
     lookup_run = cast(AsyncMock, webhook_common.lookup_slack_run_mapping)
-    delivered = dict(lookup_run.return_value)
-    delivered[field] = value
-    lookup_run.return_value = delivered
+    lookup_run.return_value = _delivered(**{field: value})
     process = AsyncMock()
     monkeypatch.setattr(slack_service, "process_slack_mention", process)
     background_tasks = _FakeBackgroundTasks()
@@ -387,12 +482,7 @@ async def test_message_update_retries_until_delivery_mapping_exists(
     lookup_run = AsyncMock(
         side_effect=[
             None,
-            {
-                "run_id": "run-1",
-                "thread_ts": "1786573300.000000",
-                "triggering_user_id": "U1",
-                "agent_thread_id": "t1",
-            },
+            _delivered(),
         ]
     )
     sleep = AsyncMock()

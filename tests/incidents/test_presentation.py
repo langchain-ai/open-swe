@@ -1,5 +1,5 @@
-from agent.incidents.models import IncidentReport
-from agent.incidents.presentation import report_message
+from openswe.incidents.models import IncidentReport
+from openswe.incidents.presentation import report_message
 
 
 def test_model_summary_preserves_markdown_and_long_links_without_mentions():

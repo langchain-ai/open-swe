@@ -20,6 +20,7 @@ export function useConnectionStatus(
     // during render, which the purity rule rejects for the same reason.
     // oxlint-disable-next-line react/set-state-in-effect
     setNow(Date.now())
+    // oxlint-disable-next-line invalidations/no-polling -- a countdown, not a fetch
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
   }, [connection])

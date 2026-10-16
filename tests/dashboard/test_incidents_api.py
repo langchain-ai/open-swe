@@ -8,9 +8,9 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from agent import incidents
-from agent.dashboard import oauth, routes
-from agent.threads import handlers, listing, proxy
+from openswe import incidents
+from openswe.dashboard import oauth, routes
+from openswe.threads import handlers, listing, proxy
 from tests.conftest import patch_thread_module
 
 

@@ -12,12 +12,12 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.act_as import slack as act_as_slack
-from agent.act_as.records import ThreadActAs
-from agent.slack import routes as slack_routes
-from agent.slack.payloads import SlackChannelContext
-from agent.users import User, UserPreferences, UserPreferencesPatch
-from agent.utils.json_types import JsonObject
+from openswe.act_as import slack as act_as_slack
+from openswe.act_as.records import ThreadActAs
+from openswe.slack import routes as slack_routes
+from openswe.slack.payloads import SlackChannelContext
+from openswe.users import User, UserPreferences, UserPreferencesPatch
+from openswe.utils.json_types import JsonObject
 
 _SECRET = "test-signing-secret"
 

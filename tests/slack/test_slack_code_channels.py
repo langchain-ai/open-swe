@@ -6,13 +6,13 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.slack import client as slack_utils
-from agent.slack import events as slack_events
-from agent.slack import routes as slack_routes
-from agent.slack import webhook as slack_service
-from agent.slack.payloads import SlackChannelContext
-from agent.slack.request import SlackRequest
-from agent.webhooks import common as webhook_common
+from openswe.slack import client as slack_utils
+from openswe.slack import events as slack_events
+from openswe.slack import routes as slack_routes
+from openswe.slack import webhook as slack_service
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.request import SlackRequest
+from openswe.webhooks import common as webhook_common
 
 
 class _FakeRequest:
@@ -24,9 +24,13 @@ class _FakeRequest:
         return self._body
 
 
-def test_untagged_code_channel_message_does_not_interrupt_active_work() -> None:
+@pytest.mark.parametrize("text", ["talking to a teammate", "talking about @openswe"])
+def test_untagged_code_channel_message_does_not_interrupt_active_work(
+    monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     assert not slack_service._interrupts_active_run(
-        "talking to a teammate",
+        text,
         "BOT",
         treat_all_messages_as_mentions=True,
         code_channel=True,
@@ -55,7 +59,9 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     slack_events.reset_slack_event_claims()
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
@@ -123,10 +129,11 @@ async def test_a_stale_id_costs_only_itself(invite_call: dict[str, Any]) -> None
         "errors": [{"user": "U2", "ok": False, "error": "user_not_found"}],
     }
 
-    invited, error = await slack_utils.invite_to_slack_channel("C1", ["U1", "U2", "U3"])
+    with pytest.raises(slack_utils.SlackRequestError) as raised:
+        await slack_utils.invite_to_slack_channel("C1", ["U1", "U2", "U3"])
 
-    assert invited == ["U1", "U3"]
-    assert error == "U2 (user_not_found)"
+    assert raised.value.invited == ["U1", "U3"]
+    assert raised.value.code == "U2 (user_not_found)"
 
 
 async def test_a_refused_call_names_everyone_it_could_not_invite(
@@ -134,7 +141,6 @@ async def test_a_refused_call_names_everyone_it_could_not_invite(
 ) -> None:
     invite_call["response"] = {"ok": False, "error": "missing_scope"}
 
-    assert await slack_utils.invite_to_slack_channel("C1", ["U1", "U2"]) == (
-        [],
-        "U1, U2: missing_scope",
-    )
+    with pytest.raises(slack_utils.SlackRequestError, match="U1, U2: missing_scope") as raised:
+        await slack_utils.invite_to_slack_channel("C1", ["U1", "U2"])
+    assert raised.value.invited == []

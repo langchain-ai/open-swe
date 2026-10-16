@@ -6,13 +6,14 @@ import {
   useMatch,
   useRouterState,
 } from "@tanstack/react-router"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { AssistantProvider } from "@/features/assistant/AssistantProvider"
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
+import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 
 export const Route = createFileRoute("/assistant")({
   component: AssistantLayout,
@@ -24,6 +25,10 @@ function AssistantLayout() {
   const experimental = useExperimentalAssistantUi()
   const match = useMatch({ from: "/assistant/$threadId", shouldThrow: false })
   const threadId = match?.params.threadId
+  const localThreads = useLocalThreads()
+  const thisMacThread = Boolean(
+    threadId && localThreads.data?.some((thread) => thread.id === threadId)
+  )
   const navigate = Route.useNavigate()
   const href = useRouterState({ select: (state) => state.location.href })
   useEffect(() => {
@@ -33,14 +38,18 @@ function AssistantLayout() {
     }
   }, [])
   useEffect(() => rememberAppLocation(href), [href])
-  if (session.isLoading || (session.data && profile.isPending))
+  if (
+    session.isLoading ||
+    (session.data && (profile.isPending || localThreads.isLoading))
+  )
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-background">
+      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )
   if (!session.data) return <RequireLogin />
-  if (!experimental)
+  // A "This Mac" thread needs the desktop bridge and git controls of the agents view.
+  if (!experimental || thisMacThread)
     return threadId ? (
       <Navigate to="/agents/$threadId" params={{ threadId }} replace />
     ) : (

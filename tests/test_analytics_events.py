@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from agent.analytics.events import (
+from openswe.analytics.events import (
     EventEnvelope,
     EventName,
     RunStartedPayload,

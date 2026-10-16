@@ -1,4 +1,4 @@
-from agent.github.squash_message import (
+from openswe.github.squash_message import (
     CommitParent,
     GitCommit,
     GitHubUser,

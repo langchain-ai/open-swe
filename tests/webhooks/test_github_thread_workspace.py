@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.webhooks import common as webhook_common
+from openswe.webhooks import common as webhook_common
 
 
 @pytest.mark.parametrize(
@@ -15,8 +15,10 @@ from agent.webhooks import common as webhook_common
 async def test_trigger_or_queue_run_prefers_the_threads_saved_workspace(
     monkeypatch: pytest.MonkeyPatch, saved: str | None, expected: str
 ) -> None:
-    monkeypatch.setattr(webhook_common, "authorize_github_thread", AsyncMock())
-    monkeypatch.setattr(webhook_common, "get_thread_workspace", AsyncMock(return_value=saved))
+    record = webhook_common.ThreadRecord(
+        exists=saved is not None, metadata={"workspace": saved} if saved else {}
+    )
+    monkeypatch.setattr(webhook_common.ThreadRecord, "read", AsyncMock(return_value=record))
     monkeypatch.setattr(
         webhook_common, "workspace_for_repo_config", AsyncMock(return_value="moved-to")
     )

@@ -1,12 +1,11 @@
 import hashlib
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from sqlalchemy import text
 
-from agent.api_keys.models import KEY_PREFIX, ApiKey
-from agent.database import postgres
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.api_keys.models import KEY_PREFIX, ApiKey
+from openswe.database import postgres
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 def _future(days: int = 30) -> datetime:
@@ -108,7 +107,6 @@ async def test_list_all_filters_by_workspace(registry_db: None) -> None:
     assert len(await ApiKey.list_all()) == 2
 
 
-@pytest.mark.usefixtures("fake_store")
 async def test_deleting_a_workspace_invalidates_its_keys(registry_db: None) -> None:
     """A slug is reusable, so a key must not outlive the workspace it was minted on."""
     key, secret = await _mint("CI", workspace="core")

@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.2.14",
+  "version": "0.3.8",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
@@ -13,9 +13,8 @@
     "test": "pnpm run build && pnpm run test:run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build:ui",
-    "pack": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && pnpm run build:cli && electron-builder --dir",
-    "dist": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && pnpm run build:cli && electron-builder",
-    "build:local-backend": "node scripts/build-local-backend.cjs",
+    "pack": "pnpm run build:ui && pnpm run build && pnpm run build:cli && electron-builder --dir",
+    "dist": "pnpm run build:ui && pnpm run build && pnpm run build:cli && electron-builder",
     "build:cli": "pnpm --filter open-swe-cli run build"
   },
   "build": {
@@ -30,7 +29,6 @@
     "asarUnpack": [
       "node_modules/node-pty/**/*"
     ],
-    "afterSign": "build/notarize.cjs",
     "npmRebuild": true,
     "icon": "resources/icon.png",
     "directories": {
@@ -70,13 +68,6 @@
         "to": "ui/licenses/libghostty-vt.LICENSE"
       },
       {
-        "from": "resources/local-backend",
-        "to": "local-backend",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
         "from": "../cli/dist/oswe",
         "to": "bin/oswe"
       }
@@ -114,7 +105,6 @@
   "license": "MIT",
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
-    "@electron/notarize": "3.1.1",
     "@types/node": "26.6.3",
     "electron": "44.4.5",
     "electron-builder": "26.15.3",
@@ -122,6 +112,7 @@
   },
   "dependencies": {
     "electron-updater": "6.8.9",
-    "node-pty": "1.1.0"
+    "node-pty": "1.1.0",
+    "open-swe-bridge-client": "workspace:*"
   }
 }

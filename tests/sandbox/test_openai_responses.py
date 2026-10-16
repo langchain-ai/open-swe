@@ -9,11 +9,11 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
-from agent.openai_responses import conversations, routes
-from agent.openai_responses.conversations import SandboxCaller
-from agent.openai_responses.ids import OpenSweId
-from agent.openai_responses.models import (
+from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from openswe.openai_responses import conversations, routes
+from openswe.openai_responses.conversations import SandboxCaller
+from openswe.openai_responses.ids import OpenSweId
+from openswe.openai_responses.models import (
     ConversationRef,
     CreateResponseRequest,
     FunctionCallItem,
@@ -22,9 +22,9 @@ from agent.openai_responses.models import (
     Response,
     WebSearchCallItem,
 )
-from agent.openai_responses.projection import ResponseProjection
-from agent.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY
-from agent.transcript.events import (
+from openswe.openai_responses.projection import ResponseProjection
+from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY
+from openswe.transcript.events import (
     MessageAppended,
     MessageCompleted,
     MessageUsage,
@@ -34,14 +34,14 @@ from agent.transcript.events import (
     TurnCompleted,
     TurnStarted,
 )
-from tests.conftest import FakeStore
 
 THREAD = str(uuid.uuid4())
 RUN = str(uuid.uuid4())
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_api_flag_blocks_requests_and_can_be_revoked(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     caller = SandboxCaller("host-thread", "sandbox-a", {"workspace": "experiment"})
     monkeypatch.setattr(SandboxCaller, "authenticate", AsyncMock(return_value=caller))

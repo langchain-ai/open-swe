@@ -1,1 +1,0 @@
-Start the automated reviewer agent for a GitHub pull request URL. Use only when the user explicitly requests an automated/AI review or asks to start/run the reviewer agent. Unqualified requests for a PR review mean human review: use `request_human_review`, or `expedite_pr_approval` for a qualifying tiny change, instead.

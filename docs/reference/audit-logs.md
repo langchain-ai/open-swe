@@ -12,11 +12,15 @@ Records have no cascading foreign keys: deleting an account, key, or workspace m
 
 Human IDs come from verified sessions. API-key actors use the key ID, not its creator. Tool records identify an agent, with the initiating user only for a direct user run, and include thread/sandbox provenance where available. A saved requester context is not evidence of a fresh human action. Tool `enrichments.workspace` can describe the execution workspace; `workspace_id` is set only for explicitly bound scopes.
 
-Enrichments allowlist actor and execution metadata, HTTP method, route **template**, status, and UUID path resource IDs. Request/response bodies, tool arguments/results, query strings, headers, credentials, and exception text are never stored. No IP address is inferred from untrusted forwarded headers.
+Enrichments allowlist actor and execution metadata, HTTP method, route **template**, status, and UUID path resource IDs. Instance and workspace settings saves also record `settings_scope` and `settings_changes`: changed field names mapped to `before`/`after` stored override values. Feature-flag booleans (including `model_routing_enabled`) and the human-review assignment timeout retain their values; all non-null text values are `[REDACTED]`. A null value means the override was unset, restoring defaults or inheritance, not the effective resolved value. Unchanged fields, timestamps, and unknown fields are excluded. These changes are attached only after persistence succeeds, even if a later step fails; a no-op save records an empty map. A failed comparison read omits the changes rather than inventing previous values. Concurrent saves can observe the same previous value; this is not transactional change capture.
 
-Unauthenticated failures, failures before an actor is bound (including CSRF), GET/read access, login/logout, webhook-driven actions, arbitrary shell commands, and tools not listed above are not covered. There is no historical backfill or dashboard viewer in this first pass.
+Request/response bodies, tool arguments/results, query strings, headers, credentials, and exception text are never stored. No IP address is inferred from untrusted forwarded headers. Production and preview installations retain their own audit history; a workspace override additionally identifies its workspace.
+
+Unauthenticated failures, failures before an actor is bound (including CSRF), GET/read access, login/logout, webhook-driven actions, arbitrary shell commands, and tools not listed above are not covered. There is no historical backfill.
 
 ## Querying
+
+Installation administrators can browse **Administration → Audit logs** (`/admin/audit-logs`) in the dashboard. The viewer defaults to the last 24 hours, with local-time date inputs and exact-match operation, user ID, API key ID, and workspace ID filters. Apply filters to start a new query; load more to page through the same fixed range. Event details include actor and execution metadata and recorded settings changes, preserving redacted and unset values.
 
 Installation administrators can call `GET /dashboard/api/audit-logs` using their dashboard session:
 

@@ -2,7 +2,7 @@ import pytest
 from jinja2 import UndefinedError
 from langchain_core.tools import StructuredTool
 
-from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from openswe.prompts import apply_tool_descriptions, prompt
 
 
 def sample_tool(value: str) -> str:
@@ -15,14 +15,14 @@ def test_jinja_prompt_requires_all_variables() -> None:
         prompt("runs/baby-sit-ready", pr_url="P", head_sha="H")
 
 
-def test_load_prompt_rejects_paths_outside_resources() -> None:
+def test_prompt_rejects_paths_outside_resources() -> None:
     with pytest.raises(ValueError):
-        load_prompt("../default_prompt.md")
+        prompt("../default_prompt")
 
 
 def test_apply_tool_descriptions_copies_base_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     source = StructuredTool.from_function(sample_tool)
-    monkeypatch.setattr("agent.prompts.load_prompt", lambda _: "Resource description.")
+    monkeypatch.setattr("openswe.prompts._load_prompt", lambda _: "Resource description.")
 
     [described] = apply_tool_descriptions([source])
 
@@ -30,3 +30,14 @@ def test_apply_tool_descriptions_copies_base_tools(monkeypatch: pytest.MonkeyPat
     assert described.name == source.name
     assert described.args_schema == source.args_schema
     assert described.description == "Resource description."
+
+
+def test_described_function_tools_are_reused_across_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Reuse keeps each tool's memoized model-facing schema from being rebuilt every run.
+    monkeypatch.setattr("openswe.prompts._load_prompt", lambda _: "Resource description.")
+
+    [first] = apply_tool_descriptions([sample_tool])
+    [second] = apply_tool_descriptions([sample_tool])
+
+    assert first is second
+    assert first.description == "Resource description."

@@ -1,0 +1,19 @@
+"""Save the authenticated user's explicit assessment feedback."""
+
+from openswe.credential_scope import private_credential_login
+from openswe.review.assessment_feedback import (
+    AssessmentFeedback,
+    FeedbackSubmission,
+    PublishedAssessment,
+)
+
+
+async def submit_review_assessment_feedback(
+    owner: str, repo: str, pr_number: int, review_id: int, feedback: FeedbackSubmission
+) -> AssessmentFeedback:
+    """Submit the user's rating and optional comment on a published review assessment."""
+    login = await private_credential_login()
+    if not login:
+        raise ValueError("Review feedback requires the authenticated owner of a private task")
+    assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
+    return await assessment.record_feedback(login, feedback)

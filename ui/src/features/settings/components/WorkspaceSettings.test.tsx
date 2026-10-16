@@ -11,6 +11,7 @@ import {
   within,
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import {
   api,
@@ -20,9 +21,11 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
+import { ModelPairControl } from "./WorkspaceSettingsSections"
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 vi.mock("@monaco-editor/react", () => ({
@@ -146,11 +149,57 @@ function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
         canEdit={canEdit}
         onDeleted={onDeleted}
       />
-    </QueryClientProvider>
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
   )
 }
 
+/** What `InvalidationTab` does when the stream invalidates `workspaces`. */
+async function invalidateWorkspaces() {
+  await act(async () => {
+    await clients.at(-1)?.invalidateQueries({
+      predicate: (query) =>
+        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
+        false,
+    })
+    await vi.advanceTimersByTimeAsync(1)
+  })
+}
+
 describe("WorkspaceSettingsPanel", () => {
+  it("preserves saved effort while a subagent uses the parent model", () => {
+    const onChange = vi.fn()
+    const props = {
+      label: "Open SWE Agent subagents",
+      models: [
+        {
+          id: "openai:gpt-6.1-sol",
+          label: "GPT-6.1 Sol",
+          supports_images: true,
+          efforts: ["medium", "high"],
+          default_effort: "medium",
+        },
+      ],
+      model: "openai:gpt-6.1-sol",
+      effort: "high",
+      onChange,
+      disabled: false,
+    }
+    const { rerender } = render(
+      <ModelPairControl {...props} parentModel={props.model} />
+    )
+    const effort = () =>
+      screen.getByRole("combobox", {
+        name: "Open SWE Agent subagents reasoning effort",
+      }) as HTMLButtonElement
+    expect(effort().disabled).toBe(true)
+    expect(effort().textContent).toContain("Parent run")
+    rerender(<ModelPairControl {...props} parentModel="another-model" />)
+    expect(effort().disabled).toBe(false)
+    expect(effort().textContent).toContain("high")
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it("shows model labels before the dropdown opens and after it closes", async () => {
     mockApis()
     vi.mocked(api.options).mockResolvedValue({
@@ -180,7 +229,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     const trigger = (await screen.findByText("GPT-6.1 Sol")).closest("button")!
     const models = screen
-      .getByRole("heading", { name: "Model defaults" })
+      .getByRole("heading", { name: "Model Defaults" })
       .closest("section")!
     expect(within(models).getByText("Inherit instance setting")).toBeTruthy()
     expect(screen.queryByRole("listbox")).toBeNull()
@@ -218,11 +267,9 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage(true, onDeleted)
 
     fireEvent.click(await screen.findByRole("button", { name: "Delete OSS" }))
-    expect(screen.getByRole("alertdialog").textContent).toContain(
-      "cannot be undone"
-    )
+    expect(screen.getByRole("dialog").textContent).toContain("cannot be undone")
     fireEvent.click(
-      within(screen.getByRole("alertdialog")).getByRole("button", {
+      within(screen.getByRole("dialog")).getByRole("button", {
         name: "Cancel",
       })
     )
@@ -257,13 +304,13 @@ describe("WorkspaceSettingsPanel", () => {
       )
     ).toBe(true)
     expect(
-      within(screen.getByRole("alertdialog"))
+      within(screen.getByRole("dialog"))
         .getByRole("button", { name: "Cancel" })
         .hasAttribute("disabled")
     ).toBe(true)
     finish()
     await waitFor(() => expect(onDeleted).toHaveBeenCalledOnce())
-    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(screen.queryByRole("dialog")).toBeNull()
   })
 
   it("does not offer deletion without admin access", async () => {
@@ -325,7 +372,7 @@ describe("WorkspaceSettingsPanel", () => {
     ["refreshing", "unknown"],
     ["success", "unknown"],
   ] as const)(
-    "follows a repository rebuild from a %s save response through stale polls to %s",
+    "follows a repository rebuild from a %s save response through invalidations to %s",
     async (savedStatus, outcome) => {
       const initial = {
         ...RECORD,
@@ -389,9 +436,7 @@ describe("WorkspaceSettingsPanel", () => {
           .mocked(api.getWorkspace)
           .mockResolvedValue(saved)
         const reads = getWorkspace.mock.calls.length
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
         expect(screen.getByRole("status").textContent).toContain(
           "rebuild queued"
@@ -401,6 +446,7 @@ describe("WorkspaceSettingsPanel", () => {
           ...saved,
           refresh_status: outcome === "unknown" ? "success" : "refreshing",
         })
+        await invalidateWorkspaces()
         await act(async () => {
           await vi.advanceTimersByTimeAsync(65_001)
         })
@@ -422,9 +468,7 @@ describe("WorkspaceSettingsPanel", () => {
               : "2026-01-01T00:01:00Z",
           refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
         })
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(
           within(general).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
@@ -711,7 +755,7 @@ describe("WorkspaceSettingsPanel", () => {
       name: "Rebuilding…",
     })
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
-  })
+  }, 15_000)
 
   it("offers every accessible repository as its default", async () => {
     mockApis()

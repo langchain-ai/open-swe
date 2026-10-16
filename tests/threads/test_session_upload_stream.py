@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.types import Message
 
-from agent.threads.session_upload import UploadStream
+from openswe.threads.session_upload import UploadStream
 
 
 def _request(body: bytes, *, chunk: int, encoding: str | None) -> Request:

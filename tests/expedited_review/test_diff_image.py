@@ -4,7 +4,7 @@ from io import BytesIO
 import pytest
 from PIL import Image, ImageColor, ImageDraw
 
-from agent.expedited_review.diff_image import (
+from openswe.expedited_review.diff_image import (
     DiffFile,
     DiffImageRenderer,
     DiffTheme,
@@ -12,7 +12,7 @@ from agent.expedited_review.diff_image import (
     Span,
     render_diff_png,
 )
-from agent.expedited_review.eligibility import ChangedFile
+from openswe.expedited_review.eligibility import ChangedFile
 
 PATCH = """@@ -10,4 +10,4 @@ def existing() -> None:
  keep = 1

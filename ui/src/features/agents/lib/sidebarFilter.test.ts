@@ -39,6 +39,35 @@ describe("filterThreads", () => {
     expect(filterThreads(threads, DEFAULT_SIDEBAR_FILTERS)).toHaveLength(1)
   })
 
+  it("keeps the actively viewed thread visible despite source and automation filters", () => {
+    const active = makeThread({
+      id: "active-thread",
+      source: "slack",
+      threadCategory: "automation",
+    })
+    const hidden = makeThread({ source: "slack" })
+    const visible = makeThread({ source: "github" })
+
+    expect(
+      filterThreads(
+        [active, hidden, visible],
+        filters({ sources: ["github"] }),
+        active.id
+      )
+    ).toEqual([active, visible])
+  })
+
+  it("hides archived threads even when actively viewed unless Show archived is enabled", () => {
+    const archived = makeThread({ id: "archived", resolved: true })
+    const ordinary = makeThread()
+    const threads = [archived, ordinary]
+
+    expect(filterThreads(threads, filters(), archived.id)).toEqual([ordinary])
+    expect(
+      filterThreads(threads, filters({ includeResolved: true }), archived.id)
+    ).toEqual(threads)
+  })
+
   it("includes automations when requested", () => {
     const ordinary = makeThread()
     const automation = makeThread({
@@ -74,6 +103,15 @@ describe("filterThreads", () => {
       filterThreads([gh, noSource], filters({ sources: ["github"] }))
     ).toEqual([gh])
   })
+})
+
+it("retains a nonmatching coordinator as context for matching workers", () => {
+  const match = makeThread({ source: "dashboard" })
+  const sibling = makeThread({ source: "github" })
+  const parent = makeThread({ source: "slack", taskWorkers: [match, sibling] })
+  expect(filterThreads([parent], filters({ sources: ["dashboard"] }))).toEqual([
+    { ...parent, taskWorkers: [match] },
+  ])
 })
 
 describe("hasActiveFilters", () => {
