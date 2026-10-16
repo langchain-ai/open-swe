@@ -36,7 +36,7 @@ def _linear_person(author: dict[str, Any]) -> PersonIdentity:
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
-    issue_data: dict[str, Any], repo_config: dict[str, str]
+    issue_data: dict[str, Any], repo_config: dict[str, str], *, workspace: str | None = None
 ) -> None:
     """Process a Linear issue by creating a new LangGraph thread and run.
 
@@ -191,7 +191,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # are the ones the vision fallback checks.
     workspace = (
         await common.get_thread_workspace(thread_id)
-        or issue_data.get("default_repo_workspace")
+        or workspace
         or await common.workspace_for_repo_config(repo_config)
     )
 

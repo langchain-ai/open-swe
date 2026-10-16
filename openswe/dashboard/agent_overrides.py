@@ -1,13 +1,13 @@
 """Profile lookup + override helpers consumed by ``openswe.server.get_agent``."""
 
 import logging
-from collections.abc import Mapping
 from typing import Any
 
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.users import User
+from openswe.users.repository_defaults import RepositoryDefaults
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +25,6 @@ async def resolve_github_login(config: dict[str, Any]) -> str | None:
     return await User.login_for_email(email if isinstance(email, str) else None)
 
 
-def profile_default_repo(profile: Mapping[str, object], workspace: str | None = None) -> str | None:
-    """Resolve a workspace override, falling back to the user's global default."""
-    overrides = profile.get("workspace_default_repos")
-    scoped = overrides.get(workspace) if isinstance(overrides, dict) and workspace else None
-    value = scoped if isinstance(scoped, str) and scoped.strip() else profile.get("default_repo")
-    return value if isinstance(value, str) else None
-
-
 async def get_profile_default_repo(
     login: str | None, workspace: str | None = None, *, fallback_global: bool = True
 ) -> dict[str, str] | None:
@@ -42,17 +34,9 @@ async def get_profile_default_repo(
     profile = await load_profile(login)
     if not profile:
         return None
-    defaults = profile if fallback_global else {**profile, "default_repo": None}
-    default_repo = profile_default_repo(defaults, workspace)
-    if not isinstance(default_repo, str):
-        return None
-    parts = default_repo.strip().split("/", 1)
-    if len(parts) != 2:
-        return None
-    owner, name = parts[0].strip(), parts[1].strip()
-    if not owner or not name:
-        return None
-    return {"owner": owner, "name": name}
+    return RepositoryDefaults.model_validate(profile).repo_config(
+        workspace, fallback_global=fallback_global
+    )
 
 
 async def load_profile(login: str) -> dict[str, Any] | None:

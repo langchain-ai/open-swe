@@ -5,6 +5,7 @@ import pytest
 from openswe import server
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.run_config import RunConfig
+from openswe.users import User
 from tests.conftest import FakeUserRecords
 
 
@@ -31,8 +32,10 @@ def test_resolve_prompt_default_repo_never_loads_team_default(
 
 @pytest.mark.parametrize("workspace", ["oss", "other"])
 async def test_prompt_default_uses_personal_workspace_then_global(
-    user_records: FakeUserRecords, workspace: str
+    user_records: FakeUserRecords, workspace: str, registry_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    await User.sign_in("github", "alice", login="alice")
     user_records.seed(
         "profile",
         "alice",

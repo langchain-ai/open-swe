@@ -230,6 +230,20 @@ class User(Base):
         user = await cls.for_login("github", login.strip())
         return (user.email or None) if user is not None else None
 
+    async def default_repo(
+        self, workspace: str | None = None, *, fallback_global: bool = True
+    ) -> dict[str, str] | None:
+        """This person's repository default in the selected workspace."""
+        from openswe.users.records import UserRecords
+        from openswe.users.repository_defaults import RepositoryDefaults
+
+        if not self.github_login:
+            return None
+        profile = await UserRecords("profile").get(self.github_login) or {}
+        return RepositoryDefaults.model_validate(profile).repo_config(
+            workspace, fallback_global=fallback_global
+        )
+
     @property
     def typed_preferences(self) -> UserPreferences:
         return UserPreferences.model_validate(self.preferences)

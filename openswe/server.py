@@ -69,7 +69,6 @@ from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
 from openswe.bridge.worktree_handoff import worktree_handoff
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.agent_overrides import (
-    get_profile_default_repo,
     load_profile,
     profile_draft_prs,
     resolve_github_login,
@@ -413,8 +412,14 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
         email = cfg.user_email or (
             cfg.slack_thread.triggering_user_email if cfg.slack_thread else None
         )
-        login = cfg.github_login or await User.login_for_email(email)
-        personal = await get_profile_default_repo(login, workspace_slug(cfg))
+        user = (
+            await User.for_login("github", cfg.github_login)
+            if cfg.github_login
+            else await User.for_email(email)
+            if email
+            else None
+        )
+        personal = await user.default_repo(workspace_slug(cfg)) if user else None
         return personal or (await get_workspace_settings(workspace_slug(cfg))).default_repo
     except Exception:
         logger.debug("Failed to load the workspace default repo for prompt", exc_info=True)
