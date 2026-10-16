@@ -33,6 +33,11 @@ function ExperimentsPage() {
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
         />
         <ProfileSwitchRow
+          field="experimental_transcript_upgrade"
+          label="Upgrade older threads on open (experimental)"
+          description="Opening a thread that predates the transcript log, or an imported Claude Code session, moves its history to the transcript log so it loads faster. Sessions you import afterwards are recorded there directly."
+        />
+        <ProfileSwitchRow
           field="experimental_mcp_ptc"
           label="Code Mode (Experimental)"
           description="Let the agent call integrations and supported tools from JavaScript, combining calls and filtering results before they enter its context. Separate from sandbox tool routing; not available for local runs. Applies on the next run."

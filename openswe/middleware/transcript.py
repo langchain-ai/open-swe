@@ -13,8 +13,6 @@ background writer per run, so the model stream never waits on Postgres.
 """
 
 import asyncio
-import base64
-import binascii
 import contextlib
 import logging
 import re
@@ -36,8 +34,6 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command as GraphCommand
 from langgraph_sdk import get_client
-from pydantic import JsonValue
-from pydantic_core import PydanticSerializationError, to_jsonable_python
 from sqlalchemy import text as sql
 
 from openswe.database import postgres
@@ -47,19 +43,15 @@ from openswe.input_messages import (
     message_sender_id,
 )
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.transcript.attachments import PendingAttachment, UnsupportedAttachment
-from openswe.transcript.engine import Command, append
+from openswe.transcript.engine import Command, append, lock_thread
 from openswe.transcript.events import (
     TOOL_OUTPUT_PREVIEW_CHARS,
     JsonObject,
     MessageAppended,
-    MessageAttachment,
     MessageCompleted,
     MessageSender,
-    MessageUsage,
     NoticeKind,
     RunNotice,
-    ThreadCreated,
     ToolCompleted,
     ToolStarted,
     TurnCompleted,
@@ -68,13 +60,24 @@ from openswe.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
+from openswe.transcript.messages import (
+    capped_tool_output,
+    human_attachments,
+    is_dynamic_context,
+    json_object,
+    message_text,
+    message_usage,
+    nonempty_string,
+    reasoning_text,
+    thread_created,
+    transcribed_human_text,
+)
 from openswe.transcript.turns import recorded_message_ids, run_turn, superseded_turns
 
 logger = logging.getLogger(__name__)
 
 PARAGRAPH_FLUSH_SECONDS = 0.4
 HARD_FLUSH_CHARS = 24_000
-TOOL_OUTPUT_CAP_BYTES = 256 * 1024
 ERROR_TEXT_CAP = 2_000
 _WRITER_BATCH = 32
 # Model calls a middleware makes for its own bookkeeping (routing classifier,
@@ -266,59 +269,10 @@ def _lookup_state() -> RunState:
     return _runs.get(_run_key(ids.thread_id, ids.run_id), DISABLED)
 
 
-def _reasoning_text(message: BaseMessage) -> str:
-    """Concatenated reasoning. Never stripped: a streaming chunk's leading space
-    is part of the delta."""
-    try:
-        blocks = message.content_blocks
-    except Exception:
-        logger.debug("Could not read content blocks for reasoning", exc_info=True)
-        return ""
-    out = ""
-    for block in blocks:
-        if not isinstance(block, Mapping):
-            continue
-        if block.get("type") == "reasoning":
-            reasoning = block.get("reasoning")
-            if isinstance(reasoning, str):
-                out += reasoning
-        elif block.get("type") == "non_standard":
-            value = block.get("value")
-            if isinstance(value, Mapping) and value.get("type") == "thinking":
-                thinking = value.get("thinking")
-                if isinstance(thinking, str):
-                    out += thinking
-    return out
-
-
-def _message_text(message: BaseMessage) -> str:
-    try:
-        return message.text
-    except Exception:
-        logger.debug("Could not read message text", exc_info=True)
-        return ""
-
-
 def _human_text(message: HumanMessage) -> str:
     """The user's own words, unwrapping the ``<input-message>`` envelope."""
     authored = input_message_text(message.content)
-    return (authored or _message_text(message)).strip()
-
-
-def _transcribed_human_text(message: HumanMessage) -> str:
-    """A human message as the reader has to receive it: envelope and all.
-
-    Who sent it, on which surface, and whether it is a platform-generated
-    context message the UI hides are all carried by the ``<input-message>``
-    wrapper and by nothing else on the wire. Unwrapping here would strip a
-    message of its attribution.
-    """
-    return _message_text(message).strip()
-
-
-def _is_dynamic_context(message: HumanMessage) -> bool:
-    """A ``<dynamic-context>`` introduction: who a sender is, not what they said."""
-    return "<dynamic-context" in _message_text(message)
+    return (authored or message_text(message)).strip()
 
 
 def _is_turn_annotation(message: HumanMessage) -> bool:
@@ -327,121 +281,7 @@ def _is_turn_annotation(message: HumanMessage) -> bool:
     A ``<dynamic-context>`` introduction can trail the message it describes, so
     the last human message in state is not reliably the request itself.
     """
-    return _is_dynamic_context(message)
-
-
-def _usage(message: AIMessage) -> MessageUsage | None:
-    """Token accounting for one AI message, when the provider reported any."""
-    usage = message.usage_metadata
-    if not isinstance(usage, Mapping):
-        return None
-    counts = {
-        key: value
-        for key in ("input_tokens", "output_tokens", "total_tokens")
-        if isinstance(value := usage.get(key), int)
-    }
-    metadata = message.response_metadata
-    return (
-        MessageUsage(
-            **counts,
-            model=_string(metadata.get("model_name")),
-            invocation_id=_string(metadata.get("open_swe_invocation_id")),
-        )
-        if counts
-        else None
-    )
-
-
-def _image_bytes(block: Mapping[str, object]) -> tuple[str, bytes] | None:
-    """``(mime_type, data)`` for a standard base64 image content block."""
-    mime_type = block.get("mime_type")
-    encoded = block.get("base64")
-    if not isinstance(mime_type, str) or not isinstance(encoded, str):
-        return None
-    try:
-        return mime_type, base64.b64decode(encoded, validate=True)
-    except binascii.Error:
-        logger.warning("Skipping an undecodable transcript attachment", exc_info=True)
-        return None
-
-
-def _human_attachments(
-    message: HumanMessage, message_id: str
-) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
-    """Files on a human message, as event metadata plus the bytes to store.
-
-    Only standard base64 image blocks are captured; a remote-URL image is
-    referenced rather than copied, and anything else is skipped with a log.
-    """
-    try:
-        blocks = message.content_blocks
-    except Exception:
-        logger.debug("Could not read content blocks for attachments", exc_info=True)
-        return [], ()
-    attachments: list[MessageAttachment] = []
-    pending: list[PendingAttachment] = []
-    for block in blocks:
-        if not isinstance(block, Mapping) or block.get("type") != "image":
-            continue
-        url = block.get("url")
-        decoded = _image_bytes(block)
-        if decoded is None:
-            if isinstance(url, str) and url:
-                attachments.append(MessageAttachment(mime_type="image/*", url=url))
-            else:
-                logger.warning(
-                    "Skipping a transcript attachment with no bytes and no url",
-                    extra={"transcript": {"message_id": message_id}},
-                )
-            continue
-        mime_type, data = decoded
-        file_name = block.get("file_name")
-        attachment_id = uuid.uuid7()
-        try:
-            pending.append(
-                PendingAttachment(
-                    attachment_id=attachment_id,
-                    message_id=message_id,
-                    position=len(attachments),
-                    mime_type=mime_type,
-                    file_name=file_name if isinstance(file_name, str) else None,
-                    data=data,
-                )
-            )
-        except UnsupportedAttachment:
-            logger.warning(
-                "Skipping an unsupported transcript attachment",
-                exc_info=True,
-                extra={"transcript": {"message_id": message_id, "mime_type": mime_type}},
-            )
-            continue
-        attachments.append(
-            MessageAttachment(
-                mime_type=mime_type,
-                file_name=file_name if isinstance(file_name, str) else None,
-                attachment_id=attachment_id,
-            )
-        )
-    return attachments, tuple(pending)
-
-
-def _tool_output(content: object) -> tuple[str, bool]:
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, (list, dict)):
-        parts: list[str] = []
-        for block in content if isinstance(content, list) else [content]:
-            if isinstance(block, Mapping) and isinstance(block.get("text"), str):
-                parts.append(cast(str, block["text"]))
-            else:
-                parts.append(str(block))
-        text = "\n".join(parts)
-    else:
-        text = str(content)
-    encoded = text.encode("utf-8", "replace")
-    if len(encoded) <= TOOL_OUTPUT_CAP_BYTES:
-        return text, False
-    return encoded[:TOOL_OUTPUT_CAP_BYTES].decode("utf-8", "ignore"), True
+    return is_dynamic_context(message)
 
 
 class _DeltaHandler(AsyncCallbackHandler):
@@ -480,8 +320,8 @@ class _DeltaHandler(AsyncCallbackHandler):
         if not isinstance(message, BaseMessage):
             self._feed(token if isinstance(token, str) else "", "")
             return
-        text = _message_text(message) or (token if isinstance(token, str) else "")
-        self._feed(text, _reasoning_text(message))
+        text = message_text(message) or (token if isinstance(token, str) else "")
+        self._feed(text, reasoning_text(message))
 
     async def on_stream_event(
         self,
@@ -622,30 +462,14 @@ async def _finish(state: RunState) -> None:
         _runs.pop(_run_key(state.thread_id, state.run_id), None)
 
 
-def _string(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _thread_created(metadata: Mapping[str, object], title: str) -> ThreadCreated:
-    return ThreadCreated(
-        type="thread.created",
-        title=_string(metadata.get("title")) or title or "New agent",
-        source=_string(metadata.get("source")) or _string(metadata.get("origin")) or "unknown",
-        owner_login=_string(metadata.get("owner_login")) or "",
-        visibility="private" if metadata.get("visibility") == "private" else "public",
-        repo_owner=_string(metadata.get("repo_owner")),
-        repo_name=_string(metadata.get("repo_name")),
-        model_id=_string(metadata.get("resolved_model")) or _string(metadata.get("model")),
-        effort=_string(metadata.get("resolved_effort")) or _string(metadata.get("effort")),
-        metadata=_json_object(metadata),
-    )
-
-
 async def _has_transcript(thread_id: str) -> bool:
     """Whether the thread is served by the event log rather than by LangGraph state."""
     if not postgres.configured():
         return False
     async with postgres.read_only_transaction() as conn:
+        # Waits out an in-flight backfill (``openswe.transcript.backfill``), so a
+        # run starting mid-upgrade is recorded rather than lost from the log.
+        await lock_thread(conn, thread_id)
         result = await conn.execute(
             sql("SELECT 1 FROM thread WHERE thread_id = :thread_id"),
             {"thread_id": thread_id},
@@ -740,7 +564,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 [
                     Command(
                         command_id=f"thread:{ids.thread_id}:created",
-                        event=_thread_created(metadata, title[:80]),
+                        event=thread_created(metadata, title[:80]),
                         actor_kind="system",
                         run_id=ids.run_id,
                     )
@@ -804,7 +628,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             and isinstance(message.id, str)
             and message.id
             and message.id not in input_event_ids
-            and not _is_dynamic_context(message)
+            and not is_dynamic_context(message)
         )
         commands.extend(
             Command(
@@ -925,8 +749,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             if not isinstance(message_id, str) or message_id in state.seen_human_ids:
                 continue
             state.seen_human_ids.add(message_id)
-            text = _transcribed_human_text(message)
-            attachments, pending = _human_attachments(message, message_id)
+            text = transcribed_human_text(message)
+            attachments, pending = human_attachments(message, message_id)
             if not text and not attachments:
                 continue
             state.enqueue(
@@ -960,7 +784,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         status = request.state.get("conversation_offloading")
         if not isinstance(status, Mapping):
             return
-        payload = _json_object(status)
+        payload = json_object(status)
         if state.offloading_notice == payload:
             return
         state.offloading_notice = payload
@@ -1011,9 +835,9 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                         message_id=message_id,
                         namespace=list(namespace),
                         role="ai",
-                        text=_message_text(message).strip(),
-                        reasoning=_reasoning_text(message).strip(),
-                        usage=_usage(message),
+                        text=message_text(message).strip(),
+                        reasoning=reasoning_text(message).strip(),
+                        usage=message_usage(message),
                         created_at=datetime.now(UTC),
                     ),
                     actor_kind="agent",
@@ -1059,7 +883,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 tool_call_id,
                 namespace,
                 "error",
-                *_tool_output(f"{type(exc).__name__}: {exc}"),
+                *capped_tool_output(f"{type(exc).__name__}: {exc}"),
             )
             raise
         finally:
@@ -1104,7 +928,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                         tool_call_id=tool_call_id,
                         message_id=_issuing_message_id(state, messages, tool_call_id),
                         name=name,
-                        input=_json_object(tool_call.get("args")),
+                        input=json_object(tool_call.get("args")),
                         namespace=namespace,
                     ),
                     actor_kind="agent",
@@ -1241,11 +1065,15 @@ def _sender(human: HumanMessage, ids: RunIds, metadata: Mapping[str, object]) ->
     """Who asked for this turn, from the message envelope then the run config."""
     login = (
         message_sender_id(human.content, kind="human")
-        or _string(ids.configurable.get("github_login"))
-        or _string(metadata.get("owner_login"))
+        or nonempty_string(ids.configurable.get("github_login"))
+        or nonempty_string(metadata.get("owner_login"))
         or "unknown"
     )
-    kind = _string(ids.configurable.get("source")) or _string(metadata.get("source")) or "unknown"
+    kind = (
+        nonempty_string(ids.configurable.get("source"))
+        or nonempty_string(metadata.get("source"))
+        or "unknown"
+    )
     return MessageSender(login=login, kind=kind)
 
 
@@ -1255,19 +1083,19 @@ def _turn_requested(
     message_id = human.id if isinstance(human.id, str) and human.id else str(uuid.uuid7())
     # ``_start_run`` marks this message as seen, so its images can never be
     # recovered by ``_record_injected_humans``; they travel with the request.
-    attachments, pending = _human_attachments(human, message_id)
+    attachments, pending = human_attachments(human, message_id)
     return Command(
         command_id=f"turn:{state.turn_id}:requested",
         event=TurnRequested(
             type="turn.requested",
             turn_id=state.turn_id,
             message_id=message_id,
-            text=_transcribed_human_text(human),
+            text=transcribed_human_text(human),
             sender=_sender(human, ids, metadata),
             attachments=attachments,
-            model_id=_string(ids.configurable.get("resolved_agent_model_id"))
-            or _string(ids.configurable.get("agent_model_id")),
-            effort=_string(ids.configurable.get("agent_effort")),
+            model_id=nonempty_string(ids.configurable.get("resolved_agent_model_id"))
+            or nonempty_string(ids.configurable.get("agent_model_id")),
+            effort=nonempty_string(ids.configurable.get("agent_effort")),
         ),
         actor_kind="user",
         run_id=state.run_id,
@@ -1291,21 +1119,6 @@ def _issuing_message_id(state: RunState, candidates: object, tool_call_id: str) 
     return None
 
 
-def _json_object(value: object) -> JsonObject:
-    """``value`` as a JSON object, dropping keys pydantic could not encode."""
-    if not isinstance(value, Mapping):
-        return {} if value is None else {"value": repr(value)}
-    out: JsonObject = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            continue
-        try:
-            out[key] = cast(JsonValue, to_jsonable_python(item))
-        except PydanticSerializationError:
-            logger.debug("Dropping unserializable transcript payload key", exc_info=True)
-    return out
-
-
 def _result_output(
     result: ToolMessage | GraphCommand[Any], tool_call_id: str
 ) -> tuple[Literal["completed", "error"], str, bool]:
@@ -1326,7 +1139,7 @@ def _result_output(
     if message is None:
         return "completed", "", False
     status: Literal["completed", "error"] = "error" if message.status == "error" else "completed"
-    return status, *_tool_output(message.content)
+    return status, *capped_tool_output(message.content)
 
 
 def _attach(handler: AsyncCallbackHandler) -> CallbackManager | AsyncCallbackManager | None:

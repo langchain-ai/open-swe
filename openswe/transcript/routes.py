@@ -13,6 +13,7 @@ after the flip.
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -25,11 +26,18 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.profiles import get_profile
 from openswe.database import postgres
 
 # The ``thread.metadata`` mirror exists so this predicate is reused unchanged.
 from openswe.threads.summary import assert_thread_readable
 from openswe.transcript import attachments, listener, tool_output
+from openswe.transcript.backfill import (
+    UPGRADE_FLAG,
+    ThreadBusy,
+    UpgradeProgress,
+    upgrade_transcript,
+)
 from openswe.transcript.cursor import decode_turn_cursor
 from openswe.transcript.events import StoredEvent
 from openswe.transcript.snapshot import (
@@ -40,6 +48,8 @@ from openswe.transcript.snapshot import (
     load_turn_page,
     measure_gap,
 )
+from openswe.utils.json_types import thread_metadata
+from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.timing import phase, server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -200,6 +210,85 @@ async def api_get_thread_attachment(
             "Cache-Control": f"private, max-age={ATTACHMENT_MAX_AGE_SECONDS}, immutable",
         },
     )
+
+
+_upgrades: set[asyncio.Task[None]] = set()
+"""Upgrades outlive the request that started them: a reader who navigates away
+mid-upgrade still leaves the thread upgraded for the next one."""
+
+
+def _upgrade_finished(thread_id: str, task: asyncio.Task[None]) -> None:
+    _upgrades.discard(task)
+    if task.cancelled():
+        return
+    error = task.exception()
+    if isinstance(error, ThreadBusy):
+        logger.info("Transcript upgrade refused for a busy thread", extra={"thread_id": thread_id})
+    elif error is not None:
+        logger.error(
+            "Transcript upgrade failed",
+            exc_info=error,
+            extra={"thread_id": thread_id},
+        )
+
+
+@router.post("/threads/{thread_id}/transcript/upgrade")
+async def api_upgrade_thread_transcript(
+    thread_id: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> StreamingResponse:
+    """Fold a legacy thread into the transcript, streaming progress as NDJSON.
+
+    Each line is ``{"type": "progress", "done", "total"}`` until one final
+    ``{"type": "done"}`` or ``{"type": "error", "error"}``; ``thread_busy``
+    means a run was live and the thread can be upgraded once it settles.
+    """
+    if not postgres.configured():
+        raise HTTPException(409, "transcript_unavailable")
+    profile = await get_profile(session["sub"]) or {}
+    if profile.get(UPGRADE_FLAG) is not True:
+        raise HTTPException(403, "transcript_upgrade_disabled")
+    try:
+        thread = await langgraph_client().threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    assert_thread_readable(thread_metadata(thread), session["sub"], session.get("email"))
+    progress: asyncio.Queue[UpgradeProgress] = asyncio.Queue()
+    task = asyncio.create_task(upgrade_transcript(thread_id, progress.put_nowait))
+    _upgrades.add(task)
+    task.add_done_callback(lambda done: _upgrade_finished(thread_id, done))
+    return StreamingResponse(
+        _upgrade_stream(task, progress),
+        media_type="application/x-ndjson",
+        headers=_SSE_HEADERS,
+    )
+
+
+async def _upgrade_stream(
+    task: asyncio.Task[None], progress: asyncio.Queue[UpgradeProgress]
+) -> AsyncGenerator[str]:
+    while not task.done():
+        reading = asyncio.ensure_future(progress.get())
+        await asyncio.wait({reading, task}, return_when=asyncio.FIRST_COMPLETED)
+        if not reading.done():
+            reading.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reading
+            break
+        yield _progress_line(reading.result())
+    while not progress.empty():
+        yield _progress_line(progress.get_nowait())
+    # Logged by ``_upgrade_finished``; the reader only needs to know which way it went.
+    error = None if task.cancelled() else task.exception()
+    if task.cancelled() or error is not None:
+        reason = "thread_busy" if isinstance(error, ThreadBusy) else "upgrade_failed"
+        yield json.dumps({"type": "error", "error": reason}) + "\n"
+    else:
+        yield json.dumps({"type": "done"}) + "\n"
+
+
+def _progress_line(update: UpgradeProgress) -> str:
+    return json.dumps({"type": "progress", **update.model_dump()}) + "\n"
 
 
 async def _stream(thread_id: str, after: int, session: dict[str, Any]) -> AsyncGenerator[str]:

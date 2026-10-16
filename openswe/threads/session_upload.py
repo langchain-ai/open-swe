@@ -15,6 +15,7 @@ from openswe.claude_code.transcript import ClaudeTranscript, TranscriptError
 from openswe.dashboard.oauth import UPLOAD_TICKET_TTL_SECONDS, UploadTicket, issue_upload_ticket
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.repo_access import require_repo_access_for_user
+from openswe.database import postgres
 from openswe.github.http import GitHubClient, GitHubError
 from openswe.github.pull_requests import PullRequest
 from openswe.input_messages import SystemIdentity, build_input_messages
@@ -34,6 +35,7 @@ from openswe.threads.summary import (
     _parse_repo,
     _thread_summary,
 )
+from openswe.transcript.backfill import UPGRADE_FLAG, upgrade_transcript
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
@@ -402,10 +404,29 @@ async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str
         update["title"] = session.title
     await client.threads.update(thread_id=thread_id, metadata=update)
     await mirror_thread_metadata(thread_id, update)
+    await _record_transcript(thread_id, reserved.owner_login)
     # Linked only once the thread holds the session, so an abandoned reservation stays off the PR.
     if reserved.pr_number is not None:
         await _link_pull_request(reserved.target, reserved.pr_number, thread_id)
     return await _thread_summary(await client.threads.get(thread_id))
+
+
+async def _record_transcript(thread_id: str, login: str) -> None:
+    """Serve the seeded history from the transcript, as for a thread a run created."""
+    if not postgres.configured():
+        return
+    profile = await get_profile(login) or {}
+    if profile.get(UPGRADE_FLAG) is not True:
+        return
+    try:
+        await upgrade_transcript(thread_id)
+    except Exception:
+        # The thread still reads from LangGraph state, and opening it retries.
+        logger.warning(
+            "Could not record an uploaded session's transcript",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
 
 
 async def _link_pull_request(target: _Target, number: int, thread_id: str) -> None:

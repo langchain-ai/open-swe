@@ -4181,6 +4181,18 @@
             ],
             "title": "Experimental Task Coordination"
           },
+          "experimental_transcript_upgrade": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Transcript Upgrade"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {
@@ -19958,6 +19970,53 @@
           }
         ],
         "summary": "Api Get Thread Transcript Turns",
+        "tags": [
+          "dashboard",
+          "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/transcript/upgrade": {
+      "post": {
+        "description": "Fold a legacy thread into the transcript, streaming progress as NDJSON.\n\nEach line is ``{\"type\": \"progress\", \"done\", \"total\"}`` until one final\n``{\"type\": \"done\"}`` or ``{\"type\": \"error\", \"error\"}``; ``thread_busy``\nmeans a run was live and the thread can be upgraded once it settles.",
+        "operationId": "api_upgrade_thread_transcript_dashboard_api_threads__thread_id__transcript_upgrade_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Upgrade Thread Transcript",
         "tags": [
           "dashboard",
           "transcript"

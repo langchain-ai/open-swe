@@ -4,10 +4,12 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
+import { TranscriptUpgradeProgress } from "@/features/agents/components/TranscriptUpgradeProgress"
 import { SubagentThreadView } from "@/features/agents/components/subagents/SubagentThreadView"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useAgentThread } from "@/features/agents/lib/queries"
+import { useTranscriptUpgrade } from "@/features/agents/lib/transcript/useTranscriptUpgrade"
 import {
   ensureThreadLoad,
   threadDetailFailed,
@@ -56,6 +58,7 @@ function AgentThreadContent({
 }) {
   const threadQuery = useAgentThread(threadId)
   const transcript = threadQuery.data?.transcript === "v2"
+  const upgrade = useTranscriptUpgrade(threadId, threadQuery.data)
   const timedOut = useLoadTimedOut(threadQuery.isPending)
   const title = threadQuery.data?.title
   const hasDetail = threadQuery.data !== undefined
@@ -82,7 +85,7 @@ function AgentThreadContent({
     }
   }, [active, ownsTitle, title])
 
-  if (threadQuery.isPending && !timedOut) {
+  if ((threadQuery.isPending && !timedOut) || upgrade.kind === "pending") {
     return (
       <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
         <Skeleton className="h-40 w-full max-w-md" />
@@ -102,6 +105,9 @@ function AgentThreadContent({
       />
     )
   }
+
+  if (upgrade.kind === "upgrading")
+    return <TranscriptUpgradeProgress progress={upgrade.progress} />
 
   return (
     <AgentThreadStreamBoundary active={active}>

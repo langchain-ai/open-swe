@@ -302,3 +302,59 @@ export async function startRun(
     )
   }
 }
+
+export interface TranscriptUpgradeProgress {
+  done: number
+  total: number
+}
+
+type TranscriptUpgradeLine =
+  | ({ type: "progress" } & TranscriptUpgradeProgress)
+  | { type: "done" }
+  | { type: "error"; error: "thread_busy" | "upgrade_failed" }
+
+/** The thread had a live run; it can be upgraded once that settles. */
+export class TranscriptUpgradeBusy extends Error {}
+
+/**
+ * Fold a legacy thread into the transcript log. The server streams one JSON
+ * line per progress step and ends on `done` or `error`; this resolves on
+ * `done` and throws otherwise.
+ */
+export async function upgradeTranscript(
+  threadId: string,
+  onProgress: (progress: TranscriptUpgradeProgress) => void
+): Promise<void> {
+  const requestId = newRequestId()
+  const response = await timedFetch(
+    dashboardApiUrl(transcriptPath(threadId, "/upgrade")),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { [REQUEST_ID_HEADER]: requestId },
+    }
+  ).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
+  })
+  if (!response.ok) throw await apiError(response, requestId)
+  if (!response.body) throw new Error("Transcript upgrade sent no progress")
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffered = ""
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffered += value
+    const lines = buffered.split("\n")
+    buffered = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const parsed = JSON.parse(line) as TranscriptUpgradeLine
+      if (parsed.type === "progress") onProgress(parsed)
+      else if (parsed.type === "done") return
+      else if (parsed.error === "thread_busy")
+        throw new TranscriptUpgradeBusy("Thread is busy")
+      else throw new Error("Transcript upgrade failed")
+    }
+  }
+  throw new Error("Transcript upgrade ended without finishing")
+}
