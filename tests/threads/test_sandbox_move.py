@@ -31,7 +31,7 @@ async def test_moving_to_the_cloud_carries_the_checkout_now_or_not_at_all(
     carry = AsyncMock(side_effect=RuntimeError("pack failed") if carry_fails else None)
     monkeypatch.setattr(moves, "langgraph_client", lambda: client)
     monkeypatch.setattr(moves, "mirror_thread_metadata", AsyncMock())
-    monkeypatch.setattr(moves, "ensure_sandbox_for_thread", carry)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.ensure_sandbox_for_thread", carry)
     monkeypatch.setattr(moves.BridgeStore, "is_connected", AsyncMock(return_value=True))
 
     move = await SandboxMove.requested(

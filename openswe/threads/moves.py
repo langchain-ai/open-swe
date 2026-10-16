@@ -12,7 +12,6 @@ from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.database import postgres
 from openswe.dispatch import thread_workspace
 from openswe.input_messages import SystemIdentity, build_input_messages
-from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
 from openswe.threads.summary import TRANSCRIPT_VERSION, thread_is_owner
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import MessageSender, TurnCompleted, TurnRequested
@@ -102,6 +101,8 @@ class SandboxMove:
         A carry that fails puts the thread back where it was, so it is never
         half-moved: its checkout stays in the sandbox it was asked to leave.
         """
+        from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
+
         await self._write(self.update)
         try:
             await ensure_sandbox_for_thread(self.thread_id, workspace_slug=self._workspace)
