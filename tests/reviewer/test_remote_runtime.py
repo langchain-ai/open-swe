@@ -1,5 +1,9 @@
 import time
+from collections.abc import Awaitable, Callable
+from functools import partial
+from pathlib import Path
 
+import httpx2
 import jwt
 import pytest
 from starlette.types import Message, Receive, Scope, Send
@@ -149,6 +153,159 @@ async def test_tool_server_refuses_calls_without_a_valid_run_token() -> None:
 
 async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_attempts", "expected_status"),
+    [
+        ("connect", 3, "error"),
+        ("connect_then_success", 2, "success"),
+        ("read", 1, "error"),
+        ("write", 1, "error"),
+        ("502", 1, "error"),
+        ("503", 1, "error"),
+        ("504", 1, "error"),
+        ("timeout", 1, "error"),
+        ("401", 1, "raises"),
+        ("500", 1, "raises"),
+    ],
+)
+async def test_mda_tool_hook_failure_reaches_model_and_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: str,
+    expected_attempts: int,
+    expected_status: str,
+) -> None:
+    from langchain.agents import create_agent
+    from langchain.agents.middleware import after_agent, wrap_model_call
+    from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.messages import AIMessage, ToolMessage, message_to_dict
+    from langgraph.runtime import Runtime
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "mda"))
+    from mda.rt import tools
+    from mda.rt.middleware import RunState, RuntimeToolsMiddleware
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.test")
+    attempts: list[httpx2.Request] = []
+    delays: list[float] = []
+    observed: list[ToolMessage] = []
+    completed: list[bool] = []
+    secret = "private-run-token"
+    arguments = {"command": "private-request-body"}
+
+    async def respond(request: httpx2.Request) -> httpx2.Response:
+        attempts.append(request)
+        if failure == "connect" or failure == "connect_then_success" and len(attempts) == 1:
+            raise httpx2.ConnectError(f"{secret} {arguments}", request=request)
+        if failure in {"read", "write", "timeout"}:
+            exception = {
+                "read": httpx2.ReadError,
+                "write": httpx2.WriteError,
+                "timeout": httpx2.ReadTimeout,
+            }[failure]
+            raise exception(f"{secret} {arguments}", request=request)
+        if failure.isdigit():
+            return httpx2.Response(int(failure), text=f"{secret} {arguments}")
+        return httpx2.Response(
+            200,
+            json={
+                "message": message_to_dict(ToolMessage(content="completed", tool_call_id="call-1")),
+                "update": {"completed": True},
+                "events": [{"event": "completed"}],
+            },
+        )
+
+    async def sleep(seconds: float) -> None:
+        delays.append(seconds)
+
+    monkeypatch.setattr(
+        httpx2,
+        "AsyncClient",
+        partial(httpx2.AsyncClient, transport=httpx2.MockTransport(respond)),
+    )
+    monkeypatch.setattr(tools.asyncio, "sleep", sleep)
+    backend = tools.OpenSweBackend(secret)
+    tool = tools.backend_tool(
+        tools.ToolSpec(
+            name="execute",
+            description="Execute a command",
+            parameters={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        ),
+        backend,
+    )
+
+    @wrap_model_call
+    async def model(
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        replies = [message for message in request.messages if isinstance(message, ToolMessage)]
+        if replies:
+            observed.extend(replies)
+            return ModelResponse(result=[AIMessage(content="finished")])
+        return ModelResponse(
+            result=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "execute", "args": arguments, "id": "call-1"}],
+                )
+            ]
+        )
+
+    @after_agent
+    async def finish(state: AgentState, runtime: Runtime) -> None:
+        completed.append(True)
+
+    graph = create_agent(
+        FakeListChatModel(responses=[]),
+        tools=[tool],
+        middleware=[RuntimeToolsMiddleware(backend, {"execute"}), model, finish],
+        state_schema=RunState,
+    )
+    if expected_status == "raises":
+        with pytest.raises(tools.BackendCallError):
+            await graph.ainvoke({"messages": [{"role": "user", "content": "run command"}]})
+        assert len(attempts) == 1
+        assert completed == []
+        return
+    values: dict[str, object] = {}
+    events: list[object] = []
+    async for mode, chunk in graph.astream(
+        {"messages": [{"role": "user", "content": "run command"}]},
+        stream_mode=["values", "custom"],
+    ):
+        if mode == "values":
+            values = chunk
+        else:
+            events.append(chunk)
+
+    assert len(attempts) == expected_attempts
+    assert delays == (
+        [1, 3] if failure == "connect" else [1] if failure == "connect_then_success" else []
+    )
+    assert completed == [True]
+    assert len(observed) == 1
+    assert observed[0].tool_call_id == "call-1"
+    assert observed[0].status == expected_status
+    assert secret not in observed[0].content
+    assert arguments["command"] not in observed[0].content
+    if failure == "connect_then_success":
+        assert observed[0].content == "completed"
+        assert values["open_swe_state"] == {"completed": True}
+        assert events == [{"event": "completed"}]
+    elif failure == "timeout":
+        assert observed[0].content == tools._TIMED_OUT
+    else:
+        assert "check" in observed[0].content
+        assert secret not in caplog.text
+        assert arguments["command"] not in caplog.text
 
 
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
