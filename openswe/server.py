@@ -1127,6 +1127,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     error=None if prepared else "Model selection preparation failed",
                 )
 
+    async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
+        await resolve_github_token(self._config, self._thread_id)
+
     async def _prepare_with_decision(
         self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
     ) -> dict[str, object]:  # noqa: ARG002
