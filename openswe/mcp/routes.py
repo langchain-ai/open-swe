@@ -213,10 +213,7 @@ async def api_my_mcp_oauth_callback(
     result = "connected"
     try:
         if error or not code:
-            store = AuthorizationStore(session["sub"], name)
-            authorization = await store.consume(record, state, binding)
-            authorization.verifier = None
-            await store.finish(authorization)
+            await AuthorizationStore(session["sub"], name).consume(record, state, binding)
             result = "failed"
         else:
             await complete_oauth(session["sub"], record, state, code, binding, iss)

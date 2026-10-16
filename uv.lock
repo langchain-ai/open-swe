@@ -1772,15 +1772,11 @@ wheels = [
 [[package]]
 name = "langchain"
 version = "1.4.6"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Flangchain_v1&rev=6992104e3770d06a7f0bdd59de817112b9fe7827#6992104e3770d06a7f0bdd59de817112b9fe7827" }
 dependencies = [
     { name = "langchain-core" },
     { name = "langgraph" },
     { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d1/19/f4fd7d8ea845558bdc75c249bf9392250c67f38b7a242a9a3854c4f8e32e/langchain-1.4.6.tar.gz", hash = "sha256:ad3ccfdc50005eb06bf1fcbae61aa69ad98fe8bc7d7c1b4ad88323b5bda4cbac", size = 754010, upload-time = "2026-10-14T17:27:49.315Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/5c/cbe6452c6e3e65988ed0177d8f549f035049f6ff1c61291d087b89bc9637/langchain-1.4.6-py3-none-any.whl", hash = "sha256:7c3fbd5460ddc180115c10bbd385fbbde335fa166dd525ad22c0f599d13a9fad", size = 170398, upload-time = "2026-10-14T17:27:47.652Z" },
 ]
 
 [package.optional-dependencies]
@@ -1805,7 +1801,7 @@ wheels = [
 [[package]]
 name = "langchain-core"
 version = "1.6.11"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Fcore&rev=6992104e3770d06a7f0bdd59de817112b9fe7827#6992104e3770d06a7f0bdd59de817112b9fe7827" }
 dependencies = [
     { name = "httpx" },
     { name = "jsonpatch" },
@@ -1817,10 +1813,6 @@ dependencies = [
     { name = "tenacity" },
     { name = "typing-extensions" },
     { name = "uuid-utils" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/06/ae/3af9efe9e6280bb13d9e7d2c8b1173fd870aff0202d239a9710c8c2ce922/langchain_core-1.6.11.tar.gz", hash = "sha256:1ae4133bba30fb14100f74718ea7458cb6134d135704977354f8f178d561122a", size = 1015244, upload-time = "2026-10-15T18:32:20.71Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/fa/765b77cab75ba67b94ce66d2bc3b0a6b66e5077bd152dca1877f0d8c8670/langchain_core-1.6.11-py3-none-any.whl", hash = "sha256:0036e7cc6c6be6eac28970bd7e46df5d2b5da9cced583507a5ffcda2ec57a401", size = 573799, upload-time = "2026-10-15T18:32:19.358Z" },
 ]
 
 [[package]]
@@ -2537,7 +2529,7 @@ requires-dist = [
     { name = "githubkit-schemas", extras = ["2022-11-28"], specifier = "==26.9.29" },
     { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6" },
+    { name = "langchain", extras = ["mcp"], git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Flangchain_v1&rev=6992104e3770d06a7f0bdd59de817112b9fe7827" },
     { name = "langchain-anthropic", specifier = ">=1.7.6" },
     { name = "langchain-daytona", marker = "extra == 'sandbox-daytona'", specifier = ">=0.0.8" },
     { name = "langchain-daytona", marker = "extra == 'sandbox-providers'", specifier = ">=0.0.8" },

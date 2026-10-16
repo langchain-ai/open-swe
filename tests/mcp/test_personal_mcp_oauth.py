@@ -173,9 +173,9 @@ async def test_split_hosted_callback_persists_encrypted_pkce_and_rejects_replays
     fields = parse_qs(urlsplit(url).query)
     stored = await hosted.AuthorizationStore("alice", "notion").get()
     assert stored is not None
-    assert stored.tokens is None
-    verifier = stored.verifier
-    assert verifier
+    assert stored.credentials.tokens is None
+    assert stored.pending is not None
+    verifier = stored.pending.code_verifier
     assert fields["redirect_uri"] == [
         "https://openswe.example/dashboard/api/my-mcps/oauth/callback"
     ]
@@ -244,7 +244,7 @@ async def test_refresh_is_cross_replica_rotating_and_restores_absolute_expiry(oa
     record = oauth_server.record
     store = hosted.AuthorizationStore("alice", record.name)
     saved = await store.get()
-    saved.expires_at = time.time() - 10
+    saved.credentials.expires_at = time.time() - 10
     await store.put(saved)
     replicas = [hosted.PersonalOAuthAuth("alice", record) for _ in range(4)]
     assert (
@@ -252,10 +252,10 @@ async def test_refresh_is_cross_replica_rotating_and_restores_absolute_expiry(oa
     )
     assert oauth_server.refreshes == 1
     saved = await store.get()
-    assert saved.tokens.refresh_token == "refresh-secret-2"
-    assert (saved.expires_at or 0) > time.time() + 3000
+    assert saved.credentials.tokens.refresh_token == "refresh-secret-2"
+    assert (saved.credentials.expires_at or 0) > time.time() + 3000
     assert await hosted.PersonalOAuthAuth("alice", record).access_token() == "access-secret-2"
-    saved.expires_at = time.time() - 10
+    saved.credentials.expires_at = time.time() - 10
     await store.put(saved)
     assert await hosted.PersonalOAuthAuth("alice", record).access_token() == "access-secret-3"
     assert oauth_server.refreshes == 2
@@ -266,7 +266,7 @@ async def test_invalid_grant_and_missing_tokens_never_start_interactive_auth(oau
     record = oauth_server.record
     store = hosted.AuthorizationStore("alice", record.name)
     saved = await store.get()
-    saved.expires_at = time.time() - 1
+    saved.credentials.expires_at = time.time() - 1
     await store.put(saved)
     oauth_server.token_status = 400
     for _ in range(2):
@@ -323,11 +323,17 @@ async def test_all_oauth_requests_have_bounded_responses_and_private_destination
     provider = hosted.HostedProvider(
         oauth_server.record, hosted.Authorization.new(oauth_server.record)
     )
+    for request in [
+        httpx2.Request("POST", "https://issuer.example/oauth/token", content=b"code=secret"),
+        httpx2.Request("POST", oauth_server.record.url, headers={"Authorization": "Bearer x"}),
+        httpx2.Request("GET", "https://issuer.example/meta", headers={"Authorization": "Bearer x"}),
+    ]:
+        with pytest.raises(ValueError, match="OAuth"):
+            await provider.send(request)
+    assert oauth_server.requests == []
     oauth_server.oversized = True
     with pytest.raises(ValueError, match="size limit"):
-        await provider.oauth_request(
-            httpx2.Request("GET", "https://issuer.example/.well-known/oauth-authorization-server")
-        )
+        await hosted.start_oauth("alice", oauth_server.record, "session-binding")
 
     def reject(url):
         raise transport.UnsafeUrlError(url, "private")
@@ -335,7 +341,7 @@ async def test_all_oauth_requests_have_bounded_responses_and_private_destination
     monkeypatch.setattr(transport, "resolve_and_validate", reject)
     count = len(oauth_server.requests)
     with pytest.raises(ValueError, match="public addresses"):
-        await provider.oauth_request(httpx2.Request("GET", "https://private.example/metadata"))
+        await provider.send(httpx2.Request("GET", "https://private.example/metadata"))
     assert len(oauth_server.requests) == count
 
 
@@ -354,7 +360,7 @@ async def test_expired_state_and_changed_connection_are_rejected_before_exchange
         )
     store = hosted.AuthorizationStore("alice", record.name)
     saved = await store.get()
-    saved.pending_until = time.time() - 1
+    saved.pending = saved.pending.model_copy(update={"expires_at": time.time() - 1})
     await store.put(saved)
     with pytest.raises(ValueError):
         await hosted.complete_oauth(
@@ -368,7 +374,7 @@ async def test_transient_provider_outage_is_failed_not_consent_revocation(oauth_
     record = oauth_server.record
     store = hosted.AuthorizationStore("alice", record.name)
     saved = await store.get()
-    saved.expires_at = time.time() - 1
+    saved.credentials.expires_at = time.time() - 1
     await store.put(saved)
     oauth_server.token_status = 503
     with pytest.raises(ValueError, match="unavailable"):
@@ -376,7 +382,7 @@ async def test_transient_provider_outage_is_failed_not_consent_revocation(oauth_
     assert (await hosted.oauth_status("alice", record)).status == "failed"
     assert oauth_server.refreshes == 1
     saved = await store.get()
-    assert saved.tokens.refresh_token == "refresh-secret-1"
+    assert saved.credentials.tokens.refresh_token == "refresh-secret-1"
     saved.retry_after = time.time() - 1
     await store.put(saved)
     oauth_server.token_status = 200
@@ -399,13 +405,13 @@ async def test_only_ambiguous_refresh_failures_discard_rotating_credentials(
     record = oauth_server.record
     store = hosted.AuthorizationStore("alice", record.name)
     saved = await store.get()
-    saved.expires_at = time.time() - 1
+    saved.credentials.expires_at = time.time() - 1
     await store.put(saved)
     oauth_server.network_failure = failure
     with pytest.raises(ValueError):
         await hosted.PersonalOAuthAuth("alice", record).access_token()
     saved = await store.get()
-    assert (saved.tokens is not None) == preserved
+    assert (saved.credentials.tokens is not None) == preserved
     assert saved.status.status == ("failed" if preserved else "reconnect_required")
 
 
