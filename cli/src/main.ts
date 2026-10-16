@@ -126,12 +126,20 @@ async function authStatusCommand(): Promise<number> {
 
 interface RunOptions {
   thread: string | undefined
+  visibility: string | undefined
   model: string | undefined
   effort: string | undefined
   prompt: string
 }
 
 async function runCommand(options: RunOptions): Promise<number> {
+  // Still accepted so scripts that asked for private threads keep working.
+  if (options.visibility !== undefined && options.visibility !== "private") {
+    fail(
+      "--visibility is always private: whoever can prompt a thread runs commands on this machine"
+    )
+    return 2
+  }
   const prompt = composePrompt(options.prompt, await readPipedStdin())
   if (!prompt) {
     fail("a prompt is required, as arguments or on stdin")
@@ -304,6 +312,7 @@ async function runCommand(options: RunOptions): Promise<number> {
 const CLI_OPTIONS = {
   backend: { type: "string" },
   thread: { type: "string" },
+  visibility: { type: "string" },
   model: { type: "string" },
   effort: { type: "string" },
   help: { type: "boolean", short: "h" },
@@ -356,6 +365,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     case "run":
       return await runCommand({
         thread: values.thread,
+        visibility: values.visibility,
         model: values.model,
         effort: values.effort,
         prompt: positionals.slice(1).join(" "),
