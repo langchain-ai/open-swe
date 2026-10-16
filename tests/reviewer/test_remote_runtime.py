@@ -53,6 +53,42 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
+async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepare_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import openswe.reviewer as reviewer
+    from openswe.github.thread_token import (
+        invalidate_cached_github_token,
+        resolve_thread_github_token,
+    )
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def mint(*, repositories: list[str] | None = None) -> tuple[str, str | None]:
+        assert repositories == ["widgets"]
+        return "ghs_reviewer", None
+
+    monkeypatch.setattr(reviewer, "get_github_app_installation_token_with_expiry", mint)
+    await invalidate_cached_github_token(RUN.thread_id)
+    config = {"configurable": {**RUN.configurable, "thread_id": RUN.thread_id, "source": "github"}}
+    session = RunSession(
+        ToolSurface(
+            middleware=[
+                reviewer.PrepareReviewerRunMiddleware(
+                    thread_id=RUN.thread_id, config=config, use_gateway=False
+                )
+            ]
+        ),
+        config,
+        None,
+        started_here=False,
+    )
+
+    await session.join({"messages": [], "run_prepared": True}, None)
+
+    assert await resolve_thread_github_token(config) == "ghs_reviewer"
+
+
 def test_run_token_round_trips_the_signed_run() -> None:
     assert verify_runtime_token(sign_runtime_token(RUN)) == RUN
 
