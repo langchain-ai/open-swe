@@ -31,13 +31,13 @@ What a deployment needs:
 
 GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on. Every variable Open SWE reads is declared in `openswe/config.py` with its description and default; that file is the complete reference.
 
-### Optional Segment usage tracking
+### Optional PostHog usage tracking
 
-Create a Segment HTTP API source and set its write key as the backend's `SEGMENT_WRITE_KEY` secret. Set `DD_ENV` to distinguish deployments. Without a key, no events are sent; no frontend key or additional dependency is needed.
+Set `POSTHOG_API_KEY` to your PostHog project API key. `POSTHOG_HOST` defaults to `https://us.i.posthog.com`; use `https://eu.i.posthog.com` for EU projects or your self-hosted ingestion host. Without a key, capture is disabled. No frontend key or additional dependency is needed.
 
-Authenticated dashboard navigation sends Segment `page` events with a normalized `page_name`. Agent MCP executions send `MCP Tool Called` events with the tool name and `is_error`. Both resolve the GitHub login to the internal user UUID used by webhook events, with email and GitHub login traits and `product: open-swe`. Usage capture skips unresolved users rather than sending a second login-based identity. Tool arguments/results, page URLs, query strings, and thread identifiers are excluded. Configure the Segment warehouse destination separately to query these events in Hex.
+Authenticated dashboard navigation sends `$pageview` events with normalized `page_name`; MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events. `DD_ENV` identifies the deployment. Resolved users share the internal user UUID, with email and GitHub login traits on usage events. Unresolved usage is skipped; unresolved webhooks use a source-specific ID without creating person profiles.
 
-Every newly persisted GitHub, Slack, and Linear event-log delivery also sends `Webhook Received`, including events without a resolved user. Properties include source, event type, action, environment, and resolved workspace/repository/PR IDs; the raw webhook payload stays in the local event log. Resolved users use the event log's internal user UUID; unresolved events use a source-specific anonymous ID. This is best-effort delivery, not a historical backfill or durable export.
+Delivery is best effort, not a durable export or historical backfill. Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; only allowlisted metadata properties are exported; IP geolocation is disabled.
 
 ## 1. Create the deployment
 
