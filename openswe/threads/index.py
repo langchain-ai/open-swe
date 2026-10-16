@@ -1,11 +1,8 @@
 """The thread index in PostgreSQL: each thread's metadata, runtime and last known status.
 
-``THREAD_STORE`` moves threads onto it in steps. With ``dual`` every thread
-change is written here beside the Agent Server, which still answers thread
-calls; with ``postgres`` the index answers thread reads, updates and searches
-in the Agent Server's own shape, so callers of ``client.threads`` see no change,
-and each change is still copied to the Agent Server. Runs, checkpoints and
-streams stay with the thread's runtime.
+The index answers thread reads, updates and searches in the Agent Server's own
+shape, so callers of ``client.threads`` see no change, and each change is copied
+to the thread's runtimes. Runs, checkpoints and streams stay with the runtime.
 """
 
 import json
@@ -18,7 +15,6 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import RowMapping, text
 
-from openswe.config import ENV
 from openswe.database.postgres import transaction
 from openswe.remote_runtime.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 
@@ -28,8 +24,6 @@ SortBy = Literal["thread_id", "status", "created_at", "updated_at"]
 SelectField = Literal[
     "thread_id", "created_at", "updated_at", "metadata", "status", "values", "interrupts", "config"
 ]
-
-ThreadStore = Literal["agent_server", "dual", "postgres"]
 
 THREAD_STATUSES: Final[frozenset[str]] = frozenset(get_args(ThreadStatus))
 # What the index keeps of an Agent Server thread; its values are its whole conversation.
@@ -44,16 +38,6 @@ _COLUMNS: Final = "thread_id, runtime, metadata, status, created_at, updated_at"
 
 
 _status = TypeAdapter(ThreadStatus)
-_store = TypeAdapter(ThreadStore)
-
-
-def thread_store() -> ThreadStore:
-    return _store.validate_python(ENV.THREAD_STORE.get())
-
-
-def index_kept() -> bool:
-    """Whether thread changes are written to the index, whichever store answers reads."""
-    return thread_store() != "agent_server"
 
 
 def as_status(value: object) -> ThreadStatus | None:

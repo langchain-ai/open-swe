@@ -38,6 +38,8 @@ UNLINKED_USER = "U_CAROL"
 
 PORT = os.environ.setdefault("E2E_PORT", "2024")
 BASE_URL = os.environ.setdefault("E2E_BASE", f"http://127.0.0.1:{PORT}")
+# The Managed Deep Agents server (mda-dev.sh) agent and reviewer threads run on.
+MDA_PORT = os.environ.setdefault("E2E_MDA_PORT", "2025")
 
 # Where a browser reaches the dashboard: the app's own server, not this harness.
 # It is a separate origin from the backend here only because the two run as
@@ -85,6 +87,8 @@ _DEFAULTS = {
     "LANGSMITH_CONTROL_PLANE_API_KEY": "",
     # SDK client target (same dev server).
     "LANGGRAPH_URL": BASE_URL,
+    "MDA_RUNTIME_URL": f"http://127.0.0.1:{MDA_PORT}",
+    "REMOTE_RUNTIME_TOKEN_SECRET": "test-remote-runtime-token-secret",
     # Dashboard: the "Open in Web" link target + session-cookie signing. Use
     # 127.0.0.1 (not localhost) so the local-dev LLM-key check stays skipped.
     # The link points at the app server, so following it lands the browser on

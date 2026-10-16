@@ -8,8 +8,6 @@ calls back with it for the graph's tools and run hooks.
 from typing import Final, Literal, NotRequired, TypedDict
 from urllib.parse import urlsplit
 
-from langgraph_sdk import get_client
-from langgraph_sdk.client import LangGraphClient
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.config import ENV
@@ -41,13 +39,15 @@ RemoteRunContext = TypedDict(
 
 
 class RemoteRuntimeConfigurationError(RuntimeError):
-    """A remote runtime is configured in a way this backend cannot safely call."""
+    """Managed Deep Agents is missing or configured in a way this backend cannot safely call."""
 
 
-def mda_runtime_url() -> str | None:
+def mda_runtime_url() -> str:
     url = ENV.MDA_RUNTIME_URL.optional()
     if url is None:
-        return None
+        raise RemoteRuntimeConfigurationError(
+            "MDA_RUNTIME_URL is required: the agent and reviewer graphs run on Managed Deep Agents"
+        )
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise RemoteRuntimeConfigurationError("MDA_RUNTIME_URL is not absolute")
@@ -60,20 +60,13 @@ def mda_runtime_url() -> str | None:
     return url.rstrip("/")
 
 
-def remote_runtime_client() -> LangGraphClient | None:
-    """The client for the MDA deployment, or None when graphs run on this one."""
-    url = mda_runtime_url()
-    if url is None:
-        return None
-    return get_client(url=url, api_key=mda_runtime_api_key())
+def validate_mda_startup_config() -> None:
+    """Refuse to start without the Managed Deep Agents deployment every agent run needs."""
+    mda_runtime_url()
 
 
 def mda_runtime_api_key() -> str | None:
     return ENV.MDA_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-
-
-def hosted_on_mda(assistant_id: str) -> bool:
-    return assistant_id in HOSTED_GRAPHS and mda_runtime_url() is not None
 
 
 async def remote_run_context(
