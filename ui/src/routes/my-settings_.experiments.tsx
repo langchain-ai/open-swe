@@ -49,15 +49,6 @@ function ExperimentsPage() {
             description="Your agent and review threads run their model loop on the Managed Deep Agents deployment instead of this server. Applies to threads you start afterwards; existing threads stay where they are."
           />
         )}
-        <ProfileSwitchRow
-          field="experimental_act_as_approval"
-          label="Approve PRs opened as you"
-          description={
-            profile.data?.act_as_always_allowed
-              ? "You chose Always allow, so Open SWE is not asking. Switch this off and on to be asked again."
-              : "In Slack threads with more than one person, Open SWE DMs you for approval before opening a PR under your name."
-          }
-        />
       </SettingsSection>
     </SettingsPage>
   )
