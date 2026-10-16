@@ -50,7 +50,7 @@ from openswe.middleware import (
     ToolErrorMiddleware,
 )
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.prompts import apply_tool_descriptions, prompt
+from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -88,7 +88,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
     return {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": GENERAL_PURPOSE_SUBAGENT["description"],
-        "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
@@ -185,7 +185,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
 
     return create_deep_agent(
         model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
-        system_prompt="",
+        system_prompt=common_prompt(),
         tools=apply_tool_descriptions(
             [
                 read_repo_file,
