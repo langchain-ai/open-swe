@@ -8,7 +8,7 @@ import pytest
 
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_requests import PullRequest
-from openswe.human_review.picking import WorkHours
+from openswe.human_review.picking import ReviewerAvailability
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords
@@ -88,25 +88,51 @@ async def test_strict_codeowners_fetch_distinguishes_missing_from_unreadable(
 
 
 def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
-    hours = WorkHours(ZoneInfo("America/New_York"))
+    hours = ReviewerAvailability(ZoneInfo("America/New_York"))
     friday_evening = datetime(2026, 10, 2, 23, tzinfo=UTC)
     assert not hours.on_shift(friday_evening)
     assert hours.next_start(friday_evening) == datetime(2026, 10, 5, 13, tzinfo=UTC)
 
 
 @pytest.mark.parametrize("codeowners", [CodeOwners.parse("* @ada @grace"), None])
-async def test_auto_picks_skip_opted_out_owners_and_recent_authors(
+@pytest.mark.parametrize(
+    ("profile", "skip_reason"),
+    [
+        (None, "opted_out"),
+        ({"display_name": "Ada (oOo)"}, "out_of_office"),
+        ({"status_text": "OOO", "status_expiration": 0}, "out_of_office"),
+        ({"status_text": "On vacation", "status_expiration": 4102444800}, "out_of_office"),
+        ({"status_text": "OOO", "status_expiration": 1}, None),
+        (
+            {"display_name": "Ada OOO", "status_text": "OOO", "status_expiration": 1},
+            "out_of_office",
+        ),
+        ({"status_text": "In a meeting"}, None),
+    ],
+)
+async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     monkeypatch: pytest.MonkeyPatch,
     user_records: FakeUserRecords,
     caplog: pytest.LogCaptureFixture,
     codeowners: CodeOwners | None,
+    profile: dict[str, object] | None,
+    skip_reason: str | None,
 ) -> None:
     from openswe.expedited_review.eligibility import ChangedFile
     from openswe.human_review import picking
 
-    ada = User(identities=[UserIdentity(provider="github", external_id="1", login="ada")])
+    ada = User(
+        identities=[
+            UserIdentity(provider="github", external_id="1", login="ada"),
+            UserIdentity(provider="slack", external_id="U123"),
+        ]
+    )
     grace = User(identities=[UserIdentity(provider="github", external_id="2", login="grace")])
-    user_records.seed("profile", "ada", {"auto_human_review_enabled": False})
+    if profile is None:
+        user_records.seed("profile", "ada", {"auto_human_review_enabled": False})
+    monkeypatch.setattr(
+        picking, "get_slack_user_info", AsyncMock(return_value={"profile": profile or {}})
+    )
     pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
@@ -127,8 +153,8 @@ async def test_auto_picks_skip_opted_out_owners_and_recent_authors(
     pull.repo.can_write = AsyncMock(return_value=True)
     with caplog.at_level("INFO", logger=picking.__name__):
         choice = await picking._choose_reviewer(request, pull, None, {})
-    assert isinstance(choice, picking.Pick) and choice.login == "grace"
+    assert isinstance(choice, picking.Pick) and choice.login == ("grace" if skip_reason else "ada")
     filtered = next(
         record for record in caplog.records if record.message == "Filtered reviewer candidates"
     )
-    assert filtered.skipped == {"ada": "opted_out"}
+    assert filtered.skipped == ({"ada": skip_reason} if skip_reason else {})
