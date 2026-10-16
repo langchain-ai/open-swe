@@ -111,7 +111,8 @@ def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
         ({"status_text": "OOO", "status_expiration": 1}, None, None),
         ({"display_name": "Ada OOO", "status_expiration": 1}, None, "out_of_office"),
         ({"status_text": "In a meeting"}, "not_out_of_office", None),
-        ({"status_text": "OOO"}, None, "availability_unknown"),
+        ({"status_text": "OOO"}, None, None),
+        (None, None, None),
         ({}, None, None),
     ],
 )
@@ -136,10 +137,12 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         ]
     )
     grace = User(identities=[UserIdentity(provider="github", external_id="2", login="grace")])
-    if profile is None:
+    if skip_reason == "opted_out":
         user_records.seed("profile", "ada", {"auto_human_review_enabled": False})
     monkeypatch.setattr(
-        picking, "get_slack_user_info", AsyncMock(return_value={"profile": profile or {}})
+        picking,
+        "get_slack_user_info",
+        AsyncMock(return_value={"profile": profile} if profile is not None else None),
     )
     pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")

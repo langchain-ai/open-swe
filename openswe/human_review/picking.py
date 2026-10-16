@@ -364,11 +364,14 @@ async def _choose_reviewer(
         )
     )
     for login in list(people):
-        if hours[login].out_of_office is not False:
-            skipped[login] = (
-                "availability_unknown" if hours[login].out_of_office is None else "out_of_office"
-            )
+        if hours[login].out_of_office is True:
+            skipped[login] = "out_of_office"
             del people[login]
+        elif hours[login].out_of_office is None:
+            logger.warning(
+                "Reviewer availability is unknown; retaining candidate for normal eligibility checks",
+                extra={**extra, "github_login": login},
+            )
     logger.info(
         "Filtered reviewer candidates",
         extra={**extra, "eligible": sorted(people), "skipped": skipped},
