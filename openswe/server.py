@@ -1948,10 +1948,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
         skill_sources.insert(0, USER_SKILLS_ROUTE)
     # Offloaded images live in PostgreSQL so they can be read without the sandbox.
-    skill_routes[BLOBS_ROUTE] = StoreBackend(
+    thread_store = StoreBackend(
         store=ThreadBlobs(thread_id),
         namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
     )
+    skill_routes[BLOBS_ROUTE] = thread_store
+    if bridge_client is not None:
+        skill_routes["/large_tool_results/"] = thread_store
+        skill_routes["/conversation_history/"] = thread_store
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (

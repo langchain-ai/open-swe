@@ -9,7 +9,8 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -92,6 +93,139 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
     )
     assert filesystem.backend is captured["backend"]
     assert filesystem._offload_binary_content
+
+
+@pytest.mark.parametrize("bridge_client", [None, "desktop", "cli"])
+@pytest.mark.parametrize("prefix", ["/large_tool_results/", "/conversation_history/"])
+async def test_context_artifacts_persist_in_the_thread_store_only_for_bridges(
+    saved_thread_scope: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bridge_client: str | None,
+    prefix: str,
+) -> None:
+    from deepagents.backends import CompositeBackend, FilesystemBackend
+    from langgraph.store.memory import InMemoryStore
+
+    from openswe.threads.blobs import ThreadBlobs, blob_namespace
+
+    if bridge_client is not None:
+        saved_thread_scope.update(sandbox_id="bridge:local", sandbox_bridge_client=bridge_client)
+    store = InMemoryStore()
+    monkeypatch.setattr(ThreadBlobs, "abatch", AsyncMock(side_effect=store.abatch))
+    captured = await _capture_create_deep_agent_kwargs()
+    backend = captured["backend"]
+    assert isinstance(backend, CompositeBackend)
+    backend.default = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    path = f"{prefix}artifact"
+
+    assert (await backend.awrite(path, "recoverable content")).error is None
+    assert (await backend.adownload_files([path]))[0].content == b"recoverable content"
+    item = await store.aget(blob_namespace("thread-ctx"), "/artifact")
+    assert (item is not None) is (bridge_client is not None)
+    assert (tmp_path / path.lstrip("/")).exists() is (bridge_client is None)
+    assert (await backend.awrite("/workspace/local.txt", "local file")).error is None
+    assert (tmp_path / "workspace/local.txt").read_text() == "local file"
+
+    if bridge_client is not None:
+        resumed = (await _capture_create_deep_agent_kwargs())["backend"]
+        assert isinstance(resumed, CompositeBackend)
+        assert (await resumed.adownload_files([path]))[0].content == b"recoverable content"
+        config = _base_config()
+        config["configurable"]["thread_id"] = "other-thread"
+        other = (await _capture_create_deep_agent_kwargs(config))["backend"]
+        assert isinstance(other, CompositeBackend)
+        assert (await other.adownload_files([path]))[0].error is not None
+
+
+async def test_large_bridge_execute_result_is_recoverable_and_next_model_call_fits(
+    saved_thread_scope: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from deepagents.backends import CompositeBackend
+    from deepagents.backends.protocol import WriteResult
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from langchain.agents import create_agent
+    from langchain.agents.middleware import AgentMiddleware, wrap_model_call
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.store.memory import InMemoryStore
+
+    from openswe.bridge.backend import BridgeSandboxBackend
+    from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
+    from openswe.threads.blobs import ThreadBlobs
+
+    saved_thread_scope.update(sandbox_id="bridge:desktop", sandbox_bridge_client="desktop")
+    store = InMemoryStore()
+    monkeypatch.setattr(ThreadBlobs, "abatch", AsyncMock(side_effect=store.abatch))
+    model = FakeListChatModel(responses=["Summary"], profile={"max_input_tokens": 10000})
+    captured = await _capture_create_deep_agent_kwargs(make_model=lambda *args, **kwargs: model)
+    backend = captured["backend"]
+    assert isinstance(backend, CompositeBackend)
+    bridge = BridgeSandboxBackend(bridge_id="desktop", thread_id="thread-ctx")
+    backend.default = bridge
+    monkeypatch.setattr(
+        bridge, "awrite", AsyncMock(return_value=WriteResult(error="Permission denied"))
+    )
+    output = "lint output\n" * 73_793
+    monkeypatch.setattr(
+        bridge,
+        "_round_trip",
+        AsyncMock(return_value={"output": output, "exit_code": 0, "truncated": False}),
+    )
+    middleware = cast(list[object], captured["middleware"])
+    filesystem = next(item for item in middleware if isinstance(item, FilesystemMiddleware))
+    offloading = next(
+        item for item in middleware if isinstance(item, ConversationOffloadingMiddleware)
+    )
+
+    @wrap_model_call
+    async def respond(
+        request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+    ) -> ModelResponse:
+        if any(isinstance(message, ToolMessage) for message in request.messages):
+            result = request.messages[-1]
+            assert isinstance(result, ToolMessage)
+            assert len(str(result.content)) < 80_000
+            assert "/large_tool_results/lint" in str(result.content)
+            return ModelResponse(result=[AIMessage(content="Finished")])
+        return ModelResponse(
+            result=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "execute", "args": {"command": "lint"}, "id": "lint"}],
+                )
+            ]
+        )
+
+    context_middleware: list[AgentMiddleware] = [filesystem, offloading, respond]
+    graph = create_agent(model=model, middleware=context_middleware)
+    result = await graph.ainvoke({"messages": [HumanMessage(content="Run lint")]})
+    assert result["messages"][-1].content == "Finished"
+    saved = (await backend.adownload_files(["/large_tool_results/lint"]))[0]
+    assert saved.content is not None
+    assert saved.content.decode().startswith(output)
+
+    manual = ConversationOffloadingMiddleware(model, backend, manual=True)
+    manual._lc_helper.keep = ("messages", 2)
+    history = create_agent(model=model, middleware=[manual], checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-ctx"}}
+    await history.ainvoke(
+        {
+            "messages": [
+                HumanMessage(content="Prior decision"),
+                AIMessage(content="Keep it"),
+                HumanMessage(content="What next?"),
+                AIMessage(content="Run lint"),
+            ]
+        },
+        config,
+    )
+    state = await history.aget_state(config)
+    path = state.values["_summarization_event"]["file_path"]
+    assert path.startswith("/conversation_history/")
+    saved_history = (await backend.adownload_files([path]))[0]
+    assert saved_history.content is not None
+    assert b"Prior decision" in saved_history.content
 
 
 @pytest.mark.parametrize(
