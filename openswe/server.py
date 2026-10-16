@@ -63,7 +63,7 @@ class _DisableInheritedMiddleware(AgentMiddleware):
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
-from openswe.bridge.constants import BridgeClient
+from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
 from openswe.bridge.store import Bridge
 from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
 from openswe.bridge.worktree_handoff import worktree_handoff
@@ -181,6 +181,7 @@ from openswe.sandboxes.tool_runtime import (
     ToolSurface,
     save_tool_context,
 )
+from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
@@ -318,7 +319,6 @@ client = get_client()
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
-BLOBS_ROUTE = "/blobs/"
 BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
@@ -331,7 +331,7 @@ DEEP_AGENT_TOOL_NAMES = {
     "task",
     "write_file",
 }
-DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
+DEEP_AGENT_EXCLUDED_TOOLS = SHELL_SEARCH_EXCLUDED_TOOLS
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
@@ -722,6 +722,7 @@ def _general_purpose_subagent(
                 _SubagentToolGuard(sandbox_only_tools),
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 TranscriptMiddleware(),
+                ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
@@ -1127,6 +1128,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     error=None if prepared else "Model selection preparation failed",
                 )
 
+    async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
+        await resolve_github_token(self._config, self._thread_id)
+
     async def _prepare_with_decision(
         self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
     ) -> dict[str, object]:  # noqa: ARG002
@@ -1145,6 +1149,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 handoff = await infer_requested_model(
                     messages=state.get("messages") or [],
                     requested_models=self._requested_models,
+                    performance_model=self._routing_defaults.get("performance"),
                     decision=decision.classifier,
                     effort_decision=decision.effort_classifier,
                     slack_event_ts=(
@@ -1947,12 +1952,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     if credential_login:
         skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
         skill_sources.insert(0, USER_SKILLS_ROUTE)
+    artifacts_root = "/" if bridge_client is None else f"{LOCAL_ARTIFACTS_DIR}/{thread_id}/"
     # Offloaded images live in PostgreSQL so they can be read without the sandbox.
-    skill_routes[BLOBS_ROUTE] = StoreBackend(
+    skill_routes[f"{artifacts_root}blobs/"] = StoreBackend(
         store=ThreadBlobs(thread_id),
         namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
     )
-    agent_backend = CompositeBackend(default=backend, routes=skill_routes)
+    agent_backend = CompositeBackend(
+        default=backend, routes=skill_routes, artifacts_root=artifacts_root
+    )
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)

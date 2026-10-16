@@ -130,6 +130,11 @@ testpaths = ["tests"]
 
 [tool.ty.src]
 include = ["openswe", "tests"]
+# Runs in the mda/ project's environment, against the graph `mda build` compiles.
+exclude = ["tests/e2e/mda_entrypoint.py"]
+
+[tool.ty.environment]
+extra-paths = ["mda"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [

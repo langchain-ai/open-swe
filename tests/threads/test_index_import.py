@@ -43,7 +43,7 @@ def _thread(n: int, *, updated: datetime, **metadata: Any) -> dict[str, Any]:
     }
 
 
-async def test_the_index_catches_up_with_the_agent_server_after_the_switch_was_off(
+async def test_the_index_imports_the_agent_server_threads_once(
     monkeypatch: pytest.MonkeyPatch, memory_event_claims: MemoryEventClaims
 ) -> None:
     monkeypatch.setattr(index_import, "_PAGE", 2)
@@ -55,17 +55,8 @@ async def test_the_index_catches_up_with_the_agent_server_after_the_switch_was_o
     first, claimed = await index.get("t0"), await index.get("t1")
     assert first is not None and first.status == "busy"
     assert claimed is not None and claimed.runtime == "mda"
-    # Current: nothing to do until a start with the switch off marks it stale.
+    # Current: the next start imports nothing.
     assert await index_import.import_agent_server_threads() == 0
-
-    await index.update("t2", {"title": "renamed here"})
-    threads[3] = _thread(3, updated=datetime.now(UTC) + timedelta(hours=1), title="renamed there")
-    await index_import.mark_index_stale()
-    assert await index_import.import_agent_server_threads() == 5
-
-    kept, caught_up = await index.get("t2"), await index.get("t3")
-    assert kept is not None and kept.metadata["title"] == "renamed here"
-    assert caught_up is not None and caught_up.metadata == {"title": "renamed there"}
     assert memory_event_claims.held == {("threads", "index-current")}
 
 

@@ -234,6 +234,8 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
       return active ? "Researching" : "Researched"
     case "task":
       return active ? "Delegating" : "Delegated"
+    case "code":
+      return active ? "Running code" : "Ran code"
     case "think":
       return "Thinking"
     case "slack":
@@ -277,6 +279,14 @@ export function liveActivityLabel(
       )
       if (!activeTool) return "Thinking…"
       chunk = activeTool
+    }
+
+    // A running `eval` is doing whatever the call its code is waiting on does.
+    if (chunk.toolKind === "code") {
+      chunk =
+        chunk.calls?.findLast(
+          (call) => call.status === "in_progress" || call.status === "pending"
+        ) ?? chunk
     }
 
     if (chunk.status === "pending") return "Waiting for approval…"
