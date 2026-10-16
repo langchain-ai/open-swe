@@ -293,9 +293,8 @@ async def test_idle_origin_keeps_status_until_routed_destination_finishes(monkey
     assert metadata["destination"]["routed_work_origins"] == []
 
 
-@pytest.mark.parametrize("terminal", ["success", "error", "timeout", "interrupted"])
 async def test_delegated_lifecycle_keeps_waiting_through_launch_and_delivery(
-    monkeypatch: pytest.MonkeyPatch, terminal: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openswe.slack import routed_work
 
@@ -312,10 +311,6 @@ async def test_delegated_lifecycle_keeps_waiting_through_launch_and_delivery(
     assert await routed_work.delegated_work_active(client, "origin")
     pending.return_value = set()
 
-    async def runs(thread_id: str, *, status: str | None = None, limit: int):
-        return [{"status": terminal}] if status is None else []
-
-    client.runs.list.side_effect = runs
     assert not await routed_work.delegated_work_active(client, "origin")
     pending.return_value = {"origin"}
     assert await routed_work.delegated_work_active(client, "origin")

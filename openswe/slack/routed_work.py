@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
@@ -27,7 +27,7 @@ async def _merge(
     add: Sequence[str] = (),
     remove: Sequence[str] = (),
 ) -> None:
-    async with agent_thread_pr_state_lock(client, thread_id):
+    async with agent_thread_pr_state_lock(thread_id):
         metadata = thread_metadata(await client.threads.get(thread_id))
         current = set(thread_ids(metadata.get(key)))
         updated = sorted((current | set(add)) - set(remove))
@@ -60,6 +60,7 @@ async def delegated_work_active(
     *,
     visited: frozenset[str] = frozenset(),
     prune: bool = True,
+    metadata: Mapping[str, object] | None = None,
 ) -> bool:
     if origin in visited:
         return False
@@ -80,7 +81,7 @@ async def delegated_work_active(
                 return True
         except NotFoundError:
             continue
-    return await routed_work_active(client, origin, visited=visited, prune=prune)
+    return await routed_work_active(client, origin, visited=visited, prune=prune, metadata=metadata)
 
 
 async def routed_work_active(
@@ -89,8 +90,10 @@ async def routed_work_active(
     *,
     visited: frozenset[str] = frozenset(),
     prune: bool = True,
+    metadata: Mapping[str, object] | None = None,
 ) -> bool:
-    metadata = thread_metadata(await client.threads.get(origin))
+    if metadata is None:
+        metadata = thread_metadata(await client.threads.get(origin))
     active = False
     for destination in thread_ids(metadata.get(DESTINATIONS_KEY)):
         try:
