@@ -8,7 +8,7 @@ graph's tools, subagents and models from the backend's catalog for the run, and
 middleware there. The run token in the context authenticates every call.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Final, Literal
 
 from langchain.agents.middleware import (
@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
 from rt.middleware import (
     BackendRunMiddleware,
+    DescribedToolsMiddleware,
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
@@ -76,14 +77,18 @@ def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[A
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
 
 
-def _code_mode(graph: Graph, from_code: Sequence[BaseTool]) -> list[AgentMiddleware]:
+def _code_mode(
+    graph: Graph, from_code: Sequence[BaseTool], described: Mapping[str, str]
+) -> list[AgentMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
-        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])]
-    if not from_code:
+        interpreter = CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])
+    elif from_code:
+        # As the in-process agent's code mode: state per turn, subagents through `task`.
+        interpreter = CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")
+    else:
         return []
-    # As the in-process agent's code mode: state per turn, subagents through `task`.
-    return [CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")]
+    return [interpreter, *([DescribedToolsMiddleware(described)] if described else [])]
 
 
 # `mda build` reads the agent's name without running this factory, so its body
@@ -152,7 +157,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             BackendRunMiddleware(backend, context.invocation_id),
             *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(offered, excluded | code_only),
-            *_code_mode(context.graph, from_code),
+            *_code_mode(context.graph, from_code, catalog.described),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],

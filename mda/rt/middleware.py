@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 # event, which MDA's summarization then applies to every model call.
 _MDA_STATE_KEYS: Final = frozenset({"_summarization_event"})
 _MESSAGE_KEY: Final = "__lc_message__"
+DISPLAY_DESCRIPTION: Final = "display_description"
 
 
 def _merge(
@@ -127,6 +128,87 @@ class ServedToolsMiddleware(AgentMiddleware):
         names = {getattr(tool, "name", None) for tool in offered}
         missing = [tool for tool in self._tools if tool.name not in names | hidden]
         return await handler(request.override(tools=[*offered, *missing]))
+
+
+class DescribedToolsMiddleware(AgentMiddleware):
+    """Have the model label its calls of the named tools, for the dashboard to show.
+
+    Each named tool the model is offered takes a required ``display_description``,
+    first so the model writes it before the rest. The tool call keeps it, so the
+    transcript records it, and the tool runs without it. Place it inside code mode,
+    which binds the request's tools to ``eval`` before this rewrites them.
+    """
+
+    def __init__(self, described: Mapping[str, str]) -> None:
+        self._described = described
+        self._offered: dict[int, tuple[BaseTool, BaseTool]] = {}
+
+    def _offered_as(self, tool: BaseTool) -> BaseTool:
+        cached = self._offered.get(id(tool))
+        if cached is not None and cached[0] is tool:
+            return cached[1]
+        schema = tool.tool_call_schema
+        parameters = (
+            schema
+            if isinstance(schema, dict)
+            else schema.model_json_schema()
+            if issubclass(schema, BaseModel)
+            else schema.schema()
+        )
+        properties = parameters.get("properties")
+        if isinstance(properties, dict) and DISPLAY_DESCRIPTION in properties:
+            self._offered[id(tool)] = (tool, tool)
+            return tool
+        required = parameters.get("required")
+        offered = tool.model_copy(
+            update={
+                "args_schema": {
+                    **parameters,
+                    "type": "object",
+                    "properties": {
+                        DISPLAY_DESCRIPTION: {
+                            "type": "string",
+                            "description": self._described[tool.name],
+                        },
+                        **(properties if isinstance(properties, dict) else {}),
+                    },
+                    "required": [
+                        DISPLAY_DESCRIPTION,
+                        *(required if isinstance(required, list) else []),
+                    ],
+                }
+            }
+        )
+        self._offered[id(tool)] = (tool, offered)
+        return offered
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        tools = [
+            self._offered_as(tool)
+            if isinstance(tool, BaseTool) and tool.name in self._described
+            else tool
+            for tool in request.tools
+        ]
+        return await handler(request.override(tools=tools))
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        call = request.tool_call
+        if (
+            call["name"] not in self._described
+            or DISPLAY_DESCRIPTION not in call["args"]
+            or (request.tool is not None and self._offered_as(request.tool) is request.tool)
+        ):
+            return await handler(request)
+        args = {key: value for key, value in call["args"].items() if key != DISPLAY_DESCRIPTION}
+        return await handler(request.override(tool_call={**call, "args": args}))
 
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):

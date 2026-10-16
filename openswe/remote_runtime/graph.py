@@ -66,7 +66,7 @@ from openswe.middleware.conversation_offloading import ConversationOffloadingMid
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
-from openswe.prompts import common_prompt
+from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -91,6 +91,8 @@ logger = logging.getLogger(__name__)
 
 # MDA's own deep agent runs subagents and code.
 _MDA_TOOLS: Final = frozenset({"task", "eval"})
+# Tools the model labels each call of, for the dashboard to show in place of a bare name.
+_DESCRIBED_TOOLS: Final = ("eval",)
 # Model-call middleware that is MDA's own, or that observes rather than shapes a call.
 _NOT_PROMPT_SHAPING: Final = (
     FilesystemMiddleware,
@@ -330,6 +332,9 @@ class RunSession:
                 "also_from_code": sorted(
                     name for name in tools if self.surface.code_mode and direct_and_from_code(name)
                 ),
+                "described": {
+                    name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS
+                },
             }
         )
 
