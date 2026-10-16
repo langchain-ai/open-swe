@@ -1921,6 +1921,41 @@
         "title": "FixIntent",
         "type": "object"
       },
+      "ForwardedDelivery": {
+        "description": "A Linear delivery the channel received, forwarded as Linear sent it.",
+        "properties": {
+          "delivery_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Delivery Id",
+            "type": "string"
+          },
+          "raw_body": {
+            "maxLength": 1000000,
+            "title": "Raw Body",
+            "type": "string"
+          },
+          "signature": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Signature",
+            "type": "string"
+          },
+          "thread_id": {
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "delivery_id",
+          "raw_body",
+          "signature"
+        ],
+        "title": "ForwardedDelivery",
+        "type": "object"
+      },
       "FunctionCallItem": {
         "description": "A call the client runs itself and answers with a ``function_call_output``.",
         "properties": {
@@ -3881,6 +3916,59 @@
           "html_url"
         ],
         "title": "PostedReviewComment",
+        "type": "object"
+      },
+      "PreparedLinearRun": {
+        "description": "The run the channel starts, or None to start nothing.",
+        "properties": {
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreparedRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "run"
+        ],
+        "title": "PreparedLinearRun",
+        "type": "object"
+      },
+      "PreparedRun": {
+        "description": "What the channel starts the run with.",
+        "properties": {
+          "context": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "$ref": "#/components/schemas/RunInput"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "webhook": {
+            "title": "Webhook",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input",
+          "context",
+          "metadata"
+        ],
+        "title": "PreparedRun",
         "type": "object"
       },
       "PreviewCheck": {
@@ -6117,6 +6205,64 @@
           "commits"
         ],
         "title": "RolloutAccepted",
+        "type": "object"
+      },
+      "RunInput": {
+        "properties": {
+          "files": {
+            "additionalProperties": true,
+            "title": "Files",
+            "type": "object"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/RunMessage"
+            },
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "title": "RunInput",
+        "type": "object"
+      },
+      "RunMessage": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Content"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "system"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "RunMessage",
         "type": "object"
       },
       "ScheduleCreateBody": {
@@ -21157,6 +21303,88 @@
         "summary": "Health Check"
       }
     },
+    "/linear/channel/events": {
+      "post": {
+        "description": "Log a Linear event that starts no conversation, and run the automations it triggers.",
+        "operationId": "receive_linear_event_linear_channel_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForwardedDelivery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Receive Linear Event Linear Channel Events Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Receive Linear Event"
+      }
+    },
+    "/linear/channel/runs": {
+      "post": {
+        "description": "Prepare the run an agent session turn starts on the channel's thread.",
+        "operationId": "prepare_linear_run_linear_channel_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForwardedDelivery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreparedLinearRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prepare Linear Run"
+      }
+    },
     "/webhooks/github": {
       "post": {
         "description": "Handle GitHub webhooks for issue and PR events that tag @open-swe.",
@@ -21178,50 +21406,6 @@
           }
         },
         "summary": "Github Webhook"
-      }
-    },
-    "/webhooks/linear": {
-      "get": {
-        "description": "Verify endpoint for Linear webhook setup.",
-        "operationId": "linear_webhook_verify_webhooks_linear_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Linear Webhook Verify Webhooks Linear Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Linear Webhook Verify"
-      },
-      "post": {
-        "description": "Handle Linear webhooks.\n\nTriggers a new LangGraph run when an issue gets the 'open-swe' label added.",
-        "operationId": "linear_webhook_webhooks_linear_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Linear Webhook Webhooks Linear Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Linear Webhook"
       }
     },
     "/webhooks/rollout": {

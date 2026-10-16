@@ -87,6 +87,30 @@ def _marks_busy(thread_id: str) -> Callable[[], Awaitable[None]]:
     return mark
 
 
+async def _move_to_mda(thread_id: str) -> IndexedThread | None:
+    """Index the thread as one MDA runs; its runtime copy is the caller's to create."""
+    await index.set_runtime(thread_id, "mda")
+    moved = await index.update(thread_id, {RUNTIME_METADATA_KEY: MDA_RUNTIME})
+    if moved is not None:
+        await RUNTIMES.local.update(thread_id, {RUNTIME_METADATA_KEY: MDA_RUNTIME})
+    return moved
+
+
+async def adopt_channel_run(thread_id: str) -> None:
+    """Index an MDA channel's thread for the run the channel is about to start on it.
+
+    The channel creates the thread on MDA as its conversation's own, so unlike a
+    claim this never creates it there. Busy now, so the dashboard shows the run;
+    its run-complete webhook settles it.
+    """
+    thread = await index.get(thread_id)
+    if thread is None:
+        raise LookupError(f"Thread {thread_id} is not indexed")
+    if thread.runtime != "mda":
+        await _move_to_mda(thread_id)
+    await index.set_status(thread_id, "busy")
+
+
 async def _not_found(send: Send, thread_id: str) -> None:
     await send_json(send, 404, {"detail": f"Thread {thread_id} not found"})
 
@@ -264,11 +288,9 @@ class ThreadRouter:
             or await RUNTIMES.local.has_history(thread.thread_id)
         ):
             return thread
-        await index.set_runtime(thread.thread_id, "mda")
-        claimed = await index.update(thread.thread_id, {RUNTIME_METADATA_KEY: MDA_RUNTIME})
+        claimed = await _move_to_mda(thread.thread_id)
         if claimed is None:
             return thread
-        await RUNTIMES.local.update(thread.thread_id, {RUNTIME_METADATA_KEY: MDA_RUNTIME})
         await RUNTIMES.mda.create(thread.thread_id, _for_mda(claimed.metadata))
         logger.info("Claimed thread for Managed Deep Agents", extra={"thread_id": thread.thread_id})
         return claimed

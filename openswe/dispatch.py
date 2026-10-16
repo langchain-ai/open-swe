@@ -85,6 +85,9 @@ class RunMetadata(BaseModel):
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
 # Run metadata ``kind`` of a run started only to deliver store leftovers.
 FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
+#: Run metadata naming the MDA channel that started the run. The channel answers in its
+#: conversation, failures included, so nothing else replies there for that run.
+CHANNEL_METADATA_KEY = "channel"
 # The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
 # the REST ``POST /runs`` schema.
 V3_RUN_STREAM_MODES: tuple[str, ...] = (
@@ -335,6 +338,31 @@ async def _run_user_id(
         return None
 
 
+async def prepare_durable_run(
+    assistant_id: str,
+    config: LangGraphRunConfig | None,
+    metadata: dict[str, Any] | None,
+    *,
+    source: str,
+) -> LangGraphRunConfig:
+    """The config and metadata a durable run starts with, wherever it is created."""
+    recorded = RunMetadata.of_run(assistant_id, config)
+    run_metadata = dict(metadata or {}) | recorded.model_dump(exclude_none=True)
+    conversation_type = _slack_conversation_type(source, config)
+    if conversation_type is not None:
+        run_metadata["slack_conversation_type"] = conversation_type
+    user_id = await _run_user_id(config, source=source)
+    if user_id:
+        run_metadata["user_id"] = user_id
+    run_config = prepare_run_config(config, run_metadata)
+    if user_id is None:
+        run_config["metadata"].pop("user_id", None)
+        configurable = run_config["configurable"]
+        if isinstance(configurable, dict):
+            configurable.pop("user_id", None)
+    return run_config
+
+
 async def create_durable_run(
     thread_id: str,
     assistant_id: str,
@@ -362,20 +390,8 @@ async def create_durable_run(
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
+    run_config = await prepare_durable_run(assistant_id, config, metadata, source=source)
     recorded = RunMetadata.of_run(assistant_id, config)
-    run_metadata = dict(metadata or {}) | recorded.model_dump(exclude_none=True)
-    conversation_type = _slack_conversation_type(source, config)
-    if conversation_type is not None:
-        run_metadata["slack_conversation_type"] = conversation_type
-    user_id = await _run_user_id(config, source=source)
-    if user_id:
-        run_metadata["user_id"] = user_id
-    run_config = prepare_run_config(config, run_metadata)
-    if user_id is None:
-        run_config["metadata"].pop("user_id", None)
-        configurable = run_config["configurable"]
-        if isinstance(configurable, dict):
-            configurable.pop("user_id", None)
     create_kwargs: dict[str, Any] = {
         "input": input,
         "config": run_config,

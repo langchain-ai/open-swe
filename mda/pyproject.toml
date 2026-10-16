@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Open SWE's coding agent and pull request reviewer as one Managed Deep Agent; the Open SWE backend serves their tools."
 requires-python = ">=3.12"
 dependencies = [
-    "managed-deepagents==0.9.1",
+    "managed-deepagents==0.10.0.dev6",
     "deepagents==0.7.21",
     "langchain[mcp]>=1.4.3",
     "langchain-anthropic>=1.7.4",
@@ -23,4 +23,4 @@ python-version = "3.13"
 # Its own type-check root: checked against this project's environment alone, an
 # import of the backend (`openswe`) or a database driver fails to resolve.
 [tool.ty.src]
-include = ["agent.py", "identity.py", "rt"]
+include = ["agent.py", "identity.py", "channels", "rt"]

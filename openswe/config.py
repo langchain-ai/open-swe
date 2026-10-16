@@ -214,6 +214,13 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "MDA_SERVICE_SECRET",
+    "Secret shared with MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): the backend presents it as "
+    "MDA's trusted service, so it serves channel threads too, and MDA's channels present it "
+    "to /linear/channel/*. Required for the Linear channel.",
+    secret=True,
+)
+ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
     "comma-separated, the first signs and every one verifies. Required.",
