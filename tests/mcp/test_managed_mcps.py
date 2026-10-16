@@ -398,7 +398,7 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
         ),
     )
     post = AsyncMock(return_value={"success": True})
-    monkeypatch.setattr(tool, "slack_reply", post)
+    monkeypatch.setattr(tool, "send_slack_reply", post)
 
     result = await tool.connect_managed_tools(["linear"], {"reply_surface": "slack"}, "call-1")
 

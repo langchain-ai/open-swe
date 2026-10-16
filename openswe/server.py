@@ -47,7 +47,6 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
-from langchain_quickjs import CodeInterpreterMiddleware
 from langchain_quickjs._ptc import is_valid_ptc_tool_name
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
@@ -125,6 +124,7 @@ from openswe.middleware import (
     task_retry_on,
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
+from openswe.middleware.code_mode import CodeModeMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
@@ -654,16 +654,21 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "record_incident_report",
         "search_incidents",
         "start_thread",
+        "task",
     }
 
 
 class _SubagentToolGuard(AgentMiddleware):
+    def __init__(self, sandbox_only_tools: frozenset[str] = frozenset()) -> None:
+        self._sandbox_only_tools = sandbox_only_tools
+
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        if _is_subagent_excluded_tool(request.tool_call["name"]):
+        name = request.tool_call["name"]
+        if name in self._sandbox_only_tools or _is_subagent_excluded_tool(name):
             return ToolMessage(
                 content=prompt("tools/subagent-unavailable"),
                 tool_call_id=request.tool_call["id"],
@@ -693,7 +698,7 @@ def _general_purpose_description() -> str:
 
 def _general_purpose_subagent(
     model: BaseChatModel,
-    tools: Sequence[Any],
+    tools: Sequence[BaseTool | Callable[..., object] | dict[str, object]],
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
     offloading: ConversationOffloadingMiddleware | None = None,
@@ -701,6 +706,7 @@ def _general_purpose_subagent(
     incident_middleware: AgentMiddleware | None = None,
     guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
     inherited_middleware_exclusions: Sequence[str] = (),
+    sandbox_only_tools: frozenset[str] = frozenset(),
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -713,7 +719,7 @@ def _general_purpose_subagent(
             [
                 _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
-                _SubagentToolGuard(),
+                _SubagentToolGuard(sandbox_only_tools),
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 TranscriptMiddleware(),
                 *([incident_middleware] if incident_middleware else []),
@@ -801,12 +807,55 @@ async def _run_mcp_tools(
         return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
 
 
+# The sandbox's file and shell tools, which code mode offers directly as well.
+SANDBOX_TOOL_NAMES = frozenset({*FILESYSTEM_TOOL_NAMES, "delete", "background_execute"})
+# In-process code mode calls tools directly, skipping the guards that wrap these calls.
+_GUARDED_SHELL_TOOLS = frozenset({"execute", "background_execute"})
+# Never called from code: subagents, the replies a run waits on, and tools whose
+# results update graph state, which a call from code drops.
+_NOT_FROM_CODE = (
+    frozenset({"task"})
+    | GUIDE_REPLY_TOOLS
+    | frozenset(
+        {
+            "slack_reply",
+            "slack_no_reply_needed",
+            "cli_result",
+            "connect_managed_tools",
+            "switch_to_performance_model",
+            "record_human_input",
+            "load_integration_tools",
+            "spawn_worker",
+            "control_worker",
+            "message_task_thread",
+        }
+    )
+)
+# Everyday tools code mode still offers the model directly.
+_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {"open_pull_request", "web_search", "fetch_url"}
+
+
+def callable_from_code(name: str) -> bool:
+    """Whether code mode can offer a tool as ``tools.<camelCaseName>``."""
+    return name not in _NOT_FROM_CODE and is_valid_ptc_tool_name(name)
+
+
+def direct_and_from_code(name: str) -> bool:
+    """Whether code mode offers a tool from code while keeping its schema on the model's list."""
+    return callable_from_code(name) and name in _DIRECT_IN_CODE_MODE
+
+
+def code_only(name: str) -> bool:
+    """Whether code mode offers a tool only from code, keeping its schema off the model's list."""
+    return callable_from_code(name) and name not in _DIRECT_IN_CODE_MODE
+
+
 async def _mcp_code_mode(
     thread_id: str,
     tools: Sequence[BaseTool],
     *,
-    additional_tools: Sequence[str | BaseTool] = (),
-) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
+    additional_tools: Sequence[str] = (),
+) -> tuple[CodeModeMiddleware | None, Sequence[BaseTool]]:
     if not (tools or additional_tools):
         return None, tools
     thread = await read_thread(thread_id)
@@ -814,19 +863,17 @@ async def _mcp_code_mode(
     profile = await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
     if not profile or profile.get("experimental_mcp_ptc") is not True:
         return None, tools
-    ptc_tools: list[str | BaseTool] = [tool for tool in tools if is_valid_ptc_tool_name(tool.name)]
+    ptc_tools: list[str | BaseTool] = [tool for tool in tools if callable_from_code(tool.name)]
     ptc_tools.extend(
-        tool
-        for tool in additional_tools
-        if (tool if isinstance(tool, str) else tool.name)
-        not in (DEEP_AGENT_TOOL_NAMES - {"read_file", "write_file"})
-        | {"background_execute", "slack_reply", "slack_no_reply_needed", "cli_result"}
-        and is_valid_ptc_tool_name(tool if isinstance(tool, str) else tool.name)
+        name
+        for name in additional_tools
+        if callable_from_code(name) and name not in _GUARDED_SHELL_TOOLS
     )
     if not ptc_tools:
         return None, tools
-    ordinary_tools = [tool for tool in tools if not is_valid_ptc_tool_name(tool.name)]
-    return CodeInterpreterMiddleware(ptc=ptc_tools, subagents=False, mode="turn"), ordinary_tools
+    ordinary_tools = [tool for tool in tools if not callable_from_code(tool.name)]
+    hidden = frozenset(name for name in additional_tools if code_only(name))
+    return CodeModeMiddleware(ptc_tools, code_only=hidden), ordinary_tools
 
 
 def _integration_middleware(
@@ -1867,7 +1914,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ],
             *[
                 name
-                for name in ("read_file", "write_file")
+                for name in sorted(SANDBOX_TOOL_NAMES)
                 if name not in excluded_tools and name not in client_tool_names
             ],
         ],
@@ -1991,10 +2038,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         routing_mode=model_routing_mode,
         requested_model_factory=requested_model_factory,
     )
-    subagent_model = _make_model_or_defer(
-        subagent_model_id,
-        use_gateway=use_gateway,
-        **subagent_model_kwargs,
+    subagent_model = (
+        main_model
+        if subagent_model_id == model_id
+        else _make_model_or_defer(
+            subagent_model_id,
+            use_gateway=use_gateway,
+            **subagent_model_kwargs,
+        )
     )
     title_model = _make_model_or_defer(
         title_model_id,
@@ -2125,7 +2176,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
-                    tools=subagent_tools,
+                    tools=main_tools,
+                    sandbox_only_tools=sandbox_only_tools,
                     workspace_skills=workspace_skills,
                     dynamic_tools=full_dynamic_tools,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
@@ -2150,7 +2202,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         tool_surface.middleware = middleware
         tool_surface.models = SurfaceModels(
             main=ModelChoice(model_id, dict(model_kwargs)),
-            subagent=ModelChoice(subagent_model_id, dict(subagent_model_kwargs)),
+            subagent=ModelChoice(
+                subagent_model_id,
+                dict(model_kwargs if subagent_model_id == model_id else subagent_model_kwargs),
+            ),
             use_gateway=bool(use_gateway),
             routes={
                 route: ModelChoice(
@@ -2181,6 +2236,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
         ]
         tool_surface.dynamic = full_dynamic_tools
+        tool_surface.code_mode = True
         tool_surface.excluded = (
             STOP_SUMMARY_EXCLUDED_TOOLS
             if stop_summary_mode

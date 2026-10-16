@@ -686,7 +686,7 @@ async def upsert_agent_thread_metadata(
             # "PRs closed" mark no longer applies. Only the PR webhook sets those,
             # and only on PR-linked threads, so take its lock for any such thread
             # and derive the reset from a fresh read rather than the pre-lock one.
-            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+            async with agent_thread_pr_state_lock(thread_id):
                 current = as_thread_dict(await langgraph_client.threads.get(thread_id))
                 current_meta = (
                     current["metadata"] if isinstance(current.get("metadata"), dict) else {}
@@ -1481,7 +1481,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         metadata: dict[str, Any] | None = None
         newly_merged = False
         try:
-            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+            async with agent_thread_pr_state_lock(thread_id):
                 current = await langgraph_client.threads.get(thread_id)
                 metadata = current.get("metadata") if isinstance(current, dict) else None
                 if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:

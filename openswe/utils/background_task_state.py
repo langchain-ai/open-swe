@@ -19,7 +19,7 @@ async def update_background_task_state(
     reset: bool = False,
 ) -> dict[str, object]:
     """Merge transitions under the lock and return the resulting metadata snapshot."""
-    async with agent_thread_pr_state_lock(client, thread_id):
+    async with agent_thread_pr_state_lock(thread_id):
         metadata = thread_metadata(await client.threads.get(thread_id))
         previous = metadata.get(RUNNING_BACKGROUND_TASKS_KEY)
         active = (

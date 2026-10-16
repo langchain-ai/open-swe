@@ -99,6 +99,8 @@ class ToolSurface:
     middleware: Sequence[AgentMiddleware] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
+    # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
+    code_mode: bool = False
 
     async def prepare(self, state: Mapping[str, object]) -> None:
         if self.graph is None:

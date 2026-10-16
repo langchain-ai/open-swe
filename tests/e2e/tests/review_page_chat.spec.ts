@@ -189,6 +189,47 @@ test.describe("review page", () => {
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
   });
 
+  test("keeps description spacing stable when expanding and collapsing", async ({
+    page,
+  }) => {
+    const longPr = await seedOpenPullRequest(page, {
+      repo: `${OWNER}/${REPO}`,
+      title: "Keep description spacing stable",
+      body: Array.from(
+        { length: 24 },
+        (_, index) => `Paragraph ${index + 1}: Description content.`,
+      ).join("\n\n"),
+      author: "bob",
+      head: "description-spacing",
+      files: { "spacing.py": "SPACING = 1\n" },
+    });
+    await openReview(page, longPr);
+    const description = page.getByRole("article", {
+      name: "Description",
+      exact: true,
+    });
+    const offset = () =>
+      description.evaluate((element) => {
+        const header = element.querySelector("header")!;
+        const paragraph = element.querySelector(".chat-markdown p")!;
+        return (
+          paragraph.getBoundingClientRect().top -
+          header.getBoundingClientRect().bottom
+        );
+      });
+    const expand = description.getByRole("button", {
+      name: "Show the whole description",
+    });
+    await expect(expand).toBeVisible();
+    const collapsed = await offset();
+    await expand.click();
+    expect(await offset()).toBeCloseTo(collapsed, 1);
+    await description
+      .getByRole("button", { name: "Show less", exact: true })
+      .click();
+    expect(await offset()).toBeCloseTo(collapsed, 1);
+  });
+
   test("renders human input above the description and the changes", async ({
     page,
   }) => {

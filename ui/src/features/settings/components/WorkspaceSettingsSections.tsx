@@ -202,7 +202,11 @@ function ModelRow({
       settings={settings}
       fields={[modelField, effortField]}
       label={label}
-      description={description}
+      description={
+        modelField === "default_agent_subagent_model"
+          ? `${description} When this matches the main agent's model, effort follows the parent run. Saved effort applies only to a different model.`
+          : description
+      }
       control={
         <ModelPairControl
           label={label}
@@ -211,6 +215,11 @@ function ModelRow({
           effort={settings.data?.[effortField] ?? null}
           onChange={(model, effort) => settings.save(patch(model, effort))}
           disabled={!settings.data}
+          parentModel={
+            modelField === "default_agent_subagent_model"
+              ? settings.data?.default_agent_model
+              : undefined
+          }
           inheritLabel={
             inheritLabel && settings.scope.kind === "workspace"
               ? "Inherit instance setting"
@@ -356,6 +365,7 @@ interface ModelPairControlProps {
   effort: string | null
   onChange: (model: string, effort: string) => void
   disabled: boolean
+  parentModel?: string | null
   /**
    * When set, the model dropdown gains a leading "unset" option with this
    * label. Selecting it calls {@link onInherit}; an unset `model` renders as
@@ -375,6 +385,7 @@ export function ModelPairControl({
   effort,
   onChange,
   disabled,
+  parentModel,
   inheritLabel,
   onInherit,
 }: ModelPairControlProps) {
@@ -393,6 +404,9 @@ export function ModelPairControl({
   }, [model, effort, inheritFallback])
 
   const isInherit = localModel === INHERIT_VALUE
+  const inheritsParentEffort = Boolean(
+    parentModel && localModel === parentModel
+  )
   const selectedModel = models.find((m) => m.id === localModel)
   const availableEfforts = selectedModel?.efforts ?? []
 
@@ -433,10 +447,14 @@ export function ModelPairControl({
       <Select
         aria-label={`${label} reasoning effort`}
         placeholder="effort"
-        options={availableEfforts.map((e) => ({ value: e, label: e }))}
-        value={localEffort || undefined}
+        options={
+          inheritsParentEffort
+            ? [{ value: INHERIT_VALUE, label: "Parent run" }]
+            : availableEfforts.map((e) => ({ value: e, label: e }))
+        }
+        value={inheritsParentEffort ? INHERIT_VALUE : localEffort || undefined}
         onChange={handleEffortChange}
-        disabled={disabled || !localModel || isInherit}
+        disabled={disabled || !localModel || isInherit || inheritsParentEffort}
         triggerClassName="w-28"
       />
     </div>

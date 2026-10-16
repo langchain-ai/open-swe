@@ -44,7 +44,7 @@ export function VersionMismatchBanner() {
         }
       >
         <span className="truncate">
-          Frontend version differs from the deployed backend.
+          New changes are available. Reload to get the latest updates.
         </span>
       </Banner>
     </div>

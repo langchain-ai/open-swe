@@ -24,7 +24,7 @@ invariants, boundary patching, and rendering. Boundaries (Slack, GitHub) and dom
 import os
 import re
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
@@ -37,6 +37,7 @@ import time_machine
 from pydantic import BaseModel, JsonValue
 
 from openswe.human_review.picking import WorkHours
+from openswe.jobs import queue
 from openswe.utils import thread_ops
 
 # Scenarios happen in the week of Monday 5 October 2026.
@@ -148,7 +149,8 @@ class _Scheduled:
 
 
 class LangGraph:
-    """The LangGraph client: delayed runs become scheduled work, and the store is in memory."""
+    """The LangGraph client and the job queue: delayed runs and queued jobs become scheduled
+    work, and the store is in memory."""
 
     def __init__(self, scenario: Scenario) -> None:
         self.scenario = scenario
@@ -175,6 +177,18 @@ class LangGraph:
         due = self.scenario.now + timedelta(seconds=max(after_seconds, 0))
         self.queue.append(_Scheduled(due, self.scenario.next_seq(), assistant_id, input))
         return {"run_id": f"run-{self.scenario.next_seq()}"}
+
+    async def schedule(
+        self,
+        kind: str,
+        payload: Mapping[str, JsonValue] | None = None,
+        *,
+        due_at: datetime | None = None,
+        **_: object,
+    ) -> None:
+        """``queue.schedule``: the job's ``kind`` picks its handler, as an assistant does a run's."""
+        due = max(due_at or self.scenario.now, self.scenario.now)
+        self.queue.append(_Scheduled(due, self.scenario.next_seq(), kind, dict(payload or {})))
 
     async def put_item(
         self, namespace: tuple[str, ...], key: str, value: dict[str, JsonValue], **_: object
@@ -285,7 +299,10 @@ class Scenario:
         return []
 
     def fakes(self) -> list[tuple[object, Fake]]:
-        return [(thread_ops.langgraph_client, lambda: self.langgraph)]
+        return [
+            (thread_ops.langgraph_client, lambda: self.langgraph),
+            (queue.schedule, self.langgraph.schedule),
+        ]
 
     def attribute_fakes(self) -> list[tuple[object, str, object]]:
         return []

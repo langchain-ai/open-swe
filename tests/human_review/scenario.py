@@ -253,7 +253,7 @@ class ReviewScenario(Scenario):
         self._slack.wake = self._woken
         self._decisions = Decisions(self, _describe)
         self.coverage = await Coverage.build(self._github.parsed_codeowners, self.files)
-        self.langgraph.handle("scheduler", self._deadline)
+        self.langgraph.handle(standard.SCHEDULER_TASK, self._deadline)
 
     def outside_world(self) -> list[Boundary]:
         return [
