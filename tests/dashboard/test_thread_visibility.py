@@ -234,7 +234,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert metadata["graph_id"] == "agent"
     for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):
         assert key not in metadata
-    (state_call,) = client.threads.update_state.await_args_list
+    state_call, _ = client.threads.update_state.await_args_list
     assert state_call.args[0] == client.threads.create.call_args.kwargs["thread_id"]
     copied = state_call.kwargs["values"]["messages"]
     assert [m["content"] for m in copied] == ["hi", "hello"]
