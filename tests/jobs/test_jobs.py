@@ -1,5 +1,7 @@
 import asyncio
+import importlib
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import text
@@ -42,6 +44,32 @@ async def test_a_due_job_runs_once_however_many_workers_poll() -> None:
 
     assert sum(counts) == 1
     assert [job.payload for job in ran] == [{"n": 1}]
+    assert await queue.find({}) == []
+
+
+async def test_a_thread_wakeup_starts_its_run_and_finishes_the_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.jobs import kinds
+
+    wakeup_tool = importlib.import_module("openswe.tools.schedule_thread_wakeup")
+    started: list[str] = []
+
+    class _Runs:
+        async def create(
+            self, thread_id: str, assistant_id: str, **kwargs: object
+        ) -> dict[str, str]:
+            started.append(thread_id)
+            return {"run_id": "run-1"}
+
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: SimpleNamespace(runs=_Runs()))
+    await queue.schedule(
+        "thread_wakeup", {"thread_id": "t1", "input": {"messages": []}}, due_at=_PAST
+    )
+
+    assert await kinds.WORKER.run_due() == 1
+
+    assert started == ["t1"]
     assert await queue.find({}) == []
 
 
