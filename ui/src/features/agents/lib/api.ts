@@ -30,6 +30,14 @@ export class AgentsApiError extends DashboardRequestError {
   }
 }
 
+export interface ThreadMembership {
+  ownerLogin: string | null
+  requiresApproval: boolean
+  canParticipate: boolean
+  requestPending: boolean
+  pendingLogins: Array<string>
+}
+
 export interface ScheduleCreateRequest {
   prompt: string
   /** Every trigger, any of which fires the automation; replaces them all on update. */
@@ -284,6 +292,20 @@ export interface PullRequestSnapshot {
 
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
+  threadMembership: (threadId: string) =>
+    agentsRequest<ThreadMembership>(
+      `/threads/${encodeURIComponent(threadId)}/membership`
+    ),
+  requestThreadMembership: (threadId: string) =>
+    agentsRequest<ThreadMembership>(
+      `/threads/${encodeURIComponent(threadId)}/membership`,
+      { method: "POST" }
+    ),
+  decideThreadMembership: (threadId: string, login: string, approve: boolean) =>
+    agentsRequest<ThreadMembership>(
+      `/threads/${encodeURIComponent(threadId)}/membership/${encodeURIComponent(login)}`,
+      { method: "POST", body: JSON.stringify({ approve }) }
+    ),
   listThreadRepos: (
     params: {
       includeResolved?: boolean

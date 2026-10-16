@@ -685,7 +685,13 @@ def test_process_github_issue_followup_keeps_the_threads_workspace(monkeypatch) 
         webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
     )
     monkeypatch.setattr(
-        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=True)
+        webhook_common.ThreadRecord,
+        "read",
+        AsyncMock(
+            return_value=webhook_common.ThreadRecord(
+                exists=True, metadata={"source": "github", "owner_login": "octocat"}
+            )
+        ),
     )
     monkeypatch.setattr(
         webhook_common, "get_thread_workspace", lambda thread_id: asyncio.sleep(0, result="core")
@@ -774,7 +780,9 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
         webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
     )
     monkeypatch.setattr(
-        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
+        webhook_common.ThreadRecord,
+        "read",
+        AsyncMock(return_value=webhook_common.ThreadRecord(exists=False, metadata={})),
     )
     monkeypatch.setattr(
         webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")

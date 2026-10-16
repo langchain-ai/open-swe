@@ -9,6 +9,7 @@ from openswe.threads import (
     blobs,
     handlers,
     listing,
+    membership,
     plan_api,
     summary,
     workflow_approval_api,
@@ -40,7 +41,7 @@ def private_thread(monkeypatch):
         ),
         runs=SimpleNamespace(cancel_many=AsyncMock(), list=AsyncMock(return_value=[])),
     )
-    for module in (access, handlers, listing, tools):
+    for module in (access, handlers, listing, membership, tools):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
     monkeypatch.setattr(
         handlers, "_thread_summary", AsyncMock(side_effect=lambda t, **_: t["metadata"])
@@ -163,7 +164,8 @@ async def test_owner_can_publish_thread_without_retaining_admin_capabilities(
     monkeypatch.setattr(handlers, "mirror_thread_metadata", mirror)
     shared = await handlers.share_thread_with_workspace("private-thread", "ALICE")
     assert summary.thread_is_readable(shared, "bob")
-    assert summary.thread_is_promptable(shared, "bob")
+    assert not summary.thread_is_promptable(shared, "bob")
+    assert summary.thread_is_promptable(shared, "alice")
     assert shared["visibility"] == "public"
     assert shared["admin_thread"] is False
     assert shared["unlisted"] is False
@@ -368,6 +370,85 @@ async def test_admin_cancel_reaches_private_thread_without_exporting_details(
 
     assert result == {"success": True, "thread": {"id": "private-thread", "status": "idle"}}
     cancel.assert_awaited_once_with("private-thread", "admin", email=None)
+
+
+async def test_public_viewer_needs_owner_approval_despite_historical_participant_credit(
+    private_thread, monkeypatch
+):
+    thread, client = private_thread
+    thread["metadata"]["visibility"] = "public"
+    notify = AsyncMock()
+    monkeypatch.setattr(membership.ThreadMembership, "_notify_owner", notify)
+
+    async def update(*, thread_id, metadata):
+        thread["metadata"].update(metadata)
+
+    client.threads.update.side_effect = update
+    assert await access._readable_thread_metadata("private-thread", login="bob")
+    await handlers.get_dashboard_thread_state("private-thread", "bob")
+    assert not summary.thread_is_promptable(thread["metadata"], "bob")
+
+    stale_request = membership.ThreadMembership("private-thread", dict(thread["metadata"]))
+    applicant = await membership.ThreadMembership.read("private-thread", "bob")
+    assert await applicant.request("bob")
+    applicant = await membership.ThreadMembership.read("private-thread", "BOB")
+    assert not await applicant.request("BOB")
+    notify.assert_awaited_once()
+    assert applicant.view("bob")["requestPending"] is True
+    assert applicant.view("bob")["pendingLogins"] == []
+    assert applicant.view("alice")["pendingLogins"] == ["bob"]
+    for unauthorized in ("bob", "admin"):
+        with pytest.raises(HTTPException) as exc:
+            await applicant.decide(unauthorized, "bob", approve=True)
+        assert exc.value.status_code == 403
+    assert not summary.thread_is_promptable(thread["metadata"], "bob")
+    await applicant.decide("ALICE", "BOB", approve=True)
+    assert summary.thread_is_promptable(thread["metadata"], "BOB")
+    await stale_request.request("bob")
+    assert summary.thread_is_promptable(thread["metadata"], "bob")
+    assert not summary.thread_is_promptable(thread["metadata"], "admin")
+    assert (await membership.ThreadMembership.read("private-thread", "bob")).view("bob")[
+        "requestPending"
+    ] is False
+
+
+@pytest.mark.parametrize("approve", [True, False])
+async def test_owner_cannot_admit_without_a_pending_request(private_thread, approve):
+    thread, client = private_thread
+    thread["metadata"]["visibility"] = "public"
+    member = await membership.ThreadMembership.read("private-thread", "alice")
+    with pytest.raises(HTTPException) as exc:
+        await member.decide("alice", "bob", approve=approve)
+    assert exc.value.status_code == 409
+    client.threads.update.assert_not_awaited()
+
+
+async def test_private_admin_cannot_request_to_join(private_thread):
+    member = await membership.ThreadMembership.read("private-thread", "admin")
+    with pytest.raises(HTTPException) as exc:
+        await member.request("admin")
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.parametrize("operation", ["cancel", "delete", "rename", "resolve", "terminal"])
+async def test_unadmitted_public_viewer_cannot_mutate_thread(private_thread, operation):
+    thread, client = private_thread
+    thread["metadata"]["visibility"] = "public"
+    with pytest.raises(HTTPException) as exc:
+        match operation:
+            case "cancel":
+                await handlers.cancel_dashboard_thread("private-thread", "bob")
+            case "delete":
+                await handlers.delete_dashboard_thread("private-thread", "bob")
+            case "rename":
+                await handlers.rename_dashboard_thread("private-thread", "bob", title="hijack")
+            case "resolve":
+                await handlers.resolve_dashboard_thread("private-thread", "bob", resolved=True)
+            case "terminal":
+                await handlers.get_dashboard_terminal_sandbox("private-thread", "bob")
+    assert exc.value.status_code == 403
+    client.threads.update.assert_not_awaited()
+    client.runs.cancel_many.assert_not_awaited()
 
 
 async def test_email_admin_can_cancel_private_thread(private_thread, monkeypatch):

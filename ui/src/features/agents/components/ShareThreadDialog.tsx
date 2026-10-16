@@ -41,8 +41,9 @@ export function ShareThreadDialog({
         <DialogDescription className="text-sm text-primary">
           Everyone with workspace access will be able to read everything already
           in this thread and anything added later: messages, private tool
-          results, attachments, plans, and sandbox files. This may include
-          secrets or sensitive personal information.
+          results, attachments, and plans. This may include secrets or sensitive
+          personal information. You must approve people before they can
+          participate or access the live sandbox.
         </DialogDescription>
         <p className="text-sm font-semibold text-primary">
           This cannot be undone. Continuing privately creates a new copy; it

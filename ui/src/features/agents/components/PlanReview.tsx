@@ -62,7 +62,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const commentMutation = useRef(0)
   const format = plan.html.trim() ? "html" : "markdown"
   const content = format === "html" ? plan.html : plan.markdown
-  const canComment = format === "html"
+  const canComment = format === "html" && plan.canParticipate !== false
 
   useEffect(() => {
     let cancelled = false
@@ -215,7 +215,9 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                       Comments
                     </Text>
                     <p className="mt-0.5 text-xs text-secondary">
-                      Highlight text in the preview to comment.
+                      {canComment
+                        ? "Highlight text in the preview to comment."
+                        : "Join the thread from the conversation to comment."}
                     </p>
                   </div>
                   {anchor && (
@@ -314,6 +316,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                                 variant="plain"
                                 color="secondary"
                                 className="mt-space-2"
+                                disabled={!canComment}
                                 onClick={() => void removeComment(comment.id)}
                               >
                                 Delete
@@ -330,7 +333,9 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                     <div className="border-t border-default p-space-3">
                       <Button
                         className="w-full"
-                        disabled={submitting || posting || submitted}
+                        disabled={
+                          !canComment || submitting || posting || submitted
+                        }
                         onClick={() => void submitComments()}
                       >
                         {submitting

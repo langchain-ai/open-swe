@@ -90,6 +90,23 @@ new_prs: as drafts
 </dynamic-context>
 ```
 
+```xml
+<dynamic-context kind="system" id="system:thread-queue">
+display_name: Queued message
+platform: open-swe
+</dynamic-context>
+```
+
+```xml
+<input-message sender="system:thread-queue" surface="automation" kind="system">
+Note from Open SWE, not written by anyone in this thread: Open SWE sent &lt;@U_ALICE&gt; the following direct message on behalf of this thread. This is context, not a request to act on it or repeat it.
+
+&lt;sent-dm&gt;
+bob requested to join your thread. Approve or deny their request in &lt;http://127.0.0.1:3100/agents/<thread-id>|the dashboard&gt;. They can still view it while waiting.
+&lt;/sent-dm&gt;
+</input-message>
+```
+
 ## Turn 4: Alice switches to the web dashboard
 Given: the thread has Alice and Bob
 When: Alice types in the dashboard: ship it

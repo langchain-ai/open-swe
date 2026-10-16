@@ -56,6 +56,7 @@ from openswe.threads.listing import (
     unpin_dashboard_thread,
 )
 from openswe.threads.machine_reads import machine_thread, machine_threads
+from openswe.threads.membership import ThreadMembership, read_thread_membership
 from openswe.threads.principals import PrincipalDep
 from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
@@ -251,6 +252,42 @@ async def api_list_threads_page(
         sort_by=sort_by,
         hierarchy=hierarchy,
     )
+
+
+@router.get("/threads/{thread_id}/membership")
+async def api_thread_membership(
+    thread_id: str,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, object]:
+    return await read_thread_membership(thread_id, session["sub"], session.get("email"))
+
+
+@router.post("/threads/{thread_id}/membership")
+@audit_endpoint
+async def api_request_thread_membership(
+    thread_id: str,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, object]:
+    membership = await ThreadMembership.read(thread_id, session["sub"], session.get("email"))
+    await membership.request(session["sub"])
+    return await read_thread_membership(thread_id, session["sub"], session.get("email"))
+
+
+class ThreadMembershipDecision(BaseModel):
+    approve: bool
+
+
+@router.post("/threads/{thread_id}/membership/{login}")
+@audit_endpoint
+async def api_decide_thread_membership(
+    thread_id: str,
+    login: str,
+    body: ThreadMembershipDecision,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, object]:
+    membership = await ThreadMembership.read(thread_id, session["sub"], session.get("email"))
+    await membership.decide(session["sub"], login, approve=body.approve)
+    return await read_thread_membership(thread_id, session["sub"], session.get("email"))
 
 
 class PullRequestChecksRef(BaseModel):

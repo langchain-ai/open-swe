@@ -28,6 +28,7 @@ export function ThreadMenuItems({
   pinned,
   archived,
   isDeleting,
+  readOnly = false,
   onTogglePin,
   onToggleArchived,
   onDelete,
@@ -37,6 +38,7 @@ export function ThreadMenuItems({
   pinned: boolean
   archived: boolean
   isDeleting: boolean
+  readOnly?: boolean
   onTogglePin: () => void
   onToggleArchived: () => void
   onDelete: () => void
@@ -104,7 +106,7 @@ export function ThreadMenuItems({
         <CopyIcon size={ICON_SIZE} weight="regular" />
         Copy thread ID
       </Item>
-      <Item onSelect={onToggleArchived}>
+      <Item onSelect={onToggleArchived} disabled={readOnly}>
         {archived ? (
           <ArrowCounterClockwiseIcon size={ICON_SIZE} weight="regular" />
         ) : (
@@ -115,7 +117,7 @@ export function ThreadMenuItems({
       <Item
         className="text-error-secondary"
         onSelect={onDelete}
-        disabled={isDeleting}
+        disabled={isDeleting || readOnly}
       >
         <TrashIcon size={ICON_SIZE} weight="regular" />
         Delete thread

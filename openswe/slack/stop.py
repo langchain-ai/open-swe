@@ -20,6 +20,8 @@ from openswe.slack.records import (
     store_slack_run_mapping,
 )
 from openswe.source_context import SourceContext
+from openswe.threads.membership import ThreadMembership
+from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -160,10 +162,13 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
     target = await _resolve_stop_target(client, channel_id, message_ts)
     if target is None:
         return
+    thread_id, thread_ts, metadata, slack_thread = target
+    membership = ThreadMembership(thread_id, metadata)
+    if membership.owner and not membership.admits(await User.login_for_slack(event.get("user"))):
+        return
     if not await claim_slack_event(event_id):
         return
 
-    thread_id, thread_ts, metadata, slack_thread = target
     run_ids = await _active_run_ids(client, thread_id)
     if run_ids:
         await client.runs.cancel_many(

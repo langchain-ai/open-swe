@@ -1,8 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Threads have no owner: every authenticated user has the same rights on every
-// thread. What differs per user is only which threads their sidebar lists —
-// the ones they have posted in.
+import { admitThreadParticipant } from "./helpers/thread-membership";
+
 const ALICE = { login: "alice", email: "alice@example.com" };
 const BOB = { login: "bob", email: "bob@example.com" };
 const BOB_SLACK_ID = "U_BOB";
@@ -98,7 +97,7 @@ async function waitForStateToContain(
     .toBe(true);
 }
 
-test.describe("ownerless threads", () => {
+test.describe("thread participants", () => {
   // The sidebar used to be scoped by `metadata.github_login` — whoever created
   // the thread. It is now scoped by participation, so posting is what puts a
   // thread on your list.
@@ -122,7 +121,12 @@ test.describe("ownerless threads", () => {
     // Bob has not posted here, so it is not on his list…
     expect(await sidebarThreadIds(bob)).not.toContain(threadId);
 
-    // …but he can open it and post, exactly like anyone else.
+    await admitThreadParticipant(
+      page.request,
+      bob.request,
+      threadId,
+      BOB.login,
+    );
     await bob.goto(`/agents/${threadId}`);
     await expect(bob).toHaveURL(new RegExp(`/agents/${threadId}$`));
     await expectComposerReady(bob);
@@ -140,9 +144,7 @@ test.describe("ownerless threads", () => {
     await bobContext.close();
   });
 
-  // Resolve, unresolve, cancel and delete were all owner-only and answered 404
-  // for everyone else. They are ordinary actions now.
-  test("a user who did not create the thread can resolve and delete it", async ({
+  test("an admitted participant can resolve and delete the thread", async ({
     page,
     browser,
     baseURL,
@@ -154,6 +156,12 @@ test.describe("ownerless threads", () => {
     const bob = await bobContext.newPage();
     await loginAs(bob, BOB);
 
+    await admitThreadParticipant(
+      page.request,
+      bob.request,
+      threadId,
+      BOB.login,
+    );
     const headers = { origin: baseURL ?? "", referer: `${baseURL ?? ""}/` };
     const resolved = await bob.request.post(
       `/dashboard/api/threads/${threadId}/resolve`,
@@ -179,8 +187,6 @@ test.describe("ownerless threads", () => {
     await bobContext.close();
   });
 
-  // Whoever sends the message is the thread's context for that turn; the person
-  // who opened the thread carries no standing privilege over later senders.
   test("a thread started by one user lists for the other once they reply in Slack", async ({
     page,
     browser,

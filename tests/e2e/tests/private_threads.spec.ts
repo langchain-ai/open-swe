@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
 import { dismissOnboardingIfShown } from "./helpers/dashboard";
 
 const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
@@ -180,6 +181,149 @@ test("private threads require owner confirmation to expose the entire thread", a
     for (const threadId of [createdId, continuedId, sharedId]) {
       if (threadId) await api.delete(`/threads/${threadId}`);
     }
+    await api.dispose();
+  }
+});
+
+test("public viewers need owner approval to participate but keep their read access", async ({
+  page,
+  browser,
+  playwright,
+}) => {
+  const api = await playwright.request.newContext({ baseURL: harness });
+  const ownerContext = await browser.newContext();
+  const ownerPage = await ownerContext.newPage();
+  const id = crypto.randomUUID();
+  const base = new URL(
+    test.info().project.use.baseURL ?? "http://127.0.0.1:3100",
+  ).origin;
+  const screenshotDir = process.env.THREAD_MEMBERSHIP_SCREENSHOTS;
+  try {
+    expect(
+      (
+        await api.post("/threads", {
+          data: {
+            thread_id: id,
+            metadata: {
+              title: "Plan the next release",
+              source: "dashboard",
+              owner_login: "alice",
+              visibility: "public",
+              participant_logins: { alice: true, bob: true },
+              graph_id: "agent",
+            },
+          },
+        })
+      ).ok(),
+    ).toBeTruthy();
+    expect(
+      (
+        await api.post(`/threads/${id}/state`, {
+          data: {
+            values: {
+              messages: [
+                {
+                  type: "human",
+                  content: "Let’s plan the next release together.",
+                },
+                {
+                  type: "ai",
+                  content:
+                    "The release plan is ready for discussion. Everyone can view it; Alice approves new participants.",
+                },
+              ],
+            },
+          },
+        })
+      ).ok(),
+    ).toBeTruthy();
+    await page.request.post("/control/login", { data: { login: "bob" } });
+    await page.goto(`/agents/${id}`);
+    await dismissOnboardingIfShown(page);
+    await expect(
+      page.getByText("Let’s plan the next release together.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Request to join", exact: true }),
+    ).toBeEnabled();
+    await expect(page.getByTestId("composer-editor")).toHaveAttribute(
+      "contenteditable",
+      "false",
+    );
+    expect(
+      (
+        await page.request.patch(`/dashboard/api/threads/${id}`, {
+          headers: { origin: base },
+          data: { title: "Hijacked" },
+        })
+      ).status(),
+    ).toBe(403);
+    await page
+      .getByRole("button", { name: "Request to join", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Request pending", exact: true }),
+    ).toBeDisabled();
+    expect(
+      (
+        await page.request.post(`/dashboard/api/threads/${id}/membership/bob`, {
+          headers: { origin: base },
+          data: { approve: true },
+        })
+      ).status(),
+    ).toBe(403);
+
+    await ownerContext.request.post(`${base}/control/login`, {
+      data: { login: "alice" },
+    });
+    await ownerPage.goto(`${base}/agents/${id}`);
+    await dismissOnboardingIfShown(ownerPage);
+    await ownerPage
+      .getByRole("button", { name: "Deny bob's join request" })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Request to join", exact: true }),
+    ).toBeEnabled();
+    await expect(
+      page.getByText("Let’s plan the next release together.", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Request to join", exact: true })
+      .click();
+    await expect(
+      ownerPage.getByRole("button", { name: "Approve bob's join request" }),
+    ).toBeVisible();
+    if (screenshotDir) {
+      await mkdir(screenshotDir, { recursive: true });
+      await page.screenshot({ path: `${screenshotDir}/viewer-pending.png` });
+      await ownerPage.screenshot({
+        path: `${screenshotDir}/owner-approval-light.png`,
+      });
+      await ownerPage.evaluate(() =>
+        document.documentElement.classList.add("dark"),
+      );
+      await ownerPage.screenshot({
+        path: `${screenshotDir}/owner-approval-dark.png`,
+      });
+    }
+    await ownerPage
+      .getByRole("button", { name: "Approve bob's join request" })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Request pending", exact: true }),
+    ).not.toBeVisible();
+    await expect(page.getByTestId("composer-editor")).toHaveAttribute(
+      "contenteditable",
+      "true",
+    );
+    await expect(
+      page.getByText("Let’s plan the next release together.", { exact: true }),
+    ).toBeVisible();
+    if (screenshotDir)
+      await page.screenshot({ path: `${screenshotDir}/viewer-admitted.png` });
+  } finally {
+    await api.delete(`/threads/${id}`);
+    await ownerContext.close();
     await api.dispose();
   }
 });

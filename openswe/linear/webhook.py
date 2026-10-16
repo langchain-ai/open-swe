@@ -186,6 +186,20 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # Resolve the GitHub login from the Linear email the same way Slack does, so
     # PRs open *as the triggering user* and the thread is tagged for the dashboard.
     mapped_login = await User.login_for_email(user_email) if user_email else None
+    record = await common.ThreadRecord.read(thread_id)
+    record.authorize(mapped_login or "")
+    membership_metadata = record.metadata or {
+        "source": "linear",
+        "owner_login": mapped_login,
+    }
+    included_comments = [
+        comment
+        for comment in included_comments
+        if common.thread_is_promptable(
+            membership_metadata,
+            await User.login_for_email((comment.get("user") or {}).get("email")),
+        )
+    ]
     # A follow-up stays in its thread's workspace; a new issue lands in the
     # repository's preferred one. Either way its default model and Fable flag
     # are the ones the vision fallback checks.
@@ -255,7 +269,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     configurable["workspace"] = workspace
     configurable["environment"] = workspace
 
-    await common.upsert_agent_thread_metadata(
+    persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="linear",
         repo_config=repo_config,
@@ -265,6 +279,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         source_context=SourceContext.parse({"linear_issue": configurable["linear_issue"]}),
         workspace=workspace,
     )
+
+    if mapped_login and not persisted:
+        raise RuntimeError("could not persist thread authorization metadata")
 
     run_messages = [
         system_introduction(

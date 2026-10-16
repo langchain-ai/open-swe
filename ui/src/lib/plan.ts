@@ -27,6 +27,7 @@ export interface PlanUser {
 
 export interface PlanData {
   threadId: string
+  canParticipate?: boolean
   status: string
   html: string
   markdown: string
