@@ -68,7 +68,7 @@ from openswe.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
-from openswe.transcript.turns import recorded_message_ids, run_turn
+from openswe.transcript.turns import recorded_message_ids, run_turn, superseded_turns
 
 logger = logging.getLogger(__name__)
 
@@ -764,7 +764,19 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             and delivered_event_match_ids([message]) & ids.event_match_ids
         ]
         input_event_ids = {message.id for message in input_events}
-        commands: list[Command] = []
+        # A run replaced by an interrupting follow-up never reports its turn's end.
+        commands: list[Command] = [
+            Command(
+                command_id=f"turn:{stale_turn}:interrupted",
+                event=TurnInterrupted(
+                    type="turn.interrupted", turn_id=stale_turn, run_id=stale_run
+                ),
+                actor_kind="system",
+                run_id=stale_run,
+                turn_id=stale_turn,
+            )
+            for stale_turn, stale_run in await superseded_turns(ids.thread_id, ids.run_id, turn_id)
+        ]
         if (
             (not transcribed or configured_turn is None)
             and human is not None

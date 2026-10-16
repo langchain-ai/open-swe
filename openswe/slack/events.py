@@ -2,25 +2,21 @@
 
 import asyncio
 import logging
-import uuid
 from collections import OrderedDict
+from datetime import timedelta
 
-from langgraph_sdk import get_client
-
+from openswe import event_claims
 from openswe.config import ENV
-from openswe.threads.creation import create_lock_thread
 
 logger = logging.getLogger(__name__)
 
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 
 _LOCAL_CLAIM_LIMIT = 2048
+_CLAIM_SCOPE = "slack_event"
+_CLAIM_TTL = timedelta(minutes=10)
 _claimed_keys: OrderedDict[str, None] = OrderedDict()
 _claim_lock = asyncio.Lock()
-
-
-def _claim_thread_id(claim_key: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-event:{claim_key}"))
 
 
 def slack_message_claim_key(event_id: str, channel_id: str = "", event_ts: str = "") -> str:
@@ -31,18 +27,11 @@ def slack_message_claim_key(event_id: str, channel_id: str = "", event_ts: str =
 
 
 async def _claim_remotely(claim_key: str) -> bool | None:
-    client = get_client(url=LANGGRAPH_URL)
-    claim_thread_id = _claim_thread_id(claim_key)
     try:
-        await create_lock_thread(client, claim_thread_id, ttl_minutes=10)
-    except Exception:  # noqa: BLE001
-        try:
-            await client.threads.get(claim_thread_id)
-        except Exception:  # noqa: BLE001
-            logger.warning("Slack event claim failed for key=%s", claim_key)
-            return None
-        return False
-    return True
+        return await event_claims.claim(_CLAIM_SCOPE, claim_key, ttl=_CLAIM_TTL)
+    except Exception:
+        logger.warning("Slack event claim failed for key=%s", claim_key, exc_info=True)
+        return None
 
 
 def _claim_locally(claim_key: str) -> None:

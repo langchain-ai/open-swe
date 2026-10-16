@@ -366,7 +366,7 @@ async def start_pull_request_thread(
     url = f"https://github.com/{full_name}/pull/{number}"
     prompt = intent.prompt(url)
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
+    async with agent_thread_pr_state_lock(_pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner,
             repo,
@@ -384,7 +384,7 @@ async def start_pull_request_thread(
         busy = current.get("status") == "busy"
         if busy and not intent.queues_behind_running:
             return PullRequestThreadRun(thread_id=thread_id, already_running=True)
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             await client.threads.update(
                 thread_id=thread_id,
                 metadata={
@@ -429,7 +429,7 @@ async def dispatch_pull_request_prompt(
     """
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
+    async with agent_thread_pr_state_lock(_pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner, repo, number, login, None, prompt=prompt, title=title, unlisted=unlisted
         )

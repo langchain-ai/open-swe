@@ -52,6 +52,7 @@ from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
@@ -71,7 +72,6 @@ from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
-from openswe.utils.thread_ops import langgraph_client
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
@@ -269,13 +269,11 @@ def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
 
 async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
     try:
-        await langgraph_client().runs.create(
-            None,
-            "scheduler",
-            input={"task": SCHEDULER_TASK, "request_id": str(request.id), "step": step},
+        await queue.schedule(
+            SCHEDULER_TASK,
+            {"request_id": str(request.id), "step": step},
+            due_at=datetime.now(UTC) + after,
             metadata={"kind": SCHEDULER_TASK, "request_id": str(request.id), "step": step},
-            after_seconds=int(after.total_seconds()),
-            on_completion="delete",
         )
     except Exception:
         logger.warning(

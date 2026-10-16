@@ -4,6 +4,7 @@ import asyncio
 import itertools
 from collections.abc import Sequence
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid7
 
 import pytest
@@ -78,6 +79,7 @@ def _install(
 
     monkeypatch.setattr(mw, "_has_transcript", _has_transcript)
     monkeypatch.setattr(mw, "_reusable_turn_id", _reusable_turn_id)
+    monkeypatch.setattr(mw, "superseded_turns", AsyncMock(return_value=[]))
     configurable: dict[str, Any] = {"thread_id": THREAD_ID, "run_id": RUN_ID}
     if turn_id is not None:
         configurable["transcript_turn_id"] = str(turn_id)
@@ -397,6 +399,48 @@ async def test_a_run_inheriting_a_closed_turn_id_opens_and_closes_its_own_turn(
 
     snapshot = await load_snapshot(thread_id)
     assert snapshot is not None and snapshot.thread.status == "idle"
+
+
+@pytest.mark.parametrize("reuses_turn", [False, True])
+async def test_a_follow_up_closes_the_turn_its_interrupted_predecessor_left_running(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, reuses_turn: bool
+) -> None:
+    """A run replaced by an interrupting follow-up never reports its turn's end."""
+    thread_id, first_turn = str(uuid7()), uuid7()
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id="created",
+                event=ThreadCreated(title="Task", source="slack", owner_login="owner"),
+                actor_kind="system",
+            )
+        ],
+    )
+    configurable: dict[str, object] = {
+        "thread_id": thread_id,
+        "run_id": "run-a",
+        "transcript_turn_id": str(first_turn),
+    }
+    monkeypatch.setattr(mw, "get_config", lambda: {"configurable": configurable})
+    middleware = mw.TranscriptMiddleware()
+    first: dict[str, Any] = {"messages": [HumanMessage(content="first", id="first")]}
+    await middleware.abefore_agent(first, None)
+    await mw._finish(mw._runs.pop(mw._run_key(thread_id, "run-a")))
+
+    configurable.update(run_id="run-b")
+    if not reuses_turn:
+        configurable.pop("transcript_turn_id")
+    second: dict[str, Any] = {
+        "messages": [*first["messages"], HumanMessage(content="second", id="second")]
+    }
+    await middleware.abefore_agent(second, None)
+    await middleware.aafter_agent(second, None)
+
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None and snapshot.thread.status == "idle"
+    states = {turn.turn_id: turn.state for turn in snapshot.turns}
+    assert states[first_turn] == ("completed" if reuses_turn else "interrupted")
 
 
 async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(

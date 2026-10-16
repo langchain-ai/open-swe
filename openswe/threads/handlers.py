@@ -549,7 +549,7 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
     now_ms = _now_ms()
 
     async def resolve(thread_id: str) -> None:
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             await client.threads.update(
                 thread_id=thread_id,
                 metadata={
@@ -571,7 +571,7 @@ async def resolve_dashboard_thread(
     client = langgraph_client()
     await _authorized_thread(thread_id, login, email=email)
     try:
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             thread = await _authorized_thread(thread_id, login, email=email)
             metadata = thread_metadata(thread)
             metadata_update: dict[str, Any] = {

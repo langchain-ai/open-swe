@@ -63,6 +63,12 @@ import { useDiffKeys } from "./useDiffKeys"
 
 type Item = CodeViewItem<Note>
 
+/** Pierre's protected hook that hydrates a patch diff with full file contents. */
+type LoadsFiles = { loadFilesIfNecessary(): void }
+
+/** Expanded diff instances that already asked for full contents since mounting. */
+const hydrating = new WeakSet<object>()
+
 const NO_ITEMS: Array<Item> = []
 
 // A diff row as painted: the line-number gutter sets the grid track, not the 18px code line.
@@ -234,6 +240,13 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       layout: { paddingTop: 0, paddingBottom: 160, gap: 10 },
       __devOnlyValidateItemHeights: import.meta.env.DEV,
       loadDiffFiles,
+      // Hunks highlighted alone lose multi-line string state; hydrate once shown.
+      onPostRender: (_node, instance, phase) => {
+        if (phase === "unmount") return void hydrating.delete(instance)
+        if (instance.options.collapsed || hydrating.has(instance)) return
+        hydrating.add(instance)
+        ;(instance as unknown as LoadsFiles).loadFilesIfNecessary()
+      },
       enableLineSelection: true,
       enableGutterUtility: true,
       lineHoverHighlight: "number",

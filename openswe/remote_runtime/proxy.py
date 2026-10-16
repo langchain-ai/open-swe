@@ -36,9 +36,18 @@ from langsmith.address import env_values
 from langsmith.utils import get_tracer_project
 from pydantic import JsonValue, TypeAdapter
 from starlette.datastructures import Headers
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.types import ASGIApp, Receive, Scope, Send
 
+from openswe.api.agent_server_auth import backend_call
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.remote_runtime.asgi import (
+    configurable_of,
+    forward,
+    json_body,
+    read_body,
+    replay,
+    send_json,
+)
 from openswe.remote_runtime.client import (
     HOSTED_GRAPHS,
     MDA_GRAPH_ID,
@@ -61,10 +70,6 @@ _V3_STREAMING_KEY: Final = "__event_streaming_v2"
 # REST run-create schema rejects.
 _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
 _RUN_DERIVED_FIELDS: Final = ("status", "values", "interrupts", "error")
-_FORWARDED_REQUEST_HEADERS: Final = ("content-type", "accept", "last-event-id")
-_DROPPED_RESPONSE_HEADERS: Final = frozenset(
-    {"content-length", "transfer-encoding", "connection", "content-encoding", "keep-alive"}
-)
 _UNCLAIMED_TTL_SECONDS: Final = 5.0
 _REMOTE_PAGE: Final = 500
 
@@ -157,7 +162,7 @@ class MdaRuntime:
         if thread is not None and (thread.get("values") or thread.get("status") != "idle"):
             # Runs already here keep running where their checkpoints are.
             return False
-        if not await _runs_on_mda(thread, configurable):
+        if not await runs_on_mda(thread, configurable):
             return False
         if thread is None:
             # Run creation with `if_not_exists=create`: the index thread is made here first.
@@ -209,6 +214,57 @@ class MdaRuntime:
             rewritten.pop("config", None)
         return _object.validate_python(rewritten)
 
+    async def start_command_run(
+        self, thread_id: str, command: Mapping[str, JsonValue], params: Mapping[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        """Answer a protocol v2 ``run.start`` by creating the run here with its context.
+
+        MDA's own ``run.start`` would drop the context, which is what carries the run token.
+        """
+        config = params.get("config")
+        configurable = config.get("configurable") if isinstance(config, dict) else None
+        run_config: dict[str, JsonValue] = {
+            **(config if isinstance(config, dict) else {}),
+            "configurable": {
+                **(configurable if isinstance(configurable, dict) else {}),
+                _V3_STREAMING_KEY: True,
+                "thread_id": thread_id,
+            },
+        }
+        strategy = params.get("multitaskStrategy") or params.get("multitask_strategy")
+        payload: dict[str, JsonValue] = {
+            "assistant_id": params["assistant_id"],
+            "input": params.get("input"),
+            "config": run_config,
+            "metadata": params.get("metadata"),
+            "stream_mode": list(_V3_RUN_STREAM_MODES),
+            "stream_subgraphs": True,
+            "stream_resumable": True,
+            "on_completion": "keep",
+            "if_not_exists": "create",
+            "multitask_strategy": strategy if isinstance(strategy, str) else "reject",
+        }
+        await self.ensure_remote_thread(thread_id)
+        rewritten = await self.run_payload(thread_id, payload)
+        response = await self.http.post(f"/threads/{thread_id}/runs", json=rewritten)
+        if response.is_error:
+            logger.warning(
+                "Starting an MDA run failed",
+                extra={"thread_id": thread_id, "status_code": response.status_code},
+            )
+            return {
+                "type": "error",
+                "id": command.get("id", 0),
+                "error": "unknown_error",
+                "message": response.text[:500],
+            }
+        run = _object.validate_python(response.json())
+        return {
+            "type": "success",
+            "id": command.get("id", 0),
+            "result": {"run_id": str(run.get("run_id") or "")},
+        }
+
     async def merged_thread(self, thread: dict[str, JsonValue]) -> dict[str, JsonValue]:
         thread_id = thread.get("thread_id")
         if not isinstance(thread_id, str):
@@ -249,7 +305,7 @@ class MdaRuntime:
         return set().union(*found)
 
 
-async def _runs_on_mda(
+async def runs_on_mda(
     thread: Mapping[str, JsonValue] | None, configurable: Mapping[str, JsonValue]
 ) -> bool:
     """Whether a fresh thread runs on MDA: its person's ``run_on_mda``, else its workspace's.
@@ -277,99 +333,6 @@ async def _runs_on_mda(
             extra={"owner_login": login},
         )
         return False
-
-
-def _configurable(container: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-    config = container.get("config")
-    configurable = config.get("configurable") if isinstance(config, dict) else None
-    return _object.validate_python(configurable) if isinstance(configurable, dict) else {}
-
-
-async def _body(receive: Receive) -> bytes:
-    chunks: list[bytes] = []
-    while True:
-        message = await receive()
-        if message["type"] == "http.disconnect":
-            break
-        chunks.append(message.get("body", b""))
-        if not message.get("more_body"):
-            break
-    return b"".join(chunks)
-
-
-def _replay(body: bytes) -> Receive:
-    sent = False
-
-    async def receive() -> Message:
-        nonlocal sent
-        if sent:
-            # Starlette waits on this for a disconnect while it streams a response.
-            await asyncio.Event().wait()
-        sent = True
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    return receive
-
-
-async def _send_json(send: Send, status: int, payload: object) -> None:
-    body = json.dumps(payload).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": status,
-            "headers": [(b"content-type", b"application/json")],
-        }
-    )
-    await send({"type": "http.response.body", "body": body})
-
-
-def _remote_path(scope: Scope) -> str:
-    path: str = scope["path"]
-    return path.removeprefix("/noauth")
-
-
-async def _forward(
-    runtime: MdaRuntime, scope: Scope, send: Send, body: bytes, *, path: str | None = None
-) -> None:
-    """Send the request to the MDA deployment and stream its answer back unchanged."""
-    headers = Headers(scope=scope)
-    request = runtime.http.build_request(
-        scope["method"],
-        path or _remote_path(scope),
-        params=scope.get("query_string", b"").decode(),
-        headers={
-            name: value for name in _FORWARDED_REQUEST_HEADERS if (value := headers.get(name))
-        },
-        content=body or None,
-    )
-    response = await runtime.http.send(request, stream=True)
-    try:
-        await send(
-            {
-                "type": "http.response.start",
-                "status": response.status_code,
-                "headers": [
-                    (name.encode(), value.encode())
-                    for name, value in response.headers.multi_items()
-                    if name.lower() not in _DROPPED_RESPONSE_HEADERS
-                ],
-            }
-        )
-        # Decoded, since Content-Encoding is not passed on.
-        async for chunk in response.aiter_bytes():
-            await send({"type": "http.response.body", "body": chunk, "more_body": True})
-        await send({"type": "http.response.body", "body": b""})
-    finally:
-        await response.aclose()
-
-
-async def _json_body(body: bytes) -> dict[str, JsonValue] | None:
-    if not body.strip():
-        return {}
-    try:
-        return _object.validate_json(body)
-    except ValueError:
-        return None
 
 
 def _may_route(scope: Scope) -> bool:
@@ -417,22 +380,28 @@ class MdaThreadProxy:
 
     async def _route(self, scope: Scope, receive: Receive, send: Send) -> None:
         runtime = self.runtime()
-        if runtime is None:
+        if runtime is None or not backend_call(scope):
             await self.app(scope, receive, send)
             return
         path: str = scope["path"]
         thread_match = _THREAD_PATH.match(path)
         is_search = bool(_SEARCH_PATH.match(path)) and scope["method"] == "POST"
         is_cancel_many = bool(_CANCEL_MANY_PATH.match(path)) and scope["method"] == "POST"
-        body = await _body(receive)
-        replay = _replay(body)
+        body = await read_body(receive)
+        replayed = replay(body, receive)
         if is_search:
-            await self._search(runtime, scope, replay, send, body)
+            await self._search(runtime, scope, replayed, send, body)
         elif is_cancel_many:
-            await self._cancel_many(runtime, scope, replay, send, body)
+            await self._cancel_many(runtime, scope, replayed, send, body)
         elif thread_match is not None:
             await self._thread(
-                runtime, scope, replay, send, body, thread_match["thread_id"], thread_match["rest"]
+                runtime,
+                scope,
+                replayed,
+                send,
+                body,
+                thread_match["thread_id"],
+                thread_match["rest"],
             )
 
     async def _thread(
@@ -453,21 +422,21 @@ class MdaThreadProxy:
             await self._command(runtime, scope, receive, send, body, thread_id)
             return
         if method == "POST" and _CREATE_RUN_PATH.match(rest):
-            payload = await _json_body(body)
+            payload = json_body(body)
             assistant_id = payload.get("assistant_id") if payload else None
             if (
                 payload is not None
                 and isinstance(assistant_id, str)
                 and assistant_id in HOSTED_GRAPHS
-                and await runtime.claim(thread_id, _configurable(payload))
+                and await runtime.claim(thread_id, configurable_of(payload))
             ):
                 await runtime.ensure_remote_thread(thread_id)
                 rewritten = await runtime.run_payload(thread_id, payload)
-                await _forward(runtime, scope, send, json.dumps(rewritten).encode())
+                await forward(runtime.http, scope, send, json.dumps(rewritten).encode())
                 return
         if await runtime.hosts(thread_id):
             await runtime.ensure_remote_thread(thread_id)
-            await _forward(runtime, scope, send, body)
+            await forward(runtime.http, scope, send, body)
             return
         await self.app(scope, receive, send)
 
@@ -478,9 +447,9 @@ class MdaThreadProxy:
         if method == "GET" and await runtime.hosts(thread_id):
             thread = await runtime.local_thread(thread_id)
             if thread is None:
-                await _send_json(send, 404, {"detail": f"Thread {thread_id} not found"})
+                await send_json(send, 404, {"detail": f"Thread {thread_id} not found"})
                 return
-            await _send_json(send, 200, await runtime.merged_thread(thread))
+            await send_json(send, 200, await runtime.merged_thread(thread))
             return
         if method == "DELETE" and await runtime.hosts(thread_id):
             try:
@@ -502,7 +471,7 @@ class MdaThreadProxy:
         body: bytes,
         thread_id: str,
     ) -> None:
-        command = await _json_body(body)
+        command = json_body(body)
         params = command.get("params") if command else None
         is_hosted_start = (
             command is not None
@@ -511,12 +480,12 @@ class MdaThreadProxy:
             and params.get("assistant_id") in HOSTED_GRAPHS
         )
         if is_hosted_start and command is not None and isinstance(params, dict):
-            if await runtime.claim(thread_id, _configurable(params)):
+            if await runtime.claim(thread_id, configurable_of(params)):
                 await self._start_run(runtime, send, thread_id, command, params)
                 return
         elif await runtime.hosts(thread_id):
             await runtime.ensure_remote_thread(thread_id)
-            await _forward(runtime, scope, send, body)
+            await forward(runtime.http, scope, send, body)
             return
         await self.app(scope, receive, send)
 
@@ -528,68 +497,13 @@ class MdaThreadProxy:
         command: Mapping[str, JsonValue],
         params: Mapping[str, JsonValue],
     ) -> None:
-        """Answer a protocol v2 ``run.start`` by creating the run on MDA with its context.
-
-        MDA's own ``run.start`` would drop the context, which is what carries the run token.
-        """
-        config = params.get("config")
-        configurable = config.get("configurable") if isinstance(config, dict) else None
-        run_config: dict[str, JsonValue] = {
-            **(config if isinstance(config, dict) else {}),
-            "configurable": {
-                **(configurable if isinstance(configurable, dict) else {}),
-                _V3_STREAMING_KEY: True,
-                "thread_id": thread_id,
-            },
-        }
-        strategy = params.get("multitaskStrategy") or params.get("multitask_strategy")
-        payload: dict[str, JsonValue] = {
-            "assistant_id": params["assistant_id"],
-            "input": params.get("input"),
-            "config": run_config,
-            "metadata": params.get("metadata"),
-            "stream_mode": list(_V3_RUN_STREAM_MODES),
-            "stream_subgraphs": True,
-            "stream_resumable": True,
-            "on_completion": "keep",
-            "if_not_exists": "create",
-            "multitask_strategy": strategy if isinstance(strategy, str) else "reject",
-        }
-        await runtime.ensure_remote_thread(thread_id)
-        rewritten = await runtime.run_payload(thread_id, payload)
-        response = await runtime.http.post(f"/threads/{thread_id}/runs", json=rewritten)
-        if response.is_error:
-            logger.warning(
-                "Starting an MDA run failed",
-                extra={"thread_id": thread_id, "status_code": response.status_code},
-            )
-            await _send_json(
-                send,
-                200,
-                {
-                    "type": "error",
-                    "id": command.get("id", 0),
-                    "error": "unknown_error",
-                    "message": response.text[:500],
-                },
-            )
-            return
-        run = _object.validate_python(response.json())
-        await _send_json(
-            send,
-            200,
-            {
-                "type": "success",
-                "id": command.get("id", 0),
-                "result": {"run_id": str(run.get("run_id") or "")},
-            },
-        )
+        await send_json(send, 200, await runtime.start_command_run(thread_id, command, params))
 
     async def _search(
         self, runtime: MdaRuntime, scope: Scope, receive: Receive, send: Send, body: bytes
     ) -> None:
         """Search here, with claimed threads' status (and status filter) answered by MDA."""
-        query = await _json_body(body)
+        query = json_body(body)
         if query is None:
             await self.app(scope, receive, send)
             return
@@ -598,7 +512,7 @@ class MdaThreadProxy:
             threads = await self._search_by_status(runtime, query, cast("ThreadStatus", status))
         else:
             threads = _object_list(await runtime.local().http.post("/threads/search", json=query))
-        await _send_json(send, 200, await runtime.merged_threads(threads))
+        await send_json(send, 200, await runtime.merged_threads(threads))
 
     async def _search_by_status(
         self, runtime: MdaRuntime, query: dict[str, JsonValue], status: ThreadStatus
@@ -644,10 +558,10 @@ class MdaThreadProxy:
     async def _cancel_many(
         self, runtime: MdaRuntime, scope: Scope, receive: Receive, send: Send, body: bytes
     ) -> None:
-        payload = await _json_body(body)
+        payload = json_body(body)
         thread_id = payload.get("thread_id") if payload else None
         if isinstance(thread_id, str) and await runtime.hosts(thread_id):
-            await _forward(runtime, scope, send, body)
+            await forward(runtime.http, scope, send, body)
             return
         await self.app(scope, receive, send)
 

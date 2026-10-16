@@ -8,7 +8,7 @@ graph's tools, subagents and models from the backend's catalog for the run, and
 middleware there. The run token in the context authenticates every call.
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from typing import Final, Literal
 
 from langchain.agents.middleware import (
@@ -64,7 +64,8 @@ class OpenSweRunContext(BaseModel):
     # The Agent Server keeps only context keys this schema names, and reads the
     # protocol v2 stream marker from the context it mirrors into configurable.
     event_streaming_v2: bool = Field(default=False, alias="__event_streaming_v2")
-    run_token: str | None = None
+    # Dunder keys stay out of the trace metadata the context is mirrored into.
+    run_token: str | None = Field(default=None, alias="__run_token")
     invocation_id: str | None = None
     # JSON, not RunModels: the gRPC runtime serializes only the context's top level.
     models: dict[str, JsonValue] | None = None
@@ -73,6 +74,16 @@ class OpenSweRunContext(BaseModel):
 def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
     """The backend's transcript and usage see every reply, and every tool call."""
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
+
+
+def _code_mode(graph: Graph, from_code: Sequence[BaseTool]) -> list[AgentMiddleware]:
+    """The graph's code mode, with every tool the catalog offers from code callable from it."""
+    if graph == "reviewer":
+        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])]
+    if not from_code:
+        return []
+    # As the in-process agent's code mode: state per turn, subagents through `task`.
+    return [CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")]
 
 
 # `mda build` reads the agent's name without running this factory, so its body
@@ -101,8 +112,13 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     tools = [backend_tool(spec, backend) for spec in catalog.tools]
     by_name = {tool.name: tool for tool in tools}
     excluded = frozenset(catalog.excluded)
+    # Every schema offered costs each call its context, and OpenAI answers some requests
+    # carrying hundreds with nothing; the tools the model seldom needs are called from code.
+    in_code = [tool for tool in tools if tool.name in catalog.code_only]
+    offered = [tool for tool in tools if tool not in in_code]
+    from_code = [*in_code, *(tool for tool in offered if tool.name in catalog.also_from_code)]
     subagent_tools = {
-        subagent.name: tools
+        subagent.name: offered
         if subagent.tools is None
         else [by_name[name] for name in subagent.tools if name in by_name]
         for subagent in catalog.subagents
@@ -113,7 +129,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         context_schema=OpenSweRunContext,
         # Named as the in-process graph names them, these replace MDA's own file
         # and shell tools: the backend runs them in the thread's sandbox.
-        tools=tools,
+        tools=offered,
         sandbox=None,
         subagents=[
             {
@@ -133,12 +149,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         middleware=[
             BackendRunMiddleware(backend, context.invocation_id),
             *_backend_reports(backend, by_name.keys()),
-            ServedToolsMiddleware(tools, excluded),
-            *(
-                [CodeInterpreterMiddleware(ptc=_REVIEWER_PTC_TOOLS)]
-                if context.graph == "reviewer"
-                else []
-            ),
+            ServedToolsMiddleware(offered, excluded),
+            *_code_mode(context.graph, from_code),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],
