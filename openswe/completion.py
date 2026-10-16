@@ -96,12 +96,14 @@ _REASON_TEXT = {
     "context_too_long": "the conversation outgrew the model's context window",
     "model_unavailable": "the selected model isn't available to this workspace",
     "sandbox_unreachable": "the run lost its sandbox",
+    "backend_interrupted": "the connection to the Open SWE backend was interrupted",
     "step_limit": "the run hit its step limit",
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
     "context_too_long": "Start a new thread to continue.",
     "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
+    "backend_interrupted": "Re-trigger the run to try again.",
 }
 
 

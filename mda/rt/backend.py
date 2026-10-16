@@ -188,6 +188,7 @@ class OpenSweBackend:
         body: Mapping[str, JsonValue] | None = None,
         *,
         seconds: float | None = None,
+        retry_gateway: bool = False,
     ) -> dict[str, JsonValue]:
         if self._run_token is None:
             raise BackendCallError(
@@ -195,7 +196,7 @@ class OpenSweBackend:
             )
         if seconds is None:
             seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
-        for attempt in range(3):
+        for attempt in range(4 if retry_gateway else 3):
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}/remote-runtime/hooks/{hook}",
@@ -208,16 +209,24 @@ class OpenSweBackend:
             except httpx2.TimeoutException as exc:
                 raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
             except httpx2.ConnectError as exc:
-                if attempt == 2:
+                if attempt >= 2:
                     raise BackendUnavailableError(f"{hook} failed (ConnectError)") from exc
                 logger.warning("Backend connection failed; retrying", extra={"hook": hook})
                 await asyncio.sleep((1, 3)[attempt])
             except httpx2.HTTPError as exc:
+                gateway_failure = isinstance(
+                    exc, httpx2.HTTPStatusError
+                ) and exc.response.status_code in {502, 503, 504}
+                if retry_gateway and gateway_failure and attempt < 3:
+                    logger.warning(
+                        "Backend gateway failed; retrying",
+                        extra={"hook": hook, "attempt": attempt + 1},
+                    )
+                    await asyncio.sleep((1, 3, 9)[attempt])
+                    continue
                 error = (
                     BackendUnavailableError
-                    if isinstance(exc, httpx2.TransportError)
-                    or isinstance(exc, httpx2.HTTPStatusError)
-                    and exc.response.status_code in {502, 503, 504}
+                    if isinstance(exc, httpx2.TransportError) or gateway_failure
                     else BackendCallError
                 )
                 raise error(f"{hook} failed ({type(exc).__name__})") from exc
@@ -227,7 +236,13 @@ class OpenSweBackend:
         return Catalog.model_validate(await self.call("catalog", {"run_id": run_id}))
 
     async def phase(self, hook: Hook, body: Mapping[str, JsonValue]) -> PhaseReply:
-        return PhaseReply.model_validate(await self.call(hook, body))
+        return PhaseReply.model_validate(
+            await self.call(
+                hook,
+                body,
+                retry_gateway=hook in {"before_model", "after_model", "prepare", "after_agent"},
+            )
+        )
 
     async def tool(self, body: Mapping[str, JsonValue]) -> ToolReply:
         arguments = body.get("arguments")

@@ -26,6 +26,9 @@ _ERROR_TYPE_CODES = {
     "RecursionError": "step_limit",
     "SandboxConnectionError": "sandbox_unreachable",
     "SandboxUnreachableError": "sandbox_unreachable",
+    "BackendCallError": "backend_interrupted",
+    "BackendUnavailableError": "backend_interrupted",
+    "BackendTimeoutError": "backend_interrupted",
 }
 
 
