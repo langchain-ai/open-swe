@@ -2752,7 +2752,8 @@
         "enum": [
           "instance",
           "workspace",
-          "user"
+          "user",
+          "managed"
         ],
         "type": "string"
       },

@@ -253,7 +253,15 @@ async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     catalog = ToolSurface(tools={tool.name: tool for tool in tools}).catalog()
-    assert all("mcp_provenance" not in entry.model_dump() for entry in catalog)
+    assert len(catalog) == 2
+    for entry in catalog:
+        assert entry.model_dump()["mcp_provenance"] == {
+            "connection_name": managed.CONNECTION_NAME,
+            "scope": "managed",
+            "overridden_scopes": [],
+        }
+        assert "alice-langsmith-token" not in entry.model_dump_json()
+        assert GATEWAY_ID not in entry.model_dump_json()
     metadata["visibility"] = "public"
     assert "MCP call failed" in await tools[0].ainvoke({})
     assert await runtime.load_mcp_tools(managed.managed_mcp_source("bob", GATEWAY_ID)) == []

@@ -46,7 +46,7 @@ class MCPSource:
     only a genuinely absent connection may return None.
     """
 
-    scope: MCPScope | None = field(kw_only=True)
+    scope: MCPScope = field(kw_only=True)
     namespace: tuple[str, ...]
     list_connections: Callable[[], Awaitable[list[MCPConnection]]]
     get_connection: Callable[[str], Awaitable[MCPConnection | None]]
@@ -159,7 +159,7 @@ def _wrap_tool(
     definition: Tool,
     namespace: tuple[str, ...],
     sources: tuple[MCPSource, ...],
-    provenance: MCPToolProvenance | None,
+    provenance: MCPToolProvenance,
 ) -> BaseTool:
     async def invoke(**arguments: Any) -> Any:
         is_error = True
@@ -267,9 +267,7 @@ async def _load_tools(
                     connection_name=record.name,
                     scope=source.scope,
                     overridden_scopes=overridden_scopes,
-                )
-                if source.scope is not None
-                else None,
+                ),
             )
             for definition in definitions
             if record.allows_tool(definition.name)
@@ -285,7 +283,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
     try:
         catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
         resolved: dict[str, tuple[MCPSource, MCPConnection]] = {}
-        scopes: dict[str, list[MCPScope | None]] = {}
+        scopes: dict[str, list[MCPScope]] = {}
         for source, records in zip(sources, catalogs, strict=True):
             for record in records:
                 resolved[record.name] = (source, record)
@@ -307,7 +305,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
                 source,
                 record,
                 sources,
-                [scope for scope in scopes[record.name][:-1] if scope is not None],
+                scopes[record.name][:-1],
             )
             for source, record in connections
         )

@@ -1,3 +1,4 @@
+import json
 import time
 
 import jwt
@@ -159,6 +160,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
+    from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.remote_runtime.graph import RemoteGraph
     from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
@@ -170,9 +172,15 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
         return StructuredTool.from_function(coroutine=run, name=name, description=name)
 
     async def build(config: object, surface: ToolSurface) -> None:
-        surface.dynamic = DynamicToolMiddleware(
-            {"MCP": [integration("mcp_search"), integration("mcp.dotted")]}
-        )
+        search = integration("mcp_search")
+        search.metadata = {
+            "mcp_provenance": MCPToolProvenance(
+                connection_name="lmt", scope="managed", overridden_scopes=["instance", "user"]
+            ),
+            "headers": {"Authorization": "private-token"},
+            "namespace": ["managed_tools", "private-owner", "private-gateway"],
+        }
+        surface.dynamic = DynamicToolMiddleware({"MCP": [search, integration("mcp.dotted")]})
         core = [integration(name) for name in ("read_file", "manage_thread", "slack_reply")]
         middleware: list[AgentMiddleware] = [
             surface.dynamic,
@@ -198,6 +206,18 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     names = {tool["name"] for tool in tools if isinstance(tool, dict)}
     assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
     assert "eval" not in names
+    search = next(tool for tool in tools if isinstance(tool, dict) and tool["name"] == "mcp_search")
+    assert isinstance(search, dict)
+    expected = {
+        "connection_name": "lmt",
+        "scope": "managed",
+        "overridden_scopes": ["instance", "user"],
+    }
+    assert search["mcp_provenance"] == expected
+    assert json.dumps(expected, separators=(",", ":")) in str(search["description"])
+    assert "private-token" not in str(catalog)
+    assert "private-owner" not in str(catalog)
+    assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     assert catalog["also_from_code"] == ["read_file"]
 

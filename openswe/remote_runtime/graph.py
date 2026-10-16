@@ -79,7 +79,6 @@ from openswe.sandboxes.tool_runtime import (
     ModelChoice,
     SurfaceModels,
     ToolSurface,
-    tool_parameters,
 )
 from openswe.server import code_only, direct_and_from_code, fallback_model_choice
 from openswe.utils.model import provider_model_kwargs
@@ -287,12 +286,9 @@ class RunSession:
         return _json_object.validate_python(
             {
                 "tools": [
-                    {
-                        "name": name,
-                        "description": tool.description,
-                        "parameters": tool_parameters(tool),
-                    }
-                    for name, tool in tools.items()
+                    tool.model_dump(mode="json")
+                    for tool in self.surface.catalog()
+                    if tool.name in tools
                 ],
                 "subagents": [
                     {

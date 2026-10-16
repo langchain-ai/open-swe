@@ -118,7 +118,7 @@ class MCPConnectionUpdate(BaseModel):
         return list(dict.fromkeys(name.strip() for name in value))
 
 
-type MCPScope = Literal["instance", "workspace", "user"]
+type MCPScope = Literal["instance", "workspace", "user", "managed"]
 
 
 class MCPToolProvenance(BaseModel):
