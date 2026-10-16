@@ -37,6 +37,13 @@ export function useAiSearchStream<T extends { relevance: number }>(
   key: (match: T) => string
 ): AiSearchState<T> {
   const [state, setState] = useState<StreamState<T>>({ ...IDLE, path: null })
+  // Each new path, including the same one searched again after `null`, is a
+  // fresh search: the finished stream's matches and status must not carry over.
+  const [trackedPath, setTrackedPath] = useState(path)
+  if (path !== trackedPath) {
+    setTrackedPath(path)
+    setState({ ...(path ? STARTING : IDLE), path })
+  }
 
   useEffect(() => {
     if (!path) return

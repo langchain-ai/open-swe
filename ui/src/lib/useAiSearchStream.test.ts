@@ -72,6 +72,34 @@ describe("useAiSearchStream", () => {
     expect(source?.closed).toBe(true)
   })
 
+  it("starts fresh when the same query is searched again", () => {
+    const { rerender, result } = renderHook(
+      ({ path }: { path: string | null }) =>
+        useAiSearchStream<{ id: string; relevance: number }>(path, key),
+      { initialProps: { path: "/threads/search?q=dm" as string | null } }
+    )
+    act(() => {
+      FakeEventSource.last?.emit("batch", {
+        matches: [{ id: "old", relevance: 0.9 }],
+        scanned: 30,
+      })
+      FakeEventSource.last?.emit("done", { scanned: 30 })
+    })
+    rerender({ path: null })
+    rerender({ path: "/threads/search?q=dm" })
+    expect(result.current.status).toBe("streaming")
+    expect(result.current.matches).toEqual([])
+
+    act(() =>
+      FakeEventSource.last?.emit("batch", {
+        matches: [{ id: "new", relevance: 0.7 }],
+        scanned: 10,
+      })
+    )
+    expect(result.current.matches.map((match) => match.id)).toEqual(["new"])
+    expect(result.current.scanned).toBe(10)
+  })
+
   it("closes the stream when the query goes away", () => {
     const { rerender, result } = renderHook(
       ({ path }: { path: string | null }) =>
