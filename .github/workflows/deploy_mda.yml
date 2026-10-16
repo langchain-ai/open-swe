@@ -82,13 +82,15 @@ jobs:
       - name: Install the mda CLI
         if: steps.changed.outputs.deploy == 'true'
         # Same version mda/ pins.
-        run: uv tool install managed-deepagents==0.9.1
+        run: uv tool install managed-deepagents==0.10.0.dev6
       - name: Deploy
         if: steps.changed.outputs.deploy == 'true'
         env:
           ENVIRONMENT: ${{ matrix.environment }}
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          # Shared with this environment's backend: it is the deployment's trusted service.
+          MDA_SERVICE_SECRET: ${{ secrets[format('MDA_SERVICE_SECRET_{0}', matrix.environment)] }}
         run: |
           case "$ENVIRONMENT" in
             preview) backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" ;;
@@ -96,8 +98,9 @@ jobs:
             prod) backend="https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app" ;;
             *) echo "::error::Unknown environment $ENVIRONMENT"; exit 1 ;;
           esac
-          # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
-          printf 'OPEN_SWE_BACKEND_URL=%s\n' "$backend" >mda/.env
+          # The project .env is forwarded as the deployment's secrets: the backend it calls back,
+          # and the secret they share.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$MDA_SERVICE_SECRET" >mda/.env
           mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \
