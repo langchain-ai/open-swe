@@ -515,10 +515,10 @@ reviews when it is opened or marked ready for review, and automatic re-reviews
 on pushes. Label matching is case-insensitive. Repository-wide automatic review
 settings and draft-review preferences still apply to other PRs.
 
-Apply the label before the triggering event (for generated PRs, create them as
-drafts, label them, then mark them ready). Adding it does not cancel a review
-already running or remove existing comments or checks. Removing it allows future
-automatic triggers again; removing the label alone does not start a review.
+Adding the label stops pending and running automatic reviews without removing
+published comments or completed checks. An unfinished review check is completed
+as neutral. Removing the label allows future automatic triggers again; removing
+the label alone does not start a review.
 Explicitly requested reviews and replies to existing findings are unaffected.
 
 ### Removing a trigger

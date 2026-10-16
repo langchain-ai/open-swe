@@ -810,3 +810,24 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
 
     assert captured["token_repositories"] == scope
     assert captured.get("run_created", False) is dispatched
+
+
+async def test_github_review_opt_out_label_is_handled_when_auto_review_disabled(
+    monkeypatch, registry_db
+) -> None:
+    handler = AsyncMock()
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(
+        webhook_common, "is_repo_auto_review_enabled", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(github_webhooks, "process_github_pr_review_label", handler)
+    payload = {
+        "action": "labeled",
+        "label": {"name": "OpenSWE:Skip-Review"},
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+        "pull_request": {"number": 1244},
+    }
+    response = await _post_github_webhook("pull_request", payload)
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    handler.assert_awaited_once_with(payload)

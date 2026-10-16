@@ -1019,6 +1019,8 @@ SUPPORTED_GH_EVENTS = frozenset(
 SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
     [
+        "labeled",
+        "unlabeled",
         "opened",
         "edited",
         "ready_for_review",
