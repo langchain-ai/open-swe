@@ -14,7 +14,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
 from langsmith.utils import get_tracer_project
-from pydantic import JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe import dispatch
 from openswe.remote_runtime.client import (
@@ -35,6 +35,20 @@ _V3_STREAMING_KEY: Final = "__event_streaming_v2"
 _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
 
 _object = TypeAdapter(dict[str, JsonValue])
+
+
+class _RunError(BaseModel):
+    """The exception LangGraph records on a thread whose latest run failed."""
+
+    error: str = ""
+    message: str = ""
+
+    def describe(self) -> str:
+        return ": ".join(part for part in (self.error, self.message) if part)
+
+
+class _ErroredThread(BaseModel):
+    error: _RunError | None = None
 
 
 class _SdkThreads:
@@ -74,6 +88,12 @@ class _SdkThreads:
         """The thread's status here; one this runtime does not have has nothing running."""
         thread = await self.indexed(thread_id)
         return "idle" if thread is None else thread.status
+
+    async def run_error(self, thread_id: str) -> str | None:
+        """Why the thread's latest run here failed, or ``None`` when it recorded no error."""
+        thread = await self.get(thread_id)
+        failure = _ErroredThread.model_validate(thread or {}).error
+        return (failure.describe() or None) if failure else None
 
     async def has_history(self, thread_id: str) -> bool:
         """Whether runs already left checkpoints here, which keeps the thread on this runtime."""
