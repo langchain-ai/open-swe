@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fastapi import HTTPException
+from langgraph.constants import END
 from langgraph_sdk.errors import NotFoundError
 
 from openswe.github.http import GitHubClient
@@ -529,6 +530,9 @@ async def continue_thread_privately(
         try:
             await copy_thread_blobs(thread_id, new_thread_id, referenced_blob_digests(copied))
             await client.threads.update_state(new_thread_id, values={"messages": copied})
+            # The copy is written as the graph's input, which leaves its first node
+            # pending, and clients take a pending node for a run in flight.
+            await client.threads.update_state(new_thread_id, values=None, as_node=END)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Could not copy transcript into private continuation",
