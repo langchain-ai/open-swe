@@ -28,6 +28,31 @@ def token_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
+def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from openswe.utils.model import provider_model_kwargs
+
+    main = ModelChoice("openai:gpt-6.1-sol", {})
+    session = RunSession(
+        ToolSurface(models=SurfaceModels(main=main, subagent=main, use_gateway=False)),
+        {},
+        None,
+        started_here=True,
+    )
+    choice = session.model_for(
+        {
+            "model_route": "default",
+            "requested_model": requested,
+            "requested_effort": "medium",
+        }
+    )
+
+    assert choice.model_id == requested
+    assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
+
+
 def test_run_token_round_trips_the_signed_run() -> None:
     assert verify_runtime_token(sign_runtime_token(RUN)) == RUN
 
