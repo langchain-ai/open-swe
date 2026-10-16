@@ -226,7 +226,7 @@ export function AgentThreadHeader({
                 onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
-                className="min-w-0 rounded-md bg-surface-level-2 px-space-2 py-space-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                className="min-w-0 rounded-md bg-surface-level-2 px-space-2 py-space-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 style={{ width: editorWidth }}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
