@@ -155,7 +155,12 @@ export function SkillsPage() {
             options={SCOPES}
           />
           {canEdit && (
-            <Button size="xs" className="w-full" onClick={clear}>
+            <Button
+              size="xs"
+              color={creating ? "secondary" : "primary"}
+              className="w-full"
+              onClick={clear}
+            >
               New skill
             </Button>
           )}
@@ -204,6 +209,7 @@ export function SkillsPage() {
               value={selectedName ?? newName}
               onChange={setNewName}
               disabled={!creating}
+              required={creating}
               placeholder="address-review-feedback"
               hintText={
                 creating
@@ -220,6 +226,7 @@ export function SkillsPage() {
                 setDraft((value) => ({ ...value, description }))
               }
               disabled={!canEdit}
+              required={canEdit}
               placeholder="What this skill does and when Open SWE should use it"
             />
           </div>

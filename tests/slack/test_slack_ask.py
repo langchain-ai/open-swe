@@ -109,7 +109,7 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     assert _slack_tools_enabled(RunConfig.parse(resumed))
     monkeypatch.setattr(slack_reply, "get_config", lambda: {"configurable": resumed})
     monkeypatch.setattr(slack_reply, "get_langgraph_client", lambda: client)
-    monkeypatch.setattr(slack_reply, "create_lock_thread", AsyncMock())
+    monkeypatch.setattr(slack_reply.event_claims, "claim", AsyncMock(return_value=True))
     monkeypatch.setattr(slack_reply, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(slack_reply, "settle_slack_thread_status", AsyncMock())
     replace = AsyncMock(return_value=True)

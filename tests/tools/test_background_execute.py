@@ -41,6 +41,8 @@ codes = (root / "codes").read_text().split() if (root / "codes").exists() else [
 print(codes[0] if codes else "204", end="")
 """
 
+pytestmark = pytest.mark.usefixtures("memory_event_claims")
+
 
 @pytest.fixture
 def fake_curl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -313,7 +315,7 @@ async def test_cron_tick_deletes_its_cron_only_once_nothing_is_left(
     monkeypatch.setattr(background_tasks, "_reconcile", AsyncMock(return_value=reconciled))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=relisted))
     delete_crons = AsyncMock()
-    monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
+    monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
 
     assert await monitor_background_tasks("thread-1") == {"status": status}
 
@@ -352,7 +354,7 @@ async def test_shared_sandbox_monitors_deliver_only_their_own_completions(
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
-    monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
+    monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
 
     assert await monitor_background_tasks("worker-b") == {
         "status": "idle",
@@ -428,7 +430,9 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
             AsyncMock(side_effect=launches if callback else [{"tasks": []}, *launches]),
         ),
         patch("openswe.tools.background_execute.update_background_task_state", AsyncMock()),
-        patch("openswe.background_tasks.ensure_background_task_cron", AsyncMock()) as ensure_cron,
+        patch(
+            "openswe.background_tasks.ensure_background_task_polling", AsyncMock()
+        ) as ensure_cron,
     ):
         result = await background_execute("sleep 10")
 
@@ -454,7 +458,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             AsyncMock(side_effect=[{"tasks": []}, {"task_id": "task-1", "status": "running"}]),
         ),
         patch(
-            "openswe.background_tasks.ensure_background_task_cron",
+            "openswe.background_tasks.ensure_background_task_polling",
             AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
         ),
     ):
@@ -723,7 +727,7 @@ async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.Monk
     )
     delete_crons = AsyncMock()
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
-    monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
+    monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
 
     assert await monitor_background_tasks("thread-1") == {"status": "missing_thread"}
     delete_crons.assert_awaited_once_with("thread-1")

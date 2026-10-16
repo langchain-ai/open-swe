@@ -1,4 +1,5 @@
-import { memo } from "react"
+import { createContext, memo, useContext, useState } from "react"
+import { toast } from "sonner"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { SlackMrkdwn, useSlackMarkdown } from "../messages/SlackMrkdwn"
 import { Markdown } from "./Markdown"
@@ -80,11 +81,18 @@ const HEADER_LABELS: Record<"linear" | "slack", Record<Delivery, string>> = {
 }
 
 type SlackTextObject = { type?: string; text?: string }
+type SlackElement = { type?: string; text?: SlackTextObject; value?: string }
 type SlackBlock = {
   type?: string
   text?: SlackTextObject
-  elements?: Array<{ type?: string; text?: SlackTextObject }>
+  elements?: Array<SlackElement>
 }
+type SlackButton = { label: string; answer?: string }
+
+/** Sends a reply option as the user's next message, as a Slack click does. */
+export const ReplyOptionContext = createContext<
+  ((answer: string) => Promise<void>) | undefined
+>(undefined)
 
 function isSlackTextObject(value: unknown): value is SlackTextObject {
   return (
@@ -101,17 +109,61 @@ function isSlackBlockArray(value: unknown): value is Array<SlackBlock> {
   )
 }
 
-function SlackButtons({ labels }: { labels: Array<string> }) {
+function optionAnswer(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!parsed || typeof parsed !== "object") return undefined
+    const { type, response } = parsed as { type?: unknown; response?: unknown }
+    return type === "open_swe_option" && typeof response === "string"
+      ? response
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function elementButton(element: SlackElement): SlackButton {
+  return {
+    label: isSlackTextObject(element.text)
+      ? (element.text.text ?? "")
+      : element.type || "Action",
+    answer: optionAnswer(element.value),
+  }
+}
+
+const buttonClass =
+  "rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xxs text-primary"
+
+function SlackButtons({ buttons }: { buttons: Array<SlackButton> }) {
+  const onAnswer = useContext(ReplyOptionContext)
+  const [sending, setSending] = useState(false)
+  const choose = (answer: string) => {
+    if (!onAnswer) return
+    setSending(true)
+    onAnswer(answer)
+      .catch(() => toast.error("Could not send your answer"))
+      .finally(() => setSending(false))
+  }
   return (
     <div className="flex flex-wrap gap-space-2">
-      {labels.map((label, index) => (
-        <span
-          key={index}
-          className="rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xxs text-primary"
-        >
-          {label}
-        </span>
-      ))}
+      {buttons.map(({ label, answer }, index) =>
+        onAnswer && answer !== undefined ? (
+          <button
+            key={index}
+            type="button"
+            disabled={sending}
+            onClick={() => choose(answer)}
+            className={`${buttonClass} cursor-pointer hover:bg-surface-level-2 disabled:cursor-default disabled:opacity-60`}
+          >
+            {label}
+          </button>
+        ) : (
+          <span key={index} className={buttonClass}>
+            {label}
+          </span>
+        )
+      )}
     </div>
   )
 }
@@ -141,11 +193,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
           return (
             <SlackButtons
               key={index}
-              labels={block.elements.map((element) =>
-                isSlackTextObject(element.text)
-                  ? (element.text.text ?? "")
-                  : element.type || "Action"
-              )}
+              buttons={block.elements.map(elementButton)}
             />
           )
         }
@@ -181,7 +229,14 @@ function SlackReply({ chunk }: ReplyCardProps) {
   return (
     <div className="flex flex-col gap-space-2">
       <Markdown content={markdown} />
-      {options.length > 0 && <SlackButtons labels={options} />}
+      {options.length > 0 && (
+        <SlackButtons
+          buttons={options.map((option) => ({
+            label: option,
+            answer: option.trim(),
+          }))}
+        />
+      )}
     </div>
   )
 }
