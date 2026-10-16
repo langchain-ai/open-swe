@@ -29,6 +29,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from openswe.api.agent_server_auth import backend_call
+from openswe.config import ENV
 from openswe.jobs import queue
 from openswe.remote_runtime.asgi import (
     StatusRecorder,
@@ -279,7 +280,9 @@ class ThreadRouter:
             or assistant_id not in HOSTED_GRAPHS
             or RUNTIMES.mda_runtime is None
             or await RUNTIMES.local.has_history(thread.thread_id)
-            or not (index.mda_all_threads() or await runs_on_mda(thread.metadata, configurable))
+            or not (
+                ENV.MDA_ALL_THREADS.get_bool() or await runs_on_mda(thread.metadata, configurable)
+            )
         ):
             return thread
         await index.set_runtime(thread.thread_id, "mda")
