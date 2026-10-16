@@ -22,7 +22,6 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
-from openswe.dashboard.import_settings import delete_legacy_workspace_settings
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
@@ -35,9 +34,9 @@ from openswe.dashboard.options import (
 )
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
 from openswe.run_config import RunConfig
-from openswe.store import now_iso
 from openswe.ui_invalidations import Topic
 from openswe.utils.gateway import gateway_overrides, resolve_gateway_enabled
+from openswe.utils.time import now_iso
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
@@ -88,6 +87,9 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
+    # Threads no person starts (API keys, workflows, system reviews) run on Managed
+    # Deep Agents when deployed; a person's threads follow their own run_on_mda.
+    run_on_mda: bool | None = None
     # The LangSmith Managed Tools gateway private threads load with the owner's own
     # LangSmith connection; unset means none. Only the instance record's value is read.
     managed_tools_gateway_id: str | None = None
@@ -340,6 +342,7 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
+        "run_on_mda": False,
         "managed_tools_gateway_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -574,9 +577,8 @@ async def upsert_workspace_overrides(
 
 
 async def delete_workspace_settings(slug: str) -> None:
-    """Forget the workspace's overrides, including any Store copy not yet imported."""
+    """Forget the workspace's overrides."""
     await WORKSPACE_SETTINGS.delete(slug)
-    await delete_legacy_workspace_settings(slug)
     await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
 
@@ -589,9 +591,7 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
     # bypassed and the call still needs a real OpenAI credential.
     if gateway_enabled and gateway_overrides(pair[0]) is not None:
         return pair
-    from openswe.utils.openai_oauth import desktop_openai_oauth_available
-
-    if ENV.OPENAI_API_KEY.optional() or desktop_openai_oauth_available():
+    if ENV.OPENAI_API_KEY.optional():
         return pair
     if not ENV.ANTHROPIC_API_KEY.optional():
         return pair

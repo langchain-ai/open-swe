@@ -1,3 +1,5 @@
+import uuid
+from datetime import UTC, datetime
 from typing import Any, Literal
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
@@ -8,12 +10,15 @@ import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import ConflictError
 from pydantic import ValidationError
+from sqlalchemy import text
 
-from openswe import store as agent_store
 from openswe.dashboard import repo_access
 from openswe.dashboard.options import fable_disabled_fallback
 from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from openswe.database.postgres import transaction
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.jobs import queue
+from openswe.jobs.queue import Job
 from openswe.schedules import store as schedules
 from openswe.schedules.store import (
     GitHubTrigger,
@@ -22,54 +27,17 @@ from openswe.schedules.store import (
     ScheduleTrigger,
     ScheduleUpdateBody,
     SlackTrigger,
+    TriggerConfig,
 )
 from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"
 SCHED_2 = "22222222-2222-4222-8222-222222222222"
-SCHED_GONE = "33333333-3333-4333-8333-333333333333"
 SCHED_SYSTEM = "44444444-4444-4444-8444-444444444444"
 BROKEN = "55555555-5555-4555-8555-555555555555"
 WORKING = "66666666-6666-4666-8666-666666666666"
 ADMIN_SCHEDULE = "77777777-7777-4777-8777-777777777777"
-
-
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-        self.deleted: list[tuple[tuple[str, ...], str]] = []
-
-    async def get_item(self, namespace: list[str], key: str) -> dict[str, Any] | None:
-        value = self.items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
-        self.items[(tuple(namespace), key)] = value
-
-    async def delete_item(self, namespace: list[str], key: str) -> None:
-        self.deleted.append((tuple(namespace), key))
-        self.items.pop((tuple(namespace), key), None)
-
-    async def search_items(
-        self,
-        namespace: list[str],
-        filter: dict[str, Any] | None = None,
-        limit: int = 1000,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        values = [
-            value
-            for (stored_namespace, _), value in self.items.items()
-            if stored_namespace == tuple(namespace)
-        ]
-        if filter:
-            values = [
-                value
-                for value in values
-                if all(value.get(key) == expected for key, expected in filter.items())
-            ]
-        return {"items": [{"value": value} for value in values[offset : offset + limit]]}
 
 
 # Automations name a workspace, and launching or saving one checks that its row
@@ -77,25 +45,37 @@ class _FakeStore:
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-class _FakeCrons:
+class _FakeJobs:
     def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
+        self.created: list[Job] = []
         self.deleted: list[str] = []
 
-    async def create(self, assistant_id: str, **kwargs: Any) -> dict[str, Any]:
-        self.created.append({"assistant_id": assistant_id, **kwargs})
-        return {"cron_id": f"cron_{len(self.created)}"}
+    async def schedule(self, kind: str, payload: dict[str, Any], **kwargs: Any) -> Job:
+        job = Job(
+            id=uuid.uuid4(),
+            kind=kind,
+            payload=payload,
+            due_at=datetime.now(UTC),
+            cron=kwargs.get("cron"),
+            timezone="UTC",
+            key=kwargs.get("key"),
+            metadata=kwargs.get("metadata") or {},
+            attempts=0,
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        self.created.append(job)
+        return job
 
-    async def delete(self, cron_id: str) -> None:
-        self.deleted.append(cron_id)
+    async def cancel(self, job_id: uuid.UUID) -> bool:
+        self.deleted.append(str(job_id))
+        return any(job.id == job_id for job in self.created)
 
-    async def search(self, **kwargs: Any) -> list[dict[str, Any]]:
-        wanted = kwargs.get("metadata") or {}
+    async def find(self, metadata: dict[str, Any], **_kwargs: Any) -> list[Job]:
         return [
-            {"cron_id": f"cron_{index}", **cron}
-            for index, cron in enumerate(self.created, start=1)
-            if f"cron_{index}" not in self.deleted
-            and all(cron["metadata"].get(key) == value for key, value in wanted.items())
+            job
+            for job in self.created
+            if str(job.id) not in self.deleted
+            and all(job.metadata.get(key) == value for key, value in metadata.items())
         ]
 
 
@@ -137,8 +117,7 @@ class _FakeRuns:
 
 class _FakeClient:
     def __init__(self) -> None:
-        self.store = _FakeStore()
-        self.crons = _FakeCrons()
+        self.jobs = _FakeJobs()
         self.threads = _FakeThreads()
         self.runs = _FakeRuns()
 
@@ -147,7 +126,7 @@ class _FakeClient:
 def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     client = _FakeClient()
     monkeypatch.setattr(schedules, "langgraph_client", lambda: client)
-    monkeypatch.setattr(agent_store, "store_client", lambda: client)
+    monkeypatch.setattr(schedules, "queue", client.jobs)
     return client
 
 
@@ -183,16 +162,49 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
     )
 
 
-async def _seed(fake_client: _FakeClient, record: dict[str, Any]) -> None:
-    """Store an automation the way older releases did, then import it as startup does."""
-    seeded = dict(record)
-    if (seeded.get("trigger") or "schedule") == "schedule":
-        seeded.setdefault("schedule", "0 9 * * *")
-    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, seeded["id"], seeded)
-    await schedules.import_store_automations()
+async def _seed(record: dict[str, Any]) -> None:
+    """Save an automation with one trigger straight to PostgreSQL, skipping creation checks.
+
+    A ``github_issue_opened`` record watches its ``repo`` for opened issues; any
+    other runs on its ``schedule`` under ``cron_id``.
+    """
+    repo = record.get("repo")
+    trigger: TriggerConfig
+    if record.get("trigger") == "github_issue_opened" and isinstance(repo, dict):
+        trigger = GitHubTrigger(repo=f"{repo['owner']}/{repo['name']}", events=["issues.opened"])
+        cron_id = None
+    else:
+        trigger = ScheduleTrigger(cron=record.get("schedule") or "0 9 * * *")
+        cron_id = record.get("cron_id")
+    workspace_id = await WORKSPACES.id_for_slug(record.get("workspace") or "default")
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, model, "
+                "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
+                "user_email) VALUES (:id, :workspace_id, :name, :prompt, :admin_thread, "
+                ":model, :effort, :base_branch, :branch_prefix, :enabled, :created_by, "
+                ":created_by, :user_email)"
+            ),
+            {
+                "id": uuid.UUID(record["id"]),
+                "workspace_id": workspace_id,
+                "name": record.get("name") or "Automation",
+                "prompt": record["prompt"],
+                "admin_thread": record.get("admin_thread") is True,
+                "model": record.get("model") or "Default",
+                "effort": record.get("effort"),
+                "base_branch": record.get("base_branch") or "main",
+                "branch_prefix": record.get("branch_prefix"),
+                "enabled": bool(record.get("enabled")),
+                "created_by": record.get("created_by") or "",
+                "user_email": record.get("user_email") or "",
+            },
+        )
+        await schedules._insert_triggers(conn, record["id"], [trigger], [uuid.uuid4()], [cron_id])
 
 
-async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+async def test_create_agent_schedule_registers_a_cron_job(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
         workspace="default",
         name="Daily report",
@@ -204,13 +216,12 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
 
     assert result["name"] == "Daily report"
     assert result["enabled"] is True
-    assert result["cronId"] == "cron_1"
-    created = fake_client.crons.created[0]
-    assert created["assistant_id"] == "scheduler"
-    assert created["schedule"] == "0 9 * * 1-5"
-    assert created["input"]["schedule_id"] == result["id"]
-    assert created["config"]["configurable"]["schedule_id"] == result["id"]
-    assert created["metadata"]["kind"] == "agent_schedule"
+    [created] = fake_client.jobs.created
+    assert result["cronId"] == str(created.id)
+    assert created.kind == "agent_schedule"
+    assert created.cron == "0 9 * * 1-5"
+    assert created.payload["schedule_id"] == result["id"]
+    assert created.metadata["kind"] == "agent_schedule"
 
 
 async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -> None:  # noqa: ANN001, ARG001
@@ -226,7 +237,7 @@ async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -
         await schedules.create_agent_schedule("alice", body, email="alice@example.com")
 
     assert exc.value.status_code == 403
-    assert fake_client.crons.created == []
+    assert fake_client.jobs.created == []
 
 
 async def test_create_agent_schedule_requires_repo_access(fake_client, auth, monkeypatch) -> None:  # noqa: ANN001, ARG001
@@ -246,7 +257,7 @@ async def test_create_agent_schedule_requires_repo_access(fake_client, auth, mon
         )
 
     assert exc.value.status_code == 403
-    assert fake_client.crons.created == []
+    assert fake_client.jobs.created == []
 
 
 async def test_update_agent_schedule_rejects_non_admin_elevation(fake_client) -> None:  # noqa: ANN001
@@ -266,7 +277,7 @@ async def test_update_agent_schedule_rejects_non_admin_elevation(fake_client) ->
         "created_at": "2026-01-01T00:00:00+00:00",
         "updated_at": "2026-01-01T00:00:00+00:00",
     }
-    await _seed(fake_client, record)
+    await _seed(record)
 
     with pytest.raises(HTTPException) as exc:
         await schedules.update_agent_schedule(
@@ -298,7 +309,7 @@ async def test_each_trigger_runs_in_its_own_repository(
         ),
     )
     schedule_trigger = created["triggers"][0]
-    cron_input = fake_client.crons.created[0]["input"]
+    cron_input = fake_client.jobs.created[0].payload
     assert cron_input == {"schedule_id": created["id"], "trigger_id": schedule_trigger["id"]}
 
     def closed_on(repo: str) -> dict[str, Any]:
@@ -333,8 +344,8 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
             triggers=[ScheduleTrigger(cron="0 9 * * *", repo="langchain-ai/open-swe")],
         ),
     )
-    cron_delete = AsyncMock(side_effect=RuntimeError("cron service unavailable"))
-    monkeypatch.setattr(fake_client.crons, "delete", cron_delete)
+    cron_delete = AsyncMock(side_effect=RuntimeError("job queue unavailable"))
+    monkeypatch.setattr(fake_client.jobs, "cancel", cron_delete)
 
     updated = await schedules.update_agent_schedule(
         created["id"],
@@ -357,7 +368,7 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
     assert (await schedules.launch_scheduled_agent_run(created["id"]))["status"] == (
         "trigger_mismatch"
     )
-    cron_delete.assert_awaited_with(created["cronId"])
+    cron_delete.assert_awaited_with(uuid.UUID(created["cronId"]))
     assert (await schedules.trigger_agent_schedule(created["id"]))["status"] == "started"
 
 
@@ -374,7 +385,7 @@ async def test_a_test_run_is_refused_when_repo_access_is_revoked(
         "created_by": "alice",
         "user_email": "alice@example.com",
     }
-    await _seed(fake_client, record)
+    await _seed(record)
 
     async def deny_access(full_name: str) -> str:
         raise HTTPException(403, "repository unavailable to the workspace GitHub App")
@@ -404,7 +415,7 @@ async def test_launch_github_issue_automations_matches_repo_and_sanitizes_prompt
         "created_by": "alice",
         "user_email": "alice@example.com",
     }
-    await _seed(fake_client, record)
+    await _seed(record)
 
     results = await schedules.launch_github_issue_automations(
         {
@@ -551,7 +562,6 @@ async def test_launch_github_issue_automations_isolates_claim_failures(
 ) -> None:
     for schedule_id in (BROKEN, WORKING):
         await _seed(
-            fake_client,
             {
                 "id": schedule_id,
                 "prompt": "Triage the issue",
@@ -582,6 +592,10 @@ async def test_launch_github_issue_automations_isolates_claim_failures(
     assert results == [{"status": "started", "schedule_id": WORKING}]
 
 
+def _job_id(schedule_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"job:{schedule_id}"))
+
+
 def _scheduled_record(**overrides: Any) -> dict[str, Any]:
     record: dict[str, Any] = {
         "id": SCHED_1,
@@ -594,7 +608,7 @@ def _scheduled_record(**overrides: Any) -> dict[str, Any]:
         "base_branch": "main",
         "branch_prefix": "open-swe",
         "enabled": True,
-        "cron_id": "cron_1",
+        "cron_id": _job_id(SCHED_1),
         "created_by": "alice",
         "user_email": "alice@example.com",
         "created_at": "2026-01-01T00:00:00+00:00",
@@ -608,7 +622,7 @@ async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
 ) -> None:  # noqa: ANN001, ARG001
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
-    await _seed(fake_client, _scheduled_record(workspace="core"))
+    await _seed(_scheduled_record(workspace="core"))
 
     assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
 
@@ -879,90 +893,6 @@ async def test_open_swe_events_do_not_trigger_automations(
     assert fake_client.runs.created == []
 
 
-async def test_one_unreadable_store_automation_does_not_block_the_rest(
-    fake_client: _FakeClient, auth: None
-) -> None:
-    broken = _scheduled_record(id=SCHED_GONE, schedule="not a cron")
-    for record in (broken, _scheduled_record()):
-        await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, record["id"], record)
-
-    assert await schedules.import_store_automations() == 1
-    assert await schedules.get_agent_schedule(SCHED_1) is not None
-    # The unreadable one stays in the Store for a fixed release to import.
-    assert (tuple(schedules.SCHEDULES_NAMESPACE), SCHED_GONE) in fake_client.store.items
-
-
-async def test_a_cron_firing_before_the_store_import_keeps_its_cron(
-    fake_client: _FakeClient, auth: None
-) -> None:
-    record = _scheduled_record(cron_id="cron_1")
-    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, record["id"], record)
-    await fake_client.crons.create("scheduler", metadata={"schedule_id": record["id"]})
-
-    tick = await schedules.launch_scheduled_agent_run(record["id"])
-
-    assert tick["status"] == "pending_import"
-    assert fake_client.crons.deleted == []
-    assert fake_client.runs.created == []
-
-
-async def test_the_startup_import_moves_store_automations_into_postgres(
-    fake_client, auth, registry_db
-) -> None:  # noqa: ANN001, ARG001
-    """Ids and crons carry over, workspace-less records land in `default`, and it runs once."""
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
-    records = [
-        _scheduled_record(cron_id="cron_kept"),
-        _scheduled_record(
-            id=SCHED_2,
-            workspace="oss",
-            trigger="github_issue_opened",
-            slack_channel_id="c0123456789",
-            slack_notification_mode="on_action",
-        ),
-        _scheduled_record(id=SCHED_GONE, workspace="gone", cron_id="cron_orphan"),
-    ]
-    for record in records:
-        await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, record["id"], record)
-    await fake_client.store.put_item(
-        schedules.SCHEDULE_RUN_STATE_NAMESPACE,
-        SCHED_1,
-        {
-            "schedule_id": SCHED_1,
-            "last_thread_id": "thread-before",
-            "last_triggered_at": "2026-09-01T09:00:00+00:00",
-        },
-    )
-
-    assert await schedules.import_store_automations() == 2
-    assert await schedules.import_store_automations() == 0
-
-    first = await schedules.get_agent_schedule(SCHED_1)
-    second = await schedules.get_agent_schedule(SCHED_2)
-    assert first is not None and second is not None
-    assert first["workspace"] == "default"
-    assert first["last_thread_id"] == "thread-before"
-    assert first["last_triggered_at"] == "2026-09-01T09:00:00+00:00"
-    assert first["triggers"][0]["cron_id"] == "cron_kept"
-    assert second["workspace"] == "oss"
-    # Automations no longer post to a destination; the prompt asks for the report.
-    assert second["prompt"].endswith(
-        "When a run takes a concrete action, post a short summary of the outcome to <#C0123456789>."
-    )
-    # Schedules no longer name a repository; the prompt says where to work.
-    assert "repo" not in first["triggers"][0]["config"]
-    assert first["prompt"].endswith("Scheduled runs work in `langchain-ai/open-swe`.")
-    assert second["triggers"][0]["config"] == {
-        "kind": "github",
-        "repo": "langchain-ai/open-swe",
-        "events": ["issues.opened"],
-    }
-    # A record whose workspace is gone is dropped along with its cron.
-    assert await schedules.get_agent_schedule(SCHED_GONE) is None
-    assert fake_client.crons.deleted == ["cron_orphan"]
-    assert fake_client.store.items == {}
-
-
 async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(
     fake_client, auth, registry_db
 ) -> None:  # noqa: ANN001, ARG001
@@ -974,7 +904,6 @@ async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspa
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
     await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
     await _seed(
-        fake_client,
         _scheduled_record(workspace="oss", model="anthropic:claude-fable-5-1", effort="high"),
     )
 
@@ -1020,7 +949,7 @@ async def test_system_schedule_can_run_without_user_credentials(
     }
     if creator:
         record["created_by"] = creator
-    await _seed(fake_client, record)
+    await _seed(record)
 
     results = await schedules.launch_github_issue_automations(
         {
@@ -1065,7 +994,7 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
         "admin_thread": True,
         "created_by": "alice",
     }
-    await _seed(fake_client, record)
+    await _seed(record)
     await schedules.launch_scheduled_agent_run(record["id"])
     run_config = fake_client.runs.created[0]["config"]
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
@@ -1149,7 +1078,7 @@ async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_th
         "created_at": "2026-01-01T00:00:00+00:00",
         "updated_at": "2026-01-01T00:00:00+00:00",
     }
-    await _seed(fake_client, record)
+    await _seed(record)
 
     result = await schedules.launch_scheduled_agent_run(SCHED_1)
 
@@ -1175,7 +1104,7 @@ async def test_an_issue_automation_on_a_public_repository_records_a_single_repos
         "created_by": "alice",
         "user_email": "alice@example.com",
     }
-    await _seed(fake_client, record)
+    await _seed(record)
 
     await schedules.launch_github_issue_automations(
         {
@@ -1236,12 +1165,11 @@ async def test_an_automation_cannot_name_a_missing_workspace(
         await schedules.create_agent_schedule("alice", body, email="alice@example.com")
 
     assert refused.value.status_code == 422
-    assert fake_client.store.items == {}
 
 
 async def test_an_automation_can_move_to_another_workspace(fake_client, auth, registry_db) -> None:  # noqa: ANN001, ARG001
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
-    await _seed(fake_client, _scheduled_record(workspace="default"))
+    await _seed(_scheduled_record(workspace="default"))
 
     moved = await schedules.update_agent_schedule(
         SCHED_1, "alice", ScheduleUpdateBody(workspace="core")
@@ -1263,15 +1191,14 @@ async def test_deleting_a_workspace_deletes_its_automations(fake_client, auth, r
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
     for schedule_id, workspace in ((SCHED_1, "core"), (SCHED_2, "default")):
         await _seed(
-            fake_client,
-            _scheduled_record(id=schedule_id, workspace=workspace, cron_id=f"cron_{schedule_id}"),
+            _scheduled_record(id=schedule_id, workspace=workspace, cron_id=_job_id(schedule_id)),
         )
 
     assert await WORKSPACES.remove("core")
 
     remaining = {item["id"] for item in await schedules.list_agent_schedules()}
     assert remaining == {SCHED_2}
-    assert fake_client.crons.deleted == [f"cron_{SCHED_1}"]
+    assert fake_client.jobs.deleted == [_job_id(SCHED_1)]
 
 
 async def test_retrying_a_failed_workspace_delete_finishes_it(
@@ -1279,7 +1206,7 @@ async def test_retrying_a_failed_workspace_delete_finishes_it(
 ) -> None:  # noqa: ANN001, ARG001
     """The automations go first, so a failure leaves a workspace that can be deleted again."""
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
-    await _seed(fake_client, _scheduled_record(workspace="core", cron_id="cron_1"))
+    await _seed(_scheduled_record(workspace="core", cron_id=_job_id(SCHED_1)))
     real_delete = WORKSPACES.delete
     monkeypatch.setattr(WORKSPACES, "delete", AsyncMock(side_effect=RuntimeError("db down")))
 
@@ -1292,4 +1219,48 @@ async def test_retrying_a_failed_workspace_delete_finishes_it(
 
     assert await WORKSPACES.get("core") is None
     assert await schedules.list_agent_schedules() == []
-    assert fake_client.crons.deleted == ["cron_1"]
+    assert fake_client.jobs.deleted == [_job_id(SCHED_1)]
+
+
+async def test_a_scheduler_cron_adopted_again_keeps_the_job_it_moved_to() -> None:
+    cron_id = str(uuid.uuid4())
+    await _seed(_scheduled_record(cron_id=cron_id))
+    async with transaction() as conn:
+        trigger_id = str(
+            await conn.scalar(
+                text("SELECT id FROM automation_trigger WHERE automation_id = :id"),
+                {"id": uuid.UUID(SCHED_1)},
+            )
+        )
+
+    # A cron whose delete failed after it moved is adopted again on the next start.
+    for _ in range(2):
+        assert await schedules.adopt_agent_server_cron(
+            cron_id, SCHED_1, trigger_id, "0 9 * * 1", "alice"
+        )
+
+    [job] = await queue.find({"schedule_id": SCHED_1})
+    async with transaction() as conn:
+        held = await conn.scalar(
+            text("SELECT cron_id FROM automation_trigger WHERE id = :id"),
+            {"id": uuid.UUID(trigger_id)},
+        )
+    assert held == str(job.id)
+
+
+async def test_a_scheduler_cron_from_before_trigger_ids_moves_for_the_trigger_holding_it() -> None:
+    cron_id = str(uuid.uuid4())
+    await _seed(_scheduled_record(cron_id=cron_id))
+
+    assert not await schedules.adopt_agent_server_cron(
+        str(uuid.uuid4()), SCHED_1, None, "0 9 * * 1", "alice"
+    )
+    assert await schedules.adopt_agent_server_cron(cron_id, SCHED_1, None, "0 9 * * 1", "alice")
+
+    [job] = await queue.find({"schedule_id": SCHED_1})
+    async with transaction() as conn:
+        held = await conn.scalar(
+            text("SELECT cron_id FROM automation_trigger WHERE automation_id = :id"),
+            {"id": uuid.UUID(SCHED_1)},
+        )
+    assert held == str(job.id)

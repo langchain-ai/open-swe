@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -15,8 +16,8 @@ import httpx
 import httpx2
 import pytest
 
-from openswe import store as agent_store
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
+from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
 from openswe.tools import access as tool_access
 from openswe.users.records import UserRecords
@@ -51,67 +52,6 @@ def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) 
         raise AttributeError(f"no dashboard thread module defines {name!r}")
     for module in modules:
         monkeypatch.setattr(module, name, value)
-
-
-class _FakeStoreNotFoundError(Exception):
-    status_code = 404
-
-
-class FakeStore:
-    """In-memory stand-in for the LangGraph Store, in the SDK's item shape.
-
-    Backs the real ``openswe.store`` code path, so values round-trip through
-    ``model_dump``/``model_validate`` the way they do in production.
-    """
-
-    def __init__(self) -> None:
-        self.items: dict[tuple[str, ...], dict[str, dict[str, Any]]] = {}
-
-    def seed(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
-        self.items.setdefault(tuple(namespace), {})[key] = dict(value)
-
-    def values(self, namespace: Sequence[str]) -> dict[str, dict[str, Any]]:
-        return self.items.get(tuple(namespace), {})
-
-    async def get_item(self, namespace: Sequence[str], key: str) -> dict[str, Any]:
-        value = self.values(namespace).get(key)
-        if value is None:
-            raise _FakeStoreNotFoundError
-        return {"value": dict(value)}
-
-    async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
-        self.seed(namespace, key, value)
-
-    async def delete_item(self, namespace: Sequence[str], key: str) -> None:
-        self.values(namespace).pop(key, None)
-
-    async def search_items(
-        self,
-        namespace: Sequence[str],
-        *,
-        filter: dict[str, Any] | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        matches = [
-            {"key": key, "value": dict(value)}
-            for key, value in self.values(namespace).items()
-            if all(value.get(k) == expected for k, expected in (filter or {}).items())
-        ]
-        return {"items": matches[offset : offset + limit]}
-
-
-class FakeStoreClient:
-    def __init__(self) -> None:
-        self.store = FakeStore()
-
-
-@pytest.fixture
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
-    """Route every ``openswe.store`` access to an in-memory store for this test."""
-    client = FakeStoreClient()
-    monkeypatch.setattr(agent_store, "store_client", lambda: client)
-    return client.store
 
 
 class FakeUserRecords:
@@ -254,17 +194,17 @@ def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
-    bot = {
-        "team_id": "T123",
-        "bot_id": "B123",
-        "user_id": "U123",
-        "app_id": "A123",
-        "name": "Release bot",
-        "created_by": "alice",
-        "created_at": "2026-09-09",
-    }
-    fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
+async def allowed_bot(registry_db: None) -> AllowedSlackBot:
+    bot = AllowedSlackBot(
+        team_id="T123",
+        bot_id="B123",
+        user_id="U123",
+        app_id="A123",
+        name="Release bot",
+        created_by="alice",
+        created_at=datetime(2026, 9, 9, tzinfo=UTC),
+    )
+    await bot.add(None)
     return bot
 
 
@@ -374,7 +314,7 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
     The dashboard's opt-in list (loaded by :func:`openswe.review.enabled_repos.is_review_repo_enabled`)
-    is empty in the test environment because there is no live LangGraph Store.
+    is empty in the test environment.
 
     Tests targeting the automatic-review gate should override this fixture or set
     ``monkeypatch.setattr(webhook_common, "is_review_repo_enabled", ...)`` to a stricter stub.
@@ -409,3 +349,34 @@ def slack_api(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
         monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "test-slack-token")
         yield api
+
+
+class MemoryEventClaims:
+    """``openswe.event_claims`` without PostgreSQL: claims held in memory, never lapsing."""
+
+    def __init__(self) -> None:
+        self.held: set[tuple[str, str]] = set()
+
+    async def claim(self, scope: str, key: str, *, ttl: timedelta) -> bool:
+        del ttl
+        if (scope, key) in self.held:
+            return False
+        self.held.add((scope, key))
+        return True
+
+    async def release(self, scope: str, key: str) -> None:
+        self.held.discard((scope, key))
+
+    async def is_held(self, scope: str, key: str) -> bool:
+        return (scope, key) in self.held
+
+
+@pytest.fixture
+def memory_event_claims(monkeypatch: pytest.MonkeyPatch) -> MemoryEventClaims:
+    from openswe import event_claims
+
+    claims = MemoryEventClaims()
+    monkeypatch.setattr(event_claims, "claim", claims.claim)
+    monkeypatch.setattr(event_claims, "release", claims.release)
+    monkeypatch.setattr(event_claims, "held", claims.is_held)
+    return claims

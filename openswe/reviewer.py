@@ -66,7 +66,6 @@ from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
     changed_files,
     compute_diff_line_set,
-    fetch_compare_diff,
     fetch_pr_diff,
     fetch_pr_metadata,
     materialize_review_diff,
@@ -92,6 +91,7 @@ from openswe.runtime import (
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.tools import (
     add_finding,
     fetch_review_diff,
@@ -518,7 +518,6 @@ async def _cached_api_standards_skill() -> str | None:
 class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
-    diff_range: NotRequired[tuple[str, str, bool]]
     review_approval_policy: NotRequired[str | None]
 
 
@@ -568,7 +567,7 @@ async def ensure_reviewer_sandbox_for_thread(
 class _ReviewCheckout(NamedTuple):
     work_dir: str
     repo_ready: bool
-    sandbox_backend: SandboxBackendProtocol | None = None
+    sandbox_backend: SandboxBackendProtocol
     skills_prompt: str | None = None
 
 
@@ -635,14 +634,8 @@ async def prepare_reviewer_run(
     thread_id: str,
     config: RunnableConfig,
     runtime: Runtime,
-    *,
-    remote_work_dir: str | None = None,
 ) -> dict[str, Any]:
-    """Ready the sandbox, checkout and diff, and render this run's system prompt.
-
-    With ``remote_work_dir`` the reviewer runs on another deployment that checks
-    the repo out there itself, so no sandbox is created here.
-    """
+    """Ready the sandbox, checkout and diff, and render this run's system prompt."""
     cfg = RunConfig.from_config(config)
     repo_owner = cfg.repo.owner if cfg.repo else ""
     repo_name = cfg.repo.name if cfg.repo else ""
@@ -653,8 +646,6 @@ async def prepare_reviewer_run(
     github_token = await ensure_reviewer_github_token(thread_id, cfg)
 
     async def _check_out() -> _ReviewCheckout:
-        if remote_work_dir is not None:
-            return _ReviewCheckout(remote_work_dir, repo_ready=True)
         async with aphase(thread_id, "prepare.checkout"):
             try:
                 sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
@@ -699,10 +690,7 @@ async def prepare_reviewer_run(
         pr_number is not None and bool(repo_owner) and bool(repo_name) and bool(github_token)
     )
 
-    remote_diff_range: tuple[str, str, bool] | None = None
-
     async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
-        nonlocal remote_diff_range
         if not can_fetch_pr or github_token is None or not isinstance(pr_number, int):
             return "", None
         fetched_diff: str | None = None
@@ -716,34 +704,6 @@ async def prepare_reviewer_run(
             if fetched_diff is None:
                 return "", None
         checkout = await checkout_task
-        if checkout.sandbox_backend is None:
-            diff_text = fetched_diff
-            remote_diff_range = review_diff_range(
-                base_sha=base_sha,
-                head_sha=head_sha,
-                last_reviewed_sha=last_reviewed_sha,
-                re_review=is_re_review,
-            )
-            if diff_text is None:
-                diff_text = await fetch_compare_diff(
-                    owner=repo_owner,
-                    repo=repo_name,
-                    base_ref=last_reviewed_sha,
-                    head_ref=head_sha,
-                    token=github_token,
-                )
-            if diff_text is None:
-                # GitHub has no two-dot diff once the last reviewed commit left the branch.
-                remote_diff_range = review_diff_range(base_sha=base_sha, head_sha=head_sha)
-                diff_text = await fetch_pr_diff(
-                    owner=repo_owner,
-                    repo=repo_name,
-                    pr_number=pr_number,
-                    token=github_token,
-                )
-            if diff_text is None:
-                return "", None
-            return diff_text, compute_diff_line_set(diff_text)
         try:
             diff_base, diff_head, merge_base = review_diff_range(
                 base_sha=base_sha,
@@ -864,8 +824,14 @@ async def prepare_reviewer_run(
 
     async def _fetch_scoped_agents_md() -> dict[str, str]:
         diff_text, _ = await diff_context_task
+        checkout = await checkout_task
+        if not checkout.repo_ready:
+            return {}
         return await fetch_scoped_agents_md(
-            repo_owner, repo_name, base_sha, changed_files(diff_text), token=github_token
+            checkout.sandbox_backend,
+            f"{checkout.work_dir}/{repo_name}",
+            base_sha,
+            changed_files(diff_text),
         )
 
     async def _fetch_approval_policy() -> str | None:
@@ -997,8 +963,6 @@ async def prepare_reviewer_run(
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
     }
-    if remote_diff_range is not None:
-        prepared["diff_range"] = remote_diff_range
     return prepared
 
 
@@ -1089,6 +1053,13 @@ def reviewer_tools() -> list[BaseTool]:
 
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with checkpointed run prep."""
+    return await build_reviewer_agent(config)
+
+
+async def build_reviewer_agent(
+    config: RunnableConfig, *, tool_surface: ToolSurface | None = None
+) -> Pregel:
+    """The reviewer graph; ``tool_surface`` also receives what a remote model loop needs."""
     config = config.copy()
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
@@ -1124,37 +1095,54 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
 
-    return create_deep_agent(
+    middleware = cast(
+        list[AgentMiddleware[Any, Any, Any]],
+        [
+            PrepareReviewerRunMiddleware(
+                thread_id=thread_id,
+                config=config,
+                use_gateway=use_gateway,
+            ),
+            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
+            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+            ToolErrorMiddleware(),
+            refresh_github_proxy_before_model,
+            check_message_queue_before_model,
+            SanitizeFireworksMessagesMiddleware(),
+            SanitizeOpenAIResponsesMiddleware(),
+            SanitizeThinkingBlocksMiddleware(),
+            RepairOrphanedToolCallsMiddleware(),
+            StableToolResultOrderMiddleware(),
+            ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            ModelErrorMiddleware(),
+            ModelCallTimeoutMiddleware(),
+            settle_review_check_on_exit,
+        ],
+    )
+    graph = create_deep_agent(
         model=reviewer_model,
         system_prompt="",
         tools=reviewer_tools(),
         subagents=[_reviewer_subagent(reviewer_subagent_model)],
         backend=backend,
-        middleware=cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                PrepareReviewerRunMiddleware(
-                    thread_id=thread_id,
-                    config=config,
-                    use_gateway=use_gateway,
-                ),
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-                ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
-                refresh_github_proxy_before_model,
-                check_message_queue_before_model,
-                SanitizeFireworksMessagesMiddleware(),
-                SanitizeOpenAIResponsesMiddleware(),
-                SanitizeThinkingBlocksMiddleware(),
-                RepairOrphanedToolCallsMiddleware(),
-                StableToolResultOrderMiddleware(),
-                ModelRetryMiddleware(retry_on=(TimeoutError,)),
-                ModelErrorMiddleware(),
-                ModelCallTimeoutMiddleware(),
-                settle_review_check_on_exit,
-            ],
-        ),
+        middleware=middleware,
     ).with_config(bindable_config(config))
+    if tool_surface is not None:
+        tool_surface.graph = graph
+        tool_surface.middleware = middleware
+        tool_surface.models = SurfaceModels(
+            main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
+            subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),
+            use_gateway=use_gateway,
+        )
+        tool_surface.subagents = [
+            SurfaceSubagent(
+                name="reviewer",
+                description=prompt("reviewer/subagent-description"),
+                system_prompt=REVIEWER_SUBAGENT_SYSTEM_PROMPT,
+            )
+        ]
+    return graph
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.

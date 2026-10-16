@@ -396,7 +396,7 @@ test.describe("my pull requests", () => {
     ).toBe(false);
   });
 
-  test("withholds the merge until a method is chosen on the card", async ({
+  test("defaults to squash while allowing a different method on the card", async ({
     page,
   }) => {
     await setRepoMergeMethods(page, DEMO, ["squash", "rebase"]);
@@ -412,14 +412,14 @@ test.describe("my pull requests", () => {
     const method = card(page, mine).getByLabel(
       `Merge method for PR #${mine.number}`,
     );
-    // With two methods allowed and none used before, the button asks rather than guesses.
-    const choose = card(page, mine).getByRole("button", {
-      name: "Choose how to merge",
-      exact: true,
-    });
+    await expect(
+      card(page, mine).getByRole("button", {
+        name: "Squash and merge",
+        exact: true,
+      }),
+    ).toBeEnabled();
     await expect(method).toBeEnabled();
-    await expect(choose).toBeVisible();
-    await choose.click();
+    await method.click();
     await expect(
       page.getByRole("menuitemradio", { name: /^Merge commit/ }),
     ).toHaveCount(0);

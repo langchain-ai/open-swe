@@ -33,11 +33,10 @@ from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
-from openswe.slack.client import lookup_slack_thread_id
 from openswe.slack.dm import DmOrigin
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
-from openswe.utils.thread_ops import langgraph_client
 
 RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
@@ -225,7 +224,7 @@ class HumanReviewRequest(Base):
         root = self.slack_thread_ts or self.slack_message_ts
         if not self.slack_channel_id or not root:
             return False
-        owner = await lookup_slack_thread_id(langgraph_client(), self.slack_channel_id, root)
+        owner = await lookup_slack_thread_id(self.slack_channel_id, root)
         return owner == thread_id
 
     @property

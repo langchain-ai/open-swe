@@ -236,7 +236,7 @@ def private_thread(monkeypatch, owner: str) -> dict[str, str]:
 
 async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
     async def discover(record, namespace):
-        assert record.url.endswith(f"/v1/managed-tools/gateways/{GATEWAY_ID}/mcp")
+        assert record.url.endswith(f"/v1/managed-tools/kits/{GATEWAY_ID}/mcp")
         assert record.connection_headers()["Authorization"] == "Bearer alice-langsmith-token"
         return [
             Tool(name=name, input_schema={"type": "object"})
@@ -398,7 +398,7 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
         ),
     )
     post = AsyncMock(return_value={"success": True})
-    monkeypatch.setattr(tool, "slack_reply", post)
+    monkeypatch.setattr(tool, "send_slack_reply", post)
 
     result = await tool.connect_managed_tools(["linear"], {"reply_surface": "slack"}, "call-1")
 

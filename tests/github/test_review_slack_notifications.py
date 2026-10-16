@@ -17,7 +17,7 @@ from openswe.webhooks import common
 
 @pytest.fixture
 def review_notice(
-    monkeypatch: pytest.MonkeyPatch, fake_store: object, registry_db: None
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> tuple[MagicMock, AsyncMock]:
     client = MagicMock()
     client.threads.get = AsyncMock(

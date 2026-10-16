@@ -1,6 +1,5 @@
 """FastAPI application composition."""
 
-import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -22,10 +21,14 @@ from openswe.linear.routes import router as linear_webhook_router
 from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.remote_runtime import server as remote_runtime_server
+from openswe.remote_runtime.proxy import MdaThreadProxy
+from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
+from openswe.threads.index import thread_store
 from openswe.threads.plan_api import plan_router
+from openswe.threads.router import ThreadIndexMirror, ThreadRouter
 from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
@@ -38,7 +41,6 @@ logger = logging.getLogger(__name__)
 # cannot survive them landing on different loops.
 pin_single_event_loop()
 
-REMOTE_RUNTIME = remote_runtime_server.build_mount()
 AGENT_MCP = agent_mcp_server.build_mount()
 
 
@@ -48,28 +50,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.analytics.worker import start_worker, stop_worker
     from openswe.bridge import listener as bridge_listener
     from openswe.dashboard.admin import configured_admins
-    from openswe.dashboard.import_agent_instructions import import_store_agent_instructions
-    from openswe.dashboard.import_settings import import_store_settings
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
-    from openswe.database.store_imports import run_store_import
-    from openswe.mcp.import_records import import_store_mcp_connections
-    from openswe.review.assessment_feedback import run_assessment_import
-    from openswe.review.import_records import import_review_records
+    from openswe.jobs.kinds import WORKER as JOB_WORKER
+    from openswe.jobs.kinds import start_jobs
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
-    from openswe.schedules.store import import_store_automations
-    from openswe.skill_store.store import import_store_skills
-    from openswe.thread_feedback import run_feedback_import
-    from openswe.threads.blobs import run_blob_import
-    from openswe.threads.pins import import_store_pins
-    from openswe.threads.plan_store import run_plan_import
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
-    from openswe.users.import_records import import_user_records
-    from openswe.users.import_store import import_user_mappings
     from openswe.utils.model import validate_local_dev_llm_config
 
     pin_single_event_loop()
@@ -79,89 +69,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     database.require_configured()
     await database.migrate()
     try:
-        # People used to be Store records keyed by GitHub login; this moves them
-        # into the users table.
-        await run_store_import("user_mappings", import_user_mappings)
-    except Exception:  # noqa: BLE001
-        # Startup continues: anyone still in the Store cannot vote or be
-        # resolved from Slack until an import succeeds, and nothing else breaks.
-        logger.exception("Importing user mappings from the LangGraph Store failed")
-    try:
-        # Profiles, preferences, instructions, and tokens used to be Store
-        # records keyed by GitHub login; this moves them into user_record, and
-        # concierge opt-ins into users.preferences.
-        await run_store_import("user_records", import_user_records)
-    except Exception:  # noqa: BLE001
-        # Startup continues: people whose records are still in the Store see
-        # default settings and reconnect until an import succeeds.
-        logger.exception("Importing per-person records from the LangGraph Store failed")
-    try:
-        # Automations used to live in the LangGraph Store; this copies them into
-        # PostgreSQL and is a no-op once the Store namespaces are empty.
-        imported_automations = await import_store_automations()
-    except Exception:  # noqa: BLE001
-        # Startup continues: automations still in the Store do not run until an
-        # import succeeds.
-        logger.exception("Importing automations from the LangGraph Store failed")
-    else:
-        logger.info(
-            "Imported automations from the LangGraph Store",
-            extra={"imported_automations": imported_automations},
-        )
-    try:
-        # Skills used to live in the LangGraph Store; this moves them into PostgreSQL.
-        await run_store_import("skills", import_store_skills)
-    except Exception:  # noqa: BLE001
-        # Startup continues: skills still in the Store are missing until an
-        # import succeeds.
-        logger.exception("Importing skills from the LangGraph Store failed")
-    try:
-        # Pinned threads used to live in the LangGraph Store, keyed by login.
-        await run_store_import("thread_pins", import_store_pins)
-    except Exception:  # noqa: BLE001
-        # Startup continues: pins still in the Store are missing from the
-        # sidebar until an import succeeds.
-        logger.exception("Importing thread pins from the LangGraph Store failed")
-    try:
-        # Instance, workspace, and personal MCP connections used to live in the
-        # LangGraph Store.
-        await run_store_import("mcp_connections", import_store_mcp_connections)
-    except Exception:  # noqa: BLE001
-        # Startup continues: runs go without the tools of connections still in
-        # the Store until an import succeeds.
-        logger.exception("Importing MCP connections from the LangGraph Store failed")
-    try:
-        # Review settings, assessment feedback, and baby-sit watches used to be
-        # Store records; this moves them into PostgreSQL.
-        await run_store_import("review_records", import_review_records)
-    except Exception:  # noqa: BLE001
-        # Startup continues: repos still in the Store skip auto-review, keep the
-        # default review style, and their watched pull requests go unwatched
-        # until an import succeeds.
-        logger.exception("Importing review records from the LangGraph Store failed")
-    try:
-        # Instance and workspace settings used to live in the LangGraph Store.
-        await run_store_import("settings", import_store_settings)
-    except Exception:  # noqa: BLE001
-        # Startup continues: runs see the hardcoded defaults for any settings
-        # still in the Store until an import succeeds.
-        logger.exception("Importing settings from the LangGraph Store failed")
-    try:
-        # Per-repository agent instructions used to live in the LangGraph Store.
-        await run_store_import("agent_instructions", import_store_agent_instructions)
-    except Exception:  # noqa: BLE001
-        # Startup continues: runs skip instructions still in the Store until an
-        # import succeeds.
-        logger.exception("Importing agent instructions from the LangGraph Store failed")
-    try:
         # The review-style analyzer is gone; its nightly crons would fail every run.
         await delete_analyzer_crons()
     except Exception:  # noqa: BLE001
         logger.exception("Deleting review-style analyzer crons failed")
-    blob_import = asyncio.create_task(run_blob_import())
-    plan_import = asyncio.create_task(run_plan_import())
-    feedback_import = asyncio.create_task(run_feedback_import())
-    assessment_import = asyncio.create_task(run_assessment_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -189,6 +100,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # stops is hearing about changes made elsewhere.
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
+    JOB_WORKER.start(first=start_jobs)
     try:
         from openswe.server import warm_agent_build
 
@@ -198,15 +110,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Warming the agent build failed", exc_info=True)
     try:
         async with AsyncExitStack() as stack:
-            await stack.enter_async_context(REMOTE_RUNTIME.lifespan())
             if AGENT_MCP is not None:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
     finally:
-        blob_import.cancel()
-        plan_import.cancel()
-        feedback_import.cancel()
-        assessment_import.cancel()
+        await JOB_WORKER.stop()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()
@@ -241,6 +149,12 @@ def create_app() -> FastAPI:
         expose_headers=["X-Request-ID"],
     )
     app.add_middleware(AuditLogMiddleware)
+    # Ahead of the core /threads and /runs routes, which the custom app shadows.
+    store = thread_store()
+    app.add_middleware(ThreadRouter if store == "postgres" else MdaThreadProxy)
+    if store == "dual":
+        # Added last, so outermost: it sees each change once the proxy has answered it.
+        app.add_middleware(ThreadIndexMirror)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)
@@ -255,12 +169,10 @@ def create_app() -> FastAPI:
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
-    # Routed at the exact path so no redirect sits between a remote runtime and its tools.
+    app.include_router(reviewer_eval_report_router)
+    # Routed at the exact path so no redirect sits between a remote runtime and its hooks.
     app.router.routes.append(
-        Route(remote_runtime_server.PATH, REMOTE_RUNTIME.app, methods=["GET", "POST", "DELETE"])
-    )
-    app.router.routes.append(
-        Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
+        Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
     )
     if AGENT_MCP is not None:
         app.router.routes.extend(AGENT_MCP.root_routes)

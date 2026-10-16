@@ -49,6 +49,19 @@ async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
         return result.first() is not None
 
 
+async def held(scope: str, key: str) -> bool:
+    """Whether someone holds the claim on ``(scope, key)``, for handlers that claim once done."""
+    async with transaction() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT 1 FROM event_claim WHERE scope = :scope AND key = :key "
+                "AND expires_at > clock_timestamp()"
+            ),
+            {"scope": scope, "key": key},
+        )
+        return result.first() is not None
+
+
 async def release(scope: str, key: str) -> None:
     """Give a claim back, so the event's next delivery is handled."""
     async with transaction() as conn:

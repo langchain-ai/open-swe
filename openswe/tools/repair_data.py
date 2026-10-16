@@ -7,7 +7,6 @@ from sqlalchemy import MetaData, Table, and_, delete, insert, update
 
 from openswe.config import ENV
 from openswe.database import postgres
-from openswe.store import delete_value, put_value
 from openswe.tools.access import Policy, access
 from openswe.tools.admin_gate import configurable
 from openswe.tools.mcp_exposure import expose_mcp
@@ -25,29 +24,6 @@ def _require_confirmation(confirm: bool) -> None:
         raise ValueError("Data repair tools are only enabled in preview and staging.")
     if not confirm:
         raise ValueError("Review the exact repair with the requester, then pass confirm=true.")
-
-
-@expose_mcp(access="admin")
-@access(Policy(trusted="admin_surface", actor="admin"))
-async def write_store_item(
-    namespace: list[str], key: str, value: JsonObject | None, confirm: bool = False
-) -> dict[str, object]:
-    """Replace one Store item, or delete it with value=null, after explicit confirmation."""
-    _require_confirmation(confirm)
-    if not namespace or any(not part for part in namespace) or not key:
-        raise ValueError("Namespace components and key cannot be empty.")
-    logger.warning(
-        "Admin Store repair requested",
-        extra={
-            "github_login": configurable().github_login,
-            "operation": "delete" if value is None else "put",
-        },
-    )
-    if value is None:
-        await delete_value(namespace, key)
-    else:
-        await put_value(namespace, key, value)
-    return {"ok": True}
 
 
 @expose_mcp(access="admin")

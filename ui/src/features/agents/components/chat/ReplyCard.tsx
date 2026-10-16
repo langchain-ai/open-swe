@@ -35,10 +35,19 @@ function SlackIcon() {
 type Delivery = "pending" | "failed" | "delivered"
 
 // Reply tools report some failures as a `{"success": false}` result rather than raising.
+// A result that carries images arrives as content blocks, with that object as the first text.
 function reportsFailure(output: string | undefined): boolean {
   if (!output) return false
   try {
     const parsed: unknown = JSON.parse(output)
+    if (Array.isArray(parsed)) {
+      const first: unknown = parsed[0]
+      const text =
+        !!first && typeof first === "object"
+          ? (first as { text?: unknown }).text
+          : undefined
+      return typeof text === "string" && reportsFailure(text)
+    }
     return (
       !!parsed &&
       typeof parsed === "object" &&

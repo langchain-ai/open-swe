@@ -13,7 +13,6 @@ from openswe.slack import client as slack_utils
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
 from openswe.users import User, UserPreferences
 from openswe.utils import url_safety
-from tests.conftest import FakeStore
 from tests.support.slack_api import SlackAPI
 
 
@@ -228,7 +227,6 @@ async def test_review_link_flag_changes_displayed_links_not_code_or_button_value
 
 @pytest.mark.usefixtures("registry_db")
 async def test_review_links_are_opt_in_per_user_even_in_the_same_channel(
-    fake_store: FakeStore,
     slack_api: SlackAPI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -3,7 +3,6 @@
 import base64
 import binascii
 import json
-import logging
 import re
 from typing import Any
 from uuid import UUID
@@ -16,15 +15,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import Base
-from openswe.database.store_imports import StoreImport
-from openswe.store import delete_value, now_iso, search_all_entries
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
+from openswe.utils.time import now_iso
 
-logger = logging.getLogger(__name__)
-
-LEGACY_SKILLS_NAMESPACE = "user_skills"
-LEGACY_ORGANIZATION_SKILLS_NAMESPACE = "organization_skills"
 MAX_SKILL_NAME_CHARS = 64
 MAX_SKILL_DESCRIPTION_CHARS = 1024
 MAX_SKILL_INSTRUCTIONS_CHARS = 20_000
@@ -272,32 +266,3 @@ async def update_organization_skill(name: str, body: SkillUpdate) -> dict[str, A
 
 async def delete_organization_skill(name: str) -> None:
     await _delete_skill(None, name)
-
-
-async def import_store_skills() -> StoreImport:
-    """Move skills still in the LangGraph Store into PostgreSQL.
-
-    A skill already in PostgreSQL wins, and one whose owner has no ``users`` row
-    stays in the Store for the next pass.
-    """
-    result = StoreImport()
-    for legacy, depth in ((LEGACY_ORGANIZATION_SKILLS_NAMESPACE, 1), (LEGACY_SKILLS_NAMESPACE, 2)):
-        for entry in await search_all_entries([legacy]):
-            namespace = entry.namespace or [legacy]
-            if len(namespace) == depth:
-                result += await _import_skill(namespace, entry.value)
-    return result
-
-
-async def _import_skill(namespace: list[str], value: JsonObject) -> StoreImport:
-    name = str(value.get("name") or "")
-    user = await User.for_login("github", namespace[1]) if len(namespace) == 2 else None
-    if len(namespace) == 2 and user is None:
-        logger.warning("Stored skill waits for its users row", extra={"skill": name})
-        return StoreImport(waiting=1)
-    owner = None if user is None else user.id
-    if not await _get_skill(owner, name):
-        async with postgres.session() as session:
-            session.add(Skill(user_id=owner, name=name, value=value))
-    await delete_value(namespace, skill_path(name))
-    return StoreImport(moved=1)
