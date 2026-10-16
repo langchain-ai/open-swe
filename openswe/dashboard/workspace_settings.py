@@ -87,9 +87,6 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
-    # Threads no person starts (API keys, workflows, system reviews) run on Managed
-    # Deep Agents when deployed; a person's threads follow their own run_on_mda.
-    run_on_mda: bool | None = None
     # The LangSmith Managed Tools gateway private threads load with the owner's own
     # LangSmith connection; unset means none. Only the instance record's value is read.
     managed_tools_gateway_id: str | None = None
@@ -342,7 +339,6 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
-        "run_on_mda": False,
         "managed_tools_gateway_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,

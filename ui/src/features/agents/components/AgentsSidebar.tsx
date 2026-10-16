@@ -357,7 +357,11 @@ export function AgentsSidebar({
   const threadItems = recentThreads.map(cloudSidebarThread)
   const allItems = [...pinnedItems, ...threadItems]
   const filteredPinnedItems = sortSidebarThreads(
-    filterThreads(pinnedItems, prefs.filters, activeThreadId),
+    filterThreads(
+      pinnedItems,
+      { ...prefs.filters, includeResolved: true },
+      activeThreadId
+    ),
     prefs.sortPinned
   )
   const recents = sortSidebarThreads(

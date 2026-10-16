@@ -943,7 +943,7 @@ class ReviewPicks:
         current = await HumanReviewRequest.get(request.id) or request
         if current.state == "open":
             await ReviewCard(current).refresh()
-        label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+        label = f"<{pr.url}|{pr.label}>"
         for reviewer in released:
             logger.info(
                 "Released a reviewer Open SWE picked",

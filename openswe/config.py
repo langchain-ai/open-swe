@@ -205,8 +205,8 @@ ENV.var(
 )
 ENV.var(
     "MDA_RUNTIME_URL",
-    "Managed Deep Agents deployment (mda/) that runs the agent and reviewer graphs "
-    "for people who turn on run_on_mda; unset keeps every run on LANGGRAPH_URL.",
+    "Managed Deep Agents deployment (mda/) that runs the agent and reviewer graphs; "
+    "required, the backend refuses to start without it.",
 )
 ENV.var(
     "MDA_RUNTIME_API_KEY",
@@ -216,7 +216,7 @@ ENV.var(
 ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
-    "comma-separated, the first signs and every one verifies.",
+    "comma-separated, the first signs and every one verifies. Required.",
     secret=True,
 )
 ENV.var(

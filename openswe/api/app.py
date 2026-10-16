@@ -21,12 +21,12 @@ from openswe.linear.routes import router as linear_webhook_router
 from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.remote_runtime import server as remote_runtime_server
-from openswe.remote_runtime.proxy import MdaThreadProxy
 from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
+from openswe.threads.router import ThreadRouter
 from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
@@ -51,6 +51,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
+    from openswe.jobs.kinds import WORKER as JOB_WORKER
+    from openswe.jobs.kinds import start_jobs
+    from openswe.remote_runtime.client import validate_mda_startup_config
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.transcript import listener as transcript_listener
@@ -62,6 +65,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    validate_mda_startup_config()
     database.require_configured()
     await database.migrate()
     try:
@@ -96,6 +100,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # stops is hearing about changes made elsewhere.
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
+    JOB_WORKER.start(first=start_jobs)
     try:
         from openswe.server import warm_agent_build
 
@@ -109,6 +114,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
     finally:
+        await JOB_WORKER.stop()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()
@@ -144,7 +150,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(AuditLogMiddleware)
     # Ahead of the core /threads and /runs routes, which the custom app shadows.
-    app.add_middleware(MdaThreadProxy)
+    app.add_middleware(ThreadRouter)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)

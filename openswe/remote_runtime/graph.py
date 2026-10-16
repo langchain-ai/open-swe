@@ -397,6 +397,9 @@ class RunSession:
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
         """The model the graph's model selection would call next."""
+        requested = state.get("requested_model")
+        if isinstance(requested, str) and requested:
+            return self._explicit_model(requested, state.get("requested_effort"))
         route = state.get("model_route")
         if route in _ROUTES and route is not None:
             selected_route = normalize_route(cast(PersistedRoute, route))
@@ -405,18 +408,20 @@ class RunSession:
                 return routed
         selected = state.get("selected_model_id")
         if isinstance(selected, str) and selected and selected != self.models.main.model_id:
-            effort = state.get("selected_effort")
-            return ModelChoice(
-                selected,
-                dict(
-                    provider_model_kwargs(
-                        selected,
-                        effort if isinstance(effort, str) else None,
-                        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-                    )
-                ),
-            )
+            return self._explicit_model(selected, state.get("selected_effort"))
         return self.models.main
+
+    def _explicit_model(self, model_id: str, effort: object) -> ModelChoice:
+        return ModelChoice(
+            model_id,
+            dict(
+                provider_model_kwargs(
+                    model_id,
+                    effort if isinstance(effort, str) else None,
+                    max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                )
+            ),
+        )
 
     async def observe(
         self, state: Mapping[str, object], response: list[BaseMessage], runtime: Runtime
