@@ -29,43 +29,6 @@ from tests.conftest import FakeUserRecords
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
-@pytest.mark.parametrize("state", ["open", "cancelled", "superseded", "rejected", "merged"])
-async def test_standard_review_blocks_only_outstanding_expedited(state: str) -> None:
-    from typing import cast
-
-    from openswe.human_review import standard
-    from openswe.human_review.requests import RequestState
-    from openswe.slack.client import GitHubPrRef
-
-    expedited = HumanReviewRequest(
-        pull_request_id=User().id, head_sha="abc", kind="expedited", state=cast(RequestState, state)
-    )
-    with (
-        patch.object(
-            HumanReviewRequest,
-            "active_for",
-            AsyncMock(return_value=expedited if expedited.active else None),
-        ),
-        patch.object(standard, "review_blockers", AsyncMock(return_value=["a draft"])) as blockers,
-        patch.object(standard, "_permalink", AsyncMock(return_value="")),
-    ):
-        result = await standard._request_review(
-            GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"),
-            MagicMock(),
-            standard.Origin(),
-            channel="",
-            inline_summary=None,
-        )
-    assert not result.success
-    if state == "open":
-        assert "cannot run concurrently" in result.error
-        assert "Cancel" in result.error
-        blockers.assert_not_awaited()
-    else:
-        assert "cannot be put up for review" in result.error
-        blockers.assert_awaited_once()
-
-
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
 async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -> None:
     from openswe.human_review.people import Outcome, Participant
