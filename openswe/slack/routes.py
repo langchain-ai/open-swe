@@ -1211,7 +1211,7 @@ async def slack_interactivity(
 
 async def _update_admin_approval_message(interaction: SlackInteraction, approved: bool) -> None:
     message = "Admin action approved; retry queued." if approved else "Admin action rejected."
-    response_url = (interaction.model_extra or {}).get("response_url")
+    response_url = interaction.response_url
     try:
         updated = (
             isinstance(response_url, str)

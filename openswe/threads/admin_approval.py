@@ -10,16 +10,17 @@ from uuid import uuid4
 
 import langgraph_sdk
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, text
+from uuid_utils import uuid7
 
 from openswe.database.postgres import transaction
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import post_slack_ephemeral_message
 from openswe.source_context import SlackThreadRef, SourceContext
-from openswe.store import TypedStore
 from openswe.tools.admin_gate import participant_is_admin
 from openswe.users import User
+from openswe.users.records import UnknownUser, user_id_for_login
 from openswe.utils.json_types import thread_metadata
 
 
@@ -33,7 +34,54 @@ class Approval(BaseModel):
     status: Literal["pending", "approved", "rejected", "consumed"] = "pending"
 
 
-APPROVALS = TypedStore(["admin_write_approvals"], Approval)
+class AdminApprovals:
+    async def get(self, thread_id: str) -> Approval | None:
+        async with transaction() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT a.approval, i.login AS owner
+                    FROM admin_write_approval a
+                    JOIN LATERAL (
+                        SELECT login FROM user_identity
+                        WHERE user_id = a.owner_id AND provider = 'github'
+                        ORDER BY last_seen_at DESC LIMIT 1
+                    ) i ON true
+                    WHERE a.thread_id = :thread_id
+                """),
+                {"thread_id": thread_id},
+            )
+            row = result.mappings().one_or_none()
+            if row is None:
+                return None
+            payload = row["approval"]
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            return Approval.model_validate({**payload, "owner": row["owner"].lower()})
+
+    async def put(self, thread_id: str, record: Approval) -> None:
+        async with transaction() as conn:
+            owner_id = await conn.scalar(select(user_id_for_login(record.owner)))
+            if owner_id is None:
+                raise UnknownUser(record.owner)
+            await conn.execute(
+                text("""
+                    INSERT INTO admin_write_approval
+                        (id, thread_id, owner_id, approval, created_by, updated_by)
+                    VALUES (:id, :thread_id, :owner_id, CAST(:approval AS jsonb), :owner_id, :owner_id)
+                    ON CONFLICT (thread_id) DO UPDATE SET
+                        owner_id = EXCLUDED.owner_id, approval = EXCLUDED.approval,
+                        updated_at = clock_timestamp(), updated_by = EXCLUDED.updated_by
+                """),
+                {
+                    "id": uuid7(),
+                    "thread_id": thread_id,
+                    "owner_id": owner_id,
+                    "approval": record.model_dump_json(exclude={"owner"}),
+                },
+            )
+
+
+APPROVALS = AdminApprovals()
 
 
 @asynccontextmanager

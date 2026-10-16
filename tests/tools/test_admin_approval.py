@@ -12,7 +12,6 @@ from openswe.source_context import SlackThreadRef
 from openswe.threads import admin_approval as approvals
 from openswe.tools import access as tool_access
 from openswe.tools.access import Policy, access, ack, resolve_access
-from tests.conftest import FakeStore
 
 _THREAD = "owner-thread"
 _SLACK = SlackThreadRef.model_validate(
@@ -33,11 +32,23 @@ _READ = Policy(trusted="admin_thread", actor="admin")
 
 
 @pytest.fixture
-def owner_run(monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore) -> RunConfig:
+def owner_run(monkeypatch: pytest.MonkeyPatch) -> RunConfig:
+    records: dict[str, approvals.Approval] = {}
+
+    async def get(thread_id: str) -> approvals.Approval | None:
+        record = records.get(thread_id)
+        return record.model_copy(deep=True) if record else None
+
+    async def put(thread_id: str, record: approvals.Approval) -> None:
+        records[thread_id] = record.model_copy(deep=True)
+
+    monkeypatch.setattr(approvals.APPROVALS, "get", get)
+    monkeypatch.setattr(approvals.APPROVALS, "put", put)
     metadata: dict[str, object] = {
         "owner_type": "user",
         "owner_login": "alice",
         "visibility": "public",
+        "admin_thread": True,
         "participant_logins": ["alice", "bob", "carol"],
         "source_context": {"slack_thread": _SLACK.model_dump(exclude={"channel_context"})},
     }
