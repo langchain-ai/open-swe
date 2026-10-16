@@ -629,6 +629,9 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         return await prepare_reviewer_run(self._thread_id, self._config, runtime)
 
+    async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
+        await ensure_reviewer_github_token(self._thread_id, RunConfig.from_config(self._config))
+
 
 async def prepare_reviewer_run(
     thread_id: str,

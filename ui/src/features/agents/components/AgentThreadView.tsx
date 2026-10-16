@@ -86,6 +86,7 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useConnectionStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import { runTranscriptCommitted } from "@/lib/perf/streaming"
+import { ReplyOptionContext } from "@/features/agents/components/chat/ReplyCard"
 import {
   threadHydrated,
   threadHydrationFailed,
@@ -365,7 +366,7 @@ export function AgentThreadView({
     [reviewChat, submitMessage]
   )
 
-  const commentOnDiff = useCallback(
+  const submitText = useCallback(
     (content: string) => submitMessage(content, []),
     [submitMessage]
   )
@@ -870,57 +871,61 @@ export function AgentThreadView({
               />
             </div>
           ) : (
-            <PullRequestPreviewProvider
-              pullRequests={thread.pullRequests ?? []}
-              health={pullRequestHealth}
-              healthUnavailable={pullRequestStatus.isError}
+            <ReplyOptionContext.Provider
+              value={canPost ? submitText : undefined}
             >
-              <Profiler
-                id="transcript"
-                onRender={(_id, _phase, actualDuration) =>
-                  runTranscriptCommitted(thread.id, actualDuration)
-                }
+              <PullRequestPreviewProvider
+                pullRequests={thread.pullRequests ?? []}
+                health={pullRequestHealth}
+                healthUnavailable={pullRequestStatus.isError}
               >
-                <Messages
-                  messages={visibleMessages}
-                  threadId={thread.id}
-                  scrollKey={thread.id}
-                  showPlanArtifact={Boolean(thread.planStatus)}
-                  runCosts={thread.runCosts}
-                  emptyState={
-                    <div className="flex min-h-60 items-center justify-center">
-                      {hydrationFailed ? (
-                        <Banner intent="error" className="max-w-3xl">
-                          This thread&apos;s messages could not be loaded.
-                          Reload to try again.
-                        </Banner>
-                      ) : (
-                        (reviewChat?.emptyState ?? (
-                          <p className="text-xs text-tertiary">
-                            This thread has no messages yet.
-                          </p>
-                        ))
-                      )}
-                    </div>
+                <Profiler
+                  id="transcript"
+                  onRender={(_id, _phase, actualDuration) =>
+                    runTranscriptCommitted(thread.id, actualDuration)
                   }
-                  onOpenFile={handleOpenFile}
-                  loadEarlier={loadEarlier}
-                  queuedMessages={queuedRows}
-                  onRemoveQueuedMessage={
-                    canPost ? removeQueuedMessage : undefined
-                  }
-                  isStreaming={isStreaming}
-                  streamIsLoading={source.isRunning}
-                  scrollControlRef={scrollControlRef}
-                  isThinking={isThinking}
-                  isOffloading={source.isOffloading}
-                  reconnectLabel={reconnect.label}
-                  settingUpSandbox={settingUpSandbox}
-                  pollWorkflowApprovalsWhileActive={isStreaming}
-                  contentWidthClass="max-w-3xl"
-                />
-              </Profiler>
-            </PullRequestPreviewProvider>
+                >
+                  <Messages
+                    messages={visibleMessages}
+                    threadId={thread.id}
+                    scrollKey={thread.id}
+                    showPlanArtifact={Boolean(thread.planStatus)}
+                    runCosts={thread.runCosts}
+                    emptyState={
+                      <div className="flex min-h-60 items-center justify-center">
+                        {hydrationFailed ? (
+                          <Banner intent="error" className="max-w-3xl">
+                            This thread&apos;s messages could not be loaded.
+                            Reload to try again.
+                          </Banner>
+                        ) : (
+                          (reviewChat?.emptyState ?? (
+                            <p className="text-xs text-tertiary">
+                              This thread has no messages yet.
+                            </p>
+                          ))
+                        )}
+                      </div>
+                    }
+                    onOpenFile={handleOpenFile}
+                    loadEarlier={loadEarlier}
+                    queuedMessages={queuedRows}
+                    onRemoveQueuedMessage={
+                      canPost ? removeQueuedMessage : undefined
+                    }
+                    isStreaming={isStreaming}
+                    streamIsLoading={source.isRunning}
+                    scrollControlRef={scrollControlRef}
+                    isThinking={isThinking}
+                    isOffloading={source.isOffloading}
+                    reconnectLabel={reconnect.label}
+                    settingUpSandbox={settingUpSandbox}
+                    pollWorkflowApprovalsWhileActive={isStreaming}
+                    contentWidthClass="max-w-3xl"
+                  />
+                </Profiler>
+              </PullRequestPreviewProvider>
+            </ReplyOptionContext.Provider>
           )}
           {!isHydrating && (
             <AgentComposerDock>
@@ -1010,7 +1015,7 @@ export function AgentThreadView({
       {!reviewChat && (
         <AgentGitPanel
           thread={thread}
-          onComment={canPost ? commentOnDiff : undefined}
+          onComment={canPost ? submitText : undefined}
           revealFilePath={revealFilePath}
           revealChangesKey={revealChangesKey}
           collapsed={panelCollapsed}
