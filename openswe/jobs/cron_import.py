@@ -67,11 +67,13 @@ class _AgentServerCron(BaseModel):
             return True
         if kind in {REFRESH_TASK, LEGACY_REFRESH_TASK} and (slug := self.workspace_slug):
             return await adopt_refresh(slug, self.cron_id)
-        if (automation_id := self.field("schedule_id")) and (
-            trigger_id := self.field("trigger_id")
-        ):
+        if automation_id := self.field("schedule_id"):
             return await adopt_trigger(
-                self.cron_id, automation_id, trigger_id, self.schedule, self.field("created_by")
+                self.cron_id,
+                automation_id,
+                self.field("trigger_id"),
+                self.schedule,
+                self.field("created_by"),
             )
         raise LookupError(f"No job replaces scheduler crons of kind {kind}")
 

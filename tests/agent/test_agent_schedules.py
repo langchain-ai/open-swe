@@ -1246,3 +1246,21 @@ async def test_a_scheduler_cron_adopted_again_keeps_the_job_it_moved_to() -> Non
             {"id": uuid.UUID(trigger_id)},
         )
     assert held == str(job.id)
+
+
+async def test_a_scheduler_cron_from_before_trigger_ids_moves_for_the_trigger_holding_it() -> None:
+    cron_id = str(uuid.uuid4())
+    await _seed(_scheduled_record(cron_id=cron_id))
+
+    assert not await schedules.adopt_agent_server_cron(
+        str(uuid.uuid4()), SCHED_1, None, "0 9 * * 1", "alice"
+    )
+    assert await schedules.adopt_agent_server_cron(cron_id, SCHED_1, None, "0 9 * * 1", "alice")
+
+    [job] = await queue.find({"schedule_id": SCHED_1})
+    async with transaction() as conn:
+        held = await conn.scalar(
+            text("SELECT cron_id FROM automation_trigger WHERE automation_id = :id"),
+            {"id": uuid.UUID(SCHED_1)},
+        )
+    assert held == str(job.id)

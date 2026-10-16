@@ -537,9 +537,28 @@ async def _delete_orphan_crons(automation_id: str, keep: set[str]) -> None:
 
 
 async def adopt_agent_server_cron(
-    cron_id: str, automation_id: str, trigger_id: str, schedule: str, created_by: str | None
+    cron_id: str,
+    automation_id: str,
+    trigger_id: str | None,
+    schedule: str,
+    created_by: str | None,
 ) -> bool:
-    """Move the trigger an Agent Server cron fired for onto a job; ``False`` for an orphan."""
+    """Move the trigger an Agent Server cron fired for onto a job; ``False`` for an orphan.
+
+    A cron from before trigger ids names none; the trigger holding it is the one.
+    """
+    if trigger_id is None:
+        async with transaction() as conn:
+            held_by = await conn.scalar(
+                text(
+                    "SELECT id FROM automation_trigger "
+                    "WHERE automation_id = CAST(:automation_id AS uuid) AND cron_id = :cron_id"
+                ),
+                {"automation_id": automation_id, "cron_id": cron_id},
+            )
+        if held_by is None:
+            return False
+        trigger_id = str(held_by)
     job_id = await _create_cron(automation_id, uuid.UUID(trigger_id), schedule, created_by, by=None)
     async with transaction() as conn:
         held = await conn.scalar(
