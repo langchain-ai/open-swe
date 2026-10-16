@@ -8074,28 +8074,6 @@
             ],
             "title": "Default Agent Subagent Reasoning Effort"
           },
-          "default_chat_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Chat Model"
-          },
-          "default_chat_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Chat Reasoning Effort"
-          },
           "default_repo": {
             "anyOf": [
               {
