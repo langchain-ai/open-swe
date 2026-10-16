@@ -51,6 +51,7 @@ class ParsedGitPush:
     local_ref: str
     remote_ref: str
     set_upstream: bool = False
+    force_options: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -157,12 +158,8 @@ def _command_words(command: str) -> list[str]:
 
 
 def _chained_push_dirs(command: str) -> list[str | None]:
-    """The repositories ``command`` pushes from where the push is not the whole command.
-
-    A push is located by ``git -C dir push`` or the ``cd dir`` before it; ``None``
-    is the shell's own working directory.
-    """
-    if _parse_git_push(command) is not None:
+    """Repositories pushed from by a command containing other shell operations."""
+    if _standalone_push_args(command) is not None:
         return []
     tokens = _command_words(command)
     dirs: list[str | None] = []
@@ -227,7 +224,31 @@ def _chained_push_message(request: ToolCallRequest) -> ToolMessage:
     )
 
 
+def _unsupported_push_message(request: ToolCallRequest) -> ToolMessage:
+    content = {
+        "status": "error",
+        "error_type": "WorkflowPushUnsupportedFlags",
+        "error": (
+            "Open SWE cannot inspect this standalone git push. Nothing ran. Use "
+            "`git [-C <repo>] push [options] origin <branch-or-refspec>` with optional "
+            "-u/--set-upstream, --force-with-lease[=<ref>[:<sha>]], --force-if-includes, "
+            "-f, or --force before origin, targeting the current branch."
+        ),
+    }
+    return ToolMessage(
+        content=json.dumps(content), tool_call_id=_tool_call_id(request) or "", status="error"
+    )
+
+
 def _parse_git_push(command: str) -> ParsedGitPush | None:
+    args = _standalone_push_args(command)
+    if args is None:
+        return None
+    tokens, repo_dir = args
+    return _parse_push_args(tokens, repo_dir=repo_dir)
+
+
+def _standalone_push_args(command: str) -> tuple[list[str], str | None] | None:
     stripped = command.strip()
     if _UNSAFE_RAW_COMMAND.search(stripped) or "&" in stripped.replace("&&", ""):
         return None
@@ -241,14 +262,16 @@ def _parse_git_push(command: str) -> ParsedGitPush | None:
     if len(tokens) >= 4 and tokens[0] == "cd" and tokens[2] == "&&":
         if any(token in _SHELL_OPERATORS or token == "&&" for token in tokens[3:]):
             return None
-        return _parse_git_tokens(tokens[3:], repo_dir=tokens[1])
+        return _git_push_args(tokens[3:], repo_dir=tokens[1])
 
     if any(token in _SHELL_OPERATORS or token == "&&" for token in tokens):
         return None
-    return _parse_git_tokens(tokens, repo_dir=None)
+    return _git_push_args(tokens, repo_dir=None)
 
 
-def _parse_git_tokens(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPush | None:
+def _git_push_args(
+    tokens: list[str], *, repo_dir: str | None
+) -> tuple[list[str], str | None] | None:
     if not tokens or tokens[0] != "git":
         return None
     i = 1
@@ -260,13 +283,22 @@ def _parse_git_tokens(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPu
         return None
     if i >= len(tokens) or tokens[i] != "push":
         return None
-    return _parse_push_args(tokens[i + 1 :], repo_dir=repo_dir)
+    return tokens[i + 1 :], repo_dir
 
 
 def _parse_push_args(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPush | None:
     set_upstream = False
-    while tokens and tokens[0] in {"-u", "--set-upstream"}:
-        set_upstream = True
+    force_options: list[str] = []
+    while tokens and tokens[0].startswith("-"):
+        option = tokens[0]
+        if option in {"-u", "--set-upstream"}:
+            set_upstream = True
+        elif option in {"--force-with-lease", "--force-if-includes", "-f", "--force"}:
+            force_options.append(option)
+        elif option.startswith("--force-with-lease="):
+            force_options.append(option)
+        else:
+            return None
         tokens = tokens[1:]
     if len(tokens) != 2 or tokens[0] != "origin":
         return None
@@ -280,6 +312,7 @@ def _parse_push_args(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPus
         local_ref=local_ref,
         remote_ref=remote_ref,
         set_upstream=set_upstream,
+        force_options=tuple(force_options),
     )
 
 
@@ -486,9 +519,10 @@ async def _workflow_change_for_push(
     fixed_args = ["push"]
     if parsed.set_upstream:
         fixed_args.append("--set-upstream")
+    fixed_args.extend(parsed.force_options)
     fixed_args.extend([parsed.remote, fixed_refspec])
     fixed_command = _git_command(root, " ".join(shlex.quote(arg) for arg in fixed_args))
-    payload = {
+    payload: dict[str, object] = {
         "repo": repo,
         "branch": branch_name,
         "base_sha": base_sha,
@@ -500,6 +534,8 @@ async def _workflow_change_for_push(
         "remote_ref": parsed.remote_ref,
         "fixed_refspec": fixed_refspec,
     }
+    if parsed.force_options:
+        payload["force_options"] = parsed.force_options
     return WorkflowPushChange(
         fingerprint=_fingerprint(payload),
         repo=repo,
@@ -698,6 +734,13 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         change = await self._change_for_request(request)
         if change is not None:
             return await self._handle_change_async(request, handler, change)
+        if _tool_name(request) in {"execute", "background_execute"}:
+            command = _tool_args(request).get("command")
+            args = _standalone_push_args(command) if isinstance(command, str) else None
+            if args is not None and _parse_push_args(args[0], repo_dir=args[1]) is None:
+                backend = _backend(_thread_id(request))
+                if backend is not None and await _may_push_workflow_changes(backend, args[1]):
+                    return _unsupported_push_message(request)
         if await self._chained_workflow_push(request):
             return _chained_push_message(request)
         return await handler(request)
