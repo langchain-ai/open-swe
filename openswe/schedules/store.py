@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
-from langgraph_sdk.schema import Config
+from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -40,6 +40,7 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import InputMessageContext, build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
@@ -56,7 +57,7 @@ from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 logger = logging.getLogger(__name__)
 
 _AGENT_ASSISTANT_ID = "agent"
-_SCHEDULER_ASSISTANT_ID = "scheduler"
+AGENT_SCHEDULE_JOB_KIND = "agent_schedule"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 GitHubEvent = Literal[
     "issues.opened", "pull_request.opened", "pull_request.closed", "pull_request.merged"
@@ -469,74 +470,90 @@ async def _ensure_dashboard_github_token(login: str) -> None:
         raise HTTPException(401, "github token unavailable, re-login required")
 
 
-def _build_cron_config(automation_id: str) -> Config:
-    return {"configurable": {"schedule_id": automation_id}}
-
-
 async def _create_cron(
-    automation_id: str, trigger_id: uuid.UUID, cron: str, created_by: str | None
+    automation_id: str,
+    trigger_id: uuid.UUID,
+    cron: str,
+    created_by: str | None,
+    *,
+    by: uuid.UUID | None,
 ) -> str:
-    created = await langgraph_client().crons.create(
-        _SCHEDULER_ASSISTANT_ID,
-        schedule=cron,
-        input={"schedule_id": automation_id, "trigger_id": str(trigger_id)},
-        config=_build_cron_config(automation_id),
+    job = await queue.schedule(
+        AGENT_SCHEDULE_JOB_KIND,
+        {"schedule_id": automation_id, "trigger_id": str(trigger_id)},
+        cron=cron,
+        key=f"{AGENT_SCHEDULE_JOB_KIND}:{trigger_id}",
         metadata={
-            "kind": "agent_schedule",
+            "kind": AGENT_SCHEDULE_JOB_KIND,
             "schedule_id": automation_id,
             "created_by": created_by,
-            "owner_type": "system",
-            "visibility": "public",
             **agent_version_metadata(),
         },
+        by=by,
     )
-    cron_id = (
-        created.get("cron_id") if isinstance(created, dict) else getattr(created, "cron_id", None)
-    )
-    if not isinstance(cron_id, str) or not cron_id:
-        raise RuntimeError("cron creation did not return a cron_id")
-    return cron_id
+    return str(job.id)
 
 
 async def _delete_cron(cron_id: str | None) -> bool:
     if not cron_id:
         return True
     try:
-        await langgraph_client().crons.delete(cron_id)
+        if not await queue.cancel(uuid.UUID(cron_id)):
+            # A trigger whose Agent Server cron was never moved to a job still holds it.
+            await _delete_agent_server_cron(cron_id)
     except Exception:
-        logger.warning("Could not delete schedule cron", extra={"cron_id": cron_id}, exc_info=True)
+        logger.warning("Could not delete schedule job", extra={"cron_id": cron_id}, exc_info=True)
         return False
     return True
 
 
-async def _delete_orphan_crons(automation_id: str, keep: set[str]) -> None:
-    """Delete crons for ``automation_id`` that no trigger owns any more.
+async def _delete_agent_server_cron(cron_id: str) -> None:
+    try:
+        await langgraph_client().crons.delete(cron_id)
+    except NotFoundError:
+        return
 
-    A cron whose delete failed when its trigger was removed keeps firing; the
+
+async def _delete_orphan_crons(automation_id: str, keep: set[str]) -> None:
+    """Delete jobs for ``automation_id`` that no trigger owns any more.
+
+    A job whose delete failed when its trigger was removed keeps firing; the
     next time it does, it finds itself here and goes.
     """
     try:
-        crons = await langgraph_client().crons.search(
-            assistant_id=_SCHEDULER_ASSISTANT_ID,
-            metadata={"schedule_id": automation_id},
-            limit=100,
-        )
+        jobs = await queue.find({"schedule_id": automation_id})
     except Exception:
         logger.warning(
-            "Could not look up orphaned automation crons",
+            "Could not look up orphaned automation jobs",
             extra={"schedule_id": automation_id},
             exc_info=True,
         )
         return
     settled_before = datetime.now(UTC) - _NEW_CRON_GRACE
-    for cron in crons:
-        cron_id = cron.get("cron_id")
-        created_at = _timestamp(cron.get("created_at"))
-        # An edit makes its crons before it saves the triggers that own them.
-        if created_at is not None and created_at > settled_before:
-            continue
-        if isinstance(cron_id, str) and cron_id not in keep:
-            await _delete_cron(cron_id)
+    for job in jobs:
+        # An edit makes its jobs before it saves the triggers that own them.
+        if job.created_at <= settled_before and str(job.id) not in keep:
+            await _delete_cron(str(job.id))
+
+
+async def adopt_agent_server_cron(
+    cron_id: str, automation_id: str, trigger_id: str, schedule: str, created_by: str | None
+) -> bool:
+    """Move the trigger an Agent Server cron fired for onto a job; ``False`` for an orphan."""
+    job_id = await _create_cron(automation_id, uuid.UUID(trigger_id), schedule, created_by, by=None)
+    async with transaction() as conn:
+        held = await conn.scalar(
+            text(
+                "UPDATE automation_trigger SET cron_id = :job_id "
+                "WHERE id = CAST(:trigger_id AS uuid) AND cron_id IN (:cron_id, :job_id) "
+                "RETURNING 1"
+            ),
+            {"job_id": job_id, "trigger_id": trigger_id, "cron_id": cron_id},
+        )
+    if held:
+        return True
+    await _delete_cron(job_id)
+    return False
 
 
 async def _create_crons(
@@ -546,14 +563,22 @@ async def _create_crons(
     *,
     enabled: bool,
     created_by: str,
+    saved_by: str,
 ) -> list[str | None]:
     """One cron per schedule trigger of an enabled automation; all or nothing."""
+    saver = await User.for_login("github", saved_by)
     cron_ids: list[str | None] = []
     try:
         for trigger, trigger_id in zip(triggers, trigger_ids, strict=True):
             if enabled and isinstance(trigger, ScheduleTrigger):
                 cron_ids.append(
-                    await _create_cron(automation_id, trigger_id, trigger.cron, created_by)
+                    await _create_cron(
+                        automation_id,
+                        trigger_id,
+                        trigger.cron,
+                        created_by,
+                        by=None if saver is None else saver.id,
+                    )
                 )
             else:
                 cron_ids.append(None)
@@ -662,7 +687,7 @@ async def create_agent_schedule(
     automation_id = str(uuid.uuid4())
     trigger_ids = [uuid.uuid4() for _ in triggers]
     cron_ids = await _create_crons(
-        automation_id, triggers, trigger_ids, enabled=True, created_by=login
+        automation_id, triggers, trigger_ids, enabled=True, created_by=login, saved_by=login
     )
     try:
         async with transaction() as conn:
@@ -768,6 +793,7 @@ async def update_agent_schedule(
             trigger_ids,
             enabled=enabled,
             created_by=existing["created_by"],
+            saved_by=login,
         )
     assignments = ", ".join(f"{key} = :{key}" for key in columns)
     try:

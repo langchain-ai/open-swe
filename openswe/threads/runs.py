@@ -1005,7 +1005,7 @@ async def _enrich_run_start_command(
     metadata_update["updated_at_ms"] = _now_ms()
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             current = await client.threads.get(thread_id)
             metadata = thread_metadata(current)
             if _is_thread_resolved(metadata):

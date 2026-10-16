@@ -26,12 +26,12 @@ snapshot in place: runs keep booting from the last image that worked.
 import hashlib
 import logging
 import shlex
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from langgraph_sdk import get_client
-
 from openswe.config import ENV, EnvVar
+from openswe.jobs import queue
 from openswe.workspaces.store import (
     WORKSPACES,
     RefreshKind,
@@ -44,7 +44,6 @@ from openswe.workspaces.store import (
 
 logger = logging.getLogger(__name__)
 
-_ASSISTANT_ID = "scheduler"
 REFRESH_TASK = "workspace_refresh"
 # Crons registered before the rename still carry this task name.
 LEGACY_REFRESH_TASK = "environment_refresh"
@@ -70,10 +69,6 @@ def _seconds(var: EnvVar, default: int) -> int:
 
 def capture_timeout() -> int:
     return _seconds(ENV.WORKSPACE_CAPTURE_TIMEOUT_SECONDS, DEFAULT_CAPTURE_TIMEOUT_SECONDS)
-
-
-def _client():
-    return get_client()
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -103,38 +98,52 @@ def daily_schedule(slug: str) -> str:
 
 
 async def ensure_refresh_cron(slug: str) -> str | None:
-    """Idempotently register the daily refresh cron for a workspace."""
+    """Idempotently register the daily refresh job for a workspace."""
     record = await WORKSPACES.get(slug)
     if record is None:
         return None
     if record.refresh_cron_id:
         return record.refresh_cron_id
     try:
-        cron = await _client().crons.create(
-            _ASSISTANT_ID,
-            schedule=daily_schedule(slug),
-            input={"task": REFRESH_TASK, "workspace_slug": slug},
+        job = await queue.schedule(
+            REFRESH_TASK,
+            {"workspace_slug": slug},
+            cron=daily_schedule(slug),
+            key=f"{REFRESH_TASK}:{slug}",
             metadata={"kind": REFRESH_TASK, "workspace": slug},
         )
     except Exception:
-        logger.exception("Failed to create refresh cron", extra={"workspace": slug})
+        logger.exception("Failed to create refresh job", extra={"workspace": slug})
         return None
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
-    if not (isinstance(cron_id, str) and cron_id):
-        return None
-    await WORKSPACES.set_refresh_cron_id(slug, cron_id)
-    return cron_id
+    await WORKSPACES.set_refresh_cron_id(slug, str(job.id))
+    return str(job.id)
+
+
+async def adopt_agent_server_cron(slug: str, cron_id: str) -> bool:
+    """Move a workspace's daily Agent Server cron onto a job; ``False`` if it no longer owns it."""
+    record = await WORKSPACES.get(slug)
+    if record is None or record.refresh_cron_id != cron_id:
+        return False
+    job = await queue.schedule(
+        REFRESH_TASK,
+        {"workspace_slug": slug},
+        cron=daily_schedule(slug),
+        key=f"{REFRESH_TASK}:{slug}",
+        metadata={"kind": REFRESH_TASK, "workspace": slug},
+    )
+    await WORKSPACES.set_refresh_cron_id(slug, str(job.id))
+    return True
 
 
 async def remove_refresh_cron(record: Workspace | None) -> None:
-    """Delete the refresh cron carried by a workspace record, if any."""
+    """Delete the daily refresh job of a workspace record, if any."""
     if record is None or not record.refresh_cron_id:
         return
     try:
-        await _client().crons.delete(record.refresh_cron_id)
+        await queue.cancel_key(f"{REFRESH_TASK}:{record.slug}")
     except Exception:
-        logger.debug(
-            "Could not delete refresh cron",
+        logger.warning(
+            "Could not delete refresh job",
             extra={"cron_id": record.refresh_cron_id, "workspace": record.slug},
             exc_info=True,
         )
@@ -347,19 +356,15 @@ async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None
     ``background_task``.
     """
     try:
-        run = await _client().runs.create(
-            None,
-            _ASSISTANT_ID,
-            input={"task": REFRESH_TASK, "workspace_slug": slug, "refresh_kind": kind},
+        job = await queue.schedule(
+            REFRESH_TASK,
+            {"workspace_slug": slug, "refresh_kind": kind},
             metadata={"kind": REFRESH_TASK, "workspace": slug, "refresh_kind": kind},
-            on_completion="delete",
         )
     except Exception:
-        logger.exception("Failed to start refresh run", extra={"workspace": slug})
+        logger.exception("Failed to start refresh job", extra={"workspace": slug})
         return None
-    run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
-    if not isinstance(run_id, str):
-        return None
+    run_id = str(job.id)
     await WORKSPACES.set_refresh_run_id(slug, run_id)
     return run_id
 
@@ -496,10 +501,10 @@ async def task_stop(task_id: str) -> dict[str, Any]:
         return await task_status(task_id)
     run_id = _run_id_of(task_id)
     try:
-        await _client().runs.cancel(None, run_id)
+        await queue.cancel(uuid.UUID(run_id))
     except Exception:
         logger.warning(
-            "Could not cancel refresh run", extra={"refresh_run_id": run_id}, exc_info=True
+            "Could not cancel refresh job", extra={"refresh_run_id": run_id}, exc_info=True
         )
         return {"error": "could not cancel the refresh run", "task_id": task_id}
     await WORKSPACES.mark_refresh_settled(record.slug, "failed", error="cancelled")

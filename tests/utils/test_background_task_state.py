@@ -1,33 +1,30 @@
 import asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock
 
-import httpx
-from langgraph_sdk.errors import ConflictError
+import pytest
 
+from openswe import event_claims
 from openswe.utils.background_task_state import update_background_task_state
+from tests.conftest import MemoryEventClaims
 
 
-async def test_concurrent_task_updates_read_after_acquiring_lock() -> None:
+async def test_concurrent_task_updates_read_after_acquiring_lock(
+    monkeypatch: pytest.MonkeyPatch, memory_event_claims: MemoryEventClaims
+) -> None:
     client = AsyncMock()
     stored: dict[str, object] = {"running_background_tasks": ["cmd-old"], "source": "slack"}
-    locked = False
     first_read = asyncio.Event()
     contended = asyncio.Event()
 
-    async def create(*, thread_id: str, if_exists: str, ttl: int, metadata: object) -> None:
-        nonlocal locked
-        if locked:
+    async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
+        acquired = await memory_event_claims.claim(scope, key, ttl=ttl)
+        if not acquired:
             contended.set()
-            response = httpx.Response(409, request=httpx.Request("POST", "http://test/threads"))
-            raise ConflictError("already exists", response=response, body=None)
-        locked = True
-
-    async def delete(thread_id: str) -> None:
-        nonlocal locked
-        locked = False
+        return acquired
 
     async def get(thread_id: str) -> dict[str, object]:
-        assert locked
+        assert memory_event_claims.held
         snapshot = dict(stored)
         if not first_read.is_set():
             first_read.set()
@@ -35,11 +32,10 @@ async def test_concurrent_task_updates_read_after_acquiring_lock() -> None:
         return {"metadata": snapshot}
 
     async def update(thread_id: str, *, metadata: dict[str, object]) -> None:
-        assert locked
+        assert memory_event_claims.held
         stored.update(metadata)
 
-    client.threads.create.side_effect = create
-    client.threads.delete.side_effect = delete
+    monkeypatch.setattr(event_claims, "claim", claim)
     client.threads.get.side_effect = get
     client.threads.update.side_effect = update
 
@@ -56,4 +52,4 @@ async def test_concurrent_task_updates_read_after_acquiring_lock() -> None:
     assert stored == {"running_background_tasks": ["cmd-new"], "source": "slack"}
     assert client.threads.get.await_count == 2
     assert client.threads.update.await_count == 2
-    assert not locked
+    assert not memory_event_claims.held

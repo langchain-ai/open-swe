@@ -10,10 +10,10 @@ from typing import Any
 from uuid import UUID
 
 from openswe.announcements.models import Announcement, DeliveryStatus
+from openswe.jobs import queue
 from openswe.slack.dm import post_dm
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
-from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +44,10 @@ async def start_announcement(text: str, author_id: UUID | None) -> int:
     """Queue ``text`` for everyone reachable and start the run that sends it; the recipient count."""
     announcement = await Announcement.create(text, author_id)
     try:
-        await langgraph_client().runs.create(
-            None,
-            "scheduler",
-            input={"task": ANNOUNCEMENT_TASK, "announcement_id": str(announcement.id)},
+        await queue.schedule(
+            ANNOUNCEMENT_TASK,
+            {"announcement_id": str(announcement.id)},
             metadata={"kind": ANNOUNCEMENT_TASK, "announcement_id": str(announcement.id)},
-            on_completion="delete",
         )
     except Exception:
         await Announcement.delete(announcement.id)

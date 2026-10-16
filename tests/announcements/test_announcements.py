@@ -10,6 +10,7 @@ from openswe.announcements import delivery
 from openswe.announcements.models import Announcement
 from openswe.dashboard import oauth, routes
 from openswe.database import postgres
+from openswe.jobs import queue
 from openswe.slack.http import SlackRequestError
 from openswe.tools.send_announcement import send_announcement
 from openswe.users.models import User, UserIdentity
@@ -37,14 +38,6 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> FakeSlack:
     monkeypatch.setattr(delivery, "post_dm", fake.post_dm)
     monkeypatch.setattr(delivery, "asyncio", SimpleNamespace(sleep=AsyncMock()))
     return fake
-
-
-@pytest.fixture
-def runs(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    create = AsyncMock()
-    client = SimpleNamespace(runs=SimpleNamespace(create=create))
-    monkeypatch.setattr(delivery, "langgraph_client", lambda: client)
-    return create
 
 
 async def _person(*identities: tuple[str, str]) -> User:
@@ -84,12 +77,15 @@ async def admin_client(admin: User) -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
-def _started(runs: AsyncMock) -> str:
-    return runs.await_args.kwargs["input"]["announcement_id"]
+async def _started() -> str:
+    [job] = await queue.find({"kind": delivery.ANNOUNCEMENT_TASK})
+    announcement_id = job.payload["announcement_id"]
+    assert isinstance(announcement_id, str)
+    return announcement_id
 
 
 async def test_everyone_on_slack_gets_one_dm_through_rate_limits_and_refusals(
-    admin_client: httpx.AsyncClient, slack: FakeSlack, runs: AsyncMock
+    admin_client: httpx.AsyncClient, slack: FakeSlack
 ) -> None:
     await _person(("slack", "UALICE"))
     await _person(("slack", "UBOB"))
@@ -103,11 +99,11 @@ async def test_everyone_on_slack_gets_one_dm_through_rate_limits_and_refusals(
     assert response.status_code == 202
     assert response.json() == {"test": False, "recipients": 4}
 
-    result = await delivery.deliver_announcement(_started(runs))
+    result = await delivery.deliver_announcement(await _started())
     assert sorted(slack.delivered) == ["UADMIN", "UALICE", "UCAROL"]
     assert result == {"status": "finished", "sent": 3, "failed": 1}
 
-    await delivery.deliver_announcement(_started(runs))
+    await delivery.deliver_announcement(await _started())
     assert len(slack.delivered) == 3
 
     listed = (await admin_client.get("/dashboard/api/admin/announcements")).json()
@@ -132,7 +128,7 @@ async def test_a_resumed_send_never_redelivers_someone_caught_mid_send(slack: Fa
 
 
 async def test_only_admins_announce_and_a_test_reaches_only_the_admin(
-    admin_client: httpx.AsyncClient, slack: FakeSlack, runs: AsyncMock
+    admin_client: httpx.AsyncClient, slack: FakeSlack
 ) -> None:
     intern = await _person(("github", "intern"), ("slack", "UINTERN"))
     async with _client({"sub": "intern", "user_id": str(intern.id)}) as client:
@@ -144,12 +140,12 @@ async def test_only_admins_announce_and_a_test_reaches_only_the_admin(
     )
     assert response.json() == {"test": True, "recipients": 1}
     assert slack.delivered == ["UADMIN"]
-    runs.assert_not_awaited()
+    assert await queue.find({"kind": delivery.ANNOUNCEMENT_TASK}) == []
     assert await Announcement.recent() == []
 
 
 async def test_the_tool_previews_until_the_admin_confirms(
-    admin: User, monkeypatch: pytest.MonkeyPatch, runs: AsyncMock
+    admin: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     threads = SimpleNamespace(
         get=AsyncMock(return_value={"metadata": {"visibility": "private", "owner_type": "user"}})
@@ -175,4 +171,4 @@ async def test_the_tool_previews_until_the_admin_confirms(
     assert sent == {"status": "sending", "recipients": 1}
     [summary] = await Announcement.recent()
     assert summary.author == admin.display_name
-    runs.assert_awaited_once()
+    assert len(await queue.find({"kind": delivery.ANNOUNCEMENT_TASK})) == 1
