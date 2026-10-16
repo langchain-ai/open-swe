@@ -877,6 +877,27 @@ function toolChunk(
 }
 
 /**
+ * The tool calls an `eval` call's code made: the transcript records them under
+ * a namespace that ends in the `eval` call's id, as it does a subagent's.
+ */
+function codeCalls(
+  state: TranscriptState,
+  turn: TranscriptTurnState,
+  call: TranscriptToolCallState
+): Array<ToolExecutionChunk> {
+  const namespace = [...call.namespace, call.toolCallId]
+  const calls: Array<ToolExecutionChunk> = []
+  for (const item of turn.items) {
+    if (item.kind !== "tool") continue
+    const nested = state.toolCalls[item.id]
+    if (!nested || !sameNamespace(nested.namespace, namespace)) continue
+    if (INTERNAL_TOOLS.has(nested.name)) continue
+    calls.push(toolChunk(state.threadId, nested))
+  }
+  return calls
+}
+
+/**
  * The attachments a message carries, as chunks a renderer can show: an
  * attachment is fetched from our own API with the session, a bare `url` is a
  * remote reference the browser loads itself, and one with neither has no bytes
@@ -1097,7 +1118,12 @@ function turnMessages(
     const call = state.toolCalls[item.id]
     if (!call || !sameNamespace(call.namespace, namespace)) continue
     if (INTERNAL_TOOLS.has(call.name)) continue
-    append(call.toolCallId, call.startedAt, [toolChunk(state.threadId, call)])
+    const chunk = toolChunk(state.threadId, call)
+    if (chunk.toolKind === "code") {
+      const calls = codeCalls(state, turn, call)
+      if (calls.length) chunk.calls = calls
+    }
+    append(call.toolCallId, call.startedAt, [chunk])
   }
   flush()
 

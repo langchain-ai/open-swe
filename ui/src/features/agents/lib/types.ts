@@ -65,6 +65,8 @@ export type AcpToolKind =
   | "managed-tools"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
+  /** Code mode's `eval` tool — runs code that may call other tools. */
+  | "code"
   | "other"
 
 export type AcpToolStatus = "pending" | "in_progress" | "completed" | "error"
@@ -129,6 +131,11 @@ export interface ToolExecutionChunk {
    * show the subagent's nested activity.
    */
   subagentNamespace?: Array<string>
+  /**
+   * The tool calls a `code` chunk's code made, in order. When present the row
+   * shows them instead of the code's raw output.
+   */
+  calls?: Array<ToolExecutionChunk>
 }
 
 export interface TextChunk {
