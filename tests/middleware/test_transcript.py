@@ -13,7 +13,8 @@ from langchain_core.callbacks.manager import AsyncCallbackManager
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGenerationChunk
-from langgraph.prebuilt.tool_node import ToolCallRequest
+from langchain_core.tools import tool
+from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 
 from openswe.input_messages import build_input_messages
 from openswe.middleware import transcript as mw
@@ -163,6 +164,52 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
     assert completed.event.has_output is True
     assert completed.event.output_truncated is False
     assert completed.tool_output == "file body"
+
+
+async def test_tools_called_from_code_are_recorded_beside_the_eval_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code mode runs tools with `arun` and the eval call's callbacks, bypassing the tools node."""
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": []}, None)
+
+    @tool
+    def read_file(path: str) -> str:
+        """Read a file."""
+        return f"body of {path}"
+
+    async def eval_handler(request: ToolCallRequest) -> ToolMessage:
+        config = request.runtime.config
+        await read_file.arun({"path": "a.py"}, callbacks=config["callbacks"], config=config)
+        return ToolMessage(content="done", tool_call_id="eval-1")
+
+    request = ToolCallRequest(
+        tool_call={"name": "eval", "args": {"code": "await tools.readFile()"}, "id": "eval-1"},
+        tool=None,
+        state={"messages": []},
+        runtime=ToolRuntime(
+            state={},
+            context=None,
+            config={"callbacks": AsyncCallbackManager(handlers=[])},
+            stream_writer=lambda _: None,
+            tool_call_id="eval-1",
+            store=None,
+        ),
+    )
+    await middleware.awrap_tool_call(request, eval_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    tools = [c.event for c in engine.commands if c.event.type.startswith("tool.")]
+    assert [(e.type, e.namespace) for e in tools] == [
+        ("tool.started", []),
+        ("tool.started", []),
+        ("tool.completed", []),
+        ("tool.completed", []),
+    ]
+    assert tools[1].name == "read_file"
+    assert tools[1].input == {"path": "a.py"}
+    assert tools[2].output_preview == "body of a.py"
 
 
 async def test_only_mid_run_human_messages_are_recorded_once(
