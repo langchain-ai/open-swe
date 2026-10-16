@@ -9,12 +9,15 @@ from langgraph.config import get_config
 
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.feature_flags import feature_flag_names
+from openswe.dashboard.options import SUPPORTED_MODEL_IDS
 from openswe.dashboard.personal_settings import PROFILE_SETTING_KEYS
 from openswe.dashboard.profiles import get_profile, normalize_profile_for_response
 from openswe.dashboard.user_instructions import get_user_instructions
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.run_config import RunConfig
+from openswe.threads.admin_approval import approval_owner
 from openswe.tools.access import Policy, access
+from openswe.tools.admin_gate import configurable
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User, UserPreferencesPatch
 from openswe.utils.thread_participants import resolve_thread_participant_logins
@@ -55,6 +58,44 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
         "profile": profile_settings,
         "instructions": instructions if isinstance(instructions, str) else "",
     }
+
+
+@access(Policy(trusted="private", actor="admin", shared_read=True))
+async def share_my_settings() -> dict[str, object]:
+    """Disclose only the verified admin owner's allowlisted settings after approval."""
+    cfg = configurable()
+    identity = await approval_owner(cfg)
+    if identity is None or not cfg.github_login:
+        return {"ok": False, "error": "Use your own authenticated Slack channel thread."}
+    try:
+        profile = await get_profile(cfg.github_login) or {}
+        settings: dict[str, str | bool | None] = {}
+        for key in (
+            "default_model",
+            "default_subagent_model",
+            "reasoning_effort",
+            "subagent_reasoning_effort",
+            *_PROFILE_SETTING_KEYS,
+        ):
+            value = profile.get(key)
+            if key not in profile:
+                continue
+            if key in {"default_model", "default_subagent_model"}:
+                if value is None or isinstance(value, str) and value in SUPPORTED_MODEL_IDS:
+                    settings[key] = value
+            elif key in {"reasoning_effort", "subagent_reasoning_effort"}:
+                if (
+                    value is None
+                    or isinstance(value, str)
+                    and value in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+                ):
+                    settings[key] = value
+            elif value is None or isinstance(value, bool):
+                settings[key] = value
+    except Exception:
+        logger.exception("Could not load settings for approved disclosure")
+        return {"ok": False, "error": "Could not load the permitted settings."}
+    return {"ok": True, "settings": settings}
 
 
 @expose_mcp()
