@@ -9,8 +9,8 @@ from pydantic import JsonValue
 from openswe.notion import notifications
 from openswe.notion import webhook as service
 from openswe.notion.models import WebhookEvent
+from openswe.notion.pending import PendingAssigner
 from openswe.thread_ids import notion_discussion_thread_id, notion_page_thread_id
-from tests.conftest import FakeStore
 from tests.notion.fakes import (
     ALICE,
     ASSIGNEE_ID,
@@ -55,10 +55,23 @@ class Harness:
 
 
 @pytest.fixture
-def harness(monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore) -> Harness:
-    del fake_store
+def harness(monkeypatch: pytest.MonkeyPatch) -> Harness:
     notion = FakeNotion()
     h = Harness(notion)
+    assigners: dict[str, str] = {}
+
+    async def remember(page_id: str, user_id: str) -> None:
+        assigners[page_id] = user_id
+
+    async def assigner_of(page_id: str) -> str | None:
+        return assigners.get(page_id)
+
+    async def forget(page_id: str) -> None:
+        assigners.pop(page_id, None)
+
+    monkeypatch.setattr(PendingAssigner, "remember", remember)
+    monkeypatch.setattr(PendingAssigner, "of", assigner_of)
+    monkeypatch.setattr(PendingAssigner, "forget", forget)
     monkeypatch.setenv("NOTION_API_KEY", "secret")
     monkeypatch.setenv("NOTION_AGENT_USER_IDS", JARVIS)
     monkeypatch.setenv("NOTION_TASKS_DATA_SOURCE_ID", TASKS_DS)
