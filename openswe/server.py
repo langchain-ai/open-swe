@@ -2165,8 +2165,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             fallback_middleware,
             *([image_fallback] if image_fallback else []),
             *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-            *([mcp_ptc] if mcp_ptc is not None else []),
-            ToolDescriptionMiddleware(),
+            *(
+                [mcp_ptc, ToolDescriptionMiddleware(frozenset(t.name for t in mcp_ptc.tools))]
+                if mcp_ptc is not None
+                else []
+            ),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeOpenAIResponsesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),

@@ -62,7 +62,11 @@ async def test_tool_runs_without_the_description_the_model_gave_it() -> None:
     model = ScriptedModel(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="3 lines")]
     )
-    agent = create_agent(model, tools=[count_lines], middleware=[ToolDescriptionMiddleware()])
+    agent = create_agent(
+        model,
+        tools=[count_lines],
+        middleware=[ToolDescriptionMiddleware(frozenset({"count_lines"}))],
+    )
 
     result = await agent.ainvoke({"messages": [{"role": "user", "content": "how long?"}]})
 

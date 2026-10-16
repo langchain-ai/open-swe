@@ -1,6 +1,6 @@
-"""Have the model label every tool call it makes with a human-readable description.
+"""Have the model label its calls of chosen tools with a human-readable description.
 
-Each tool the model is offered gains a required ``display_description`` argument.
+Each chosen tool the model is offered gains a required ``display_description`` argument.
 The tool call on the AI message keeps it, so the transcript and the dashboard can
 label the step with it, and it is removed before the tool itself runs.
 """
@@ -23,7 +23,7 @@ DISPLAY_DESCRIPTION: Final = "display_description"
 
 
 class ToolDescriptionMiddleware(OpenSWEMiddleware):
-    """Add a ``display_description`` argument to every offered tool, and drop it before the call.
+    """Add a ``display_description`` argument to the named tools, and drop it before the call.
 
     Place it inside code mode, which binds the request's tools to ``eval`` before
     this rewrites them: tools called from code take no description.
@@ -31,7 +31,8 @@ class ToolDescriptionMiddleware(OpenSWEMiddleware):
 
     state_schema = AgentState
 
-    def __init__(self) -> None:
+    def __init__(self, tools: frozenset[str]) -> None:
+        self._tools = tools
         # Keyed by identity: a tool memoizes the schema it sends, so a copy is reused.
         self._offered: dict[int, tuple[BaseTool, BaseTool]] = {}
 
@@ -68,7 +69,10 @@ class ToolDescriptionMiddleware(OpenSWEMiddleware):
 
     def _offer(self, request: ModelRequest) -> ModelRequest:
         tools = [
-            self._offered_as(tool) if isinstance(tool, BaseTool) else tool for tool in request.tools
+            self._offered_as(tool)
+            if isinstance(tool, BaseTool) and tool.name in self._tools
+            else tool
+            for tool in request.tools
         ]
         return request.override(tools=tools)
 
@@ -85,8 +89,11 @@ class ToolDescriptionMiddleware(OpenSWEMiddleware):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         call = request.tool_call
-        if DISPLAY_DESCRIPTION not in call["args"] or (
-            request.tool is not None and self._offered_as(request.tool) is request.tool
+        if (
+            call["name"] not in self._tools
+            or DISPLAY_DESCRIPTION not in call["args"]
+            or request.tool is not None
+            and self._offered_as(request.tool) is request.tool
         ):
             return await handler(request)
         args = {key: value for key, value in call["args"].items() if key != DISPLAY_DESCRIPTION}
