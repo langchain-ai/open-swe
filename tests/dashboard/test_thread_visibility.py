@@ -18,13 +18,13 @@ from openswe.tools import threads as tools
 _ADMINS = {"admin", "admin@example.com"}
 
 
-@pytest.fixture
-def private_thread(monkeypatch):
+@pytest.fixture(params=["dashboard", "web"])
+def private_thread(monkeypatch, request):
     thread = {
         "thread_id": "private-thread",
         "status": "idle",
         "metadata": {
-            "source": "dashboard",
+            "source": request.param,
             "visibility": "private",
             "owner_login": "alice",
             "participant_logins": {"alice": True, "bob": True},
