@@ -5,12 +5,12 @@ import logging
 import posixpath
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
-from openswe.bridge.store import SandboxBridgeBinding
+from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
@@ -28,6 +28,7 @@ from openswe.threads.listing import (
     settle_review_walkthrough,
 )
 from openswe.threads.machine_reads import machine_thread
+from openswe.threads.moves import SandboxMove
 from openswe.threads.principals import Principal
 from openswe.threads.runs import (
     _ASSISTANT_ID,
@@ -464,6 +465,35 @@ async def share_thread_with_workspace(
     return await _thread_summary(
         {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     )
+
+
+async def move_thread(
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    bridge_id: str | None,
+    target: Literal["cloud"] | None,
+) -> dict[str, object]:
+    """Move a thread onto its owner's machine or off it to the cloud, before its next message."""
+    thread = await _authorized_thread(thread_id, login, email=email)
+    bridge = (
+        None
+        if bridge_id is None
+        else await BridgeStore.require_open(
+            bridge_id, owner_id=Principal.of_login(login, email).sender_id
+        )
+    )
+    move = await SandboxMove.requested(
+        thread_id, thread_metadata(thread), login=login, bridge=bridge, target=target
+    )
+    if move is None:
+        raise HTTPException(409, "this thread already runs there")
+    try:
+        await move.carry_out()
+    except Exception as exc:
+        raise HTTPException(502, f"could not move this thread: {exc}") from exc
+    return await _thread_summary(await langgraph_client().threads.get(thread_id))
 
 
 async def continue_thread_privately(

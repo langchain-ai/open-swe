@@ -47,10 +47,7 @@ import type {
   LoadEarlier,
   MessagesScrollControl,
 } from "@/features/agents/components/messages"
-import {
-  type ThreadHandoff,
-  useSubmitAgentMessage,
-} from "@/features/agents/lib/provider/useSubmitAgentMessage"
+import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { createAutoSelectionIntent } from "@/features/agents/lib/autoSelectionIntent"
 import {
@@ -59,6 +56,7 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
   useAgentThreadQueuedMessages,
+  useMoveThread,
 } from "@/features/agents/lib/queries"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -148,10 +146,9 @@ export function AgentThreadView({
   const localThread = runsOnAMac(thread) ? localRecord : null
   const runsElsewhere =
     runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
-  // A move takes effect with the next message, whose run carries the checkout over.
-  const [handoff, setHandoff] = useState<RunTarget | null>(null)
-  // A thread its Mac isn't serving can still move to the cloud, from its pushed work.
-  const macOffline = runsElsewhere && handoff !== "cloud"
+  // A move carries the checkout across before the thread takes another message.
+  const moveThread = useMoveThread(thread)
+  const moving = moveThread.isPending ? moveThread.variables : null
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
   const ownsThread = Boolean(
@@ -160,7 +157,8 @@ export function AgentThreadView({
     thread.ownerLogin.toLowerCase() === session.data.login.toLowerCase()
   )
   const canPost =
-    !macOffline &&
+    !runsElsewhere &&
+    moving === null &&
     !botThread &&
     // Whoever posts in a thread on someone's machine runs commands there.
     (!thread.sandboxBridgeClient || ownsThread) &&
@@ -172,8 +170,7 @@ export function AgentThreadView({
     queryKey: ["local-bridge", thread.id],
     queryFn: async () =>
       (await window.openSweDesktop?.ensureLocalBridge(thread.id)) ?? false,
-    // Also kept up for a thread moving off this Mac, until its checkout is carried over.
-    enabled: Boolean(localRecord),
+    enabled: Boolean(localThread),
     retry: false,
     refetchOnWindowFocus: "always",
   })
@@ -229,24 +226,6 @@ export function AgentThreadView({
     Boolean(thread.repoFullName) &&
     thread.visibility === "private" &&
     ownsThread
-  const prepareHandoff = useCallback(async (): Promise<
-    ThreadHandoff | undefined
-  > => {
-    if (handoff === "cloud")
-      return {
-        configurable: { sandbox_target: "cloud" },
-        sandboxBridgeClient: null,
-      }
-    if (handoff !== "local" || !window.openSweDesktop) return undefined
-    const bridgeId = await window.openSweDesktop.takeOverThread({
-      threadId: thread.id,
-      repo: thread.repoFullName,
-    })
-    return {
-      configurable: { sandbox_bridge_id: bridgeId },
-      sandboxBridgeClient: "desktop",
-    }
-  }, [handoff, thread.id, thread.repoFullName])
   // The review page shows its PR's status itself; don't poll it a second time here.
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
@@ -319,7 +298,6 @@ export function AgentThreadView({
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
         await ensureLocalBridge()
-        const moving = await prepareHandoff()
         await sendMessage.mutateAsync({
           content,
           images,
@@ -328,15 +306,10 @@ export function AgentThreadView({
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
           enqueue: isStreaming && queue,
-          ...(moving ? { handoff: moving } : {}),
           ...(carriesAutoSelection
             ? { onStartError: restoreAutoSelection }
             : {}),
         })
-        if (moving) {
-          setHandoff(null)
-          void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
-        }
       } catch (error) {
         restoreAutoSelection()
         throw error
@@ -348,8 +321,6 @@ export function AgentThreadView({
       ensureLocalBridge,
       followUpBehavior,
       isStreaming,
-      prepareHandoff,
-      queryClient,
       sendMessage,
     ]
   )
@@ -743,7 +714,7 @@ export function AgentThreadView({
             thread={thread}
           />
         )}
-        {(macOffline || bridgeError) && (
+        {(runsElsewhere || bridgeError) && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
               intent={bridgeError ? "error" : "info"}
@@ -952,15 +923,17 @@ export function AgentThreadView({
               {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
                 placeholder={
-                  macOffline
-                    ? "This thread's Mac isn't serving it right now"
-                    : botThread
-                      ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
-                      : canPost
-                        ? hasConversation
-                          ? "Add a follow up"
-                          : "Send the first message"
-                        : "Only workspace admins can send messages in this thread"
+                  moving
+                    ? `Moving this thread to ${moving === "local" ? "This Mac" : "Cloud"}…`
+                    : runsElsewhere
+                      ? "This thread's Mac isn't serving it right now"
+                      : botThread
+                        ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
+                        : canPost
+                          ? hasConversation
+                            ? "Add a follow up"
+                            : "Send the first message"
+                          : "Only workspace admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
                 compact
@@ -995,12 +968,14 @@ export function AgentThreadView({
                     }
                   : {})}
                 {...(canMove && {
-                  runTarget: handoff ?? runsHere,
-                  runTargetPending: handoff !== null,
-                  onRunTargetChange: isStreaming
-                    ? undefined
-                    : (next: RunTarget) =>
-                        setHandoff(next === runsHere ? null : next),
+                  runTarget: moving ?? runsHere,
+                  runTargetPending: moving !== null,
+                  onRunTargetChange:
+                    isStreaming || moving
+                      ? undefined
+                      : (next: RunTarget) => {
+                          if (next !== runsHere) moveThread.mutate(next)
+                        },
                 })}
                 contextUsage={{
                   usedTokens: contextUsage?.tokens,
