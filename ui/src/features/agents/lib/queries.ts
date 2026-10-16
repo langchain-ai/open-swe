@@ -68,8 +68,9 @@ export const agentThreadKeys = {
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
     ["agent-threads", "lists", "infinite-pages", params] as const,
+  // Outside `lists`: thread mutations must not re-run a Jev ranking.
   search: (params: ThreadSearchParams) =>
-    ["agent-threads", "lists", "search", params] as const,
+    ["agent-threads", "search", params] as const,
 }
 
 export function invalidateAgentThreadLists(queryClient: QueryClient): void {
