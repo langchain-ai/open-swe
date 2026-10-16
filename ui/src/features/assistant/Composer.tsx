@@ -115,17 +115,22 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
       if (
         !thread &&
         config.repo_from_default === true &&
-        (config.repo !== repository || (!config.environment && workspace))
+        (config.repo !== (repository ?? undefined) ||
+          (!config.environment && workspace))
       )
         aui.composer().setRunConfig({
-          custom: { ...config, repo: repository, environment: workspace },
+          custom: {
+            ...config,
+            repo: repository ?? undefined,
+            environment: workspace,
+          },
         })
       return
     }
     aui.composer().setRunConfig({
       custom: {
         ...(!thread ? { environment: workspace } : {}),
-        repo: repository,
+        repo: repository ?? undefined,
         repo_from_default: initialRepo === undefined,
         ...modelConfigurable(
           thread?.modelSelection === "auto"
