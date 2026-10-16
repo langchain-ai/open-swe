@@ -15,6 +15,7 @@ under the subagent, as an in-process run does.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping, Sequence
+from contextlib import nullcontext
 from typing import Annotated, Final, NotRequired
 
 from langchain.agents.middleware.types import (
@@ -43,6 +44,8 @@ logger = logging.getLogger(__name__)
 # event, which MDA's summarization then applies to every model call.
 _MDA_STATE_KEYS: Final = frozenset({"_summarization_event"})
 _MESSAGE_KEY: Final = "__lc_message__"
+# The one runtime tool whose calls run a subagent.
+_SUBAGENT_TOOL: Final = "task"
 
 
 def _merge(
@@ -218,7 +221,8 @@ class RuntimeToolsMiddleware(AgentMiddleware):
     """Report the tool calls this runtime runs itself, such as ``task``, to the backend's transcript.
 
     The backend records the calls of its own tools as it runs them. A ``task``
-    call's subagent runs here, so every call it makes names the ``task`` call.
+    call's subagent runs here, so every call it makes names the ``task`` call;
+    the tools an ``eval`` call runs do not, since no subagent runs them.
     Reporting is best effort: a call the backend could not record still runs.
     """
 
@@ -243,8 +247,9 @@ class RuntimeToolsMiddleware(AgentMiddleware):
             tool_call_id=tool_call_id,
         )
         await self._report(self._backend.tool_started(body))
+        within = subagent_of(tool_call_id) if name == _SUBAGENT_TOOL else nullcontext()
         try:
-            with subagent_of(tool_call_id):
+            with within:
                 result = await handler(request)
         except asyncio.CancelledError:
             # A stopped call stays open, as it does in-process.
