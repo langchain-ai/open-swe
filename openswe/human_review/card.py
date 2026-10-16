@@ -29,7 +29,7 @@ def _button_value(action: str, request: HumanReviewRequest) -> str:
 
 def _label(request: HumanReviewRequest) -> str:
     pr = request.pull_request
-    return f"{pr.owner}/{pr.repo}#{pr.number}"
+    return pr.label
 
 
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
