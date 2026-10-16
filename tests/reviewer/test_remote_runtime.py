@@ -1,9 +1,14 @@
+import json
+import logging
 import time
+from collections.abc import Mapping
 
 import jwt
 import pytest
+from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
+from openswe.remote_runtime import server
 from openswe.remote_runtime.server import RunTokenMiddleware
 from openswe.remote_runtime.tokens import (
     RemoteRun,
@@ -197,6 +202,47 @@ async def test_tool_server_refuses_calls_without_a_valid_run_token() -> None:
 
 async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
+
+
+async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    from langgraph_api.logging import Formatter
+
+    async def failing_hook(run: RemoteRun, hook: str, body: Mapping[str, JsonValue]) -> JsonValue:
+        raise RuntimeError("connection pool exhausted")
+
+    monkeypatch.setattr(server, "_graphs", lambda: {RUN.assistant_id: failing_hook})
+    formatter = Formatter(None, None, "%")
+    lines: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            lines.append(formatter.format(record))
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/remote-runtime/hooks/before_model",
+        "headers": [],
+        "path_params": {"hook": "before_model"},
+        "state": {"remote_run": RUN},
+    }
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": json.dumps({"run_id": "mda-run-1"}).encode()}
+
+    async def send(message: Message) -> None:
+        pass
+
+    handler = Capture()
+    server.logger.addHandler(handler)
+    try:
+        with pytest.raises(RuntimeError):
+            await server.hook_endpoint(scope, receive, send)
+    finally:
+        server.logger.removeHandler(handler)
+
+    assert len(lines) == 1
+    assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "before_model"))
 
 
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:

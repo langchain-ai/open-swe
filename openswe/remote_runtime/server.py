@@ -51,6 +51,8 @@ def _scope_run(scope: Scope) -> RemoteRun:
 
 
 async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+    from langgraph_api.logging import set_logging_context
+
     run = _scope_run(scope)
     hook = scope["path_params"]["hook"]
     graph = _graphs().get(run.assistant_id)
@@ -67,6 +69,12 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
+    # Hooks run outside any run on this server, so their logs name the MDA run only
+    # through this context.
+    context = {"thread_id": run.thread_id, "hook": hook}
+    if isinstance(run_id := body.get("run_id"), str):
+        context["run_id"] = run_id
+    set_logging_context(context)
     try:
         result = await graph(run, hook, body)
     except UnknownHookError:
@@ -75,9 +83,7 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         )
         return
     except Exception:
-        logger.exception(
-            "Remote runtime hook failed", extra={"hook": hook, "thread_id": run.thread_id}
-        )
+        logger.exception("Remote runtime hook failed")
         raise
     await JSONResponse(result)(scope, receive, send)
 
