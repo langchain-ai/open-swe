@@ -1,0 +1,269 @@
+desktop/package.json
+  s_30a39b9625d194::t_ccedce83bdf764 3
+docs/CUSTOMIZATION.md
+  s_30a39b9625d194::t_d9a993a2306247 153-154
+langgraph.json
+  s_30a39b9625d194::t_562810be357b65 18-21
+mda/agent.py
+  s_30a39b9625d194::t_becdad295135d1 11,67-68,79-88,115-119,121,132,152-153
+mda/rt/backend.py
+  s_30a39b9625d194::t_15e4a6f19d774c 27-29,63-66,89-92,153-157,163-164,166,173-174,187-194
+mda/rt/tools.py
+  s_30a39b9625d194::t_fcc781fcd1a4af 10,14,20-22,25-28,41-50,52-56
+openswe/agent_cost.py
+  s_30a39b9625d194::t_18f6ea451669d3 5,18,70,82-85,173
+openswe/announcements/delivery.py
+  s_30a39b9625d194::t_18cc55a44570b7 13,47-49
+openswe/api/agent_server_auth.py
+  s_30a39b9625d194::t_37a281c7620a8f 1-98
+openswe/api/app.py
+  s_30a39b9625d194::t_0aefa158d7f51c 29,31,56-57,103,117,153-157
+openswe/baby_sit.py
+  s_30a39b9625d194::t_e309bdb07038e0 7,15,33,46,53-54,60,63-64,71,260-261,264-269,272-282,328,332-335,344-350
+openswe/background_tasks.py
+  s_30a39b9625d194::t_f8eeb65fad0904 20,58-68,73-74,236-238,295,314
+openswe/completion.py
+  s_30a39b9625d194::t_80bfa91b31a142 36-37,503-510
+openswe/config.py
+  s_30a39b9625d194::t_408ad332335378 226-239
+openswe/database/migrations/versions/0066_5b2d2caf7c5a_job_queue.py
+  s_30a39b9625d194::t_83d7212297d396 1-40
+openswe/database/migrations/versions/0067_913a5deda4f3_thread_index.py
+  s_30a39b9625d194::t_4a38cd74f3f164 1-42
+openswe/database/migrations/versions/0068_6fb9377b47b1_job_claim_token.py
+  s_30a39b9625d194::t_56ed0e6a2b4fe2 1-21
+openswe/database/migrations/versions/0069_c8d8a5c65df3_job_and_thread_index_table_shape.py
+  s_30a39b9625d194::t_f38f765a3191a2 1-45
+openswe/human_review/standard.py
+  s_30a39b9625d194::t_1b745a269ef1ba 55,272-275
+openswe/jobs/__init__.py
+  s_30a39b9625d194::t_8a3876a86e11ae 1
+openswe/jobs/cron_import.py
+  s_30a39b9625d194::t_b482296945fb76 1-124
+openswe/jobs/kinds.py
+  s_30a39b9625d194::t_6fa2f1778a2337 1-191
+openswe/jobs/queue.py
+  s_30a39b9625d194::t_a9ec827c99e32a 1-274
+openswe/jobs/worker.py
+  s_30a39b9625d194::t_1b50f135652a82 1-130
+openswe/middleware/code_mode.py
+  s_30a39b9625d194::t_91ef694b0f03d1 1-32
+openswe/middleware/require_user_reply.py
+  s_30a39b9625d194::t_f0ba3a3228741a 183,185
+openswe/middleware/transcript.py
+  s_30a39b9625d194::t_7a86d2e65a6196 71,767-779
+openswe/middleware/workspace_skills.py
+  s_30a39b9625d194::t_6dc0641b288840 7,45
+openswe/remote_runtime/asgi.py
+  s_30a39b9625d194::t_0b0291aa1d7dc9 1-149
+openswe/remote_runtime/client.py
+  s_30a39b9625d194::t_a0f378dd06aaa8 30-40,104
+openswe/remote_runtime/graph.py
+  s_30a39b9625d194::t_297fcd5ca31968 58,84,89-90,94,100-101,311-321
+openswe/remote_runtime/proxy.py
+  s_30a39b9625d194::t_bc1f175ef80cc4 39,41,43-50,165,217-267,308,383,390-391,393,395,398-404,425,431,435,439,450,452,474,483,488,500,506,515,561,564
+openswe/resources/prompts/system/repository-scope.md.jinja
+  s_30a39b9625d194::t_d1f49fc94731a5 7-8
+openswe/resources/prompts/system/sandbox-file-downloads.md
+  s_30a39b9625d194::t_664cc4649bba94 26-27
+openswe/resources/prompts/system/shared-base.md
+  s_30a39b9625d194::t_ff4569e67b67b7 36-38
+openswe/resources/prompts/system/working-environment.md.jinja
+  s_30a39b9625d194::t_2d36820d3e6367 9-10
+openswe/resources/prompts/tools/slack_breakout_thread.md
+  s_30a39b9625d194::t_bb599bc0c84876 3-4
+openswe/resources/prompts/tools/walkthrough_split_hunks.md
+  s_30a39b9625d194::t_895eae810b6387 5
+openswe/resources/prompts/walkthrough/planning.md
+  s_30a39b9625d194::t_bb8d6dca9111bd 9
+openswe/review_guide/walk.py
+  s_30a39b9625d194::t_1f0b32e7ce63e9 68-76,79
+openswe/sandboxes/providers/langsmith.py
+  s_30a39b9625d194::t_9e7ec6cdb2752b 28,812-825
+openswe/sandboxes/tool_runtime.py
+  s_30a39b9625d194::t_ed04ac24b511f6 102-103
+openswe/schedules/store.py
+  s_30a39b9625d194::t_3618a85c21264c 18,43,60,474-479,481-485,487,492,494,501-503,505,510-516,518,520,524,527,533-575,585,588,594-600,709,815
+openswe/server.py
+  s_30a39b9625d194::t_ad02082292250b 127,657,662-664,670-671,701,709,722,810-852,857-858,866,868-870,874-876,1917,2041-2048,2179-2180,2205-2208,2239
+openswe/session_cost.py
+  s_30a39b9625d194::t_9e4a50fe091b57 5,12,123-126,248
+openswe/slack/client.py
+  s_30a39b9625d194::t_17dc4f6b4653f9 112-125,1788
+openswe/slack/events.py
+  s_30a39b9625d194::t_600ae403134de9 6,8,16-17,31-34
+openswe/slack/tools/read_thread_messages.py
+  s_30a39b9625d194::t_c940ea24c49ec5 8,41-47
+openswe/slack/tools/reply.py
+  s_30a39b9625d194::t_1719512f42a609 5,8,10,15-16,48-49,51,58-59,85,87-112,261-264,272,280,344,346-348,354-359,364
+openswe/slack/webhook.py
+  s_30a39b9625d194::t_90fc3f6e904f0c 1054
+openswe/threads/handlers.py
+  s_30a39b9625d194::t_30ed27388212f0 552,574
+openswe/threads/index.py
+  s_30a39b9625d194::t_c714e5d48fa7d6 1-375
+openswe/threads/index_import.py
+  s_30a39b9625d194::t_f3f902dd6302ae 1-66
+openswe/threads/pr_fixes.py
+  s_30a39b9625d194::t_61b1dc304e36de 369,387,432
+openswe/threads/router.py
+  s_30a39b9625d194::t_b9d1391c90a090 1-496
+openswe/threads/runs.py
+  s_30a39b9625d194::t_de325d2616fb96 1008
+openswe/threads/runtimes.py
+  s_30a39b9625d194::t_e5e47e9ff9626b 1-105
+openswe/threads/status.py
+  s_30a39b9625d194::t_b7d08906d4130b 1-49
+openswe/tools/background_execute.py
+  s_30a39b9625d194::t_ebe72206dad616 446,466
+openswe/tools/connect_managed_tools.py
+  s_30a39b9625d194::t_22799d9b1e7367 23,127
+openswe/tools/review_walkthrough.py
+  s_30a39b9625d194::t_492cde66764e6d 24,104,307
+openswe/tools/schedule_thread_wakeup.py
+  s_30a39b9625d194::t_e76d9f5c05495e 6,15-16,19-20,28-31,38,70,197-198,231-232,236,238-241,243-259,261-262,266,272-302,370
+openswe/tools/submit_thread_feedback.py
+  s_30a39b9625d194::t_d2e2f11e7a81b3 38
+openswe/transcript/turns.py
+  s_30a39b9625d194::t_432a04a5b66ffd 179-196
+openswe/utils/background_task_state.py
+  s_30a39b9625d194::t_1645658a974440 22
+openswe/utils/thread_pr_state.py
+  s_30a39b9625d194::t_4eef21ed706909 8-9,11,15-16,24,27-33,37,40
+openswe/walkthrough/plan.py
+  s_30a39b9625d194::t_1a8377e90c76e2 6-9,13-14,17,32,50-66,106-154,214-231,356,358-359,363,365,367
+openswe/walkthrough/planner.py
+  s_30a39b9625d194::t_203fe208972519 223-229
+openswe/webhooks/common.py
+  s_30a39b9625d194::t_19063b1919e995 689,1484
+openswe/workspaces/refresh.py
+  s_30a39b9625d194::t_76f41266865fcf 29,34,101,108-112,116,118-135,139,143,145-146,359-361,365,367,504,507
+pyproject.toml
+  s_30a39b9625d194::t_39248b1bf01ce8 9,15-17,20-21,23,25,29,34,43,72,77,79-80
+tests/agent/test_agent_assembly_context.py
+  s_30a39b9625d194::t_1959b934371c82 541-552,599-600,606-616,622
+tests/agent/test_agent_incidents.py
+  s_30a39b9625d194::t_4122ae99e56b1a 183
+tests/agent/test_agent_integration_tools.py
+  s_30a39b9625d194::t_6f2e499a204ddb 9,17,52,72-87,97-98,108,110,208-245
+tests/agent/test_agent_schedules.py
+  s_30a39b9625d194::t_e663199dd9b26c 2,20-21,48,50,53-67,69-71,73,75-78,120,129,207,219-224,240,260,312,347-348,371,595-598,611,1194,1201,1209,1222-1266
+tests/agent/test_baby_sit.py
+  s_30a39b9625d194::t_3f3844fa94eb13 17,37,39,84,86,127,129,179,181,214,216,244,246,279,281
+tests/agent/test_factory_tool_loading.py
+  s_30a39b9625d194::t_c3b84355429061 9-10,210-229
+tests/announcements/test_announcements.py
+  s_30a39b9625d194::t_16db26affc75a0 13,80-84,88,102,106,131,143,148,174
+tests/auth/test_agent_server_auth.py
+  s_30a39b9625d194::t_4e95c33152f1b2 1-58
+tests/conftest.py
+  s_30a39b9625d194::t_d54d34dade07f0 9,352-382
+tests/dashboard/test_pr_fixes.py
+  s_30a39b9625d194::t_efc565d0ce3796 106
+tests/e2e/tests/dashboard_my_pull_requests.spec.ts
+  s_30a39b9625d194::t_afefa8eab06553 399,415-420,422
+tests/e2e/tests/review_page_chat.spec.ts
+  s_30a39b9625d194::t_dab3c0866c8f22 192-232
+tests/jobs/test_cron_import.py
+  s_30a39b9625d194::t_a8ab0b0111d9b5 1-67
+tests/jobs/test_jobs.py
+  s_30a39b9625d194::t_ff2e6a2b87b2c1 1-167
+tests/mcp/test_managed_mcps.py
+  s_30a39b9625d194::t_224e9e21ca4f0d 401
+tests/middleware/test_require_user_reply.py
+  s_30a39b9625d194::t_97ae0a72902af3 203,222,242,266
+tests/middleware/test_transcript.py
+  s_30a39b9625d194::t_727c889072f5c2 7,82,404-445
+tests/models/test_agent_subagent_models.py
+  s_30a39b9625d194::t_ddda24e18ff29e 94,157
+tests/reviewer/test_remote_runtime.py
+  s_30a39b9625d194::t_2447b7bfd95e95 129-179,223,329,367-400
+tests/sandbox/test_langsmith_sandbox_timeout.py
+  s_30a39b9625d194::t_42c5d4babf6931 15,165-195
+tests/sandbox/test_task_worker_sandbox.py
+  s_30a39b9625d194::t_ab32c28a53d54b 127
+tests/slack/test_slack_ask.py
+  s_30a39b9625d194::t_707a36166f8b4f 112
+tests/slack/test_slack_concierge_mode.py
+  s_30a39b9625d194::t_71b0eca3757fe5 86
+tests/slack/test_slack_event_dedupe.py
+  s_30a39b9625d194::t_f18dc7ef715212 17,19,22,24-27,80,82,93,98,103,115-118
+tests/slack/test_slack_reply_tool.py
+  s_30a39b9625d194::t_f4ef7aabe4efe8 174-178,186,206-221
+tests/slack/test_slack_untagged_flag.py
+  s_30a39b9625d194::t_358aecf38bf707 133
+tests/threads/test_index_import.py
+  s_30a39b9625d194::t_667004545e3973 1-85
+tests/threads/test_thread_index.py
+  s_30a39b9625d194::t_226816ad934923 1-129
+tests/threads/test_thread_router.py
+  s_30a39b9625d194::t_79fc5089542849 1-439
+tests/threads/test_thread_status.py
+  s_30a39b9625d194::t_68b55b12c557d0 1-70
+tests/tools/test_background_execute.py
+  s_30a39b9625d194::t_38cc5e29b41a42 44-45,318,357,433-435,461,476-477,480,502,506,510-513,545,549-558,730
+tests/tools/test_schedule_thread_wakeup.py
+  s_30a39b9625d194::t_a2a1daf41bd84d 14-34,149,164,194,197,220,269-271,292,296,314,317-319,339,360-380
+tests/utils/test_background_task_state.py
+  s_30a39b9625d194::t_d92e0c7fb598e4 2,5,7,9,12-14,20-22,24,27,35,38,55
+tests/utils/test_thread_pr_state.py
+  s_30a39b9625d194::t_d79946e08f711e 20-25,27,30,36-37,39-41,43,46
+tests/walkthrough/test_walkthrough_plan.py
+  s_30a39b9625d194::t_ca710fa6011a1c 18,257-292
+ui/src/components/VersionMismatchBanner.test.tsx
+  s_30a39b9625d194::t_5cfab201edeb47 44
+ui/src/components/VersionMismatchBanner.tsx
+  s_30a39b9625d194::t_4997aa9eda3e15 47
+ui/src/features/agents/components/AgentThreadView.tsx
+  s_30a39b9625d194::t_8596445a4003fd 765-775,778
+ui/src/features/agents/components/AgentsSidebar.tsx
+  s_30a39b9625d194::t_29e193e5f713ef 360-364
+ui/src/features/agents/components/SkillsPage.tsx
+  s_30a39b9625d194::t_8e9ad6c4614dd1 158-163,212,229
+ui/src/features/agents/components/chat/ReplyCard.test.tsx
+  s_30a39b9625d194::t_4ca7fbe8dc95cd 1-38
+ui/src/features/agents/components/chat/ReplyCard.tsx
+  s_30a39b9625d194::t_0b5406112b4bdd 38,43-50
+ui/src/features/agents/components/messages/Messages.tsx
+  s_30a39b9625d194::t_d443bb616606d8 1,36,42,74-84
+ui/src/features/agents/lib/sidebarFilter.test.ts
+  s_30a39b9625d194::t_2cce4d0b6cd011 60-70
+ui/src/features/agents/lib/sidebarFilter.ts
+  s_30a39b9625d194::t_7bdb5bfb2d3637 21,43-49
+ui/src/features/reviews/OpenPullRequests.test.tsx
+  s_30a39b9625d194::t_c542ae23e936b6 729,778
+ui/src/features/reviews/components/MergePullRequest.tsx
+  s_30a39b9625d194::t_d5b01d84014e8b 47-52
+ui/src/features/reviews/lib/fileContents.ts
+  s_30a39b9625d194::t_5f556dfb8ee5d8 3-5
+ui/src/features/reviews/page/Changes.tsx
+  s_30a39b9625d194::t_f61c37a622a117 66-71,243-249
+ui/src/features/reviews/page/Overview.tsx
+  s_30a39b9625d194::t_e06286f676d177 148
+ui/src/features/reviews/page/Standing.tsx
+  s_30a39b9625d194::t_9fed63ea730488 311-329
+ui/src/features/settings/components/GeneralSettings.tsx
+  s_30a39b9625d194::t_211a7ad92526fe 191
+ui/src/features/settings/components/WorkspaceSettings.test.tsx
+  s_30a39b9625d194::t_19dc66deea0731 28,170-202
+ui/src/features/settings/components/WorkspaceSettingsSections.tsx
+  s_30a39b9625d194::t_505ef59fbc11f0 205-209,218-222,368,388,407-409,450-455,457
+uv.lock
+  s_30a39b9625d194::t_af8b1fb71c6875 11-12,15,795,806,808,1774,1781,1783,1793,1800,1802,1807,1821,1823,1854,1863,1865,1870,1878,1880,1898,1906,1908,1925,1935,1937,1968,1978,1980,1985,2024,2026,2031,2037,2039,2044,2053,2055,2079,2090,2092,2097,2106,2108,2465,2530,2532,2540-2541,2546-2547,2550-2551,2555-2557
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "556831feb27b6df07007384d56291f0b4b799774",
+  "prompts": {},
+  "sessions": {
+    "s_30a39b9625d194": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfdce3a1-d304-41eb-bba0-703a4018521b",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}
