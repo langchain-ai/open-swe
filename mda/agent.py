@@ -114,7 +114,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     excluded = frozenset(catalog.excluded)
     # Every schema offered costs each call its context, and OpenAI answers some requests
     # carrying hundreds with nothing; the tools the model seldom needs are called from code.
-    in_code = [tool for tool in tools if tool.name in catalog.code_only]
+    code_only = frozenset(catalog.code_only)
+    in_code = [tool for tool in tools if tool.name in code_only]
     offered = [tool for tool in tools if tool not in in_code]
     from_code = [*in_code, *(tool for tool in offered if tool.name in catalog.also_from_code)]
     subagent_tools = {
@@ -128,8 +129,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         model=model,
         context_schema=OpenSweRunContext,
         # Named as the in-process graph names them, these replace MDA's own file
-        # and shell tools: the backend runs them in the thread's sandbox.
-        tools=offered,
+        # and shell tools: the backend runs them in the thread's sandbox. Code-only
+        # tools stay callable by name, as in-process, though no request offers them.
+        tools=tools,
         sandbox=None,
         subagents=[
             {
@@ -149,7 +151,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         middleware=[
             BackendRunMiddleware(backend, context.invocation_id),
             *_backend_reports(backend, by_name.keys()),
-            ServedToolsMiddleware(offered, excluded),
+            ServedToolsMiddleware(offered, excluded | code_only),
             *_code_mode(context.graph, from_code),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),

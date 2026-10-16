@@ -33,10 +33,8 @@ async def test_backend_connection_failures(
         if failure == "connect"
         else httpx2.Response(503, request=request)
     )
-    client = MagicMock()
-    client.__aenter__.return_value.post = AsyncMock(
-        side_effect=[failure_result] * failures + [response]
-    )
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(side_effect=[failure_result] * failures + [response])
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     backend = OpenSweBackend("secret-token")
     if hook == "before_model":
@@ -63,4 +61,4 @@ async def test_backend_connection_failures(
         assert result_message.tool_call_id == "call-1"
         assert result_message.status == ("success" if failures == 2 else "error")
         assert "secret-token" not in result_message.content
-    assert client.__aenter__.return_value.post.await_count == attempts
+    assert client.post.await_count == attempts

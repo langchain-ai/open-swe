@@ -12,6 +12,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Final, Literal
+from weakref import WeakKeyDictionary
 
 import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
@@ -143,6 +144,30 @@ def _messages(value: object) -> list[BaseMessage]:
     return [message for message in value if isinstance(message, BaseMessage)]
 
 
+class _Connections:
+    """One client per event loop, so hook calls reuse their connections to the backend.
+
+    The Agent Server runs graphs on more than one loop, and a client belongs to the
+    loop it was opened on.
+    """
+
+    def __init__(self) -> None:
+        self._clients: WeakKeyDictionary[asyncio.AbstractEventLoop, httpx2.AsyncClient] = (
+            WeakKeyDictionary()
+        )
+
+    def client(self) -> httpx2.AsyncClient:
+        loop = asyncio.get_running_loop()
+        client = self._clients.get(loop)
+        if client is None or client.is_closed:
+            client = httpx2.AsyncClient()
+            self._clients[loop] = client
+        return client
+
+
+_CONNECTIONS: Final = _Connections()
+
+
 class OpenSweBackend:
     """The Open SWE backend, called with one run's token."""
 
@@ -172,13 +197,13 @@ class OpenSweBackend:
             seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
         for attempt in range(3):
             try:
-                async with httpx2.AsyncClient(timeout=seconds) as client:
-                    response = await client.post(
-                        f"{self._base}/remote-runtime/hooks/{hook}",
-                        headers={"Authorization": f"Bearer {self._run_token}"},
-                        json=dict(body or {}),
-                    )
-                    response.raise_for_status()
+                response = await _CONNECTIONS.client().post(
+                    f"{self._base}/remote-runtime/hooks/{hook}",
+                    headers={"Authorization": f"Bearer {self._run_token}"},
+                    json=dict(body or {}),
+                    timeout=seconds,
+                )
+                response.raise_for_status()
                 break
             except httpx2.TimeoutException as exc:
                 raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
