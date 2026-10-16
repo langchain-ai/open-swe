@@ -27,7 +27,7 @@ Open SWE turns engineering work into a repeatable system: investigate a codebase
 > [!NOTE]
 > **Under active development.** Expect breaking changes and rough edges. We’re not accepting issues or external contributions at this time. You’re welcome to explore and fork the code, but correctness, stability, and compatibility are not guaranteed.
 >
-> If you really want to deploy it yourself, follow the [installation guide](docs/INSTALLATION.md).
+> If you really want to deploy it yourself, follow the [installation guide](docs/INSTALLATION.md). Deploying it as is requires access to the [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) private beta, which runs its agent; without it, we recommend forking and adapting the code to your own runtime.
 
 ## What Open SWE does
 
