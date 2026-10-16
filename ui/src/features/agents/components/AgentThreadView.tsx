@@ -154,9 +154,16 @@ export function AgentThreadView({
   const macOffline = runsElsewhere && handoff !== "cloud"
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
+  const ownsThread = Boolean(
+    thread.ownerLogin &&
+    session.data &&
+    thread.ownerLogin.toLowerCase() === session.data.login.toLowerCase()
+  )
   const canPost =
     !macOffline &&
     !botThread &&
+    // Whoever posts in a thread on someone's machine runs commands there.
+    (!thread.sandboxBridgeClient || ownsThread) &&
     ((thread.threadCategory !== "automation" && !thread.adminThread) ||
       session.data?.is_admin === true)
   // The bridge outlives a thread view but not the app; serve the checkout
@@ -221,7 +228,7 @@ export function AgentThreadView({
     thread.sandboxBridgeClient !== "cli" &&
     Boolean(thread.repoFullName) &&
     thread.visibility === "private" &&
-    thread.ownerLogin?.toLowerCase() === session.data?.login.toLowerCase()
+    ownsThread
   const prepareHandoff = useCallback(async (): Promise<
     ThreadHandoff | undefined
   > => {

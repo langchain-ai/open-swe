@@ -113,11 +113,11 @@ export function AgentThreadHeader({
   const continuePrivately = useContinueThreadPrivately()
   const shareWithWorkspace = useShareThreadWithWorkspace()
   const session = useSession()
-  // A "This Mac" thread runs commands on its owner's machine, so it stays private.
+  // A thread on its owner's machine runs commands there, so it stays private.
   const canShare = Boolean(
     thread?.ownerLogin &&
     thread.ownerLogin.toLowerCase() === session.data?.login.toLowerCase() &&
-    thread.sandboxBridgeClient !== "desktop"
+    !thread.sandboxBridgeClient
   )
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)

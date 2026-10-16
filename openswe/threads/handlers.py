@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
+from openswe.bridge.store import SandboxBridgeBinding
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
@@ -440,8 +441,8 @@ async def share_thread_with_workspace(
         raise HTTPException(403, "only the thread owner can share it")
     if metadata.get("visibility") != "private":
         raise HTTPException(409, "thread is not private")
-    if metadata.get("sandbox_bridge_client") == "desktop":
-        raise HTTPException(409, "a thread running on the owner's Mac cannot be shared")
+    if SandboxBridgeBinding.reaches_a_machine(metadata):
+        raise HTTPException(409, "a thread running on its owner's machine cannot be shared")
     if _thread_is_busy(thread):
         raise HTTPException(409, "stop the run before sharing this thread")
     for status in ("pending", "running"):

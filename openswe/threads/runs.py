@@ -912,6 +912,9 @@ async def _enrich_run_start_command(
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
         visibility = await _requested_visibility(client_configurable, login=login)
+        if sandbox_bridge is not None:
+            # Whoever can prompt a thread runs commands on its machine.
+            visibility = "private"
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
         thread = await create_dashboard_thread_record(
             thread_id,

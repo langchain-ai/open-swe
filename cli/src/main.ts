@@ -37,8 +37,6 @@ Run options:
   --thread <id>    Continue an existing thread
   --model <id>     Agent model id (needs --effort to take effect)
   --effort <name>  Reasoning effort for --model
-  --visibility <v> workspace (default) or private; API keys and CI always
-                   start system threads
 
 Piped input is attached below the prompt, or is the prompt when none is given.
 Stdout carries only the result the agent reports. The exit code is the one it
@@ -126,16 +124,8 @@ async function authStatusCommand(): Promise<number> {
   return 0
 }
 
-const VISIBILITIES = ["workspace", "private"] as const
-type Visibility = (typeof VISIBILITIES)[number]
-
-function isVisibility(value: string): value is Visibility {
-  return (VISIBILITIES as readonly string[]).includes(value)
-}
-
 interface RunOptions {
   thread: string | undefined
-  visibility: string | undefined
   model: string | undefined
   effort: string | undefined
   prompt: string
@@ -153,19 +143,8 @@ async function runCommand(options: RunOptions): Promise<number> {
     return 1
   }
   const { credential } = config
-  let visibility: Visibility = "workspace"
-  if (options.visibility !== undefined) {
-    if (!isVisibility(options.visibility)) {
-      fail("--visibility must be workspace or private")
-      return 2
-    }
-    if (credential.machine) {
-      fail("API keys and CI start system threads; --visibility does not apply")
-      return 2
-    }
-    visibility = options.visibility
-  }
-  const threadType = credential.machine ? "system" : visibility
+  // Whoever can prompt a person's thread runs commands on this machine.
+  const threadType = credential.machine ? "system" : "private"
   const root = process.cwd()
   const api = new ApiClient(config.backend, credential)
 
@@ -325,7 +304,6 @@ async function runCommand(options: RunOptions): Promise<number> {
 const CLI_OPTIONS = {
   backend: { type: "string" },
   thread: { type: "string" },
-  visibility: { type: "string" },
   model: { type: "string" },
   effort: { type: "string" },
   help: { type: "boolean", short: "h" },
@@ -378,7 +356,6 @@ export async function main(argv: readonly string[]): Promise<number> {
     case "run":
       return await runCommand({
         thread: values.thread,
-        visibility: values.visibility,
         model: values.model,
         effort: values.effort,
         prompt: positionals.slice(1).join(" "),
