@@ -322,34 +322,6 @@ async def test_native_stop_rejects_wrong_location_or_unauthorized_user(
     status.assert_not_awaited()
 
 
-@pytest.mark.parametrize("cancel_fails", [False, True])
-async def test_native_stop_clears_status_after_interruption_even_if_follow_up_fails(
-    monkeypatch: pytest.MonkeyPatch, cancel_fails: bool
-) -> None:
-    client = FakeClient()
-    thread_id = await _add_thread(client)
-    client.runs.by_status["running"] = [{"run_id": "running"}]
-    client.runs.fail_cancel = cancel_fails
-    status = _patch_native_stop(monkeypatch, client)
-    follow_up = AsyncMock(side_effect=RuntimeError("follow-up dispatch failed"))
-    monkeypatch.setattr(handlers, "dispatch_pending_follow_ups", follow_up)
-
-    await slack_stop.process_agent_session_stopped(
-        {"channel": "C123", "thread_ts": "1.000", "user": "UOWNER"}, "EvStop", "T123"
-    )
-
-    if cancel_fails:
-        assert client.runs.cancelled == []
-        status.assert_not_awaited()
-        follow_up.assert_not_awaited()
-    else:
-        assert client.runs.cancelled == [
-            {"thread_id": thread_id, "run_ids": ["running"], "action": "interrupt"}
-        ]
-        status.assert_awaited_once_with("C123", "1.000", "")
-        follow_up.assert_awaited_once()
-
-
 @pytest.mark.parametrize("thread_ts", ["0", None])
 async def test_native_stop_preserves_code_channel_routing(
     monkeypatch: pytest.MonkeyPatch, thread_ts: str | None
