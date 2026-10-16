@@ -1,7 +1,7 @@
-"""Open SWE's coding agent and pull request reviewer as one Managed Deep Agent.
+"""Open SWE's graphs as one Managed Deep Agent.
 
-Open SWE dispatch names the graph a run plays (``agent`` or ``reviewer``) in its
-context. The model loop and its checkpoints run here. The Open SWE backend
+Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
+``review-scout``) in its context. The model loop and its checkpoints run here. The Open SWE backend
 holds every credential, the sandbox and the graph itself: this factory takes the
 graph's tools, subagents and models from the backend's catalog for the run, and
 ``BackendRunMiddleware`` hands each phase of the loop to the graph's own
@@ -34,7 +34,7 @@ from rt.middleware import (
 from rt.models import RunModels, build_model
 from rt.tools import backend_tool
 
-Graph = Literal["agent", "reviewer"]
+Graph = Literal["agent", "reviewer", "review-scout"]
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
 # Matches the in-process graphs' cap on model calls per run.
 _MODEL_CALL_LIMIT: Final = 5_000
