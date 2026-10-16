@@ -7,11 +7,9 @@ tool-call middleware included, against this run's sandbox, and hands back the
 result and any other state the tool wrote.
 """
 
-import asyncio
 import logging
 from typing import Final
 
-import httpx2
 from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage, messages_from_dict
 from langchain_core.tools import BaseTool, StructuredTool
@@ -19,7 +17,13 @@ from langgraph.config import get_config
 from langgraph.types import Command
 from pydantic import JsonValue
 
-from rt.backend import BackendCallError, BackendTimeoutError, OpenSweBackend, ToolSpec, run_body
+from rt.backend import (
+    BackendTimeoutError,
+    BackendUnavailableError,
+    OpenSweBackend,
+    ToolSpec,
+    run_body,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,38 +52,23 @@ def backend_tool(spec: ToolSpec, backend: OpenSweBackend) -> BaseTool:
             arguments=dict(arguments),
             tool_call_id=tool_call_id,
         )
-        for attempt in range(3):
-            try:
-                reply = await backend.tool(body)
-                break
-            except BackendTimeoutError:
-                logger.warning("The backend did not answer a tool call", exc_info=True)
-                message = ToolMessage(content=_TIMED_OUT, tool_call_id=tool_call_id, status="error")
-                return Command(update={"messages": [message]})
-            except BackendCallError as exc:
-                cause = exc.__cause__
-                if not (
-                    isinstance(cause, httpx2.TransportError)
-                    or isinstance(cause, httpx2.HTTPStatusError)
-                    and cause.response.status_code in {502, 503, 504}
-                ):
-                    raise
-                logger.warning(
-                    "The backend could not complete a tool call",
-                    extra={"error_type": type(cause).__name__, "attempt": attempt + 1},
-                )
-                if isinstance(cause, httpx2.ConnectError) and attempt < 2:
-                    await asyncio.sleep((1, 3)[attempt])
-                    continue
-                message = ToolMessage(
-                    content=(
-                        "Error: The Open SWE backend could not be reached for this tool call. "
-                        "It may or may not have run; check state before retrying."
-                    ),
-                    tool_call_id=tool_call_id,
-                    status="error",
-                )
-                return Command(update={"messages": [message]})
+        try:
+            reply = await backend.tool(body)
+        except BackendTimeoutError:
+            logger.warning("The backend did not answer a tool call", exc_info=True)
+            message = ToolMessage(content=_TIMED_OUT, tool_call_id=tool_call_id, status="error")
+            return Command(update={"messages": [message]})
+        except BackendUnavailableError:
+            logger.warning("The backend could not complete a tool call")
+            message = ToolMessage(
+                content=(
+                    "Error: The Open SWE backend could not be reached for this tool call. "
+                    "It may or may not have run; check state before retrying."
+                ),
+                tool_call_id=tool_call_id,
+                status="error",
+            )
+            return Command(update={"messages": [message]})
         for event in reply.events:
             runtime.stream_writer(event)
         update: dict[str, object] = {
