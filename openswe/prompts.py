@@ -128,7 +128,9 @@ def _deployment_context() -> tuple[str, str]:
 
 
 def common_prompt(agent_prompt: str = "") -> str:
-    """Render service-wide instructions from current deployment configuration."""
+    """Add deployment context only for preview and staging services."""
     environment, source = _deployment_context()
+    if environment not in {"preview", "staging"}:
+        return agent_prompt
     shared = prompt("system/common", deployment_environment=environment, deployment_source=source)
     return f"{shared}\n\n{agent_prompt}" if agent_prompt else shared

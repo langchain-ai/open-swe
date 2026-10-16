@@ -22,6 +22,10 @@ from openswe.prompts import (
             ("local", "LANGSMITH_LANGGRAPH_API_VARIANT"),
         ),
         ({}, ("unknown", "no explicit environment or local runtime marker")),
+        ({"OPENSWE_ENV": "STAGING"}, ("staging", "OPENSWE_ENV")),
+        ({"OPENSWE_ENV": "prod"}, ("production", "OPENSWE_ENV")),
+        ({"OPENSWE_ENV": "production"}, ("production", "OPENSWE_ENV")),
+        ({"OPENSWE_ENV": "development"}, ("development", "OPENSWE_ENV")),
     ],
 )
 def test_deployment_context(
@@ -39,10 +43,12 @@ def test_deployment_context(
         monkeypatch.setenv(name, value)
 
     assert _deployment_context() == expected
-    assert f"**{expected[0]}**" in common_prompt()
-
-    monkeypatch.setenv("OPENSWE_ENV", "staging")
-    assert "**staging**" in common_prompt()
+    if expected[0] in {"preview", "staging"}:
+        assert f"**{expected[0]}**" in common_prompt()
+        assert common_prompt("existing prompt").endswith("\n\nexisting prompt")
+    else:
+        assert common_prompt() == ""
+        assert common_prompt("existing prompt") == "existing prompt"
 
 
 def sample_tool(value: str) -> str:
