@@ -2246,7 +2246,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             if incident_automatic
             else DEEP_AGENT_EXCLUDED_TOOLS
         )
-    elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional():
+    if tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional():
         await save_tool_context(thread_id, config)
     return graph
 
