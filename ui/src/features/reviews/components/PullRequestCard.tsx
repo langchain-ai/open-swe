@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { Text } from "@langchain/macaw-components/Text"
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
 
@@ -49,6 +50,7 @@ export function PullRequestCard({
   onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
 }) {
+  const repoName = useRepoName()
   if (compact) {
     return (
       <button
@@ -70,7 +72,7 @@ export function PullRequestCard({
         />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-space-2 text-xs text-secondary">
-            <span className="min-w-0 truncate">{pr.repo}</span>
+            <span className="min-w-0 truncate">{repoName(pr.repo)}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
           </span>
           <span className="mt-0.5 block truncate text-xs font-medium text-primary">
@@ -124,7 +126,7 @@ export function PullRequestCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-space-2 gap-y-space-2 text-xs text-secondary">
             <span>
-              {pr.repo}{" "}
+              {repoName(pr.repo)}{" "}
               <span className="font-mono tabular-nums">#{pr.number}</span>
             </span>
             {statusLabels(pr).map((status) => (

@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import type { ReactNode } from "react"
 import { Input } from "@langchain/macaw-components/Input"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -168,6 +169,7 @@ export function WorkspaceEditor({
   workspaces: Array<WorkspaceOption>
   channelLabel: (id: string) => string
 }) {
+  const repoName = useRepoName()
   return (
     <div className="space-y-space-3 border-t border-default px-space-4 py-space-3 text-primary">
       <Input
@@ -194,7 +196,11 @@ export function WorkspaceEditor({
           className="mt-space-1 flex flex-wrap items-center gap-space-2"
         >
           {draft.repos.length > 0 ? (
-            <Chips values={draft.repos} hrefFor={githubRepoHref} />
+            <Chips
+              values={draft.repos}
+              hrefFor={githubRepoHref}
+              labelFor={repoName}
+            />
           ) : (
             <span className="text-xs text-secondary">None yet</span>
           )}

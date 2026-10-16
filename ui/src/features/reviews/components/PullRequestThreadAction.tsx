@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
@@ -24,12 +25,13 @@ function useRun(
   login: string,
   action: PullRequestThreadActionName
 ) {
+  const repoName = useRepoName()
   const queryClient = useQueryClient()
   const key = threadStatusKey(pr, login)
   const { toasts } = threadActions[action]
   return useMutation({
     mutationFn: () => threadActions[action].run(pr),
-    meta: { errorTitle: `${toasts.failed} ${pr.repo}#${pr.number}` },
+    meta: { errorTitle: `${toasts.failed} ${repoName(pr.repo)}#${pr.number}` },
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: key, exact: true })
       const previous = queryClient.getQueryData<PullRequestThreadStatus>(key)
@@ -43,7 +45,7 @@ function useRun(
       queryClient.setQueryData(key, context?.previous),
     onSuccess: (result) =>
       toast.success(
-        `${result.already_running ? toasts.running : toasts.queued} ${pr.repo}#${pr.number}`
+        `${result.already_running ? toasts.running : toasts.queued} ${repoName(pr.repo)}#${pr.number}`
       ),
   })
 }

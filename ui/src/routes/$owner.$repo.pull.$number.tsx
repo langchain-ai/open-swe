@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
@@ -151,6 +152,7 @@ function ReviewLinkCard({
   loading?: boolean
   onRetry?: () => void
 }) {
+  const repoName = useRepoName()
   return (
     <main className="flex min-h-svh items-center justify-center bg-surface-level-1 p-space-5 text-primary">
       <Card className="flex w-full max-w-lg flex-col gap-space-4 p-space-5">
@@ -174,7 +176,7 @@ function ReviewLinkCard({
         <div>
           <div className="rounded-lg border border-default bg-surface-level-1 p-space-3 text-sm">
             <div className="font-medium">
-              {owner}/{repo} #{number}
+              {repoName(`${owner}/${repo}`)} #{number}
             </div>
             <MacawLink
               href={githubPrUrl}

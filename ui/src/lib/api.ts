@@ -216,6 +216,7 @@ async function loadPrDetails(
 }
 
 export interface SessionUser {
+  controlling_org?: string | null
   login: string
   email: string | null
   avatar_url: string | null

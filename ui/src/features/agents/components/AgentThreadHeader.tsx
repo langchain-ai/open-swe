@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useRef, useState } from "react"
 import {
@@ -42,6 +43,7 @@ import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
+  const displayName = useRepoName()
   const [open, setOpen] = useState(false)
   const { prefs } = useSidebarPrefs()
   const session = useSession()
@@ -57,7 +59,12 @@ function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
   if (!repoName) return null
 
   return (
-    <Tooltip title={repoName} side="bottom" open={open} onOpenChange={setOpen}>
+    <Tooltip
+      title={displayName(repoName)}
+      side="bottom"
+      open={open}
+      onOpenChange={setOpen}
+    >
       <button
         type="button"
         // Default-prevented so the trigger's own click handler keeps it open.
@@ -67,7 +74,7 @@ function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
         }}
         onPointerLeave={() => setOpen(false)}
         onBlur={() => setOpen(false)}
-        aria-label={`Repository: ${repoName}`}
+        aria-label={`Repository: ${displayName(repoName)}`}
         data-no-drag=""
         className="flex size-7 shrink-0 items-center justify-center text-icon-secondary"
       >

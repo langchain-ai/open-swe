@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { GlobeRegularIcon } from "@langchain/macaw-components/icons"
 import { useMemo } from "react"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
@@ -48,6 +49,7 @@ export function RepositoryPicker({
   workspaces,
   disabled,
 }: BindingPickerProps) {
+  const repoName = useRepoName()
   const repos = useRepos()
   const reposByName = useMemo(
     () =>
@@ -64,7 +66,7 @@ export function RepositoryPicker({
     () =>
       (repos.data?.repositories ?? []).map((repo) => ({
         id: repo.full_name,
-        label: repo.full_name,
+        label: repoName(repo.full_name),
         meta: `${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`,
         icon: repo.private ? (
           <LockSimpleIcon size={14} weight="regular" />
@@ -73,7 +75,7 @@ export function RepositoryPicker({
         ),
         owner: owners.get(repo.full_name.toLowerCase()) ?? null,
       })),
-    [repos.data, owners]
+    [repos.data, owners, repoName]
   )
   return (
     <OwnershipPicker

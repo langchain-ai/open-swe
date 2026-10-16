@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import {
   ArrowLeftIcon,
   CaretRightIcon,
@@ -213,6 +214,7 @@ function BotThreadRow({
   thread: AgentThread
   entry?: AllowedSlackBotEntry
 }) {
+  const repoName = useRepoName()
   const slackUrl = thread.sourceAppUrl ?? thread.sourceUrl
   return (
     <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3 transition-colors hover:bg-surface-level-1-hover">
@@ -247,7 +249,9 @@ function BotThreadRow({
                 {entry?.name ?? thread.triggeringBot.name}
               </span>
             )}
-            {thread.repoFullName && <span>{thread.repoFullName}</span>}
+            {thread.repoFullName && (
+              <span>{repoName(thread.repoFullName)}</span>
+            )}
             <span>{formatRelativeTime(thread.updatedAt)}</span>
           </div>
         </div>
