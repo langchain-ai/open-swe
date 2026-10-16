@@ -253,6 +253,23 @@ export function AgentTurn({
           />
         )
 
+      case "code-item": {
+        const { calls } = item.chunk
+        return (
+          <WorkEntryRow
+            key={item.key}
+            entry={describeWorkEntry(item.chunk, repoPath)}
+            timestamp={item.chunk.timestamp}
+            body={
+              calls ? (
+                <div>{buildRenderItems(calls).map(renderItem)}</div>
+              ) : undefined
+            }
+            defaultExpanded
+          />
+        )
+      }
+
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
 

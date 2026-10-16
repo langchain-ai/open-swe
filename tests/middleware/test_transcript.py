@@ -166,7 +166,7 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
     assert completed.tool_output == "file body"
 
 
-async def test_tools_called_from_code_are_recorded_beside_the_eval_call(
+async def test_tools_called_from_code_are_recorded_under_the_eval_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Code mode runs tools with `arun` and the eval call's callbacks, bypassing the tools node."""
@@ -203,8 +203,8 @@ async def test_tools_called_from_code_are_recorded_beside_the_eval_call(
     tools = [c.event for c in engine.commands if c.event.type.startswith("tool.")]
     assert [(e.type, e.namespace) for e in tools] == [
         ("tool.started", []),
-        ("tool.started", []),
-        ("tool.completed", []),
+        ("tool.started", ["eval-1"]),
+        ("tool.completed", ["eval-1"]),
         ("tool.completed", []),
     ]
     assert tools[1].name == "read_file"

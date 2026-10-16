@@ -600,7 +600,7 @@ class _NestedToolHandler(AsyncCallbackHandler):
 
     Those calls never pass through the tools node, so ``awrap_tool_call`` cannot
     see them; their tool callbacks are the only place they surface. They are
-    recorded beside the call that ran them, as if the model had made them.
+    recorded under the call that ran them, which the reader shows them inside.
     """
 
     run_inline = True
@@ -1163,7 +1163,9 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         state.start_tool(tool_call, tool_call_id, messages, namespace)
         token = _namespace.set((*_namespace.get(), tool_call_id))
         try:
-            result = await handler(_observing_nested_tools(request, state, namespace))
+            result = await handler(
+                _observing_nested_tools(request, state, [*namespace, tool_call_id])
+            )
         except asyncio.CancelledError:
             # A stopped tool never finished, and it did not fail either: leaving
             # it open is what keeps the reader showing the work the run was in
