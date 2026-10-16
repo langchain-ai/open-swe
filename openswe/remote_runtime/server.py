@@ -69,8 +69,6 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
-    # Hooks run outside any run on this server, so their logs name the MDA run only
-    # through this context.
     context = {"thread_id": run.thread_id, "hook": hook}
     if isinstance(run_id := body.get("run_id"), str):
         context["run_id"] = run_id
