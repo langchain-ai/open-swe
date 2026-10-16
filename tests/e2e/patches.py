@@ -68,12 +68,10 @@ def apply() -> None:
             return FakeScriptedChatModel(script=build_script())
 
         server.make_model = _fake_make_model
-        # The review chat and review scout graphs bind their own factory by name.
+        # The review chat graph binds its own factory by name.
         from openswe import chat as chat_graph
-        from openswe.review_scout import graph as review_scout_graph
 
-        for module in (chat_graph, review_scout_graph):
-            module.__dict__["make_model"] = _fake_make_model
+        chat_graph.__dict__["make_model"] = _fake_make_model
 
     # Callers pass installation ids, repository scopes and permission maps; the
     # fake GitHub does not care, so accept whatever the real signatures take.
@@ -319,18 +317,18 @@ def apply() -> None:
     from openswe.github import pull_request_diff
     from openswe.review import chat as review_chat
     from openswe.review import reviews as review_reviews
-    from openswe.review_scout import graph as review_scout_graph
+    from openswe.review_scout import middleware as review_scout_middleware
 
     pull_request_diff.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
     for module in (review_reviews, review_chat, chat_graph):
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff
 
-    # A scout sandbox clones the PR through the GitHub proxy, which the local
-    # provider cannot reach, so provisioning fails the way an unavailable
+    # A scout run clones the PR through the GitHub proxy, which the local
+    # provider cannot reach, so its checkout fails the way an unavailable
     # sandbox provider does. The delay keeps the run visibly in flight first,
     # which is the state the review page polls through.
-    review_scout_graph.__dict__["_ensure_scout_sandbox"] = _unavailable_scout_sandbox
+    review_scout_middleware.__dict__["check_out_pull_request"] = _unavailable_scout_checkout
 
     _applied = True
 
@@ -338,7 +336,7 @@ def apply() -> None:
 SCOUT_SANDBOX_ERROR = "E2E has no sandbox provider for the review scout"
 
 
-async def _unavailable_scout_sandbox(_thread_id: str, _cfg: object) -> object:
+async def _unavailable_scout_checkout(_backend: object, _cfg: object) -> object:
     import asyncio
 
     await asyncio.sleep(float(os.environ.get("E2E_SCOUT_FAIL_AFTER_SECONDS", "4")))

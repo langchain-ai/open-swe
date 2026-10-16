@@ -1,27 +1,23 @@
-import asyncio
 import logging
 
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
-from openswe.database import postgres
+from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.dispatch import create_durable_run, dispatch_client
+from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
+from openswe.review.session import REVIEW_SCOUT_SOURCE
 from openswe.thread_ids import review_scout_thread_id
+from openswe.threads.creation import create_thread
 from openswe.utils.thread_ops import thread_run_error
 from openswe.walkthrough.record import WalkthroughView
 
 logger = logging.getLogger(__name__)
 
-ASSISTANT_ID = "review-scout"
-# The reviewer waits this long for the walkthrough before reviewing without it;
-# the scout keeps running and still stores its result for the review page.
-SCOUT_WAIT_SECONDS = 600
-# The reviewer resumes up to one interval after the scout finishes; a poll is one run read.
-_POLL_SECONDS = 1
-_ACTIVE_STATUSES = frozenset({"pending", "running"})
+ASSISTANT_ID = "agent"
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
 
@@ -176,8 +172,8 @@ class ReviewScoutTarget(BaseModel):
             return None
         return await thread_run_error(self.thread_id) or "The review scout run ended with an error."
 
-    async def start(self) -> str:
-        """The scout run for this head, started when none is already running.
+    async def start(self, requester: str) -> str:
+        """The scout run for this head, started for ``requester`` when none is already running.
 
         A newer head interrupts a scout still working on an older one, so only
         the latest head's walkthrough is ever written.
@@ -185,14 +181,30 @@ class ReviewScoutTarget(BaseModel):
         active = await self.active_run()
         if active is not None:
             return active
+        title = f"Walkthrough: {self.pr_title} #{self.pr_number}"
+        client = dispatch_client()
+        # It reads author-controlled code, so its sandbox token reaches only this repository.
+        await create_thread(
+            client,
+            self.thread_id,
+            title=title,
+            if_exists="do_nothing",
+            metadata={GITHUB_TOKEN_REPOSITORIES_KEY: [f"{self.owner}/{self.repo}"]},
+        )
+        model_id, effort = (await cached_workspace_settings(self.workspace_slug)).review_scout_model
         configurable = {
             "thread_id": self.thread_id,
+            "source": REVIEW_SCOUT_SOURCE,
+            "github_login": requester,
             "repo": {"owner": self.owner, "name": self.repo},
             "pr_number": self.pr_number,
             "pr_title": self.pr_title,
             "base_sha": self.base_sha,
             "head_sha": self.head_sha,
             "workspace": self.workspace_slug,
+            "model_selection": "explicit",
+            "agent_model_id": model_id,
+            "agent_effort": effort,
         }
         run = await create_durable_run(
             self.thread_id,
@@ -204,34 +216,11 @@ class ReviewScoutTarget(BaseModel):
                     {"id": _SENDER_ID, "display_name": "Review scout", "platform": "open-swe"}
                 ],
             ),
-            source="review-scout",
-            thread_title=f"Walkthrough: {self.pr_title} #{self.pr_number}",
+            source=REVIEW_SCOUT_SOURCE,
+            thread_title=title,
+            client=client,
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             metadata={_HEAD_METADATA_KEY: self.head_sha},
         )
         logger.info("Started review scout", extra=self.log_extra)
         return _ScoutRun.model_validate(run).run_id
-
-    async def await_walkthrough(self) -> WalkthroughView | None:
-        """This head's walkthrough, running the scout first when it has none yet.
-
-        ``None`` when the scout cannot run or does not finish within
-        ``SCOUT_WAIT_SECONDS``; the reviewer then reviews without it.
-        """
-        if not postgres.configured() or not self.base_sha or not self.head_sha:
-            return None
-        existing = await self.walkthrough()
-        if existing is not None:
-            return existing
-        run_id = await self.start()
-        # Polled rather than joined: one join request idles for the whole run
-        # and would hit the client's 300s read timeout first.
-        client = dispatch_client()
-        deadline = asyncio.get_running_loop().time() + SCOUT_WAIT_SECONDS
-        while asyncio.get_running_loop().time() < deadline:
-            run = _ScoutRun.model_validate(await client.runs.get(self.thread_id, run_id))
-            if run.status not in _ACTIVE_STATUSES:
-                return await self.walkthrough()
-            await asyncio.sleep(_POLL_SECONDS)
-        logger.warning("Review scout did not finish in time for the reviewer", extra=self.log_extra)
-        return None

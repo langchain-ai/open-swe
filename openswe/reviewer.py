@@ -77,7 +77,6 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
-from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -672,8 +671,6 @@ async def prepare_reviewer_run(
                     sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
                 )
                 if skill_sources:
-                    # Reading every SKILL.md takes seconds on skill-heavy repos;
-                    # here it overlaps the walkthrough wait.
                     skills_prompt = await _trusted_skills_prompt(
                         sandbox_backend, skill_sources, runtime, config
                     )
@@ -773,24 +770,19 @@ async def prepare_reviewer_run(
             )
             return ""
 
-    async def _await_walkthrough() -> WalkthroughView | None:
+    # The scout runs only when someone asks for a walkthrough; the review uses one
+    # already written for this head and never waits for it.
+    async def _fetch_walkthrough() -> WalkthroughView | None:
         if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
             return None
-        pr_title, _ = await pr_overview_task
-        target = ReviewScoutTarget(
-            owner=repo_owner,
-            repo=repo_name,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            base_sha=base_sha,
-            head_sha=head_sha,
-            workspace_slug=cfg.workspace_slug,
-        )
         try:
-            async with aphase(thread_id, "prepare.walkthrough"):
-                return await target.await_walkthrough()
+            return await WalkthroughView.for_head(repo_owner, repo_name, pr_number, head_sha)
         except Exception:
-            logger.warning("Reviewing without a walkthrough", exc_info=True, extra=target.log_extra)
+            logger.warning(
+                "Reviewing without a walkthrough",
+                exc_info=True,
+                extra={"pr_repo_full_name": f"{repo_owner}/{repo_name}", "pr_number": pr_number},
+            )
             return None
 
     # Benchmark runs score the stock reviewer, without our workspace's
@@ -840,12 +832,11 @@ async def prepare_reviewer_run(
             return None
         return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
 
-    # Only the diff waits on the checkout; the walkthrough above all, a whole
-    # scout run in its own sandbox, must not queue behind the clone.
+    # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
     pr_overview_task = asyncio.create_task(_fetch_pr_overview())
-    walkthrough_task = asyncio.create_task(_await_walkthrough())
+    walkthrough_task = asyncio.create_task(_fetch_walkthrough())
     existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
     repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
     agents_md_task = asyncio.create_task(_fetch_agents_md_context())
@@ -879,7 +870,6 @@ async def prepare_reviewer_run(
         api_standards_skill = await api_standards_task
         walkthrough = await walkthrough_task
     finally:
-        # A failed checkout must not leave the scout wait polling for minutes.
         for task in tasks:
             task.cancel()
     work_dir, repo_ready = checkout.work_dir, checkout.repo_ready

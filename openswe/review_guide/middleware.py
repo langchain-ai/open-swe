@@ -32,6 +32,7 @@ from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.sandboxes.lifecycle import get_cached_sandbox_backend
 from openswe.slack.code_channels import repo_context_bar_items, set_context_bar, set_view
 from openswe.slack.http import SlackRequestError
+from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.walkthrough.checkout import PinnedCheckout
 from openswe.walkthrough.plan import LineRef
@@ -175,6 +176,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
     async def _plan_in_background(self, session: ReviewGuideSession, head: PullRequestHead) -> None:
         """Have the review scout place what the plan is missing, while the guide talks."""
         pr = session.pull_request
+        reader = await User.get(session.user_id)
         target = ReviewScoutTarget(
             owner=pr.owner,
             repo=pr.repo,
@@ -184,8 +186,14 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
             head_sha=head.head.sha,
             workspace_slug=session.workspace_slug,
         )
+        if reader is None or not reader.github_login:
+            logger.warning(
+                "Review walkthrough reader has no GitHub login to plan for",
+                extra={"agent_thread_id": self._thread_id, **target.log_extra},
+            )
+            return
         try:
-            await target.start()
+            await target.start(reader.github_login)
         except Exception:
             logger.warning(
                 "Could not start the review scout for a review walkthrough",

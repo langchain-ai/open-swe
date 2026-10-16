@@ -120,8 +120,8 @@ workspace's preferred repositories. Threads started by a GitHub event or an issu
 a **public** repository record that repository in their metadata when created, server-side and
 never from run configuration, and receive a token narrowed to that repository, including on every
 proxy refresh. Unknown repository visibility also causes repository-scoped access. Reviewer
-and review-scout sandboxes explicitly scope their tokens to the repository being
-examined. Coding threads that members start from Slack, the dashboard, or Linear normally get
+sandboxes explicitly scope their tokens to the repository being examined, and review scout
+threads record that repository the same way when they are created. Coding threads that members start from Slack, the dashboard, or Linear normally get
 the installation-wide token, as do workspace image builds.
 
 A workspace's preferred repositories are what its image preloads: the setup and update scripts

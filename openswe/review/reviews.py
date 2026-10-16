@@ -1221,7 +1221,7 @@ async def trigger_review_scout(
     if await target.walkthrough() is not None:
         trigger = ReviewScoutTrigger(started=False)
     else:
-        trigger = ReviewScoutTrigger(started=True, run_id=await target.start())
+        trigger = ReviewScoutTrigger(started=True, run_id=await target.start(login))
     pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
     try:
         await ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=login).open(

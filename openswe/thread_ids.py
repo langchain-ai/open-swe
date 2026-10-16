@@ -40,7 +40,8 @@ def reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
 
 
 def review_scout_thread_id(owner: str, repo: str, pr_number: int) -> str:
-    return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/review-scout")
+    # Coding agent threads; the older review-scout graph's threads keep its checkpoints.
+    return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/review-scout-agent")
 
 
 def pr_comment_thread_id(owner: str, repo: str, pr_number: int) -> str:
