@@ -1,14 +1,15 @@
-"""Open SWE's coding agent and pull request reviewer as one Managed Deep Agent.
+"""Open SWE's graphs as one Managed Deep Agent.
 
-Open SWE dispatch names the graph a run plays (``agent`` or ``reviewer``) in its
-context. The model loop and its checkpoints run here. The Open SWE backend
+Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
+``review-scout``) in its context. The model loop and its checkpoints run here. The Open SWE backend
 holds every credential, the sandbox and the graph itself: this factory takes the
 graph's tools, subagents and models from the backend's catalog for the run, and
 ``BackendRunMiddleware`` hands each phase of the loop to the graph's own
 middleware there. The run token in the context authenticates every call.
 """
 
-from collections.abc import Collection, Sequence
+import os
+from collections.abc import Collection, Mapping, Sequence
 from typing import Final, Literal
 
 from langchain.agents.middleware import (
@@ -25,9 +26,9 @@ from managed_deepagents import (
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
-from rt.browser import BrowserMiddleware, browser_enabled
 from rt.middleware import (
     BackendRunMiddleware,
+    DescribedToolsMiddleware,
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
@@ -35,7 +36,7 @@ from rt.middleware import (
 from rt.models import RunModels, build_model
 from rt.tools import backend_tool
 
-Graph = Literal["agent", "reviewer"]
+Graph = Literal["agent", "reviewer", "review-scout"]
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
 # Matches the in-process graphs' cap on model calls per run.
 _MODEL_CALL_LIMIT: Final = 5_000
@@ -77,19 +78,36 @@ def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[A
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
 
 
-def _code_mode(graph: Graph, from_code: Sequence[BaseTool]) -> list[AgentMiddleware]:
+def _code_mode(
+    graph: Graph, from_code: Sequence[BaseTool], described: Mapping[str, str]
+) -> list[AgentMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
-        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])]
-    if not from_code:
+        interpreter = CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])
+    elif from_code:
+        # As the in-process agent's code mode: state per turn, subagents through `task`.
+        interpreter = CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")
+    else:
         return []
-    # As the in-process agent's code mode: state per turn, subagents through `task`.
-    return [CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")]
+    return [interpreter, *([DescribedToolsMiddleware(described)] if described else [])]
 
 
 def _browser(graph: Graph) -> list[AgentMiddleware]:
-    """The coding agent's browser, a LangSmith browser per thread, when this deployment offers one."""
-    return [BrowserMiddleware()] if graph == "agent" and browser_enabled() else []
+    """The coding agent's browser, a LangSmith browser per thread, when this deployment offers one.
+
+    Off unless ``OPEN_SWE_BROWSER`` is set: the LangSmith browser is a beta each
+    workspace must have enabled, and ``BrowserMiddleware`` ships in
+    managed-deepagents 0.10, so it is imported only when turned on.
+    """
+    if graph != "agent" or os.environ.get("OPEN_SWE_BROWSER", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return []
+    from managed_deepagents.browser import BrowserMiddleware  # noqa: PLC0415
+
+    return [BrowserMiddleware()]
 
 
 # `mda build` reads the agent's name without running this factory, so its body
@@ -158,7 +176,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             BackendRunMiddleware(backend, context.invocation_id),
             *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(offered, excluded | code_only),
-            *_code_mode(context.graph, from_code),
+            *_code_mode(context.graph, from_code, catalog.described),
             *_browser(context.graph),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),

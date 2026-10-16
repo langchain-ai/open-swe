@@ -10,7 +10,7 @@ from langgraph.types import Command
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
 
-from rt.backend import BackendUnavailableError, OpenSweBackend, ToolSpec
+from rt.backend import BackendCallError, BackendUnavailableError, OpenSweBackend, ToolSpec
 from rt.tools import backend_tool
 
 
@@ -62,3 +62,17 @@ async def test_backend_connection_failures(
         assert result_message.status == ("success" if failures == 2 else "error")
         assert "secret-token" not in result_message.content
     assert client.post.await_count == attempts
+
+
+async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    failure = {"error": "RuntimeError", "message": "no sandbox provider"}
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(return_value=httpx2.Response(500, request=request, json=failure))
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+
+    with pytest.raises(BackendCallError, match="prepare failed: RuntimeError: no sandbox provider"):
+        await OpenSweBackend("secret-token").phase("prepare", {})

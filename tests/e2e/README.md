@@ -33,7 +33,7 @@ code runs for real.
 | GitHub webhook deliveries (CI, review, PR events)                | **real** route, driven by `POST /control/github-event` (signed)            |
 | Run-completion webhook (`/webhooks/run-complete`)                | **real** — LangGraph delivers it for every dispatched run; `langgraph.e2e.json` allows the loopback URL production rejects |
 | Submitted PR reviews, conditional merge, collaborator permission  | **fake** (`/fake-gh/...`), enforcing self-approval and head-SHA rules      |
-| Review page chat (`chat` graph) and its diff/comment/review tools | **real**; PR contents, compare and inline comments served by `/fake-gh`    |
+| Review page chat (the PR's `agent` thread) and its diff/comment/review tools | **real**; PR contents, compare and inline comments served by `/fake-gh`    |
 | Review scout sandbox                                              | **fake** (`patches.py`) — provisioning fails after a delay, so a scout run ends in a known error |
 | `users` rows + provider identities for the named test users      | **real** (seeded through `User.sign_in` / `link`)                          |
 
@@ -47,7 +47,7 @@ so what Playwright asserts on is exactly what the real agent produced.
 - `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece).
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
 - `agent_entrypoint.py` — langgraph `agent` graph: applies patches, re-exports the
-  real `traced_agent`. Agent and reviewer threads run on Managed Deep Agents, so
+  real `traced_agent`. Every Open SWE thread runs on Managed Deep Agents, so
   the backend builds this graph for each MDA run's hooks.
 - `mda-dev.sh` + `mda_entrypoint.py` — the Managed Deep Agents server: `mda build`
   output served by `langgraph dev` as `mda dev` serves it, with the fake model

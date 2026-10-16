@@ -59,6 +59,7 @@ from openswe.runtime import (
     graph_loaded_for_execution,
 )
 from openswe.sandboxes.repo_prep import prepare_review_repo
+from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
     walkthrough_describe_other,
@@ -269,7 +270,35 @@ def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> 
         return make_deferred_error_model(e, model_id=model_id)
 
 
+async def scout_models(cfg: RunConfig) -> SurfaceModels:
+    """The model the workspace picked for its review scout, which plans without subagents."""
+    settings = await cached_workspace_settings(cfg.workspace_slug)
+    model_id, effort = settings.review_scout_model
+    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
+    choice = ModelChoice(
+        model_id,
+        dict(
+            provider_model_kwargs(
+                model_id,
+                effort,
+                max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                openai_reasoning_default=DEFAULT_LLM_REASONING,
+            )
+        ),
+    )
+    return SurfaceModels(
+        main=choice, subagent=choice, use_gateway=settings.effective_gateway_enabled
+    )
+
+
 async def get_review_scout(config: RunnableConfig) -> Pregel:
+    return await build_review_scout(config)
+
+
+async def build_review_scout(
+    config: RunnableConfig, *, tool_surface: ToolSurface | None = None
+) -> Pregel:
+    """The review scout graph; ``tool_surface`` also receives what a remote model loop needs."""
     config = config.copy()
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
@@ -286,18 +315,9 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
             ],
         ).with_config(bindable_config(config))
 
-    settings = await cached_workspace_settings(cfg.workspace_slug)
-    model_id, effort = settings.review_scout_model
-    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
+    models = await scout_models(cfg)
     model = _make_model_or_defer(
-        model_id,
-        use_gateway=settings.effective_gateway_enabled,
-        **provider_model_kwargs(
-            model_id,
-            effort,
-            max_tokens=DEFAULT_LLM_MAX_TOKENS,
-            openai_reasoning_default=DEFAULT_LLM_REASONING,
-        ),
+        models.main.model_id, use_gateway=models.use_gateway, **models.main.kwargs
     )
 
     async def reconnect_backend(
@@ -305,7 +325,26 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     ) -> SandboxBackendProtocol:
         return await _ensure_scout_sandbox(_thread_id, _cfg)
 
-    return create_deep_agent(
+    middleware = cast(
+        list[AgentMiddleware[Any, Any, Any]],
+        [
+            PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
+            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
+            ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
+            ToolErrorMiddleware(),
+            ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
+            SanitizeFireworksMessagesMiddleware(),
+            SanitizeOpenAIResponsesMiddleware(),
+            SanitizeThinkingBlocksMiddleware(),
+            RepairOrphanedToolCallsMiddleware(),
+            StableToolResultOrderMiddleware(),
+            ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            ModelErrorMiddleware(),
+            ModelCallTimeoutMiddleware(),
+            FinishPlanMiddleware(thread_id=thread_id, config=config),
+        ],
+    )
+    graph = create_deep_agent(
         model=model,
         system_prompt=common_prompt(),
         subagents=[
@@ -324,26 +363,20 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
             ]
         ),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
-        middleware=cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-                ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
-                ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-                SanitizeFireworksMessagesMiddleware(),
-                SanitizeOpenAIResponsesMiddleware(),
-                SanitizeThinkingBlocksMiddleware(),
-                RepairOrphanedToolCallsMiddleware(),
-                StableToolResultOrderMiddleware(),
-                ModelRetryMiddleware(retry_on=(TimeoutError,)),
-                ModelErrorMiddleware(),
-                ModelCallTimeoutMiddleware(),
-                FinishPlanMiddleware(thread_id=thread_id, config=config),
-            ],
-        ),
+        middleware=middleware,
     ).with_config(bindable_config(config))
+    if tool_surface is not None:
+        tool_surface.graph = graph
+        tool_surface.middleware = middleware
+        tool_surface.models = models
+        tool_surface.subagents = [
+            SurfaceSubagent(
+                name=GENERAL_PURPOSE_SUBAGENT["name"],
+                description=GENERAL_PURPOSE_SUBAGENT["description"],
+                system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+            )
+        ]
+    return graph
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
