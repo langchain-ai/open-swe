@@ -6,6 +6,7 @@ point a call elsewhere. Every call is ``POST /remote-runtime/hooks/{hook}``.
 """
 
 import asyncio
+import logging
 import os
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -18,6 +19,8 @@ from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from rt.models import ModelSpec, RunModels
+
+logger = logging.getLogger(__name__)
 
 BACKEND_URL_ENV: Final = "OPEN_SWE_BACKEND_URL"
 # Graph state the backend's hooks read that MDA's own middleware keeps.
@@ -64,6 +67,10 @@ class BackendCallError(RuntimeError):
 
 class BackendTimeoutError(BackendCallError):
     """The backend did not answer in time; what the call started may still be running."""
+
+
+class BackendUnavailableError(BackendCallError):
+    """A transport or gateway failure left the call without a usable response."""
 
 
 class ToolSpec(BaseModel):
@@ -188,19 +195,32 @@ class OpenSweBackend:
             )
         if seconds is None:
             seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
-        try:
-            response = await _CONNECTIONS.client().post(
-                f"{self._base}/remote-runtime/hooks/{hook}",
-                headers={"Authorization": f"Bearer {self._run_token}"},
-                json=dict(body or {}),
-                timeout=seconds,
-            )
-            response.raise_for_status()
-        except httpx2.TimeoutException as exc:
-            raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
-        except httpx2.HTTPError as exc:
-            # Named by type only: transport errors can echo the request, and it carries the token.
-            raise BackendCallError(f"{hook} failed ({type(exc).__name__})") from exc
+        for attempt in range(3):
+            try:
+                response = await _CONNECTIONS.client().post(
+                    f"{self._base}/remote-runtime/hooks/{hook}",
+                    headers={"Authorization": f"Bearer {self._run_token}"},
+                    json=dict(body or {}),
+                    timeout=seconds,
+                )
+                response.raise_for_status()
+                break
+            except httpx2.TimeoutException as exc:
+                raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
+            except httpx2.ConnectError as exc:
+                if attempt == 2:
+                    raise BackendUnavailableError(f"{hook} failed (ConnectError)") from exc
+                logger.warning("Backend connection failed; retrying", extra={"hook": hook})
+                await asyncio.sleep((1, 3)[attempt])
+            except httpx2.HTTPError as exc:
+                error = (
+                    BackendUnavailableError
+                    if isinstance(exc, httpx2.TransportError)
+                    or isinstance(exc, httpx2.HTTPStatusError)
+                    and exc.response.status_code in {502, 503, 504}
+                    else BackendCallError
+                )
+                raise error(f"{hook} failed ({type(exc).__name__})") from exc
         return _json_object.validate_python(response.json())
 
     async def catalog(self, run_id: str | None) -> Catalog:
