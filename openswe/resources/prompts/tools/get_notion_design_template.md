@@ -1,0 +1,1 @@
+Return the team's design document template from Notion as Notion-flavored markdown. Read it before writing a design with `create_notion_design`, and keep its sections, order and formatting, replacing the italic guidance and sample content with the design itself. Keep a section's heading and say it does not apply rather than deleting it.

@@ -16,7 +16,7 @@ async def test_github_batch_ends_at_authorized_event(monkeypatch):
     from openswe.github import comments
 
     event = {
-        "body": "@open-swe Alice's request",
+        "body": "@jarvis-aeteq Alice's request",
         "author": "alice",
         "created_at": "2026-01-01T00:00:00Z",
         "type": "pr_comment",
@@ -36,7 +36,7 @@ async def test_github_batch_ends_at_authorized_event(monkeypatch):
                     },
                     {
                         "id": 2,
-                        "body": "@open-swe Bob's request",
+                        "body": "@jarvis-aeteq Bob's request",
                         "user": {"login": "bob"},
                         "created_at": "2026-01-01T00:00:01Z",
                     },
@@ -57,7 +57,7 @@ async def test_review_batch_keeps_same_second_inline_and_ignores_non_owner_tags(
     from openswe.github import comments
 
     event = {
-        "body": "@open-swe address review",
+        "body": "@jarvis-aeteq address review",
         "author": "alice",
         "type": "review",
         "comment_id": 90,
@@ -77,7 +77,7 @@ async def test_review_batch_keeps_same_second_inline_and_ignores_non_owner_tags(
                     },
                     {
                         "id": 2,
-                        "body": "@open-swe Bob",
+                        "body": "@jarvis-aeteq Bob",
                         "user": {"login": "bob"},
                         "created_at": "2026-01-01T00:00:01Z",
                     },
@@ -113,7 +113,7 @@ async def test_edited_github_trigger_keeps_context_since_previous_tag(monkeypatc
     from openswe.github import comments
 
     event = {
-        "body": "@open-swe revised request",
+        "body": "@jarvis-aeteq revised request",
         "author": "alice",
         "type": "pr_comment",
         "comment_id": 1,
@@ -128,8 +128,8 @@ async def test_edited_github_trigger_keeps_context_since_previous_tag(monkeypatc
             "created_at": f"2026-01-01T00:00:0{index}Z",
         }
         for index, body in [
-            (1, "@open-swe stale trigger"),
-            (2, "@open-swe previous invocation"),
+            (1, "@jarvis-aeteq stale trigger"),
+            (2, "@jarvis-aeteq previous invocation"),
             (3, "Do not delete customer data"),
             (6, "Future context"),
         ]

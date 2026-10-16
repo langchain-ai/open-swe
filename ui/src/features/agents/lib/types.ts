@@ -26,6 +26,7 @@ export type AgentSource =
   | "github"
   | "slack"
   | "linear"
+  | "notion"
   | "schedule"
 
 export type AgentThreadCategory =
@@ -61,6 +62,7 @@ export type AcpToolKind =
   | "fetch"
   | "slack"
   | "linear"
+  | "notion"
   | "sql"
   | "managed-tools"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */

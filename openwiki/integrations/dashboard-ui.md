@@ -4,50 +4,48 @@ title: Dashboard and Desktop Clients
 description: The dashboard's FastAPI API, React/TanStack Start serving and proxy boundary, authenticated product capabilities, and the Electron client's supervised local-project execution model.
 tags: [dashboard, fastapi, oauth, threads, authorization, tanstack-start, electron, langgraph]
 sources:
-  - id: openwiki-source-328bde9e94017848bb09ba23
-    resource: repo://agent/api/app.py
-  - id: openwiki-source-412c2c84023da365b8201b9f
-    resource: repo://agent/dashboard/__init__.py
-  - id: openwiki-source-09b129ff728dd4990ea2f25e
-    resource: repo://agent/dashboard/agent_instructions.py
-  - id: openwiki-source-5460c3972fe61bb256d07994
-    resource: repo://agent/dashboard/oauth.py
-  - id: openwiki-source-61ace7d4952db9ddb8316aeb
-    resource: repo://agent/dashboard/routes.py
-  - id: openwiki-source-202e70aa1fb446ab05cc6d99
-    resource: repo://agent/dashboard/schedules.py
-  - id: openwiki-source-fb23e4421b72cc55be83e96d
-    resource: repo://agent/dashboard/skills.py
-  - id: openwiki-source-dc33a233b67bb1d08952543c
-    resource: repo://agent/dashboard/thread_api.py
-  - id: openwiki-source-8c60a9544ea26006748dd7a3
-    resource: repo://agent/desktop.py
-  - id: openwiki-source-31ac80d273943055d537bae8
-    resource: repo://agent/review/styles.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-6e64b1ccdb133daeb8f4d1d4
-    resource: repo://agent/utils/dashboard_ui.py
-  - id: openwiki-source-2f66613e587b7c57d9be522e
-    resource: repo://desktop/README.md
   - id: openwiki-source-f94f5d5d16b6aac2f4bc309c
     resource: repo://desktop/src/backend-supervisor.cjs
-  - id: openwiki-source-62d0819e47a738ba26f898fd
-    resource: repo://tests/dashboard/test_dashboard_thread_api_activity.py
-  - id: openwiki-source-654bec991273a9eb3ccdf2c1
-    resource: repo://tests/dashboard/test_dashboard_thread_api.py
+  - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
+    resource: repo://openswe/api/app.py
+  - id: openwiki-source-e4bce0ee35cec33ca72293f7
+    resource: repo://openswe/dashboard/__init__.py
+  - id: openwiki-source-6128627021aa8b6393710ab1
+    resource: repo://openswe/dashboard/auth_routes.py
+  - id: openwiki-source-c6809bf047de06f004194bd4
+    resource: repo://openswe/dashboard/deps.py
+  - id: openwiki-source-50d64b46ab06b6436266b4d0
+    resource: repo://openswe/dashboard/oauth.py
+  - id: openwiki-source-7fc33e4789861923a6f12e78
+    resource: repo://openswe/dashboard/routes.py
+  - id: openwiki-source-3e4d955c2e907c017e3302d0
+    resource: repo://openswe/desktop.py
+  - id: openwiki-source-d4133df2d22c7f7c9b56d1fc
+    resource: repo://openswe/review/routes.py
+  - id: openwiki-source-7ee154e2a5d8a9f6403ac301
+    resource: repo://openswe/schedules/routes.py
+  - id: openwiki-source-919e16feae379651f2cbc1c9
+    resource: repo://openswe/server.py
+  - id: openwiki-source-1b56c0378ee7dbe5ac66ab32
+    resource: repo://openswe/threads/handlers.py
+  - id: openwiki-source-eedbca98a88c0fad1cac9934
+    resource: repo://openswe/threads/listing.py
+  - id: openwiki-source-a21a5bab5cd5ef26a5d5e360
+    resource: repo://openswe/threads/summary.py
+  - id: openwiki-source-59a48f28b14dd2fa02f2e8c3
+    resource: repo://openswe/threads/terminal.py
+  - id: openwiki-source-33b1621aff91e24fa4b85e3f
+    resource: repo://openswe/utils/dashboard_ui.py
   - id: openwiki-source-cee8c9d42a08db69733a075f
     resource: repo://ui/server/backend-proxy.ts
   - id: openwiki-source-3b0d59e2570cb537382d8c12
     resource: repo://ui/src/lib/dashboard-fetch.ts
-  - id: openwiki-source-c7a3ad58e4b4017484c1e326
-    resource: repo://ui/src/routes/agents.tsx
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
+generated: { by: "openwiki/0.4.2", at: "2026-10-05T16:54:23.398Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+    at: 2026-10-13T15:44:17.388Z
 ---
 
 # Dashboard and Desktop Clients
@@ -61,6 +59,46 @@ The dashboard is the human-facing surface around the agent: a FastAPI router, a 
 When a dashboard build is available, `agent.utils.dashboard_ui` mounts immutable hashed assets at `/assets` and serves `_shell.html` for HTML navigation requests. It deliberately declines API, webhook, health, LangGraph, docs, metrics, and asset prefixes; a non-HTML request for an unknown UI route is likewise left for the underlying server to return as a 404. The shell is `no-cache` so it can reference a new asset manifest, while hashed assets can be cached for a year. With `DASHBOARD_DEV_SERVER_URL`, the backend instead reverse-proxies non-reserved traffic to Vite, preserving the backend origin and redirect responses. The catch-all is registered last; code which subsequently adds a route must call `keep_dashboard_ui_last`.
 
 `DASHBOARD_STATIC_DIR` selects an explicit build; otherwise the in-repository `ui/.output/public` build is used when present. A build served under a LangGraph mount prefix must be built with the matching `DASHBOARD_BASE_PATH`. The UI router uses Vite's `BASE_URL` as its `basepath`, so client navigation follows that mount.
+
+```text
+graph TB
+    subgraph Deployment["Production deployment"]
+        Browser["Browser<br/>(same-origin)"]
+        Nitro["Nitro UI Server<br/>port 3000"]
+        BackendProxy["Proxy handler<br/>/dashboard/api/**<br/>/webhooks/**"]
+        PythonAPI["Python FastAPI<br/>port 2024"]
+    end
+    
+    subgraph DevFlow["Development mode"]
+        DevBrowser["Browser"]
+        ViteDev["Vite Dev Server<br/>with HMR"]
+        PythonDev["FastAPI loopback"]
+    end
+    
+    subgraph Desktop["Electron local mode"]
+        Renderer["Renderer process<br/>open-swe://app"]
+        DesktopProxy["Local-graph proxy<br/>bearer token auth"]
+        LocalBackend["Supervised backend<br/>127.0.0.1:random"]
+    end
+    
+    Browser -->|relative /dashboard/api/*| Nitro
+    Nitro -->|route to| BackendProxy
+    BackendProxy -->|forward| PythonAPI
+    
+    DevBrowser -->|relative /dashboard/api/*| ViteDev
+    ViteDev -->|proxy| PythonDev
+    
+    Renderer -->|/dashboard/api/**| DesktopProxy
+    Renderer -->|/local-graph/**| DesktopProxy
+    DesktopProxy -->|configured backend| PythonAPI
+    DesktopProxy -->|loopback| LocalBackend
+    
+    style Nitro fill:#e1f5ff
+    style BackendProxy fill:#e1f5ff
+    style ViteDev fill:#fff3e0
+    style DesktopProxy fill:#f3e5f5
+```
+Diagram: dashboard architecture showing production Nitro proxy, development Vite flow, and Electron desktop routing with loopback backend supervision.
 
 ```mermaid
 sequenceDiagram
@@ -82,7 +120,7 @@ Diagram: normal web traffic reaches the dashboard API through either the UI serv
 
 GitHub login creates signed state containing a hash of a nonce placed in a short-lived, HTTP-only state cookie, then redirects to GitHub. The callback verifies the state cookie for normal browser login, exchanges the authorization code, resolves the GitHub user, applies the organization login gate, persists the token response, and redirects with a signed session cookie. A desktop handoff is different: after the same identity checks it returns a PKCE-challenge-bound code to the desktop loopback listener without setting a browser session; `POST /auth/desktop/exchange` requires the matching verifier before minting the desktop session.
 
-Cookie security is derived from the API URL and whether UI and API share an origin: HTTP is non-secure and `SameSite=Lax`; same-origin HTTPS is `Secure; SameSite=Lax`; split-origin HTTPS is `Secure; SameSite=None`. `require_session` turns a missing or invalid session cookie into `401`. Admin routes additionally enforce `is_admin`; CI admin operations may authenticate with an Actions OIDC token or an administrator GitHub PAT.
+Cookie security is derived from the API URL and whether UI and API share an origin: HTTP is non-secure and `SameSite=Lax`; same-origin HTTPS is `Secure; SameSite=Lax`; split-origin HTTPS is `Secure; SameSite=None`. `require_session` turns a missing or invalid session cookie into `401`. Admin routes additionally enforce `is_admin`; no alternate authentication methods are currently supported for dashboard admin endpoints.
 
 The router-wide CSRF guard permits safe methods and a request authenticated only with an explicit bearer token. Cookie-authenticated mutations require an allowed `Origin` or `Referer`; WebSockets always receive the origin check. This control protects the ambient cookie, not business authority: individual endpoints still enforce administrator status, repository access, or thread postability. At app construction, credentialed CORS may be configured from `DASHBOARD_ALLOWED_ORIGINS`, but `*` is rejected because it is unsafe with credentials.
 

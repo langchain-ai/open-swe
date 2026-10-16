@@ -27,6 +27,7 @@ def dispatch_run_config(
         "source",
         "slack_thread",
         "linear_issue",
+        "notion_page",
         "github_issue",
         "pr_number",
         "github_login",
@@ -53,7 +54,7 @@ def _source_context(cfg: RunConfig) -> SourceContext:
     return SourceContext.parse(
         {
             key: dumped[key]
-            for key in ("slack_thread", "linear_issue", "github_issue")
+            for key in ("slack_thread", "linear_issue", "notion_page", "github_issue")
             if isinstance(dumped.get(key), Mapping)
         }
     )

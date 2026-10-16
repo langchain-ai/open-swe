@@ -339,7 +339,7 @@ function UsageAnalyticsPeriod({
           </div>
         ) : !leaderboard.data?.total_members ? (
           <div className="p-space-5 text-center text-xs text-secondary">
-            No Open SWE Agent usage has been recorded for{" "}
+            No Jarvis Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
         ) : (
@@ -387,8 +387,8 @@ function UsageAnalyticsPeriod({
       </SettingsSection>
 
       <SettingsSection
-        title="Reviewer Stats"
-        description="Issues surfaced by Open SWE Review and how often users addressed them."
+        title="Reviewer stats"
+        description="Issues surfaced by Jarvis Review and how often users addressed them."
       >
         {leaderboard.isLoading ? (
           <div className="grid gap-space-3 p-space-4 sm:grid-cols-2">

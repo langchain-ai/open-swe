@@ -316,7 +316,7 @@ def _setup_slack_mention_fakes(
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     monkeypatch.setattr(slack_webhooks, "get_langsmith_trace_url", _fake_trace_url)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "jarvis-aeteq")
     monkeypatch.setattr(webhook_common, "get_slack_user_info", fake_get_slack_user_info)
     monkeypatch.setattr(
         webhook_common, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages
@@ -662,9 +662,7 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
                     "bot_user_id": "UBOT",
                 }
             ),
-            webhook_common.SlackRepoResolution(
-                Repo(owner="langchain-ai", name="open-swe"), explicit=True
-            ),
+            webhook_common.SlackRepoResolution(Repo(owner="aeteq", name="open-swe"), explicit=True),
         )
     )
 
@@ -719,9 +717,7 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
                     "bot_user_id": "UBOT",
                 }
             ),
-            webhook_common.SlackRepoResolution(
-                Repo(owner="langchain-ai", name="open-swe"), explicit=True
-            ),
+            webhook_common.SlackRepoResolution(Repo(owner="aeteq", name="open-swe"), explicit=True),
         )
     )
 

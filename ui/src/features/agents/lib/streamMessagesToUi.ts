@@ -43,6 +43,7 @@ export function toolKind(name: string): ToolKind {
   if (lowered === "slack_reply") return "slack"
   if (lowered === "connect_managed_tools") return "managed-tools"
   if (lowered === "linear_comment") return "linear"
+  if (lowered === "comment_on_notion_task") return "notion"
   if (
     EDIT_TOOLS.has(lowered) ||
     ["edit", "write", "replace"].some((t) => lowered.includes(t))

@@ -22,7 +22,7 @@ def _unowned_repo_issue_comment_payload() -> dict[str, Any]:
     return {
         "action": "created",
         "issue": {"id": 12345, "number": 42, "title": "Fix the flaky test"},
-        "comment": {"body": "@open-swe help"},
+        "comment": {"body": "@jarvis-aeteq help"},
         "repository": {"owner": {"login": "acme"}, "name": "unowned"},
         "sender": {"login": "octocat"},
     }

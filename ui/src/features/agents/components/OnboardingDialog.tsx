@@ -31,7 +31,7 @@ export function OnboardingDialog() {
       <DialogContent
         title="Connect your Slack account"
         titleIcon={SlackLogoIcon}
-        description="Connect Slack so that when you tag Open SWE, it can resolve your GitHub account. We use the email Slack verifies, which also lets Linear mentions resolve to you."
+        description="Connect Slack so that when you tag Jarvis, it can resolve your GitHub account. We use the email Slack verifies, which also lets Linear mentions resolve to you."
         showClose={false}
         className="w-[min(28rem,calc(100vw-2rem))]"
       >
