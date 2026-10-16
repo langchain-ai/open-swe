@@ -1,6 +1,5 @@
 """Natural-language search with Jev: one yes/no request per candidate, a page at a time."""
 
-import asyncio
 import logging
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
@@ -74,24 +73,25 @@ class JevSearch:
     ) -> list[float | None]:
         if not cards:
             return []
-        async with asyncio.timeout(JEV_SEARCH_TIMEOUT_SECONDS):
-            # abatch returns exceptions in place, but is typed `list[Output]`:
-            # https://github.com/langchain-ai/langchain/issues/41276
-            responses: list[ClassifierResponse | Exception] = await classifier.abatch(  # ty: ignore[invalid-assignment]
-                [
-                    {
-                        "state": {
-                            "query": self.query,
-                            "today": self._today,
-                            self.subject: card.model_dump(mode="json", exclude_none=True),
-                        },
-                        "questions": {"match": self._question},
-                    }
-                    for card in cards
-                ],
-                config={"tags": ["nostream"]},
-                return_exceptions=True,
-            )
+        # No page-wide deadline: each request has the client's own timeout, so a
+        # slow one fails alone instead of discarding the rest of the page.
+        # abatch returns exceptions in place, but is typed `list[Output]`:
+        # https://github.com/langchain-ai/langchain/issues/41276
+        responses: list[ClassifierResponse | Exception] = await classifier.abatch(  # ty: ignore[invalid-assignment]
+            [
+                {
+                    "state": {
+                        "query": self.query,
+                        "today": self._today,
+                        self.subject: card.model_dump(mode="json", exclude_none=True),
+                    },
+                    "questions": {"match": self._question},
+                }
+                for card in cards
+            ],
+            config={"tags": ["nostream"]},
+            return_exceptions=True,
+        )
         failures = [response for response in responses if isinstance(response, Exception)]
         if len(failures) == len(responses):
             raise failures[0]
