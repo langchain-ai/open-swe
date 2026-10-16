@@ -138,6 +138,7 @@ from openswe.middleware.require_user_reply import (
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import warn_stale_workspace
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+from openswe.middleware.tool_descriptions import ToolDescriptionMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.model_request import (
     ModelSelectionDecision,
@@ -2165,6 +2166,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             *([image_fallback] if image_fallback else []),
             *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
             *([mcp_ptc] if mcp_ptc is not None else []),
+            ToolDescriptionMiddleware(),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeOpenAIResponsesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),

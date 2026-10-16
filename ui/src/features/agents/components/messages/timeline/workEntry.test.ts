@@ -49,6 +49,24 @@ describe("describeWorkEntry", () => {
     expect(entry.icon).toBe("eye")
   })
 
+  it("labels a described call with its description, keeping the command in the tooltip", () => {
+    const entry = describeWorkEntry(
+      chunk({
+        title: "execute",
+        toolKind: "execute",
+        input: {
+          display_description: "Run the auth tests",
+          command: "pytest tests/auth",
+        },
+      }),
+      repoPath
+    )
+
+    expect(entry.heading).toBe("Shell")
+    expect(entry.preview).toBe("Run the auth tests")
+    expect(entry.previewTooltip).toBe("pytest tests/auth")
+  })
+
   it("describes a completed edit from its diff rather than the raw tool title", () => {
     const entry = describeWorkEntry(
       chunk({ title: "edit_file", toolKind: "edit", diffData: diff() }),
