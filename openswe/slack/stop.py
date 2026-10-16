@@ -270,10 +270,12 @@ async def _process_agent_session_stopped(
             email=user.email,
             on_interrupted=partial(release_slack_location_status, channel_id, thread_ts),
         )
+        follow_ups = await client.runs.list(thread_id, status="pending", limit=1, offset=0)
         await post_slack_thread_reply(
             channel_id,
             thread_ts,
-            "Stop requested. Queued follow-ups may still run; you can continue in this thread.",
+            "Stopped. Starting the queued follow-up next." if follow_ups else "Stopped.",
+            agent_thread_id=thread_id,
         )
         return
     if event_id and not await claim_slack_event(event_id):

@@ -287,6 +287,9 @@ async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_ded
     assert client.cleared_queues == []
     assert "latest_run_status" not in client.threads.values[code_thread_id]["metadata"]
     status.assert_awaited_once_with("C123", "1.000", "")
+    slack_client.post_slack_thread_reply.assert_awaited_once_with(
+        "C123", "1.000", "Stopped. Starting the queued follow-up next.", agent_thread_id=thread_id
+    )
 
 
 @pytest.mark.parametrize("rejection", ["workspace", "moved", "unlinked", "private"])
