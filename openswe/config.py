@@ -216,9 +216,15 @@ ENV.var(
 ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): its "
-    "channels present it when they hand events to /linear/channel/*. Open SWE's own "
-    "credential between the two; required for the Linear channel.",
+    "channels present it when they hand events to /linear/channel/* and /github/channel/*. "
+    "Open SWE's own credential between the two; required for the Linear channel and "
+    "GITHUB_ISSUES_VIA_MDA_CHANNEL.",
     secret=True,
+)
+ENV.var(
+    "GITHUB_ISSUES_VIA_MDA_CHANNEL",
+    "Repositories (comma-separated owner/repo, or * for all) whose @openswe issue mentions "
+    "go to MDA_RUNTIME_URL's GitHub channel instead of starting runs here. Off when unset.",
 )
 ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",

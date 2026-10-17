@@ -101,6 +101,9 @@ jobs:
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # and the secret they share.
           printf 'OPEN_SWE_BACKEND_URL=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$MDA_SERVICE_SECRET" >mda/.env
+          # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
+          # which forwards issue mentions to the channel.
+          export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"
           mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \

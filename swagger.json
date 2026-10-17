@@ -968,6 +968,52 @@
         "title": "ChallengeResponse",
         "type": "object"
       },
+      "ChannelEvent": {
+        "additionalProperties": false,
+        "description": "An event MDA's GitHub channel verified, as its handler hands it over.",
+        "properties": {
+          "delivery_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Delivery Id",
+            "type": "string"
+          },
+          "event": {
+            "enum": [
+              "issues.opened",
+              "issues.edited",
+              "issues.reopened",
+              "issue_comment.created",
+              "issue_comment.edited"
+            ],
+            "title": "Event",
+            "type": "string"
+          },
+          "interrupted": {
+            "default": false,
+            "title": "Interrupted",
+            "type": "boolean"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "thread_id": {
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "delivery_id",
+          "event",
+          "payload"
+        ],
+        "title": "ChannelEvent",
+        "type": "object"
+      },
       "CheckpointFile": {
         "additionalProperties": false,
         "description": "One file a turn changed, as ``git diff --numstat`` counted it.",
@@ -3923,6 +3969,31 @@
           "html_url"
         ],
         "title": "PostedReviewComment",
+        "type": "object"
+      },
+      "PreparedGitHubRun": {
+        "description": "The run the channel starts, if any, and whether Open SWE acts on the event at all.",
+        "properties": {
+          "acts": {
+            "title": "Acts",
+            "type": "boolean"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreparedRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "run",
+          "acts"
+        ],
+        "title": "PreparedGitHubRun",
         "type": "object"
       },
       "PreparedLinearRun": {
@@ -21282,6 +21353,45 @@
           "dashboard",
           "settings"
         ]
+      }
+    },
+    "/github/channel/runs": {
+      "post": {
+        "description": "Prepare the run an @openswe mention on an issue starts on the channel's thread.",
+        "operationId": "prepare_github_run_github_channel_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreparedGitHubRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prepare Github Run"
       }
     },
     "/health": {
