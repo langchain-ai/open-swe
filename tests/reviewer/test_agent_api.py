@@ -453,7 +453,11 @@ async def test_operation_respects_open_tool_argument_schemas(additional: JsonVal
     from openswe.agent_api.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
-    schema: dict[str, JsonValue] = {"type": "object", "properties": {}}
+    schema: dict[str, JsonValue] = {
+        "type": "object",
+        "properties": {"repo": {"type": "string"}, "limit": {"type": "integer"}},
+        "required": ["repo"],
+    }
     if additional is not None:
         schema["additionalProperties"] = additional
 
@@ -464,7 +468,7 @@ async def test_operation_respects_open_tool_argument_schemas(additional: JsonVal
         coroutine=homebase, name="homebase", description="Homebase tool", args_schema=schema
     )
     session = RunSession(ToolSurface(tools={tool.name: tool}), {}, None, started_here=True)
-    arguments: dict[str, JsonValue] = {"commit": "abc123"}
+    arguments: dict[str, JsonValue] = {"repo": "open-swe", "commit": "abc123"}
 
     result = await session.operation(
         RunOperation(name=tool.name, arguments=arguments, request_id="call-1")
@@ -476,7 +480,10 @@ async def test_operation_respects_open_tool_argument_schemas(additional: JsonVal
         assert json.loads(result.content) == arguments
     else:
         assert result.status == "error"
-        assert result.content == "Unexpected arguments for homebase: commit"
+        assert result.content == (
+            "Unexpected arguments for homebase: commit. "
+            "Accepted parameters: limit, repo* (* = required)"
+        )
 
 
 def test_run_token_round_trips_the_signed_run() -> None:

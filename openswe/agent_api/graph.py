@@ -713,12 +713,8 @@ async def run_operation(
         return OperationResult(
             content=f"{request.name} is not one of this run's operations", status="error"
         )
-    unexpected = _unexpected_arguments(tool, request.arguments)
-    if unexpected:
-        return OperationResult(
-            content=f"Unexpected arguments for {request.name}: {', '.join(sorted(unexpected))}",
-            status="error",
-        )
+    if rejection := _argument_rejection(tool, request.name, request.arguments):
+        return OperationResult(content=rejection, status="error")
     if client is not None and (pending := client.pending_result(request.name, request.request_id)):
         return _operation_result(pending, request.request_id)
     events: list[object] = []
@@ -1186,13 +1182,26 @@ def _json_or_text(value: object) -> JsonValue:
         return str(value)
 
 
-def _unexpected_arguments(tool: BaseTool, arguments: Mapping[str, JsonValue]) -> set[str]:
+def _argument_rejection(
+    tool: BaseTool, name: str, arguments: Mapping[str, JsonValue]
+) -> str | None:
+    """Why ``arguments`` don't fit ``tool``'s schema, naming what it accepts instead."""
     schema = tool_parameters(tool)
     additional = schema.get("additionalProperties")
     if additional is True or isinstance(additional, Mapping):
-        return set()
-    properties = schema.get("properties")
-    return set(arguments) - (set(properties) if isinstance(properties, Mapping) else set())
+        return None
+    raw_properties = schema.get("properties")
+    properties = sorted(raw_properties) if isinstance(raw_properties, Mapping) else []
+    unexpected = sorted(set(arguments) - set(properties))
+    if not unexpected:
+        return None
+    raw_required = schema.get("required")
+    required = set(raw_required) if isinstance(raw_required, list) else set()
+    accepted = ", ".join(f"{key}{'*' if key in required else ''}" for key in properties)
+    return (
+        f"Unexpected arguments for {name}: {', '.join(unexpected)}. "
+        f"Accepted parameters: {accepted or '(none)'} (* = required)"
+    )
 
 
 def _operation_result(outcome: ToolMessage | Command, request_id: str) -> OperationResult:
