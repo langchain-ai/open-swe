@@ -117,6 +117,102 @@ class TestRequireUserReplyMiddleware:
         assert result == {"reply_nudges": 0}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "prior",
+        [
+            [],
+            [_call(NO_REPLY_TOOL, "first"), _result("first", success=False)],
+            [
+                _call(NO_REPLY_TOOL, "first"),
+                ToolMessage(content="failed", tool_call_id="first", status="error"),
+            ],
+            [_call(NO_REPLY_TOOL, "first"), _result("unrelated")],
+            [_call(NO_REPLY_TOOL, "first"), _result("first"), HumanMessage(content="new turn")],
+        ],
+    )
+    async def test_no_reply_declaration_without_success_can_execute(
+        self, prior: list[BaseMessage]
+    ) -> None:
+        result = await _middleware().aafter_model(
+            _state(HumanMessage(content="worker finished"), *prior, _call(NO_REPLY_TOOL, "next")),
+            _runtime(),
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_other_tools_after_no_reply_success_can_execute(self) -> None:
+        latest = _call(NO_REPLY_TOOL, "next")
+        latest.tool_calls.extend(_call("execute", "work").tool_calls)
+        result = await _middleware().aafter_model(
+            _state(
+                HumanMessage(content="worker finished"),
+                _call(NO_REPLY_TOOL, "first"),
+                _result("first"),
+                latest,
+            ),
+            _runtime(),
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("completion_required", [False, True])
+    async def test_background_wake_executes_no_reply_only_once(
+        self, completion_required: bool
+    ) -> None:
+        from openswe.slack.tools.no_reply_needed import REQUIRED_CONFIRMATION, slack_no_reply_needed
+
+        async def slack_reply(message: str, response_type: str) -> dict[str, object]:
+            """Post a reply."""
+            return {"success": True}
+
+        responses = iter(
+            [
+                _call(
+                    NO_REPLY_TOOL,
+                    call_id,
+                    reason="Nothing to report",
+                    confirmation=REQUIRED_CONFIRMATION,
+                )
+                for call_id in ("first", "repeat")
+            ]
+            + ([_reply("final"), AIMessage(content="")] if completion_required else [])
+        )
+
+        @wrap_model_call
+        async def scripted(
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            return ModelResponse(result=[next(responses)])
+
+        graph = create_agent(
+            model=FakeListChatModel(responses=[""]),
+            tools=[slack_no_reply_needed, slack_reply],
+            middleware=[_middleware(), scripted],
+        )
+        messages: list[BaseMessage] = [HumanMessage(content="Background worker completed")]
+        if completion_required:
+            messages.extend(
+                [
+                    _call("expedite_pr_approval", "card"),
+                    ToolMessage(
+                        content='{"success": true, "completion_reply_required": true}',
+                        tool_call_id="card",
+                    ),
+                ]
+            )
+        result = await graph.ainvoke({"messages": messages})
+        results = [message for message in result["messages"] if isinstance(message, ToolMessage)]
+
+        assert [message.tool_call_id for message in results] == (
+            ["card", "first", "final"] if completion_required else ["first"]
+        )
+        assert not result["messages"][-1].tool_calls
+        assert next(responses, None) is None
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("final_reply", [False, True])
     async def test_private_card_requires_a_completion_reply(self, final_reply: bool) -> None:
         messages: list[BaseMessage] = [
