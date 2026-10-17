@@ -1281,3 +1281,34 @@ async def test_performance_directive_switches_unless_quoted(
         assert notice.call_args.args[:2] == ("C123", "U123")
         assert "openai:gpt-6-astra" in notice.call_args.args[2]
         assert notice.call_args.kwargs["thread_ts"] == "1700000000.000100"
+
+
+async def test_button_click_preserves_requester_and_distinct_event_with_real_reaction_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    await slack_webhooks._process_slack_mention_impl(
+        SlackRequest(
+            channel_id="C123",
+            thread_ts="1700000000.000100",
+            event_ts="1700000000.000300",
+            original_message_ts="1700000000.000200",
+            thread_id="mapped-thread",
+            user_id="U123",
+            text="Selected option",
+            bot_user_id="UBOT",
+        ),
+        None,
+    )
+    run = captured["run_create"]
+    assert isinstance(run, dict)
+    config = run["kwargs"]["config"]["configurable"]
+    assert config["slack_thread"]["triggering_event_ts"] == "1700000000.000300"
+    assert config["slack_thread"]["original_message_ts"] == "1700000000.000200"
+    assert config["slack_thread"]["triggering_user_id"] == "U123"
+    assert config["github_login"] == "mason-gh"
+    context = captured["context_messages"]
+    assert isinstance(context, list)
+    assert any(message["ts"] == "1700000000.000300" for message in context)
+    assert "Selected option" in str(run["kwargs"]["input"])

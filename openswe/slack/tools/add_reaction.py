@@ -27,11 +27,18 @@ async def slack_add_reaction(
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
 
     trigger_ts = active.get("triggering_event_ts")
+    original_ts = active.get("original_message_ts")
     if isinstance(slack_thread, dict) and all(
         slack_thread.get(key) == active.get(key) for key in ("channel_id", "thread_ts")
     ):
         trigger_ts = slack_thread.get("triggering_event_ts") or trigger_ts
-    target_ts = (message_ts or trigger_ts or "").strip()
+        original_ts = slack_thread.get("original_message_ts")
+    target_ts = (
+        (original_ts or trigger_ts)
+        if message_ts is None or message_ts == trigger_ts
+        else message_ts
+    )
+    target_ts = (target_ts or "").strip()
     if not target_ts:
         return {
             "success": False,

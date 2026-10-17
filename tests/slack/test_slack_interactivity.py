@@ -148,6 +148,10 @@ async def test_option_interaction_schedules_update_before_agent_processing(
         "Option B",
     )
     process.assert_awaited_once()
+    request = process.await_args.args[0]
+    assert request.event_ts == "3.0"
+    assert request.original_message_ts == "2.0"
+    assert request.user_id == "U1"
 
 
 @pytest.mark.asyncio
