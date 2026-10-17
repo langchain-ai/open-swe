@@ -108,6 +108,21 @@ def _warn_in_process(scope: Scope, thread: IndexedThread, assistant_id: JsonValu
     )
 
 
+async def _warn_if_checkpointed(scope: Scope, thread: IndexedThread) -> None:
+    """Warn for a thread with checkpoints here; a fresh one moves to MDA on its first run."""
+    try:
+        checkpointed = await RUNTIMES.local.has_history(thread.thread_id)
+    except Exception:
+        logger.warning(
+            "Checking a thread for in-process checkpoints failed",
+            extra={"thread_id": thread.thread_id},
+            exc_info=True,
+        )
+        return
+    if checkpointed:
+        _warn_in_process(scope, thread)
+
+
 async def _not_found(send: Send, thread_id: str) -> None:
     await send_json(send, 404, {"detail": f"Thread {thread_id} not found"})
 
@@ -365,8 +380,8 @@ class ThreadRouter:
         if thread is None:
             await _not_found(send, thread_id)
             return
-        if thread.runtime != "mda" and await RUNTIMES.local.has_history(thread_id):
-            _warn_in_process(scope, thread)
+        if thread.runtime != "mda":
+            await _warn_if_checkpointed(scope, thread)
         made = _object.validate_python(
             await RUNTIMES.runs_on(thread.runtime).client.http.post(
                 f"/threads/{thread_id}/copy", json={}
@@ -393,9 +408,8 @@ class ThreadRouter:
             await mda.ensure_remote_thread(thread_id)
             await forward(mda.http, scope, send, body)
             return
-        # A fresh thread stays here only until its first run claims it for MDA.
-        if thread is not None and await RUNTIMES.local.has_history(thread_id):
-            _warn_in_process(scope, thread)
+        if thread is not None:
+            await _warn_if_checkpointed(scope, thread)
         await self.app(scope, receive, send)
 
     async def _cancel_many(self, scope: Scope, receive: Receive, send: Send, body: bytes) -> None:
