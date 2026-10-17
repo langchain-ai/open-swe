@@ -49,6 +49,35 @@ async def test_participant_context_includes_slack_identity(
     assert f"slack_user_id: {source_slack_id or 'U_LINKED'}" in content
 
 
+@pytest.mark.asyncio
+async def test_unresolved_sender_is_described_from_their_user_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from openswe.server import _thread_participants
+    from openswe.users.models import UserIdentity
+
+    user = User(
+        display_name="Ramon",
+        identities=[UserIdentity(provider="github", external_id="1", login="ramon")],
+    )
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=user))
+    monkeypatch.setattr("openswe.server._thread_participant_identities", AsyncMock(return_value=[]))
+    monkeypatch.setattr("openswe.server._user_for_login", AsyncMock(return_value=user))
+    monkeypatch.setattr("openswe.server.load_profile", AsyncMock(return_value={}))
+    monkeypatch.setattr("openswe.server.participant_is_admin", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        "openswe.server._resolve_user_custom_instructions", AsyncMock(return_value="")
+    )
+    person_id = "user:01a0ac0d-35b2-74be-bf3c-94de8522386a"
+    [participant] = await _thread_participants("t", {}, None, sender_person_id=person_id)
+    assert participant.person_id == person_id
+    assert participant.identity.display_name == "Ramon"
+    assert participant.identity.github_login == "ramon"
+    assert participant.linked is True
+
+
 async def test_participant_identity_ignores_users_table_email(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

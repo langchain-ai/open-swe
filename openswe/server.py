@@ -14,6 +14,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 from openswe.config import ENV
 
@@ -454,6 +455,22 @@ async def _user_for_login(login: str) -> User | None:
         return None
 
 
+async def _user_for_person_id(person_id: str) -> User | None:
+    """The ``users`` row a ``user:<uuid>`` person id names, or ``None``."""
+    platform, _, external_id = person_id.partition(":")
+    if platform != "user":
+        return None
+    try:
+        return await User.get(UUID(external_id))
+    except Exception:
+        logger.warning(
+            "Could not resolve a sender from their person id",
+            extra={"person_key": person_id},
+            exc_info=True,
+        )
+        return None
+
+
 async def _thread_participant(
     identity: CollaboratorIdentity,
     config: RunnableConfig,
@@ -513,6 +530,14 @@ async def _thread_participants(
     is all anyone knows.
     """
     identities = await _thread_participant_identities(thread_id)
+    if sender is None and not sender_display_name:
+        # Runs started without the sender's credentials, such as background-task
+        # completions, must not describe a known person as the bot.
+        user = await _user_for_person_id(sender_person_id)
+        if user is not None and user.github_login:
+            sender = (await resolve_participant_identities([user.github_login]))[0]
+        elif user is not None:
+            sender_display_name = user.display_name
     resolved_sender = sender or (
         CollaboratorIdentity(display_name=sender_display_name, commit_name="", commit_email="")
         if sender_display_name
