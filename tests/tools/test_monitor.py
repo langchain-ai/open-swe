@@ -7,10 +7,12 @@ from unittest.mock import AsyncMock
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
+from openswe.database import postgres
 from openswe.monitors import delivery, sandbox
 from openswe.monitors.delivery import ThreadMonitorDelivery
 from openswe.monitors.sandbox import MonitorEnd, MonitorEvent, PendingMonitor, SandboxMonitors
 from openswe.sandboxes.tool_access import ToolAccess
+from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
 
 
@@ -103,16 +105,29 @@ async def test_sandbox_cannot_deliver_for_a_thread_it_does_not_serve(
         )
 
 
-async def test_spent_wake_budget_stops_monitors_instead_of_starting_a_run(
+@pytest.mark.usefixtures("registry_db")
+async def test_spent_wake_budget_holds_monitor_output_on_every_delivery_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = SimpleNamespace(
-        threads=SimpleNamespace(get=AsyncMock(return_value={"status": "idle"}))
+    spent = {"monitor_wake_generation": "no-human-message", "monitor_wake_count": 10}
+    threads = SimpleNamespace(
+        get=AsyncMock(return_value={"status": "idle", "metadata": spent}),
+        get_state=AsyncMock(return_value={"values": {"messages": []}}),
     )
+    client = SimpleNamespace(threads=threads)
     monkeypatch.setattr(delivery, "langgraph_client", lambda: client)
-    monkeypatch.setattr(delivery.MONITOR_WAKES, "spend", AsyncMock(return_value=False))
-    deliver = AsyncMock(return_value=True)
-    monkeypatch.setattr(EventMatch, "deliver", deliver)
+    monkeypatch.setattr(event_matches, "dispatch_client", lambda: client)
+    monkeypatch.setattr(
+        event_matches, "create_durable_run", AsyncMock(side_effect=AssertionError("run started"))
+    )
+    async with postgres.session() as session:
+        await EventMatch(
+            thread_id="thread-1",
+            source="sandbox",
+            delivery_id="mon-running:1",
+            content="ERROR one",
+            run_config={"thread_id": "thread-1"},
+        ).record(session)
     stopped: list[str] = []
 
     class Monitors:
@@ -123,10 +138,14 @@ async def test_spent_wake_budget_stops_monitors_instead_of_starting_a_run(
     running = PendingMonitor(monitor_id="mon-running", status="running")
     ended = PendingMonitor(monitor_id="mon-ended", status="completed")
 
+    # What the completion webhook does once a run ends, then a monitor sync.
+    assert await EventMatch.deliver("thread-1", "enqueue") is False
     await ThreadMonitorDelivery("thread-1", {}, Monitors())._wake([running, ended])
 
     assert stopped == ["mon-running"]
-    deliver.assert_not_awaited()
+    assert [match.delivery_id for match in await EventMatch.owed("thread-1", [])] == [
+        "mon-running:1"
+    ]
 
 
 @pytest.mark.usefixtures("registry_db")

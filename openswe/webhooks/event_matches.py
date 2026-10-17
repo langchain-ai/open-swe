@@ -29,6 +29,7 @@ from openswe.input_messages import (
     build_input_messages,
     delivered_event_match_ids,
 )
+from openswe.threads.wake_budget import MONITOR_WAKES
 from openswe.webhooks.event_log import RETAINED_DAYS, WebhookSource
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,12 @@ class EventMatch(Base):
             state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
             owed = await cls.owed(thread_id, state.values.messages if state.values else [])
             if all(match.delivery_attempts >= _MAX_ATTEMPTS for match in owed):
+                return False
+            # Monitor output alone may start only so many runs between human
+            # messages; past that it waits for a run a person starts.
+            if all(match.source == "sandbox" for match in owed) and not await MONITOR_WAKES.spend(
+                client, thread_id
+            ):
                 return False
             owed_ids = [match.id for match in owed]
             async with postgres.session() as session:

@@ -725,8 +725,10 @@ def sync(request):
         acked = monitor.acked()
         entry = monitor.summary(state)
         entry["events_pending"] = monitor.events_after(acked.get("seq", 0), SYNC_EVENTS_LIMIT)
+        # A full page may not be all of them; the end notice waits until it is.
+        entry["behind"] = len(entry["events_pending"]) >= SYNC_EVENTS_LIMIT
         entry["end"] = None
-        if state.get("status") in TERMINAL and not acked.get("end"):
+        if state.get("status") in TERMINAL and not acked.get("end") and not entry["behind"]:
             entry["end"] = {
                 "tail": monitor.tail(TAIL_LINES),
                 "filter_errors": monitor.filter_errors(),

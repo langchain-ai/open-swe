@@ -63,6 +63,8 @@ class PendingMonitor(MonitorState):
     """A monitor with the events and end notice the backend has not recorded yet."""
 
     events_pending: list[MonitorEvent] = []
+    behind: bool = False
+    """More events wait past ``events_pending``; read again after acking these."""
     end: MonitorEnd | None = None
 
 

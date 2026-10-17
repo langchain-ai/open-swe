@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from openswe.threads import wake_budget
+
 wakeup_tool = importlib.import_module("openswe.tools.schedule_thread_wakeup")
 
 # Captured before the autouse stub replaces it, for the one test that needs the real wrapper.
@@ -243,11 +245,11 @@ async def test_schedule_thread_wakeup_schedules_a_wakeup(monkeypatch: pytest.Mon
 async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
     client = _FakeClient([], messages=[human])
-    generation = wakeup_tool._latest_human_generation([human])
+    generation = wake_budget.latest_human_generation([human])
     client.threads.metadata.update(
         {
-            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: generation,
-            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
+            wake_budget.THREAD_WAKEUP_GENERATION_KEY: generation,
+            wake_budget.THREAD_WAKEUP_COUNT_KEY: 10,
         }
     )
     client.threads.messages.extend(
@@ -262,8 +264,8 @@ async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyP
     result = await wakeup_tool.schedule_thread_wakeup(5)
 
     assert result["success"] is True
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 1
-    assert client.threads.metadata[wakeup_tool._WAKEUP_GENERATION_METADATA_KEY] != generation
+    assert client.threads.metadata[wake_budget.THREAD_WAKEUP_COUNT_KEY] == 1
+    assert client.threads.metadata[wake_budget.THREAD_WAKEUP_GENERATION_KEY] != generation
 
 
 async def test_system_wakeup_does_not_reset_wakeup_limit(
@@ -277,10 +279,10 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(
             _input_message("wakeup-10", kind="system", sender="system:thread-wakeup"),
         ],
         metadata={
-            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: (
-                wakeup_tool._latest_human_generation([human])
+            wake_budget.THREAD_WAKEUP_GENERATION_KEY: (
+                wake_budget.latest_human_generation([human])
             ),
-            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
+            wake_budget.THREAD_WAKEUP_COUNT_KEY: 10,
         },
     )
     monkeypatch.setattr("openswe.run_config.get_config", _config)
@@ -318,13 +320,13 @@ async def test_parallel_schedules_share_one_wakeup_budget(
     monkeypatch: pytest.MonkeyPatch, fake_jobs: _FakeJobs
 ) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
-    generation = wakeup_tool._latest_human_generation([human])
+    generation = wake_budget.latest_human_generation([human])
     client = _FakeClient(
         [],
         messages=[human],
         metadata={
-            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: generation,
-            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 9,
+            wake_budget.THREAD_WAKEUP_GENERATION_KEY: generation,
+            wake_budget.THREAD_WAKEUP_COUNT_KEY: 9,
         },
     )
     monkeypatch.setattr("openswe.run_config.get_config", _config)
@@ -337,7 +339,7 @@ async def test_parallel_schedules_share_one_wakeup_budget(
 
     assert sum(result["success"] is True for result in results) == 1
     assert len(fake_jobs.scheduled) == 1
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
+    assert client.threads.metadata[wake_budget.THREAD_WAKEUP_COUNT_KEY] == 10
 
 
 async def test_purge_deletes_only_expired_wakeups() -> None:

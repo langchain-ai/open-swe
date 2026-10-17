@@ -24,7 +24,7 @@ from openswe.monitors.sandbox import MonitorEvent, PendingMonitor, SandboxMonito
 from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
-from openswe.tools.schedule_thread_wakeup import WakeBudget
+from openswe.threads.wake_budget import MONITOR_WAKES
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.background_task_state import RUNNING_MONITORS_KEY, update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
@@ -34,14 +34,19 @@ logger = logging.getLogger(__name__)
 
 POLL_JOB_KIND: Final = "monitors"
 _POLL_SCHEDULE = "* * * * *"
-_MAX_WAKES = 10
-MONITOR_WAKES = WakeBudget(
-    generation_key="monitor_wake_generation", count_key="monitor_wake_count", limit=_MAX_WAKES
-)
 _WAKE_LIMIT_REASON = (
-    f"runs started by monitor events reached {_MAX_WAKES} since the last human message"
+    f"runs started by monitor events reached {MONITOR_WAKES.limit} since the last human message"
 )
 _BACKTICKS = re.compile(r"`+")
+
+
+def _tracked(metadata: Mapping[str, object]) -> list[str]:
+    tracked = metadata.get(RUNNING_MONITORS_KEY)
+    return [item for item in tracked if isinstance(item, str)] if isinstance(tracked, list) else []
+
+
+def _owed(monitors: list[PendingMonitor]) -> list[PendingMonitor]:
+    return [monitor for monitor in monitors if monitor.events_pending or monitor.end]
 
 
 def _fence(*texts: str) -> str:
@@ -122,6 +127,10 @@ class ThreadMonitorDelivery:
             raise PermissionError("Monitor owner does not belong to this sandbox")
         sandbox_id = metadata.get("sandbox_id")
         if not isinstance(sandbox_id, str) or not sandbox_id:
+            if _tracked(metadata):
+                await update_background_task_state(
+                    langgraph_client(), thread_id, reset=True, key=RUNNING_MONITORS_KEY
+                )
             return None
         backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
         return cls(thread_id, metadata, SandboxMonitors(backend, thread_id))
@@ -130,19 +139,27 @@ class ThreadMonitorDelivery:
         """Record and deliver what the monitors emitted; whether one is still running."""
         pending = await self._monitors.pending()
         running = [monitor.monitor_id for monitor in pending if monitor.status == "running"]
+        # Anything tracked that the sandbox no longer runs is done, including a
+        # monitor whose directory went with a recreated sandbox.
         await update_background_task_state(
             langgraph_client(),
             self._thread_id,
             running=running,
-            finished=[monitor.monitor_id for monitor in pending if monitor.status != "running"],
+            finished=[item for item in _tracked(self._metadata) if item not in running],
             key=RUNNING_MONITORS_KEY,
         )
-        owed = [monitor for monitor in pending if monitor.events_pending or monitor.end]
-        if owed:
+        recorded = False
+        owed = _owed(pending)
+        while owed:
             await self._record(owed)
             for monitor in owed:
                 last = monitor.events_pending[-1].seq if monitor.events_pending else 0
                 await self._monitors.ack(monitor.monitor_id, seq=last, end=monitor.end is not None)
+            recorded = True
+            if not any(monitor.behind for monitor in owed):
+                break
+            owed = _owed(await self._monitors.pending())
+        if recorded:
             await Topic.THREAD_BACKGROUND_WORK.invalidate(key=self._thread_id)
             await self._wake(pending)
         return bool(running)
@@ -178,18 +195,19 @@ class ThreadMonitorDelivery:
                 await match.record(session)
 
     async def _wake(self, pending: list[PendingMonitor]) -> None:
-        """Start a run for what is owed, unless the thread spent its monitor wakes."""
+        """Deliver what is owed; once monitor wakes are spent, stop the monitors instead."""
+        if await EventMatch.deliver(self._thread_id, "enqueue"):
+            return
         client = langgraph_client()
         thread = await client.threads.get(self._thread_id)
-        idle = not (isinstance(thread, dict) and thread.get("status") == "busy")
-        if idle and not await MONITOR_WAKES.spend(client, self._thread_id):
-            # What is owed now waits for the next run a person starts.
-            for monitor in pending:
-                if monitor.status == "running":
-                    await self._monitors.stop(monitor.monitor_id, reason=_WAKE_LIMIT_REASON)
-            logger.info("Monitor wake budget spent", extra={"agent_thread_id": self._thread_id})
+        busy = isinstance(thread, dict) and thread.get("status") == "busy"
+        if busy or not await MONITOR_WAKES.exhausted(client, self._thread_id):
             return
-        await EventMatch.deliver(self._thread_id, "enqueue")
+        # What is owed now waits for the next run a person starts.
+        for monitor in pending:
+            if monitor.status == "running":
+                await self._monitors.stop(monitor.monitor_id, reason=_WAKE_LIMIT_REASON)
+        logger.info("Monitor wake budget spent", extra={"agent_thread_id": self._thread_id})
 
 
 async def ensure_monitor_polling(thread_id: str) -> None:
