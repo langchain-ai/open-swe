@@ -5,10 +5,12 @@ signed up to review it on GitHub and where each of them stands.
 """
 
 import json
+from urllib.parse import quote
 
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
 from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_base_url
 
 BUTTON_TYPE = "human_review"
 
@@ -82,13 +84,24 @@ def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> s
     return "  ·  ".join(parts)
 
 
+def _review_link(request: HumanReviewRequest) -> str:
+    pr = request.pull_request
+    base = dashboard_base_url()
+    if not base:
+        return pr.url
+    return (
+        f"{base}/agents/reviews/{quote(pr.owner, safe='')}/{quote(pr.repo, safe='')}/"
+        f"{pr.number}?reviewLink=true"
+    )
+
+
 def accept_button(request: HumanReviewRequest) -> ButtonElement:
     """What a picked reviewer clicks to take the review; anyone else clicking signs up instead."""
     return button(
         "Accept",
         action_id="open_swe_option_select_accept",
         value=_button_value("review", request),
-        url=request.pull_request.url,
+        url=_review_link(request),
         style="primary",
     )
 
@@ -120,12 +133,11 @@ PICK_BUTTON_IDS = frozenset(
 
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     return [
-        # Slack opens the URL and still delivers the click, so signing up lands on the PR.
         button(
             "I'll review",
             action_id="open_swe_option_select_review",
             value=_button_value("review", request),
-            url=request.pull_request.url,
+            url=_review_link(request),
             style="primary",
         ),
         button(
