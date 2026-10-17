@@ -232,7 +232,7 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
             }
         ),
     )
-    monkeypatch.setattr(tool, "_repository_refusal", AsyncMock(return_value=None))
+    monkeypatch.setattr(tool, "repository_refusal", AsyncMock(return_value=None))
     monkeypatch.setattr(
         User,
         "for_login",

@@ -1,0 +1,115 @@
+import { memo } from "react"
+import { useQuery } from "@tanstack/react-query"
+
+import { SlackBlocks, SlackIcon } from "./ReplyCard"
+import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import { pullRequestTopic } from "@/features/reviews/lib/cache"
+import { api } from "@/lib/api"
+
+const PR_URL = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/
+
+function slackletId(output: string | undefined): string | null {
+  if (!output) return null
+  try {
+    const parsed: unknown = JSON.parse(output)
+    const id =
+      parsed && typeof parsed === "object"
+        ? (parsed as { slacklet_id?: unknown }).slacklet_id
+        : undefined
+    return typeof id === "string" ? id : null
+  } catch {
+    return null
+  }
+}
+
+function pullRequestOf(chunk: ToolExecutionChunk) {
+  const url = chunk.input?.pr_url
+  const match = typeof url === "string" ? PR_URL.exec(url) : null
+  return match ? { repo: match[1] ?? "", number: Number(match[2]) } : null
+}
+
+/**
+ * The live pull request slacklet a `start_pr_slacklet` call attached: the
+ * message exactly as Slack shows it, then the immutable commands that built it.
+ */
+export const SlackletCard = memo(function SlackletCard({
+  chunk,
+}: {
+  chunk: ToolExecutionChunk
+}) {
+  const id = slackletId(chunk.output)
+  const pullRequest = pullRequestOf(chunk)
+  const { data, error } = useQuery({
+    queryKey: ["slacklet", id],
+    queryFn: () => api.slacklet(id ?? ""),
+    enabled: id !== null,
+    meta: {
+      invalidatedBy: pullRequest ? [pullRequestTopic(pullRequest)] : [],
+    },
+  })
+  if (chunk.status === "pending" || chunk.status === "in_progress") {
+    return (
+      <div className="px-space-1 text-xxs text-secondary">
+        Attaching slacklet…
+      </div>
+    )
+  }
+  if (id === null) {
+    return (
+      <div className="px-space-1 text-xxs text-error-secondary">
+        Could not attach the slacklet
+      </div>
+    )
+  }
+  return (
+    <section
+      data-testid="slacklet-card"
+      className="min-w-0 rounded-lg border border-default bg-surface-level-1 p-space-3"
+    >
+      <div className="mb-space-2 flex items-center gap-space-2 text-xxs text-secondary">
+        <SlackIcon />
+        <span>Live in Slack</span>
+      </div>
+      {error ? (
+        <p className="text-xs text-error-secondary">
+          Could not load the slacklet
+        </p>
+      ) : data ? (
+        <>
+          <div
+            data-testid="slacklet-message"
+            className="border-brand-primary border-l-2 pl-space-3 text-sm"
+          >
+            <SlackBlocks blocks={data.blocks} />
+          </div>
+          <details open className="mt-space-3">
+            <summary className="cursor-pointer text-xxs text-secondary">
+              Command log · {data.commands.length}
+            </summary>
+            <ol
+              data-testid="slacklet-commands"
+              className="mt-space-2 flex flex-col gap-space-1 font-mono text-xxs"
+            >
+              {data.commands.map((command) => (
+                <li
+                  key={command.seq}
+                  className="flex gap-space-2"
+                  title={JSON.stringify(command.command)}
+                >
+                  <span className="shrink-0 text-secondary">
+                    #{command.seq} {command.op}
+                  </span>
+                  <span className="min-w-0 [overflow-wrap:anywhere] text-primary">
+                    {command.summary}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        </>
+      ) : (
+        <p className="text-xs text-secondary">Loading slacklet…</p>
+      )}
+    </section>
+  )
+})

@@ -99,6 +99,23 @@ class SlackThread(Base):
             )
 
     @classmethod
+    async def ensure(cls, session: AsyncSession, channel_id: str, thread_ts: str) -> UUID:
+        """The thread's row id inside ``session``, creating a bare row when it has none."""
+        channel_id, thread_ts = normalize_slack_location(channel_id, thread_ts)
+        await SlackChannel.ensure(session, channel_id)
+        await session.execute(
+            insert(cls)
+            .values(id=uuid7(), channel_id=channel_id, thread_ts=thread_ts)
+            .on_conflict_do_nothing(index_elements=[cls.channel_id, cls.thread_ts])
+        )
+        row_id = await session.scalar(
+            select(cls.id).where(cls.channel_id == channel_id, cls.thread_ts == thread_ts)
+        )
+        if row_id is None:
+            raise LookupError("The Slack thread row vanished while it was being ensured")
+        return row_id
+
+    @classmethod
     async def _save(cls, channel_id: str, thread_ts: str, values: Mapping[str, object]) -> None:
         upsert = insert(cls).values(
             id=uuid7(), channel_id=channel_id, thread_ts=thread_ts, **values

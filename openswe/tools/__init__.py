@@ -63,6 +63,7 @@ _TOOL_MODULES = {
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
     "send_announcement": ".send_announcement",
+    "start_pr_slacklet": "openswe.slacklets.tools",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
     "slack_attach_html": "openswe.slack.tools.attach_html",
@@ -145,6 +146,7 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_pull_requests",
     "send_announcement",
+    "start_pr_slacklet",
     "start_thread",
     "slack_add_reaction",
     "slack_attach_html",
@@ -184,6 +186,7 @@ if TYPE_CHECKING:
     from openswe.slack.tools.request_pr_review import request_pr_review
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
     from openswe.slack.tools.start_review_channel import slack_start_review_channel
+    from openswe.slacklets.tools import start_pr_slacklet
     from openswe.tools.add_finding import add_finding
     from openswe.tools.automations import (
         create_automation,

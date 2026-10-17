@@ -63,6 +63,8 @@ export type AcpToolKind =
   | "linear"
   | "sql"
   | "managed-tools"
+  /** `start_pr_slacklet` — rendered as the live slacklet it attached. */
+  | "slacklet"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   /** Code mode's `eval` tool — runs code that may call other tools. */

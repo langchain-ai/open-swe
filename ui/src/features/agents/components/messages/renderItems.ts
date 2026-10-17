@@ -36,6 +36,7 @@ export type RenderItem =
       offer: ManagedToolsCardOffer
     }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "slacklet-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
 
@@ -44,6 +45,7 @@ const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "reply-item",
   "managed-tools-item",
   "iframe-item",
+  "slacklet-item",
 ])
 
 /** A run of work that folds behind one row, or a reply shown between such runs. */
@@ -323,6 +325,12 @@ export function buildRenderItems(
           key: `tool-${chunk.toolCallId}`,
           chunk,
           offer,
+        })
+      } else if (chunk.toolKind === "slacklet") {
+        items.push({
+          type: "slacklet-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
         })
       } else if (isReplyTool(chunk)) {
         items.push({
