@@ -1,6 +1,5 @@
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Text } from "@langchain/macaw-components/Text"
-import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import type { ReactNode } from "react"
 
@@ -125,17 +124,6 @@ export function SidebarThreadCardContent({
             >
               {thread.attentionReason}
             </Text>
-          )}
-          {thread.branch && (
-            <span
-              className="flex min-w-0 items-center gap-space-2 text-tertiary"
-              title={thread.branch}
-            >
-              <GitBranchIcon size={14} weight="regular" className="shrink-0" />
-              <span className="truncate font-mono text-xxs">
-                {thread.branch}
-              </span>
-            </span>
           )}
           {(item.pr || hasChanges || item.taskWorkers?.length) && (
             <span className="flex flex-wrap items-center gap-space-2 text-xs text-secondary">
