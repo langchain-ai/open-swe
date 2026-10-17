@@ -274,7 +274,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 | `make install` | `uv sync --extra dev` |
 | `make test [TEST_FILE=tests/…]` | `pytest -vvv` on `tests/` or the given path |
 | `make lint`, `make format`, `make format-check` | ruff check and format (`format` rewrites files) |
-| `make typecheck` | `ty check agent tests` |
+| `make typecheck` | `ty check openswe tests` |
 
 ## Troubleshooting
 
