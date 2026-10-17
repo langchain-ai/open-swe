@@ -91,6 +91,8 @@ def report_message(
         summary = "" if report.problem else compact(text, 800)
         sections = [f"*{heading}*\n{summary}" if summary else f"*{heading}*"]
         sections.extend(_investigation(report, compact))
+        if tldr := compact(report.summary, 2990):
+            sections.append(f"*TLDR*\n{tldr}")
     else:
         summary = compact(text, 2400 if reason == "answer" else 800)
         sections = [f"*{heading}*\n{summary or 'No evidence-backed conclusion was established.'}"]
