@@ -4,7 +4,7 @@ from typing import NotRequired, TypedDict
 from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import private_owner_login
 from openswe.run_config import RunConfig
-from openswe.sandboxes.browsers import BrowserOwner, BrowserScope
+from openswe.sandboxes.browsers import BrowserOwner, BrowserScope, ThreadBrowserWindow
 from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 from openswe.tools.access import Policy, access
 from openswe.utils.json_types import thread_metadata
@@ -58,6 +58,9 @@ async def open_browser(
 
     backend = unwrap_sandbox_backend(await get_sandbox_backend(thread_id))
     browser, window = await owner.window_for(backend.id)
+    opened = ThreadBrowserWindow(scope=scope, browser=browser.name, window=window.id)
+    if ThreadBrowserWindow.of(metadata) != opened:
+        await opened.save(thread_id)
     result: OpenBrowserResult = {
         "scope": scope,
         "cdp_url": window.cdp_url,

@@ -37,6 +37,12 @@ export interface AgentRightPanelProps {
   diffAvailable: boolean
   /** Rendered for the Changes surface; `fullScreen` drives layout-only extras. */
   renderDiff: (state: { fullScreen: boolean }) => ReactNode
+  /**
+   * Rendered for a Browser surface, which only threads that can open a browser
+   * offer; `tabId` is the tab it shows, null to follow the newest.
+   */
+  renderBrowser?: (surface: { tabId: string | null }) => ReactNode
+  browserAvailable?: boolean
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
   onTerminalOpenFile?: (path: string) => void
@@ -136,6 +142,10 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   const handleAddFiles = useCallback(() => {
     openSurface(threadRef, "files")
+  }, [openSurface, threadRef])
+
+  const handleAddBrowser = useCallback(() => {
+    openSurface(threadRef, "preview")
   }, [openSurface, threadRef])
 
   const handleActivate = useCallback(
@@ -289,6 +299,9 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       {activeSurface?.kind === "diff"
         ? props.renderDiff({ fullScreen: maximized })
         : null}
+      {activeSurface?.kind === "preview" && props.renderBrowser
+        ? props.renderBrowser({ tabId: activeSurface.resourceId })
+        : null}
       {activeSurface?.kind === "files" || activeSurface?.kind === "file" ? (
         <FilesPanel
           key={workspaceTargetKey(terminalTarget)}
@@ -355,6 +368,12 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       onAddTerminal={handleAddTerminal}
       onAddDiff={handleAddDiff}
       onAddFiles={handleAddFiles}
+      {...(props.renderBrowser
+        ? {
+            onAddBrowser: handleAddBrowser,
+            browserAvailable: props.browserAvailable ?? false,
+          }
+        : {})}
       terminalAvailable={terminalAvailable}
       diffAvailable={diffAvailable}
       layoutControls={layoutControls}

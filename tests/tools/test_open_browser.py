@@ -2,7 +2,7 @@ import importlib
 
 import pytest
 
-from openswe.sandboxes.browsers import BrowserTab, BrowserWindow
+from openswe.sandboxes.browsers import BrowserTab, BrowserWindow, ThreadBrowserWindow
 
 browser_tool = importlib.import_module("openswe.tools.open_browser")
 access_module = importlib.import_module("openswe.tools.access")
@@ -21,6 +21,8 @@ class _Backend:
 
 
 class _Browser:
+    name = "browser-1"
+
     def __init__(self) -> None:
         self.opened: list[str] = []
 
@@ -81,25 +83,30 @@ def _configure(
     monkeypatch.setattr(browser_tool, "unwrap_sandbox_backend", lambda value: value)
     monkeypatch.setattr(browser_tool.BrowserOwner, "person", person)
     monkeypatch.setattr(browser_tool.BrowserOwner, "workspace", workspace)
+
+    async def save(window: ThreadBrowserWindow, thread_id: str) -> None:
+        owners.append(f"saved:{window.scope}")
+
+    monkeypatch.setattr(browser_tool.ThreadBrowserWindow, "save", save)
     return owners, browser
 
 
 @pytest.mark.parametrize(
-    ("visibility", "scope", "expected"),
+    ("visibility", "scope", "owner", "saved"),
     [
-        ("public", None, "workspace:acme"),
-        ("private", None, "person:alice"),
-        ("private", "workspace", "workspace:acme"),
+        ("public", None, "workspace:acme", "workspace"),
+        ("private", None, "person:alice", "private"),
+        ("private", "workspace", "workspace:acme", "workspace"),
     ],
 )
 async def test_open_browser_picks_the_threads_browser(
-    monkeypatch: pytest.MonkeyPatch, visibility: str, scope: str | None, expected: str
+    monkeypatch: pytest.MonkeyPatch, visibility: str, scope: str | None, owner: str, saved: str
 ) -> None:
     owners, browser = _configure(monkeypatch, visibility=visibility, owner_login="alice")
 
     result = await browser_tool.open_browser("http://localhost:5173/login?next=/", scope=scope)
 
-    assert owners == [expected]
+    assert owners == [owner, f"saved:{saved}"]
     assert result["localhost"] == "http://sb-abc.localhost"
     assert browser.opened == ["http://sb-abc.localhost:5173/login?next=/"]
 

@@ -7,14 +7,16 @@ the Chrome DevTools Protocol, attached with its localhost shared so pages can
 open the dev servers the sandbox runs.
 """
 
+import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Self
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid7
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import ColumnElement, ForeignKey, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,7 +24,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.sandboxes.providers.langsmith import sandbox_api_request
+from openswe.ui_invalidations.topics import Topic
 from openswe.users.records import user_id_for_login
+from openswe.utils.thread_ops import langgraph_client
 from openswe.workspaces.rows import WorkspaceRow
 
 BrowserScope = Literal["private", "workspace"]
@@ -32,6 +36,9 @@ _BROWSER_START_TIMEOUT_SECONDS = 180.0
 _BROWSER_REQUEST_TIMEOUT_SECONDS = 30.0
 _GONE_STATUSES = frozenset({"failed", "deleting"})
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
+_THREAD_METADATA_KEY = "browser_window"
+
+logger = logging.getLogger(__name__)
 
 
 class BrowserUnavailableError(RuntimeError):
@@ -85,6 +92,10 @@ class BrowserState(BaseModel):
     attachments: list[BrowserWindow] = []
 
 
+class _BrowserBox(BaseModel):
+    dataplane_url: str | None = None
+
+
 class LangSmithBrowser:
     """One browser in LangSmith's browser beta, by sandbox name."""
 
@@ -121,6 +132,49 @@ class LangSmithBrowser:
         )
         return BrowserTab.model_validate(response.json())
 
+    async def window(self, window_id: str) -> BrowserWindow:
+        """One of this browser's windows, starting the browser when it is stopped."""
+        state = await self._running_state()
+        for window in state.attachments:
+            if window.id == window_id:
+                return window
+        raise BrowserGoneError(f"window {window_id} of browser {self.name} is closed")
+
+    async def set_controller(
+        self, window_id: str, controller: Literal["agent", "user"]
+    ) -> BrowserWindow:
+        response = await _browser_request(
+            "POST",
+            f"/browsers/{self.name}/attachments/{window_id}/controller",
+            json={"controller": controller},
+            timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS,
+        )
+        return BrowserWindow.model_validate(response.json())
+
+    async def view_socket_url(self, window_id: str, tab_id: str) -> str:
+        """The live view of one tab of a window: JPEG frames out, a person's input in.
+
+        It is served beside the browser's own dataplane URL rather than through
+        the API, which does not pass WebSocket upgrades.
+        """
+        response = await _browser_request(
+            "GET", f"/boxes/{self.name}", timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS
+        )
+        dataplane_url = _BrowserBox.model_validate(response.json()).dataplane_url
+        if not dataplane_url:
+            raise BrowserGoneError(f"browser {self.name} has no dataplane")
+        sandboxes_base = dataplane_url.rstrip("/").rsplit("/", 1)[0]
+        parts = urlsplit(
+            f"{sandboxes_base}/browsers/{quote(self.name, safe='')}"
+            f"/attachments/{quote(window_id, safe='')}/view"
+        )
+        return urlunsplit(
+            parts._replace(
+                scheme="wss" if parts.scheme == "https" else "ws",
+                query=urlencode({"tab": tab_id}),
+            )
+        )
+
     async def _running_state(self) -> BrowserState:
         state = await self._state()
         if state.status == "stopped":
@@ -138,6 +192,35 @@ class LangSmithBrowser:
             "GET", f"/browsers/{self.name}", timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS
         )
         return BrowserState.model_validate(response.json())
+
+
+class ThreadBrowserWindow(BaseModel):
+    """The browser window a thread's agent opened last, kept in the thread's metadata."""
+
+    scope: BrowserScope
+    browser: str
+    window: str
+
+    @classmethod
+    def of(cls, metadata: Mapping[str, object]) -> Self | None:
+        raw = metadata.get(_THREAD_METADATA_KEY)
+        if raw is None:
+            return None
+        try:
+            return cls.model_validate(raw)
+        except ValidationError:
+            logger.warning("Ignoring a malformed thread browser window", exc_info=True)
+            return None
+
+    @property
+    def langsmith(self) -> LangSmithBrowser:
+        return LangSmithBrowser(self.browser)
+
+    async def save(self, thread_id: str) -> None:
+        await langgraph_client().threads.update(
+            thread_id=thread_id, metadata={_THREAD_METADATA_KEY: self.model_dump()}
+        )
+        await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
 
 
 async def _browser_request(

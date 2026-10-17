@@ -47,15 +47,19 @@ STATE_TTL_SECONDS = 600
 HANDOFF_TTL_SECONDS = 120
 TERMINAL_TICKET_TTL_SECONDS = 60
 TERMINAL_TICKET_AUDIENCE = "open-swe-cloud-terminal"
+BROWSER_TICKET_AUDIENCE = "open-swe-browser-view"
 UPLOAD_TICKET_TTL_SECONDS = 60 * 60
 UPLOAD_TICKET_AUDIENCE = "open-swe-session-upload"
 JWT_ALG = "HS256"
 
 
-def issue_terminal_ticket(*, login: str, email: str | None, thread_id: str) -> str:
+def issue_terminal_ticket(
+    *, login: str, email: str | None, thread_id: str, audience: str = TERMINAL_TICKET_AUDIENCE
+) -> str:
+    """A short-lived ticket for one thread's live socket; ``audience`` names which one."""
     now = int(time.time())
     payload = {
-        "aud": TERMINAL_TICKET_AUDIENCE,
+        "aud": audience,
         "sub": login,
         "email": email,
         "thread_id": thread_id,
@@ -65,13 +69,15 @@ def issue_terminal_ticket(*, login: str, email: str | None, thread_id: str) -> s
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
-def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
+def decode_terminal_ticket(
+    token: str, *, thread_id: str, audience: str = TERMINAL_TICKET_AUDIENCE
+) -> dict[str, Any]:
     try:
         payload = jwt.decode(
             token,
             _secret(),
             algorithms=[JWT_ALG],
-            audience=TERMINAL_TICKET_AUDIENCE,
+            audience=audience,
             options={"require": ["aud", "sub", "thread_id", "iat", "exp"]},
         )
     except jwt.PyJWTError as exc:

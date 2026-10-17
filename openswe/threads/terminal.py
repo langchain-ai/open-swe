@@ -6,16 +6,15 @@ import logging
 import posixpath
 import shlex
 from typing import Any
-from urllib.parse import quote, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisconnect
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.oauth import decode_terminal_ticket, issue_terminal_ticket
+from openswe.dashboard.oauth import TERMINAL_TICKET_AUDIENCE
 from openswe.threads.handlers import get_dashboard_terminal_sandbox
-from openswe.utils.thread_ops import langgraph_url
+from openswe.threads.sockets import ThreadSocket
 
 logger = logging.getLogger(__name__)
 
@@ -23,33 +22,17 @@ router = APIRouter(tags=["threads"])
 
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
+_TERMINAL_SOCKET = ThreadSocket(
+    path="terminal", protocol=_CLOUD_TERMINAL_SUBPROTOCOL, audience=TERMINAL_TICKET_AUDIENCE
+)
 
 
 def _cloud_terminal_websocket_url(thread_id: str) -> str:
-    parsed = urlsplit(langgraph_url())
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise HTTPException(500, "invalid LangGraph URL for cloud terminal")
-    path = f"{parsed.path.rstrip('/')}/dashboard/api/threads/{quote(thread_id, safe='')}/terminal"
-    scheme = "wss" if parsed.scheme == "https" else "ws"
-    return urlunsplit((scheme, parsed.netloc, path, "", ""))
+    return _TERMINAL_SOCKET.url(thread_id)
 
 
 def _cloud_terminal_session(websocket: WebSocket, thread_id: str) -> dict[str, Any]:
-    offered = [
-        value.strip()
-        for value in websocket.headers.get("sec-websocket-protocol", "").split(",")
-        if value.strip()
-    ]
-    if len(offered) != 2 or offered[0] != _CLOUD_TERMINAL_SUBPROTOCOL:
-        raise HTTPException(401, "invalid terminal ticket")
-    return decode_terminal_ticket(offered[1], thread_id=thread_id)
+    return _TERMINAL_SOCKET.session(websocket, thread_id)
 
 
 @router.post("/threads/{thread_id}/terminal/connect")
@@ -61,13 +44,7 @@ async def api_thread_terminal_connection(
 ) -> dict[str, str]:
     await get_dashboard_terminal_sandbox(thread_id, session["sub"], email=session.get("email"))
     response.headers["Cache-Control"] = "no-store"
-    return {
-        "url": _cloud_terminal_websocket_url(thread_id),
-        "protocol": _CLOUD_TERMINAL_SUBPROTOCOL,
-        "ticket": issue_terminal_ticket(
-            login=session["sub"], email=session.get("email"), thread_id=thread_id
-        ),
-    }
+    return _TERMINAL_SOCKET.connection(thread_id, session)
 
 
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:

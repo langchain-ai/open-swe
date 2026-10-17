@@ -484,6 +484,15 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
     return WorkspaceServiceURL.model_validate(response.json()).service_url
 
 
+def sandbox_api_headers() -> dict[str, str]:
+    """Headers that authenticate this deployment to the sandbox API, sockets included."""
+    api_key = _get_langsmith_api_key()
+    if not api_key:
+        msg = "LANGSMITH_API_KEY not set"
+        raise ValueError(msg)
+    return {"X-API-Key": api_key}
+
+
 async def sandbox_api_request(
     method: Literal["GET", "POST", "PATCH", "DELETE"],
     path: str,
@@ -496,16 +505,12 @@ async def sandbox_api_request(
     For routes the langsmith SDK does not model. Raises ``httpx2.HTTPStatusError``
     carrying the API's own explanation when it refuses.
     """
-    api_key = _get_langsmith_api_key()
-    if not api_key:
-        msg = "LANGSMITH_API_KEY not set"
-        raise ValueError(msg)
     async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
         response = await client.request(
             method,
             f"{_get_sandbox_api_endpoint()}{path}",
             json=json,
-            headers={"X-API-Key": api_key},
+            headers=sandbox_api_headers(),
         )
     try:
         response.raise_for_status()
