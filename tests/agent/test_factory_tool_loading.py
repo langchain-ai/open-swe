@@ -1,20 +1,24 @@
 """Integration tools the graph factory loads into a run."""
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
+from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool
-from langgraph.graph.state import RunnableConfig
+from langgraph.graph.state import CompiledStateGraph, RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes.state import SANDBOX_BACKENDS
-from openswe.server import get_agent
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import build_agent
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-5.6-sol",
@@ -24,9 +28,14 @@ _MODEL_DEFAULTS = {
 }
 
 
-class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> _DummyAgent:
-        return self
+def _tool_graph(*, middleware: list[AgentMiddleware], **kwargs: object) -> CompiledStateGraph:
+    return create_agent(
+        FakeListChatModel(responses=[]),
+        middleware=cast(
+            list[AgentMiddleware],
+            [item for item in middleware if isinstance(item, DynamicToolMiddleware)],
+        ),
+    )
 
 
 def _config() -> RunnableConfig:
@@ -41,10 +50,12 @@ def _config() -> RunnableConfig:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("experimental_mcp_ptc", [False, True])
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
 @pytest.mark.parametrize("github_login", ["octocat", None])
 async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
     initial_plan_mode: bool,
+    experimental_mcp_ptc: bool,
     github_login: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -54,7 +65,9 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         "get_client",
         lambda: SimpleNamespace(
             threads=SimpleNamespace(
-                get=AsyncMock(return_value={"metadata": {"visibility": "public"}})
+                get=AsyncMock(
+                    return_value={"metadata": {"visibility": "public", "owner_login": "octocat"}}
+                )
             )
         ),
     )
@@ -68,6 +81,12 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         description="Delete an incident",
     )
 
+    ordinary_tool = StructuredTool.from_function(
+        coroutine=delete_incident,
+        name="mcp_incident-2_delete",
+        description="Delete an incident through an ordinary MCP tool",
+    )
+    surface = ToolSurface()
     thread_id = "thread-factory-tools"
     SANDBOX_BACKENDS.pop(thread_id, None)
     with (
@@ -92,23 +111,31 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
             new_callable=AsyncMock,
             return_value=WorkspaceSettings(_MODEL_DEFAULTS),
         ),
-        patch("openswe.server.load_profile", new_callable=AsyncMock, return_value=None),
+        patch(
+            "openswe.server.load_profile",
+            new_callable=AsyncMock,
+            return_value={"experimental_mcp_ptc": experimental_mcp_ptc},
+        ),
         patch("openswe.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
         patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.make_model", return_value=MagicMock()),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
-        patch("openswe.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
+        patch("openswe.server.create_deep_agent", side_effect=_tool_graph) as create_deep_agent,
         patch("openswe.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
-        patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[mcp_tool]),
+        patch(
+            "openswe.server._mcp_tools_for",
+            new_callable=AsyncMock,
+            return_value=[mcp_tool, ordinary_tool],
+        ),
     ):
         config = _config()
         config["configurable"]["github_login"] = github_login
         config["configurable"]["plan_mode"] = initial_plan_mode
-        await get_agent(config)
+        await build_agent(config, tool_surface=surface)
 
     tool_names = {
         tool.name if hasattr(tool, "name") else tool.__name__
-        for tool in build_agent.call_args.kwargs["tools"]
+        for tool in create_deep_agent.call_args.kwargs["tools"]
     }
     assert not tool_names.intersection(
         {
@@ -123,29 +150,37 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         }
     )
 
-    middleware = build_agent.call_args.kwargs["middleware"]
+    middleware = create_deep_agent.call_args.kwargs["middleware"]
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
     captured: list[str] = []
 
-    async def capture(request: ModelRequest) -> Any:
+    async def capture(request: ModelRequest) -> ModelResponse:
         captured.extend(tool.name for tool in request.tools)
-        return MagicMock()
+        return ModelResponse(result=[AIMessage(content="")])
 
-    for state, expected in [
-        ({}, [mcp_tool.name]),
-        ({"plan_mode": True}, [mcp_tool.name]),
-        ({"plan_mode": False}, [mcp_tool.name]),
-    ]:
+    expected = [ordinary_tool.name] if experimental_mcp_ptc else [mcp_tool.name, ordinary_tool.name]
+    for state in [{}, {"plan_mode": True}, {"plan_mode": False}]:
         captured.clear()
         request = ModelRequest(
             model=MagicMock(),
             messages=[],
             tools=[],
             runtime=MagicMock(),
-            state={**state, "messages": [], "loaded_integration_tools": [mcp_tool.name]},
+            state={
+                **state,
+                "messages": [],
+                "loaded_integration_tools": [mcp_tool.name, ordinary_tool.name],
+            },
         )
         await dynamic.awrap_model_call(request, capture)
         assert captured == expected
+
+    await surface.prepare({})
+    assert {item.name for item in surface.catalog()} == {mcp_tool.name, ordinary_tool.name}
+    for name in (mcp_tool.name, ordinary_tool.name):
+        result = await surface.run(config, {}, name, {})
+        assert result.message.status == "success", result.content
+        assert result.content == "deleted"
 
     SANDBOX_BACKENDS.pop(thread_id, None)
 
