@@ -49,6 +49,7 @@ class Hypothesis(BaseModel):
 class IncidentReport(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     summary: str
+    slack_message: str = ""
     problem: str = ""
     previous_occurrence: str = ""
     impact: str = ""
