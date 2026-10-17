@@ -42,7 +42,23 @@ def _pr_close_payload(*, action: str, number: int = 7) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_push_event_skips_when_thread_not_watching() -> None:
+@pytest.mark.parametrize("action", ["opened", "ready_for_review"])
+@pytest.mark.parametrize("label", ["openswe:skip-review", "OpenSWE:Skip-Review", "unrelated", None])
+async def test_automatic_first_review_honors_opt_out(action: str, label: str | None) -> None:
+    payload = {
+        "action": action,
+        "pull_request": {"labels": [{"name": label}] if label else []},
+    }
+    with patch.object(
+        github_webhooks, "_dispatch_first_review_from_pr_payload", new_callable=AsyncMock
+    ) as dispatch:
+        await github_webhooks.process_github_pr_ready(payload)
+    assert dispatch.await_count == (0 if label and label.casefold() == "openswe:skip-review" else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opted_out", [False, True])
+async def test_push_event_skips_when_thread_not_watching_or_opted_out(opted_out: bool) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
         "number": 7,
@@ -51,6 +67,8 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
         "head": {"sha": "newsha", "ref": "feat-x"},
         "base": {"sha": "basesha", "ref": "main"},
     }
+    if opted_out:
+        pr["labels"] = [{"name": "openswe:skip-review"}]
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
 
@@ -73,7 +91,7 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
         patch(
             "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
-            return_value={"kind": "reviewer", "watch": False},
+            return_value={"kind": "reviewer", "watch": opted_out},
         ),
         patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
@@ -502,3 +520,130 @@ async def test_pr_reopened_re_enables_watch() -> None:
     ):
         await github_webhooks.process_github_pr_close(_pr_close_payload(action="reopened"))
     assert captured and captured[0][1]["watch"] is True
+
+
+@pytest.mark.asyncio
+async def test_review_label_stops_only_automatic_runs_and_settles_open_check() -> None:
+    client = MagicMock()
+    client.runs.list = AsyncMock(
+        side_effect=[
+            [
+                {"run_id": "queued-auto", "metadata": {"automatic_review": True}},
+                {"run_id": "explicit", "metadata": {}},
+            ],
+            [{"run_id": "running-auto", "metadata": {"automatic_review": True}}],
+        ]
+    )
+    client.runs.cancel_many = AsyncMock()
+    payload = {
+        "action": "labeled",
+        "repository": {"full_name": "lc/repo"},
+        "pull_request": {"number": 7, "labels": [{"name": "openswe:skip-review"}]},
+    }
+    with (
+        patch.object(github_webhooks.common, "get_client", return_value=client),
+        patch.object(
+            github_webhooks.common,
+            "ensure_thread_exists_for_metadata",
+            AsyncMock(return_value=True),
+        ),
+        patch.object(github_webhooks.common, "set_reviewer_thread_metadata", AsyncMock()) as update,
+        patch.object(
+            github_webhooks.common,
+            "get_thread_metadata_safe",
+            AsyncMock(return_value={"current_reviewer_run_id": "running-auto"}),
+        ),
+        patch.object(
+            github_webhooks.common,
+            "reviewer_token_for_repo",
+            AsyncMock(return_value=("token", None)),
+        ),
+        patch.object(github_webhooks, "settle_review_check_run", AsyncMock()) as settle,
+    ):
+        await github_webhooks.process_github_pr_review_label(payload)
+    assert update.await_args.kwargs["extra"] == {"automatic_review_opted_out": True}
+    assert client.runs.cancel_many.await_args.kwargs["run_ids"] == ["queued-auto", "running-auto"]
+    assert settle.await_args.kwargs["conclusion"] == "neutral"
+
+
+@pytest.mark.asyncio
+async def test_unlabel_does_not_cancel_explicit_review_or_dispatch() -> None:
+    client = MagicMock()
+    client.runs.cancel_many = AsyncMock()
+    with (
+        patch.object(github_webhooks.common, "get_client", return_value=client),
+        patch.object(
+            github_webhooks.common,
+            "ensure_thread_exists_for_metadata",
+            AsyncMock(return_value=True),
+        ),
+        patch.object(github_webhooks.common, "set_reviewer_thread_metadata", AsyncMock()) as update,
+    ):
+        await github_webhooks.process_github_pr_review_label(
+            {
+                "action": "unlabeled",
+                "repository": {"full_name": "lc/repo"},
+                "pull_request": {"number": 7, "labels": []},
+            }
+        )
+    assert update.await_args.kwargs["extra"] == {"automatic_review_opted_out": False}
+    client.runs.cancel_many.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_label_during_dispatch_interrupts_the_new_automatic_review() -> None:
+    payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
+    client = MagicMock()
+    client.runs.create = AsyncMock(return_value={"run_id": "auto"})
+    metadata_reads = 0
+
+    async def metadata(thread_id: str) -> dict[str, object]:
+        nonlocal metadata_reads
+        metadata_reads += 1
+        return {
+            "kind": "reviewer",
+            "watch": True,
+            "automatic_review_opted_out": metadata_reads > 2,
+        }
+
+    with (
+        patch.object(
+            github_webhooks.common, "is_repo_auto_review_enabled", AsyncMock(return_value=True)
+        ),
+        patch.object(
+            github_webhooks.common,
+            "get_github_app_installation_token_with_expiry",
+            AsyncMock(return_value=("t", None)),
+        ),
+        patch.object(
+            github_webhooks.common,
+            "fetch_open_pr_for_branch",
+            AsyncMock(
+                return_value={
+                    "number": 7,
+                    "base": {"sha": "base", "ref": "main"},
+                }
+            ),
+        ),
+        patch.object(github_webhooks.common, "get_thread_metadata_safe", metadata),
+        patch.object(github_webhooks.common, "get_client", return_value=client),
+        patch.object(
+            github_webhooks.common,
+            "ensure_thread_exists_for_metadata",
+            AsyncMock(return_value=True),
+        ),
+        patch.object(github_webhooks.common, "fetch_pr_review_threads", AsyncMock(return_value=[])),
+        patch.object(github_webhooks.common, "reconcile_findings_with_review_threads", AsyncMock()),
+        patch.object(github_webhooks.common, "set_reviewer_thread_metadata", AsyncMock()),
+        patch.object(
+            github_webhooks.common, "create_review_check_run", AsyncMock(return_value=None)
+        ),
+        patch.object(
+            github_webhooks.common, "build_reviewer_configurable", AsyncMock(return_value={})
+        ),
+        patch.object(github_webhooks.common, "store_current_reviewer_run_id", AsyncMock()),
+        patch.object(github_webhooks, "_stop_automatic_reviews", AsyncMock()) as stop,
+    ):
+        await github_webhooks.process_github_push_event(payload)
+    assert client.runs.create.await_args.kwargs["metadata"]["automatic_review"] is True
+    stop.assert_awaited_once()

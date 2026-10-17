@@ -508,6 +508,19 @@ return create_deep_agent(tools=tools, ...)
 
 Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `openswe/webapp.py`. You can add, remove, or modify triggers independently.
 
+### Skipping automatic PR reviews
+
+Add the `openswe:skip-review` GitHub label to a pull request to skip automatic
+reviews when it is opened or marked ready for review, and automatic re-reviews
+on pushes. Label matching is case-insensitive. Repository-wide automatic review
+settings and draft-review preferences still apply to other PRs.
+
+Adding the label stops pending and running automatic reviews without removing
+published comments or completed checks. An unfinished review check is completed
+as neutral. Removing the label allows future automatic triggers again; removing
+the label alone does not start a review.
+Explicitly requested reviews and replies to existing findings are unaffected.
+
 ### Removing a trigger
 
 If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.

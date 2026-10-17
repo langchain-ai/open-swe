@@ -36,6 +36,7 @@ from openswe.review.findings import (
     ReviewerSlackThread,
     reviewer_thread_title,
 )
+from openswe.review.publish import settle_review_check_run
 from openswe.run_config import Repo
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
@@ -467,6 +468,9 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
 
     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
 
+    if await _automatic_review_stopped(thread_id):
+        return
+
     check_run_id = await common.create_review_check_run(
         owner=repo_config.get("owner", ""),
         repo=repo_config.get("name", ""),
@@ -519,11 +523,83 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         thread_title=None,
         input=run_input,
         assistant_id="reviewer",
-        metadata=common.AGENT_VERSION_METADATA,
+        metadata={**common.AGENT_VERSION_METADATA, "automatic_review": True},
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    if await _automatic_review_stopped(thread_id):
+        await _stop_automatic_reviews(thread_id, repo_config)
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
+
+
+def _automatic_review_opted_out(pull_request: Mapping[str, object]) -> bool:
+    labels = pull_request.get("labels")
+    return isinstance(labels, list) and any(
+        isinstance(label, dict)
+        and isinstance(name := label.get("name"), str)
+        and name.casefold() == "openswe:skip-review"
+        for label in labels
+    )
+
+
+async def _stop_automatic_reviews(thread_id: str, repo_config: dict[str, str]) -> None:
+    client = common.get_client(url=common.LANGGRAPH_URL)
+    run_ids: list[str] = []
+    for status in ("pending", "running"):
+        offset = 0
+        while True:
+            runs = await client.runs.list(thread_id, status=status, limit=100, offset=offset)
+            run_ids.extend(
+                run["run_id"] for run in runs if run.get("metadata", {}).get("automatic_review")
+            )
+            if len(runs) < 100:
+                break
+            offset += len(runs)
+    if not run_ids:
+        return
+    await client.runs.cancel_many(thread_id=thread_id, run_ids=run_ids, action="interrupt")
+    metadata = await common.get_thread_metadata_safe(thread_id) or {}
+    if metadata.get("current_reviewer_run_id") not in run_ids:
+        return
+    if metadata.get("review_check_pending_result"):
+        return
+    token, _ = await common.reviewer_token_for_repo(repo_config, repo_private=None)
+    if token:
+        await settle_review_check_run(
+            thread_id=thread_id,
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            token=token,
+            conclusion="neutral",
+            title="Automatic review stopped",
+            summary="Automatic review was stopped by the openswe:skip-review label.",
+        )
+
+
+async def process_github_pr_review_label(payload: dict[str, object]) -> None:
+    event = PullRequestEvent.parse(payload)
+    identity = event.identity if event is not None else None
+    if identity is None:
+        return
+    owner, repo, number = identity
+    thread_id = reviewer_thread_id(owner, repo, number)
+    client = common.get_client(url=common.LANGGRAPH_URL)
+    if not await common.ensure_thread_exists_for_metadata(
+        thread_id, client, title=f"Review PR #{number}"
+    ):
+        return
+    pull_request = payload.get("pull_request")
+    opted_out = isinstance(pull_request, dict) and _automatic_review_opted_out(pull_request)
+    await common.set_reviewer_thread_metadata(
+        thread_id, extra={"automatic_review_opted_out": opted_out}
+    )
+    if opted_out:
+        await _stop_automatic_reviews(thread_id, {"owner": owner, "name": repo})
+
+
+async def _automatic_review_stopped(thread_id: str) -> bool:
+    metadata = await common.get_thread_metadata_safe(thread_id) or {}
+    return metadata.get("automatic_review_opted_out") is True
 
 
 async def process_github_pr_ready(payload: dict[str, Any]) -> None:
@@ -533,6 +609,8 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     (with the workspace's setting as a fallback).
     """
     pull_request = payload.get("pull_request", {})
+    if _automatic_review_opted_out(pull_request):
+        return
     is_draft = bool(pull_request.get("draft"))
     if is_draft:
         author = pull_request.get("user") or {}
@@ -668,6 +746,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             repo_config["name"],
             head_ref,
         )
+        return
+
+    if _automatic_review_opted_out(pr):
         return
 
     # Push payloads normally carry repo privacy/id; fall back to PR metadata.
@@ -823,6 +904,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     # created on the previous head disappears after a follow-up push. Create a
     # fresh in-progress check on the new head SHA so the review stays visible;
     # publish (or the after-agent hook) settles this id.
+    if await _automatic_review_stopped(thread_id):
+        return
+
     check_run_id = await common.create_review_check_run(
         owner=repo_config["owner"],
         repo=repo_config["name"],
@@ -874,10 +958,12 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             },
         ),
         assistant_id="reviewer",
-        metadata=common.AGENT_VERSION_METADATA,
+        metadata={**common.AGENT_VERSION_METADATA, "automatic_review": True},
         client=langgraph_client,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
+    if await _automatic_review_stopped(thread_id):
+        await _stop_automatic_reviews(thread_id, repo_config)
 
 
 async def process_github_ci_event(

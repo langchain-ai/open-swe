@@ -113,6 +113,12 @@ async def github_webhook(
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
+        if action in {"labeled", "unlabeled"}:
+            label = payload.get("label") or {}
+            if str(label.get("name", "")).casefold() != "openswe:skip-review":
+                return {"status": "ignored", "reason": "Unrelated review label"}
+            background_tasks.add_task(service.process_github_pr_review_label, payload)
+            return {"status": "accepted", "message": "Updating automatic review opt-out"}
         # The same repository allowlist as issue automations, checked below for them.
         if action in {"opened", "closed"} and common.is_repo_allowed(webhook_repo_config):
             background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
