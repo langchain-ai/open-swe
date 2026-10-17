@@ -25,7 +25,7 @@ from openswe.github.pull_request_status import (
     pull_request_identity,
 )
 from openswe.github.pull_requests import PullRequest
-from openswe.github.repo_cache import accessible_repo_full_names
+from openswe.github.repos import accessible_repo_full_names
 from openswe.threads.pr_fixes import (
     PullRequestThreadIntent,
     PullRequestThreadRun,

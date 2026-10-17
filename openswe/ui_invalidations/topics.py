@@ -169,7 +169,7 @@ async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[s
 
 async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     # Imported on use: most of the app imports this module, which stays light.
-    from openswe.github.repo_cache import accessible_repo_full_names
+    from openswe.github.repos import accessible_repo_full_names
 
     try:
         accessible = await accessible_repo_full_names(session["sub"])

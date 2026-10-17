@@ -16,8 +16,8 @@ from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
-from openswe.github.repo_cache import accessible_repo_full_names
 from openswe.github.repo_names import normalize_repo_full_name
+from openswe.github.repos import accessible_repo_full_names
 from openswe.review.approvals import fetch_approvals_md
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,

@@ -8,11 +8,11 @@ from openswe.dashboard.deps import SESSION_DEP
 from openswe.github.http import GitHubClient
 from openswe.github.repo_cache import (
     REPO_LIST_FRESH_MS,
-    build_repo_payload,
     read_cached_repos,
     schedule_repo_cache_refresh,
 )
 from openswe.github.repo_merge_methods import RepositoryMergeMethods, repository_merge_methods
+from openswe.github.repos import build_repo_payload
 
 router = APIRouter(tags=["github"])
 

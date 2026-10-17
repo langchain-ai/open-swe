@@ -86,7 +86,7 @@ async def test_list_repos_follows_installation_and_repository_next_links(
         {"full_name": "acme/later", "private": True, "archived": True},
         {"full_name": "other/api", "private": True, "archived": False},
     ]
-    assert await repo_cache.accessible_repo_full_names("octocat") == {
+    assert await repos.accessible_repo_full_names("octocat") == {
         "acme/first",
         "acme/later",
         "other/api",
@@ -109,9 +109,9 @@ async def test_access_checks_observe_removed_repositories_without_http_cache(
         )
 
     mock_github_sdk(monkeypatch, handle)
-    assert await repo_cache.accessible_repo_full_names("octocat") == {"acme/api"}
+    assert await repos.accessible_repo_full_names("octocat") == {"acme/api"}
     allowed = False
-    assert await repo_cache.accessible_repo_full_names("octocat") == set()
+    assert await repos.accessible_repo_full_names("octocat") == set()
 
 
 @pytest.mark.asyncio
@@ -178,13 +178,13 @@ async def test_access_trusts_a_cached_listing_briefly_and_drops_it_on_installati
     fetch = AsyncMock(side_effect=[([], [{"full_name": "Acme/API"}]), ([], []), ([], [])])
     monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
 
-    assert await repo_cache.accessible_repo_full_names("ada") == {"acme/api"}
-    assert await repo_cache.accessible_repo_full_names("ada") == {"acme/api"}
+    assert await repos.accessible_repo_full_names("ada") == {"acme/api"}
+    assert await repos.accessible_repo_full_names("ada") == {"acme/api"}
     assert fetch.await_count == 1
 
     await repo_cache.forget_cached_repos()
-    assert await repo_cache.accessible_repo_full_names("ada") == set()
+    assert await repos.accessible_repo_full_names("ada") == set()
 
-    monkeypatch.setattr(repo_cache, "ACCESS_FRESH_MS", -1)
-    await repo_cache.accessible_repo_full_names("ada")
+    monkeypatch.setattr(repos, "ACCESS_FRESH_MS", -1)
+    await repos.accessible_repo_full_names("ada")
     assert fetch.await_count == 3
