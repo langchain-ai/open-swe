@@ -245,6 +245,7 @@ class SlackMessage(Base):
     )
     origin_thread_ts: Mapped[str | None] = mapped_column(default=None)
     origin_subject: Mapped[str | None] = mapped_column(default=None)
+    origin_notice: Mapped[JsonObject | None] = mapped_column(JSONB, default=None)
     # Each Slack user's feedback reactions on the message.
     reactions: Mapped[dict[str, list[str]]] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb"), default_factory=dict
@@ -293,7 +294,13 @@ class SlackMessage(Base):
 
     @classmethod
     async def save_origin(
-        cls, dm_channel_id: str, message_ts: str, channel_id: str, thread_ts: str, subject: str
+        cls,
+        dm_channel_id: str,
+        message_ts: str,
+        channel_id: str,
+        thread_ts: str,
+        subject: str,
+        notice: JsonObject | None = None,
     ) -> None:
         upsert = insert(cls).values(
             id=uuid7(),
@@ -302,6 +309,7 @@ class SlackMessage(Base):
             origin_channel_id=channel_id,
             origin_thread_ts=thread_ts,
             origin_subject=subject,
+            origin_notice=notice,
         )
         async with postgres.session() as session:
             await SlackChannel.ensure(session, dm_channel_id, channel_id)
@@ -312,6 +320,7 @@ class SlackMessage(Base):
                         "origin_channel_id": upsert.excluded.origin_channel_id,
                         "origin_thread_ts": upsert.excluded.origin_thread_ts,
                         "origin_subject": upsert.excluded.origin_subject,
+                        "origin_notice": upsert.excluded.origin_notice,
                         "updated_at": func.clock_timestamp(),
                     },
                 )

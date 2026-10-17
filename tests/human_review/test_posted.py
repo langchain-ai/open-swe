@@ -6,9 +6,11 @@ import pytest
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
 from openswe.github.codeowners import CodeOwners
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.human_review import lifecycle, posted, standard
 from openswe.human_review.lifecycle import ReviewCard
+from openswe.human_review.picking import ReviewerInstructions
 from openswe.human_review.posted import linked_pull_request
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.users import User, UserPreferences
@@ -54,7 +56,7 @@ async def test_external_authors_are_not_watched(
 async def test_blocked_reactions_track_an_approved_posts_current_head(
     registry_db: None, slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
 ) -> None:
-    pr = await PullRequest(owner="lc", repo="repo", number=7).save()
+    pr = await PullRequest(owner="lc", repo="repo", number=7, base_ref="main").save()
     request = await HumanReviewRequest(
         pull_request_id=pr.id,
         head_sha="abc",
@@ -104,28 +106,16 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     monkeypatch.setattr(
         ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
     )
+    monkeypatch.setattr(ReviewerInstructions, "load", AsyncMock(return_value=None))
+    monkeypatch.setattr(PullRequestClient, "review_required", AsyncMock(return_value=True))
+    monkeypatch.setattr(standard, "choose_reviewer", AsyncMock(return_value=None))
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is None
-    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @grace")))
+    monkeypatch.setattr(PullRequestClient, "review_required", AsyncMock(return_value=False))
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is not None
-
-    async def unreadable(*_: object, strict: bool = False) -> None:
-        if strict:
-            raise standard.RepoFileUnreadableError("unreadable")
-
-    monkeypatch.setattr(CodeOwners, "fetch", unreadable)
-    await settle_with_reactions(set())
-    stored = await HumanReviewRequest.get(request.id)
-    assert stored is not None and stored.approved_at is None
-    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=None))
-    await settle_with_reactions(set())
-    stored = await HumanReviewRequest.get(request.id)
-    assert stored is not None and stored.approved_at is not None
-    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
-    await settle_with_reactions(set())
 
     preferences = UserPreferences()
 

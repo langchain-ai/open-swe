@@ -3,6 +3,7 @@
 import re
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from fastapi import HTTPException
 from langgraph.config import get_config
@@ -205,6 +206,15 @@ async def assign_human_reviewer(
     result = await assign(request, login, reason, replace=named_by_person)
     if not result.success:
         return _failure(result.error)
+    if result.starts_at is not None:
+        return {
+            "success": True,
+            "next": (
+                f"They are shown on the review card now. It is outside their work hours, so "
+                f"their GitHub review request and direct message with Accept, Decline and "
+                f"Snooze go out when their work day starts, at {result.starts_at.isoformat()}."
+            ),
+        }
     return {
         "success": True,
         "next": (
@@ -245,12 +255,27 @@ async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
 
 
 @expose_mcp()
-async def get_human_review_status(pr_url: str) -> dict[str, Any]:
+async def get_human_review_status(pr_url: str = "", review_request_id: str = "") -> dict[str, Any]:
     """Implement the `get_human_review_status` tool."""
+    cfg = RunConfig.from_config(get_config())
+    if review_request_id:
+        try:
+            request = await HumanReviewRequest.get(UUID(review_request_id))
+        except ValueError:
+            request = None
+        if request is None:
+            return _failure("No review request has that review_request_id.")
+        pr_ref = parse_github_pr_url(request.pull_request.url)
+        if pr_ref is None:
+            return _failure("The review request's pull request URL could not be read.")
+        if refusal := await _repository_refusal(pr_ref, cfg):
+            return _failure(refusal)
+        status = await ReviewStatus.of(request)
+        return {"success": True, **status.model_dump(mode="json")}
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
-        return _failure("pr_url must be a canonical GitHub pull request URL")
-    if refusal := await _repository_refusal(pr_ref, RunConfig.from_config(get_config())):
+        return _failure("Pass review_request_id, or pr_url as a canonical GitHub pull request URL.")
+    if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None or request.kind == "expedited":

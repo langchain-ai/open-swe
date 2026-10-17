@@ -28,7 +28,7 @@ from openswe.input_messages import (
     build_input_messages,
     delivered_event_match_ids,
 )
-from openswe.webhooks.event_log import RETAINED_DAYS, WebhookSource
+from openswe.webhooks.event_log import RETAINED_DAYS, EventSource
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class EventMatch(Base):
 
     thread_id: Mapped[str]
     subscription_id: Mapped[UUID]
-    source: Mapped[WebhookSource] = mapped_column(Text)
+    source: Mapped[EventSource] = mapped_column(Text)
     delivery_id: Mapped[str]
     content: Mapped[str]
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
@@ -126,7 +126,7 @@ class EventMatch(Base):
                 match.content,
                 {
                     "sender_id": _SYSTEM["id"],
-                    "surface": match.source,
+                    "surface": "automation" if match.source == "openswe" else match.source,
                     "kind": "system",
                     "data": data,
                 },

@@ -11,8 +11,9 @@ owner enabled ever reaches a run with it.
 import logging
 from typing import Any, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from openswe.human_review.notices import ReviewNotice
 from openswe.prompts import prompt
 from openswe.slack.client import get_slack_permalink, post_slack_top_level_message_with_ts
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
@@ -90,15 +91,26 @@ class DmOrigin(BaseModel):
     channel_id: str
     thread_ts: str
     subject: str = ""
+    notice: ReviewNotice | None = None
 
     @property
     def location(self) -> tuple[str, str]:
         return self.channel_id, self.thread_ts
 
-    async def save_for(self, dm_channel_id: str, message_ts: str) -> None:
+    async def save_for(self, dm_channel_id: str, message_ts: str, text: str) -> None:
+        saved = self
+        if self.notice is not None and not self.notice.text:
+            saved = self.model_copy(
+                update={"notice": self.notice.model_copy(update={"text": text})}
+            )
         try:
             await SlackMessage.save_origin(
-                dm_channel_id, message_ts, self.channel_id, self.thread_ts, self.subject
+                dm_channel_id,
+                message_ts,
+                saved.channel_id,
+                saved.thread_ts,
+                saved.subject,
+                saved.notice.model_dump(mode="json") if saved.notice is not None else None,
             )
         except Exception:
             logger.warning(
@@ -113,10 +125,21 @@ class DmOrigin(BaseModel):
         message = await SlackMessage.origin(dm_channel_id, message_ts)
         if message is None or message.origin_channel_id is None:
             return None
+        notice = None
+        if message.origin_notice is not None:
+            try:
+                notice = ReviewNotice.model_validate(message.origin_notice)
+            except ValidationError:
+                logger.warning(
+                    "A DM's saved review notice is unreadable",
+                    extra={"slack_channel": dm_channel_id, "slack_message_ts": message_ts},
+                    exc_info=True,
+                )
         return cls(
             channel_id=message.origin_channel_id,
             thread_ts=message.origin_thread_ts or "",
             subject=message.origin_subject or "",
+            notice=notice,
         )
 
 
@@ -171,7 +194,7 @@ async def post_dm(
         channel_id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
     )
     if origin is not None:
-        await origin.save_for(channel_id, message_ts)
+        await origin.save_for(channel_id, message_ts, text)
         await note_for_thread_owner(
             *origin.location,
             prompt("slack/dm-sent-for-thread", recipient=f"<@{slack_user_id}>", text=text),

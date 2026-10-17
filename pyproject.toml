@@ -50,6 +50,8 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.4",
+    "time-machine>=2.16",
+    "hypothesis>=6.140",
 ]
 # Third-party sandbox providers. The registry imports each provider lazily, so
 # these are only needed when SANDBOX_TYPE selects one; `uv sync` alone gives you

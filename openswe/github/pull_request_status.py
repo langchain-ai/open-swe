@@ -100,6 +100,13 @@ mutation($input: UpdatePullRequestReviewCommentInput!) {
   updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id } }
 }
 """
+_REVIEW_DECISION_QUERY = """
+query PullRequestReviewDecision($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) { reviewDecision }
+  }
+}
+"""
 _THREAD_COUNT_QUERY = """
 query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -359,6 +366,14 @@ class Mergeability:
 
     mergeable: bool | None
     merge_state: str
+
+
+class _ReviewDecisionAnswer(BaseModel):
+    review_decision: str | None = Field(None, alias="reviewDecision")
+
+    @property
+    def required(self) -> bool:
+        return self.review_decision == "REVIEW_REQUIRED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -726,6 +741,22 @@ class PullRequestClient:
                     return ReviewState(unresolved, review_required)
         except _CursorLoop, httpx2.HTTPError, ValueError:
             return ReviewState(None, review_required)
+
+    async def review_required(self) -> bool:
+        """Whether GitHub still wants an approval before merging, from rulesets or branch
+        protection, such as one from a code owner; an unreadable answer counts as wanted."""
+        try:
+            pull = _graphql_pull(
+                await self.repo.graphql(_REVIEW_DECISION_QUERY, {"number": self.number})
+            )
+        except httpx2.HTTPError, ValueError:
+            logger.warning(
+                "Could not read the review decision; assuming a review is still required",
+                extra=self._log_extra,
+                exc_info=True,
+            )
+            return True
+        return pull is None or _ReviewDecisionAnswer.model_validate(pull).required
 
     async def thread_status(self) -> dict[str, Any]:
         """The PR health a dashboard thread shows: state, checks and unresolved threads."""
