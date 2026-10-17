@@ -345,7 +345,7 @@ export function SidebarThreadRow({
 
   const thread = item.thread
   const subagents = (item.subagents ?? []).filter(
-    (subagent) => subagent.status !== "completed"
+    (subagent) => subagent.threadId || subagent.status !== "completed"
   )
   const workers = item.taskWorkers ?? []
   const activeWorkerId = workers.find(
@@ -681,8 +681,8 @@ function SidebarSubagentRow({
   const link = (
     <Link
       to="/agents/$threadId"
-      params={{ threadId }}
-      search={{ subagent: subagent.toolCallId }}
+      params={{ threadId: subagent.threadId ?? threadId }}
+      search={subagent.threadId ? {} : { subagent: subagent.toolCallId }}
       onClick={() => onNavigate?.()}
       className={sidebarRowClassName({
         compact,

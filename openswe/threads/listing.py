@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
+from openswe.openai_responses.associations import guest_thread_ids
 from openswe.review.session import ReviewSessionMetadata
 from openswe.tasks.flags import task_coordination_enabled
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
@@ -315,6 +316,8 @@ async def _summarize_threads(
     threads: list[ThreadLike],
     *,
     minimal_run_update: bool = False,
+    viewer_login: str | None = None,
+    viewer_email: str | None = None,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
 
@@ -334,6 +337,49 @@ async def _summarize_threads(
 
     summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
     await attach_subagents(summaries)
+    associations = await guest_thread_ids([summary["id"] for summary in summaries])
+    ids = [thread_id for children in associations.values() for thread_id in children]
+    guests_by_id: dict[str, ThreadLike] = {}
+    for offset in range(0, len(ids), _PINNED_THREADS_BATCH_SIZE):
+        batch_ids = ids[offset : offset + _PINNED_THREADS_BATCH_SIZE]
+        guests = await client.threads.search(
+            ids=batch_ids, limit=len(batch_ids), select=_THREAD_LIST_SELECT
+        )
+        for guest in guests:
+            if guest_id := _thread_id(guest):
+                guests_by_id[guest_id] = guest
+    for summary in summaries:
+        for guest_id in associations.get(summary["id"], []):
+            guest = guests_by_id.get(guest_id)
+            if guest is None:
+                continue
+            metadata = _thread_metadata(guest)
+            if not thread_is_readable(metadata, viewer_login, viewer_email):
+                continue
+            child = await _summarize_thread(client, guest)
+            client_name = metadata.get("responses_client")
+            title = (
+                f"[{client_name}] {child['title']}"
+                if isinstance(client_name, str) and client_name
+                else child["title"]
+            )
+            summary["subagents"].append(
+                {
+                    "toolCallId": child["id"],
+                    "threadId": child["id"],
+                    "title": title,
+                    "subagentType": "Responses API",
+                    "status": (
+                        "in_progress"
+                        if child["status"] == "running"
+                        else "error"
+                        if child["status"] == "error"
+                        else "completed"
+                    ),
+                    "startedAt": child["createdAt"],
+                    "endedAt": child["updatedAt"],
+                }
+            )
     return summaries
 
 
@@ -771,6 +817,8 @@ async def _pinned_thread_summaries(
         client,
         [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
         minimal_run_update=True,
+        viewer_login=login,
+        viewer_email=email,
     )
     await attach_task_workers(client, summaries, login, email)
     return summaries
@@ -948,6 +996,8 @@ async def list_dashboard_threads_page(
         summaries = await _summarize_threads(
             client,
             candidates,
+            viewer_login=login,
+            viewer_email=email,
         )
         _attach_flat_task_memberships(
             summaries, await sidebar_memberships([str(summary["id"]) for summary in summaries])
@@ -973,6 +1023,8 @@ async def list_dashboard_threads_page(
         items = await _summarize_threads(
             client,
             window,
+            viewer_login=login,
+            viewer_email=email,
         )
         has_more = len(candidates) > safe_offset + safe_limit
         _attach_flat_task_memberships(

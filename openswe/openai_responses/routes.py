@@ -98,7 +98,9 @@ async def create_response(
     model = body.agent_model()
     client_tools = body.client_tools()
     async with caller.reserve_capacity(continuation.thread_id):
-        thread_id = continuation.thread_id or await caller.create_guest_thread(prompt, model)
+        thread_id = continuation.thread_id or await caller.create_guest_thread(
+            prompt, model, request.headers.get("originator", "")
+        )
         after = await load_head(thread_id) or 0
         run_id = await caller.start_run(
             thread_id,
