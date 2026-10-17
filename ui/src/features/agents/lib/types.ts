@@ -570,7 +570,7 @@ export interface AgentThread {
   /** Whether that machine is serving the thread's checkout right now; null in lists. */
   sandboxBridgeOnline?: boolean | null
   /** Whose browser the thread's agent opened a window of, if it has. */
-  browserScope?: "private" | "workspace" | null
+  browserScope?: "user" | "workspace" | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

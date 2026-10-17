@@ -6821,6 +6821,10 @@
       "ThreadBrowser": {
         "description": "A thread's browser window as the dashboard shows it.",
         "properties": {
+          "act_url": {
+            "title": "Act Url",
+            "type": "string"
+          },
           "controller": {
             "enum": [
               "agent",
@@ -6835,7 +6839,7 @@
           },
           "scope": {
             "enum": [
-              "private",
+              "user",
               "workspace"
             ],
             "title": "Scope",
@@ -6853,7 +6857,8 @@
           "scope",
           "controller",
           "reason",
-          "tabs"
+          "tabs",
+          "act_url"
         ],
         "title": "ThreadBrowser",
         "type": "object"
@@ -18698,59 +18703,6 @@
           }
         ],
         "summary": "Api Thread Browser",
-        "tags": [
-          "dashboard",
-          "threads",
-          "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/browser/connect": {
-      "post": {
-        "operationId": "api_thread_browser_connection_dashboard_api_threads__thread_id__browser_connect_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Api Thread Browser Connection Dashboard Api Threads  Thread Id  Browser Connect Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Thread Browser Connection",
         "tags": [
           "dashboard",
           "threads",

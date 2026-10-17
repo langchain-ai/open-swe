@@ -11,25 +11,25 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Literal, Self
-from urllib.parse import quote, urlencode, urlsplit, urlunsplit
+from typing import Literal, Self
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid7
 
 import httpx2
-from pydantic import BaseModel, BeforeValidator, ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import ColumnElement, ForeignKey, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.sandboxes.providers.langsmith_api import sandbox_api_request
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.ui_invalidations.topics import Topic
 from openswe.users.records import user_id_for_login
 from openswe.utils.thread_ops import langgraph_client
 from openswe.workspaces.rows import WorkspaceRow
 
-BrowserScope = Literal["private", "workspace"]
+BrowserScope = Literal["user", "workspace"]
 
 # Creating and starting wait for Chrome to answer.
 _BROWSER_START_TIMEOUT_SECONDS = 180.0
@@ -37,8 +37,6 @@ _BROWSER_REQUEST_TIMEOUT_SECONDS = 30.0
 _GONE_STATUSES = frozenset({"failed", "deleting"})
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
 _THREAD_METADATA_KEY = "browser_window"
-# LangSmith's answer for a route it does not have, as opposed to a browser it does not have.
-_ROUTE_MISSING = "The requested path does not exist"
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +55,6 @@ class BrowserTab(BaseModel):
     url: str = ""
 
 
-def _controller(value: object) -> object:
-    # Deployments older than the controller API call a person's control "human".
-    return "user" if value == "human" else value
-
-
 class BrowserWindow(BaseModel):
     """One window of a browser, attached to one sandbox."""
 
@@ -69,10 +62,11 @@ class BrowserWindow(BaseModel):
     sandbox: str = ""
     cdp_url: str = ""
     localhost_alias: str = ""
-    controller: Annotated[Literal["agent", "user"], BeforeValidator(_controller)]
+    controller: Literal["agent", "user"]
     reason: str = ""
     tabs: list[BrowserTab] = []
     view_url: str = ""
+    act_url: str = ""
 
     def localhost_url(self, url: str) -> str:
         """``url`` with a loopback host pointed at this window's sandbox.
@@ -99,10 +93,6 @@ class BrowserState(BaseModel):
     attachments: list[BrowserWindow] = []
 
 
-class _BrowserBox(BaseModel):
-    dataplane_url: str | None = None
-
-
 class LangSmithBrowser:
     """One browser in LangSmith's browser beta, by sandbox name."""
 
@@ -119,9 +109,9 @@ class LangSmithBrowser:
     async def window_for(self, sandbox: str) -> BrowserWindow:
         """The window ``sandbox`` drives, with its localhost shared, attaching one if needed."""
         state = await self._running_state()
-        windows = [window for window in state.attachments if window.sandbox == sandbox]
-        if windows:
-            return max(windows, key=lambda window: bool(window.localhost_alias))
+        for window in state.attachments:
+            if window.sandbox == sandbox:
+                return window
         response = await _browser_request(
             "POST",
             f"/browsers/{self.name}/attachments",
@@ -157,30 +147,6 @@ class LangSmithBrowser:
             timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS,
         )
         return BrowserWindow.model_validate(response.json())
-
-    async def view_socket_url(self, window_id: str, tab_id: str) -> str:
-        """The live view of one tab of a window: JPEG frames out, a person's input in.
-
-        It is served beside the browser's own dataplane URL rather than through
-        the API, which does not pass WebSocket upgrades.
-        """
-        response = await _browser_request(
-            "GET", f"/boxes/{self.name}", timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS
-        )
-        dataplane_url = _BrowserBox.model_validate(response.json()).dataplane_url
-        if not dataplane_url:
-            raise BrowserGoneError(f"browser {self.name} has no dataplane")
-        sandboxes_base = dataplane_url.rstrip("/").rsplit("/", 1)[0]
-        parts = urlsplit(
-            f"{sandboxes_base}/browsers/{quote(self.name, safe='')}"
-            f"/attachments/{quote(window_id, safe='')}/view"
-        )
-        return urlunsplit(
-            parts._replace(
-                scheme="wss" if parts.scheme == "https" else "ws",
-                query=urlencode({"tab": tab_id}),
-            )
-        )
 
     async def _running_state(self) -> BrowserState:
         state = await self._state()
@@ -238,15 +204,11 @@ async def _browser_request(
     timeout: float,
 ) -> httpx2.Response:
     try:
-        return await sandbox_api_request(method, path, json=json, timeout=timeout)
+        return await SandboxAPI.from_env().request(method, path, json=json, timeout=timeout)
     except httpx2.HTTPStatusError as exc:
         if exc.response.status_code == 501:
             raise BrowserUnavailableError(
                 "LangSmith's browser beta is not enabled for this deployment's workspace"
-            ) from exc
-        if exc.response.status_code == 404 and _ROUTE_MISSING in exc.response.text:
-            raise BrowserUnavailableError(
-                "This LangSmith deployment does not support that browser operation yet"
             ) from exc
         if exc.response.status_code == 404 and path.startswith(("/browsers/", "/boxes/")):
             raise BrowserGoneError(str(exc)) from exc

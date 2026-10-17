@@ -92,42 +92,35 @@ def _configure(
 
 
 @pytest.mark.parametrize(
-    ("visibility", "scope", "owner", "saved"),
+    ("visibility", "scope", "owner"),
     [
-        ("public", None, "workspace:acme", "workspace"),
-        ("private", None, "person:alice", "private"),
-        ("private", "workspace", "workspace:acme", "workspace"),
+        ("public", "workspace", "workspace:acme"),
+        ("private", "user", "person:alice"),
+        ("private", "workspace", "workspace:acme"),
     ],
 )
-async def test_open_browser_picks_the_threads_browser(
-    monkeypatch: pytest.MonkeyPatch, visibility: str, scope: str | None, owner: str, saved: str
+async def test_open_browser_opens_the_requested_browser(
+    monkeypatch: pytest.MonkeyPatch, visibility: str, scope: str, owner: str
 ) -> None:
     owners, browser = _configure(monkeypatch, visibility=visibility, owner_login="alice")
 
-    result = await browser_tool.open_browser("http://localhost:5173/login?next=/", scope=scope)
+    result = await browser_tool.open_browser(scope, url="http://localhost:5173/login?next=/")
 
-    assert owners == [owner, f"saved:{saved}"]
+    assert owners == [owner, f"saved:{scope}"]
     assert result["localhost"] == "http://sb-abc.localhost"
     assert browser.opened == ["http://sb-abc.localhost:5173/login?next=/"]
 
 
-async def test_workspace_thread_cannot_open_a_private_browser(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("visibility", "owner_login"),
+    [("public", "alice"), ("private", "bob")],
+)
+async def test_only_the_owners_private_thread_opens_their_browser(
+    monkeypatch: pytest.MonkeyPatch, visibility: str, owner_login: str
 ) -> None:
-    owners, _ = _configure(monkeypatch, visibility="public", owner_login="alice")
+    owners, _ = _configure(monkeypatch, visibility=visibility, owner_login=owner_login)
 
-    result = await browser_tool.open_browser(scope="private")
+    result = await browser_tool.open_browser("user")
 
     assert result.get("ok") is False
-    assert owners == []
-
-
-async def test_private_thread_opens_only_its_owners_browser(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    owners, _ = _configure(monkeypatch, visibility="private", owner_login="bob")
-
-    with pytest.raises(ValueError, match="Only the owner of a private thread"):
-        await browser_tool.open_browser()
-
     assert owners == []

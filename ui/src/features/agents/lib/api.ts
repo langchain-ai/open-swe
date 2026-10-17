@@ -105,8 +105,7 @@ export interface ThreadRecoveryPatch {
   filename: string
 }
 
-/** A live socket onto a thread's sandbox: its URL, protocol and one-use ticket. */
-export interface ThreadSocketConnection {
+export interface CloudTerminalConnection {
   url: string
   protocol: string
   ticket: string
@@ -122,11 +121,13 @@ export interface ThreadBrowserTab {
 
 /** The browser window a thread's agent opened, and who is driving it. */
 export interface ThreadBrowser {
-  scope: "private" | "workspace"
+  scope: "user" | "workspace"
   controller: BrowserController
   /** Why the agent asked a person to take over, when it did. */
   reason: string
   tabs: Array<ThreadBrowserTab>
+  /** LangSmith's own page for the window, to watch it and use it while a person controls it. */
+  act_url: string
 }
 
 export type ThreadScope = "all" | "interactive" | "automation" | "bot"
@@ -473,7 +474,7 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/recovery.patch`
     ),
   connectCloudTerminal: (threadId: string) =>
-    agentsRequest<ThreadSocketConnection>(
+    agentsRequest<CloudTerminalConnection>(
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
@@ -488,10 +489,5 @@ export const agentsApi = {
     agentsRequest<ThreadBrowser>(
       `/threads/${encodeURIComponent(threadId)}/browser/controller`,
       { method: "POST", body: JSON.stringify({ controller }) }
-    ),
-  connectThreadBrowser: (threadId: string) =>
-    agentsRequest<ThreadSocketConnection>(
-      `/threads/${encodeURIComponent(threadId)}/browser/connect`,
-      { method: "POST" }
     ),
 }

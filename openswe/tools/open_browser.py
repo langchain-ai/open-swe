@@ -20,20 +20,23 @@ class OpenBrowserResult(TypedDict):
     scope: BrowserScope
     cdp_url: str
     controller: str
-    localhost: NotRequired[str]
+    localhost: str
     view_url: NotRequired[str]
     tab: NotRequired[OpenBrowserTab]
 
 
-def _private_browser(args: Mapping[str, object]) -> Policy | None:
-    return Policy(trusted="private", actor="owner") if args.get("scope") == "private" else None
+_WORKSPACE_BROWSER = Policy(trusted="anywhere")
+# A person's browser holds their logins, so only their own private threads reach it.
+_USER_BROWSER = Policy(trusted="private", actor="owner")
+
+
+def _browser_policy(args: Mapping[str, object]) -> Policy:
+    return _USER_BROWSER if args.get("scope") == "user" else _WORKSPACE_BROWSER
 
 
 @audit_tool()
-@access(Policy(trusted="anywhere"), per_call=_private_browser)
-async def open_browser(
-    url: str | None = None, scope: BrowserScope | None = None
-) -> OpenBrowserResult:
+@access(_WORKSPACE_BROWSER, per_call=_browser_policy)
+async def open_browser(scope: BrowserScope, url: str | None = None) -> OpenBrowserResult:
     """Implement the `open_browser` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
@@ -41,13 +44,11 @@ async def open_browser(
         raise ValueError("no thread_id in run config")
 
     metadata = thread_metadata(await read_thread(thread_id))
-    private_thread = metadata.get("visibility", "public") != "public"
-    scope = scope or ("private" if private_thread else "workspace")
-    if scope == "private":
+    if scope == "user":
         login = private_owner_login(cfg, metadata)
         if login is None:
             raise ValueError(
-                "Only the owner of a private thread can open their private browser; "
+                "Only the owner of a private thread can open their own browser; "
                 'pass scope="workspace" for the workspace browser'
             )
         owner = await BrowserOwner.person(login)
@@ -65,9 +66,8 @@ async def open_browser(
         "scope": scope,
         "cdp_url": window.cdp_url,
         "controller": window.controller,
+        "localhost": f"http://{window.localhost_alias}",
     }
-    if window.localhost_alias:
-        result["localhost"] = f"http://{window.localhost_alias}"
     if window.view_url:
         result["view_url"] = window.view_url
     if url:

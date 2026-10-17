@@ -37,11 +37,8 @@ export interface AgentRightPanelProps {
   diffAvailable: boolean
   /** Rendered for the Changes surface; `fullScreen` drives layout-only extras. */
   renderDiff: (state: { fullScreen: boolean }) => ReactNode
-  /**
-   * Rendered for a Browser surface, which only threads that can open a browser
-   * offer; `tabId` is the tab it shows, null to follow the newest.
-   */
-  renderBrowser?: (surface: { tabId: string | null }) => ReactNode
+  /** Rendered for the Browser surface, which only threads that can open a browser offer. */
+  renderBrowser?: () => ReactNode
   browserAvailable?: boolean
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
@@ -300,7 +297,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         ? props.renderDiff({ fullScreen: maximized })
         : null}
       {activeSurface?.kind === "preview" && props.renderBrowser
-        ? props.renderBrowser({ tabId: activeSurface.resourceId })
+        ? props.renderBrowser()
         : null}
       {activeSurface?.kind === "files" || activeSurface?.kind === "file" ? (
         <FilesPanel

@@ -208,9 +208,7 @@ export function AgentGitPanel({
       terminalAvailable={terminalAvailable}
       diffAvailable
       browserAvailable={browserAvailable}
-      renderBrowser={({ tabId }) => (
-        <BrowserPanel threadId={thread.id} tabId={tabId} />
-      )}
+      renderBrowser={() => <BrowserPanel threadId={thread.id} />}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={({ fullScreen }) => (

@@ -5,7 +5,7 @@ import type {
   DesktopTerminalSessionSnapshot,
   DesktopTerminalSummary,
 } from "@/desktop"
-import type { ThreadSocketConnection } from "@/features/agents/lib/api"
+import type { CloudTerminalConnection } from "@/features/agents/lib/api"
 import { agentsApi } from "@/features/agents/lib/api"
 
 export type TerminalTarget =
@@ -228,7 +228,7 @@ export interface AttachedTerminal extends TerminalSessionState {
 }
 
 export function cloudTerminalProtocols(
-  connection: ThreadSocketConnection
+  connection: CloudTerminalConnection
 ): Array<string> {
   return [connection.protocol, connection.ticket]
 }
