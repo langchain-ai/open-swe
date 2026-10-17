@@ -1,6 +1,7 @@
 """Linear, through Open SWE's app: mentioning or delegating an issue to it opens a session."""
 
 from managed_deepagents import channels
+from rt import intake
 from rt.linear import LINEAR
 
 channel = channels.linear(
@@ -16,9 +17,10 @@ channel = channels.linear(
     on_event={
         "AgentSessionEvent.created": LINEAR.start_run,
         "AgentSessionEvent.prompted": LINEAR.start_run,
-        # These start no conversation: automations and event listeners read them.
-        "Issue.create": LINEAR.forward,
-        "Issue.update": LINEAR.forward,
-        "Comment.create": LINEAR.forward,
     },
+    # These start no conversation: the backend's automations and event listeners read them.
+    events=["Issue.create", "Issue.update", "Comment.create"],
+    forward=LINEAR.forward,
+    # The channel starts the runs, so no run-complete webhook follows them.
+    on_settled=intake.settled,
 )

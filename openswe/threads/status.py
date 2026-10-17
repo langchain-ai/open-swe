@@ -6,10 +6,11 @@ run-complete webhook asks it, and a reconcile job asks again for any thread
 still marked busy long after a webhook should have come.
 
 On an MDA thread the job also completes a latest run that ended unannounced, as
-the webhook would have: MDA channels' runs have no webhook, and one that crashed
-never reached its ``after_agent`` hook either. Completion is once per run, so a
-webhook or hook that did arrive wins. It reads MDA as LangSmith Studio does, so
-it sees the threads channels own too.
+the webhook would have. MDA channels' runs have no webhook: the channel reports
+each one that ends (``openswe.mda_channels.completion``), but only from the
+process that started it, so a restart loses that report. Completion is once per
+run, so a webhook or report that did arrive wins. It reads MDA as LangSmith
+Studio does, so it sees the threads channels own too.
 """
 
 import logging
@@ -54,13 +55,15 @@ async def thread_run_error(thread_id: str) -> str | None:
     return await RUNTIMES.runs_on(thread.runtime if thread else "local").run_error(thread_id)
 
 
-async def complete_ended_run(thread: IndexedThread) -> bool:
-    """Complete the thread's latest run on MDA if it ended; whether it had."""
+async def complete_ended_run(thread: IndexedThread, run_id: str | None = None) -> bool:
+    """Complete the thread's run on MDA, its latest by default, if it ended; whether it had."""
     runtime = RUNTIMES.runs_on(thread.runtime)
-    run = await runtime.latest_run(thread.thread_id)
+    run = await (
+        runtime.run(thread.thread_id, run_id) if run_id else runtime.latest_run(thread.thread_id)
+    )
     status = run.get("status") if run else None
-    run_id = run.get("run_id") if run else None
-    if run is None or status not in _ENDED_RUN_STATUSES or not isinstance(run_id, str):
+    ended_run_id = run.get("run_id") if run else None
+    if run is None or status not in _ENDED_RUN_STATUSES or not isinstance(ended_run_id, str):
         return False
     raw_metadata = run.get("metadata")
     metadata: dict[str, Any] = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
@@ -69,13 +72,16 @@ async def complete_ended_run(thread: IndexedThread) -> bool:
         metadata.setdefault(CHANNEL_METADATA_KEY, channel)
     payload: dict[str, Any] = {
         "thread_id": thread.thread_id,
-        "run_id": run_id,
+        "run_id": ended_run_id,
         "status": status,
         "metadata": metadata,
     }
+    recorded = await runtime.get(thread.thread_id) or {}
     if status in _FAILED_RUN_STATUSES:
-        recorded = await runtime.get(thread.thread_id)
-        payload["error"] = (recorded or {}).get("error")
+        payload["error"] = recorded.get("error")
+    # The run's messages, for its usage, as a webhook carries them.
+    if isinstance(values := recorded.get("values"), dict):
+        payload["values"] = values
     # Completion reads the thread status from here.
     from openswe.completion import complete_run_once
 

@@ -42,6 +42,10 @@ class _Runtime:
     async def latest_run(self, thread_id: str) -> dict[str, JsonValue] | None:
         return self.runs.get(thread_id)
 
+    async def run(self, thread_id: str, run_id: str) -> dict[str, JsonValue] | None:
+        run = self.runs.get(f"{thread_id}/{run_id}")
+        return run if run is not None else None
+
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         return {"thread_id": thread_id, "error": {"error": "RuntimeError", "message": "boom"}}
 
@@ -108,11 +112,11 @@ async def test_threads_stuck_busy_are_settled_from_their_runtime(
     }
 
 
-async def test_ended_mda_runs_are_completed_as_their_webhook_or_hook_would(
+async def test_ended_mda_runs_are_completed_as_their_webhook_or_report_would(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     long_ago = datetime.now(UTC) - timedelta(hours=1)
-    # A channel run that crashed: no webhook follows it, and it never reached after_agent.
+    # A channel run whose report was lost to a restart: no webhook follows it.
     await _busy_since("channel", long_ago, metadata={"channel": "linear"})
     await _busy_since("own", long_ago)
     await _busy_since("running", long_ago)
@@ -153,6 +157,48 @@ async def test_ended_mda_runs_are_completed_as_their_webhook_or_hook_would(
     assert still_busy is not None and still_busy.status == "busy"
 
 
+async def test_a_channel_completes_the_run_it_reports_with_the_threads_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _busy_since("channel", datetime.now(UTC), metadata={"channel": "linear"})
+    runs: dict[str, dict[str, JsonValue]] = {
+        # A newer message already interrupted the reported run and started its own.
+        "channel": {"run_id": "run-new", "status": "running", "metadata": {}},
+        "channel/run-old": {"run_id": "run-old", "status": "interrupted", "metadata": {}},
+    }
+    runtimes = _Runtimes({"channel": "busy"}, runs)
+    values: dict[str, JsonValue] = {"messages": [{"type": "ai", "content": "Done."}]}
+
+    async def get(thread_id: str) -> dict[str, JsonValue] | None:
+        return {"thread_id": thread_id, "values": values}
+
+    monkeypatch.setattr(runtimes.runtime, "get", get)
+    monkeypatch.setattr(status, "RUNTIMES", runtimes)
+    completed: list[dict[str, Any]] = []
+
+    async def complete(payload: dict[str, Any], **_: object) -> dict[str, str]:
+        completed.append(payload)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(completion, "complete_run_once", complete)
+    thread = await index.get("channel")
+    assert thread is not None
+
+    assert await status.complete_ended_run(thread, "run-old")
+    assert completed == [
+        {
+            "thread_id": "channel",
+            "run_id": "run-old",
+            "status": "interrupted",
+            "metadata": {"channel": "linear"},
+            # Its usage comes from the messages, as a webhook carries them.
+            "values": values,
+        }
+    ]
+    # A run that is still going is not completed.
+    assert not await status.complete_ended_run(thread)
+
+
 async def test_a_run_is_completed_once_whoever_reaches_it_first(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -166,7 +212,7 @@ async def test_a_run_is_completed_once_whoever_reaches_it_first(
     payload = {"thread_id": "t1", "run_id": "run-1", "status": "success"}
 
     assert await completion.complete_run_once(payload) == {"status": "ok"}
-    # The webhook, the after_agent hook or the reconcile job arriving second does nothing.
+    # The webhook, the channel's report or the reconcile job arriving second does nothing.
     assert (await completion.complete_run_once(payload))["reason"] == "run already completed"
     assert handled == ["run-1"]
 

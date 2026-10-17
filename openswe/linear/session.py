@@ -5,8 +5,9 @@ thread, so the conversation's reply, Stop and errors reach Linear. Each agent
 session is its own thread, so a second session on the same issue is a new
 conversation, with the issue's title. The backend decides everything else, as it
 does for its own runs: the repository, the workspace, the input, and the signed
-run token the run calls back with. The run's ``after_agent`` hook completes it
-(``openswe.mda_channels.completion``); the channel reports its failures.
+run token the run calls back with. The channel reports the run once it ends, which
+completes it (``openswe.mda_channels.completion``), and reports its failures in
+the session.
 """
 
 from typing import TypedDict, cast
@@ -194,8 +195,6 @@ class LinearSessionTurn:
             "triggering_user_name": self.author.name,
         }
         configurable: dict[str, JsonValue] = {
-            # Signed into the run token, so the run's after_agent hook knows its channel.
-            CHANNEL_METADATA_KEY: LINEAR_CHANNEL,
             "repo": cast(dict[str, JsonValue], repo),
             "linear_issue": linear_issue,
             "user_email": self.author.email or None,

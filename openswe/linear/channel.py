@@ -1,17 +1,26 @@
 """Routes for MDA's Linear channel.
 
-The channel receives Linear's webhooks in the MDA deployment, verifies each
-delivery's signature and age, and hands the event here: its key and the payload
-it validated. The backend decides what the event does. Only the deployment, which
-holds Open SWE's shared secret, may call these routes.
+The channel receives Linear's webhooks in the MDA deployment and verifies each
+delivery's signature and age. An agent session turn comes to ``/runs`` as its key
+and the payload the channel validated, and the backend prepares the run the
+channel starts. Issue and comment events start no conversation: the channel
+forwards them to ``/events`` as Linear sent them. Only the deployment, which holds
+Open SWE's shared secret, may call these routes.
 """
 
 import json
-from typing import Literal, Self, TypedDict
+from typing import Annotated, Literal, Self, TypedDict
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from pydantic import BaseModel, Field, JsonValue, model_validator
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from pydantic import (
+    BaseModel,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from openswe.linear.session import LinearSessionTurn, PreparedRun
 from openswe.mda_channels.auth import require_mda_channel
@@ -28,6 +37,9 @@ LinearEventKey = Literal[
     "AgentSessionEvent.created",
     "AgentSessionEvent.prompted",
 ]
+#: The events the channel forwards; they start no conversation.
+_FORWARDED_KEYS = frozenset({"Issue.create", "Issue.update", "Comment.create"})
+_AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
 
 router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 
@@ -52,15 +64,20 @@ class LinearChannelEvent(BaseModel):
 
     async def record(self, request: Request) -> None:
         """Log the event and wake the threads that listen for Linear events."""
-        body = self.body()
-        await EventLog.record(
-            request,
-            body,
-            "linear",
-            event_type=str(self.payload.get("type") or ""),
-            delivery_id=self.delivery_id,
-            refs=EventRefs.linear(body),
-        )
+        await _record(request, self.body(), self.payload, self.delivery_id)
+
+
+async def _record(
+    request: Request, body: bytes, payload: dict[str, JsonValue], delivery_id: str
+) -> None:
+    await EventLog.record(
+        request,
+        body,
+        "linear",
+        event_type=str(payload.get("type") or ""),
+        delivery_id=delivery_id,
+        refs=EventRefs.linear(body),
+    )
 
 
 class PreparedLinearRun(TypedDict):
@@ -90,12 +107,27 @@ async def _launch_automations(payload: dict[str, JsonValue], delivery_id: str) -
         )
 
 
+_payload = TypeAdapter(dict[str, JsonValue])
+
+
 @router.post("/events")
 async def receive_linear_event(
-    request: Request, event: LinearChannelEvent, background_tasks: BackgroundTasks
+    request: Request,
+    background_tasks: BackgroundTasks,
+    linear_delivery: Annotated[str, Header(min_length=1, max_length=200)],
 ) -> dict[str, str]:
-    """Log a Linear event that starts no conversation, and run the automations it triggers."""
-    await event.record(request)
-    if event.key in {"Issue.create", "Issue.update"}:
-        background_tasks.add_task(_launch_automations, event.payload, event.delivery_id)
+    """Log a Linear delivery the channel forwarded, and run the automations it triggers."""
+    body = await request.body()
+    if len(body) > _MAX_PAYLOAD_CHARS:
+        raise HTTPException(status_code=413, detail="payload is too large")
+    try:
+        payload = _payload.validate_json(body)
+    except ValidationError as error:
+        raise HTTPException(status_code=422, detail="payload is not a JSON object") from error
+    key = f"{payload.get('type')}.{payload.get('action')}"
+    if key not in _FORWARDED_KEYS:
+        return {"status": "ignored"}
+    await _record(request, body, payload, linear_delivery)
+    if key in _AUTOMATION_KEYS:
+        background_tasks.add_task(_launch_automations, payload, linear_delivery)
     return {"status": "accepted"}

@@ -84,6 +84,13 @@ class _SdkThreads:
             return None
         return next((_object.validate_python(dict(run)) for run in runs), None)
 
+    async def run(self, thread_id: str, run_id: str) -> dict[str, JsonValue] | None:
+        """One of the thread's runs here, or ``None`` when it has no such run."""
+        try:
+            return _object.validate_python(dict(await self.reads.runs.get(thread_id, run_id)))
+        except NotFoundError:
+            return None
+
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
         await self.client.threads.create(
             thread_id=thread_id, if_exists="do_nothing", metadata=dict(metadata)
