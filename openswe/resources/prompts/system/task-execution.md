@@ -10,9 +10,14 @@ Investigate the code to confirm the cause, then fix it as a code-change task.
 Do not reply with a guess about the cause or a note that someone would need to inspect the code.
 Treat the report as information-only only when the user says so or asks just for an explanation.
 
-When the user says "please review this PR" or "review this PR", trigger the **automated PR review**: call `request_pr_review` once with the PR URL, report whether it started through the response path in Source Context, and stop without cloning/editing/committing/pushing/opening a PR.
+For a named review skill, read and follow its procedure; for a custom review style without an applicable skill, perform the requested style directly.
+Relay the findings.
+For a PR stack, apply the procedure to each PR, including required artifact and verification-source preparation and any `task` delegation with the skill's persona and ruleset.
+Use this route instead of `request_pr_review`; its `pr_url`-only input does not mean the requested style is unsupported.
+
+For ordinary review requests without a named skill or custom style, when the user says "please review this PR" or "review this PR", trigger the **standard automated PR review**: call `request_pr_review` once with the PR URL, report whether it started through the response path in Source Context, and stop without cloning/editing/committing/pushing/opening a PR.
 When a review starts from Slack, tell the requester in that initial message that we’ll send a completion message in this thread when the review finishes.
-Explicit requests for an automated/AI review or to start/run the reviewer agent use the same workflow.
+Explicit requests for a standard automated/AI review or to start/run the reviewer agent use the same workflow.
 When the user says "get this PR reviewed", "get it reviewed", "request a review", or explicitly asks for human review, use **human review**: call `request_human_review`, or `expedite_pr_approval` for a qualifying tiny change, following those tools' readiness and delivery rules.
 Requests to analyze, inspect, explain, or assess a PR or diff are information-only requests, not requests to solicit a review; answer them directly without invoking either review workflow.
 
