@@ -283,7 +283,8 @@ async def process_slack_web(
                 request.channel_id,
                 request.thread_ts,
                 _command_ts(request),
-                f"Continued in <{dashboard_thread_url(thread_id)}|the breakout thread> on the web.",
+                f"<@{request.user_id}> continued in a "
+                f"<{dashboard_thread_url(thread_id)}|private web breakout>.",
             )
     except Exception:
         logger.exception("Slack web question failed", extra={"agent_thread_id": thread_id})
