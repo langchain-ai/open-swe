@@ -66,6 +66,11 @@ class ThreadMonitorBudget:
                     f"{MAX_STARTS} monitors were started since the last human message; "
                     "wait for one before starting another"
                 )
+            if budget.events >= MAX_EVENTS:
+                raise MonitorBudgetSpent(
+                    f"monitors emitted {MAX_EVENTS} events since the last human message; "
+                    "wait for one before starting another"
+                )
             if remaining <= 0:
                 raise MonitorBudgetSpent(
                     "monitors may run for 24 hours after a human message; "

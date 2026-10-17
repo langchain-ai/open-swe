@@ -18,7 +18,7 @@ A monitor ends when its command exits, its filter exits, it reaches its timeout,
 
 Each human message opens one allowance for this thread's monitors:
 - 10 monitor starts. Past that, `start` fails until a person writes again.
-- 50 events across all monitors. Past that every monitor stops, and further events are dropped; the raw logs still have them.
+- 50 events across all monitors. Past that every monitor stops, further events are dropped (the raw logs still have them), and `start` fails until a person writes again.
 - 24 hours. Every monitor's timeout is clipped to what is left, and `start` fails once it is gone.
 - 10 runs started for monitor output while the thread is idle. After that the output waits for the next run a person starts, and the monitors stop.
 

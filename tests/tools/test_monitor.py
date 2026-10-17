@@ -234,6 +234,11 @@ async def test_each_human_message_opens_one_allowance_of_starts_and_time(
     with pytest.raises(budget.MonitorBudgetSpent):
         await allowance.start()
 
+    threads.messages.append(_human("one more"))
+    assert await allowance.take_events(budget.MAX_EVENTS + 5) == budget.MAX_EVENTS
+    with pytest.raises(budget.MonitorBudgetSpent):
+        await allowance.start()
+
 
 @pytest.mark.usefixtures("registry_db", "memory_event_claims")
 async def test_events_past_the_allowance_stop_the_monitors(
