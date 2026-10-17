@@ -14,6 +14,7 @@ from typing import Any, Literal, NamedTuple
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
+from pydantic import JsonValue
 
 from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.input_messages import InputMessageContext, SystemIdentity
@@ -88,6 +89,22 @@ def _notification(task: dict[str, Any]) -> str:
         durations=f"{duration}s",
         output_path=output_path,
     )
+
+
+async def completion_configurable(
+    thread_id: str, metadata: Mapping[str, object]
+) -> dict[str, JsonValue]:
+    """The configurable of a run that reports sandbox work back to ``thread_id``."""
+    if metadata.get("task_id") or (
+        metadata.get("visibility") == "private" and metadata.get("owner_type") == "user"
+    ):
+        from openswe.tasks.service import recipient_config
+
+        configurable = await recipient_config(thread_id)
+    else:
+        configurable = follow_up_configurable(metadata, thread_id)
+    configurable["background_task_completion"] = True
+    return configurable
 
 
 async def _claim(backend: Any, task_id: str) -> bool:
@@ -233,15 +250,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
             continue
         message = _notification(task)
         try:
-            if metadata.get("task_id") or (
-                metadata.get("visibility") == "private" and metadata.get("owner_type") == "user"
-            ):
-                from openswe.tasks.service import recipient_config
-
-                configurable = await recipient_config(thread_id)
-            else:
-                configurable = follow_up_configurable(metadata, thread_id)
-            configurable["background_task_completion"] = True
+            configurable = await completion_configurable(thread_id, metadata)
             # A completion run can change task state before delivery finishes.
             status_metadata = None
             await dispatch_agent_run(

@@ -699,7 +699,7 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
     state_schema = AgentState
 
     async def _change_for_request(self, request: ToolCallRequest) -> WorkflowPushChange | None:
-        if _tool_name(request) not in {"execute", "background_execute"}:
+        if _tool_name(request) not in {"execute", "background_execute", "monitor"}:
             return None
         command = _tool_args(request).get("command")
         if not isinstance(command, str):
@@ -759,7 +759,7 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
 
     async def _chained_workflow_push(self, request: ToolCallRequest) -> bool:
         """Whether ``request`` pushes workflow changes as one step of a longer command."""
-        if _tool_name(request) not in {"execute", "background_execute"}:
+        if _tool_name(request) not in {"execute", "background_execute", "monitor"}:
             return False
         command = _tool_args(request).get("command")
         if not isinstance(command, str):

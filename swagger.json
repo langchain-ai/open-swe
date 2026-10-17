@@ -4206,6 +4206,18 @@
             ],
             "title": "Experimental Mcp Ptc"
           },
+          "experimental_monitor": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Monitor"
+          },
           "experimental_task_coordination": {
             "anyOf": [
               {
@@ -16642,6 +16654,43 @@
           }
         },
         "summary": "List Tools",
+        "tags": [
+          "sandbox-tools"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools/monitors/{monitor_id}/sync": {
+      "post": {
+        "description": "A monitor's runner has new events or has ended; a 5xx makes a final sync retry.",
+        "operationId": "monitor_sync_dashboard_api_sandbox_tools_monitors__monitor_id__sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "monitor_id",
+            "required": true,
+            "schema": {
+              "pattern": "^mon-[0-9a-f-]{1,64}$",
+              "title": "Monitor Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Monitor Sync",
         "tags": [
           "sandbox-tools"
         ]

@@ -123,29 +123,52 @@ def _wakeup_lock(thread_id: str) -> asyncio.Lock:
     return lock
 
 
-async def _wakeup_budget(client: Any, thread_id: str) -> tuple[str, int]:
-    state = await client.threads.get_state(thread_id)
-    values = state.get("values") if isinstance(state, dict) else None
-    messages = values.get("messages") if isinstance(values, dict) else None
-    generation = _latest_human_generation(messages)
+class WakeBudget:
+    """Runs a thread may start for itself between human messages, counted in its metadata.
 
-    thread = await client.threads.get(thread_id)
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    metadata = metadata if isinstance(metadata, dict) else {}
-    if metadata.get(_WAKEUP_GENERATION_METADATA_KEY) != generation:
-        return generation, 0
-    count = metadata.get(_WAKEUP_COUNT_METADATA_KEY)
-    return generation, count if isinstance(count, int) and count >= 0 else 0
+    The count resets whenever a new human message lands in the thread.
+    """
+
+    def __init__(self, *, generation_key: str, count_key: str, limit: int) -> None:
+        self.limit = limit
+        self._generation_key = generation_key
+        self._count_key = count_key
+
+    async def spend(self, client: Any, thread_id: str) -> bool:
+        """Count one more run; ``False``, counting nothing, once the limit is reached."""
+        generation, count = await self.used(client, thread_id)
+        if count >= self.limit:
+            return False
+        await self.record(client, thread_id, generation, count + 1)
+        return True
+
+    async def used(self, client: Any, thread_id: str) -> tuple[str, int]:
+        """The current human-message generation and how many runs it has spent."""
+        state = await client.threads.get_state(thread_id)
+        values = state.get("values") if isinstance(state, dict) else None
+        messages = values.get("messages") if isinstance(values, dict) else None
+        generation = _latest_human_generation(messages)
+
+        thread = await client.threads.get(thread_id)
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        metadata = metadata if isinstance(metadata, dict) else {}
+        if metadata.get(self._generation_key) != generation:
+            return generation, 0
+        count = metadata.get(self._count_key)
+        return generation, count if isinstance(count, int) and count >= 0 else 0
+
+    async def record(self, client: Any, thread_id: str, generation: str, count: int) -> None:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={self._generation_key: generation, self._count_key: count},
+        )
 
 
-async def _record_wakeup(client: Any, thread_id: str, generation: str, count: int) -> None:
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={
-            _WAKEUP_GENERATION_METADATA_KEY: generation,
-            _WAKEUP_COUNT_METADATA_KEY: count,
-        },
-    )
+THREAD_WAKEUPS = WakeBudget(
+    generation_key=_WAKEUP_GENERATION_METADATA_KEY,
+    count_key=_WAKEUP_COUNT_METADATA_KEY,
+    limit=_MAX_WAKEUPS_BETWEEN_USER_MESSAGES,
+)
 
 
 async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[str]:
@@ -348,7 +371,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
 
     async with _wakeup_lock(thread_id):
         try:
-            generation, wakeup_count = await _wakeup_budget(client, thread_id)
+            generation, wakeup_count = await THREAD_WAKEUPS.used(client, thread_id)
         except Exception:
             logger.exception("Failed to verify thread wakeup budget for %s", thread_id)
             return {"success": False, "error": "Unable to verify the thread wakeup limit"}
@@ -362,7 +385,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
                 ),
             }
         try:
-            await _record_wakeup(client, thread_id, generation, wakeup_count + 1)
+            await THREAD_WAKEUPS.record(client, thread_id, generation, wakeup_count + 1)
         except Exception:
             logger.exception("Failed to record thread wakeup budget for %s", thread_id)
             return {"success": False, "error": "Unable to record the thread wakeup limit"}

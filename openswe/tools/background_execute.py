@@ -358,7 +358,7 @@ async def execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
     return json.loads(output.strip().splitlines()[-1])
 
 
-def _current_backend() -> tuple[str, Any]:
+def current_backend() -> tuple[str, Any]:
     thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("No thread_id in current run config")
@@ -377,8 +377,8 @@ async def background_execute(
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
-        thread_id, backend = _current_backend()
-        if await _uses_completion_callback():
+        thread_id, backend = current_backend()
+        if await uses_completion_callback():
             return await _launch_with_callback(thread_id, backend, command, timeout)
         return await _launch_with_cron(thread_id, backend, command, timeout)
     except Exception as exc:
@@ -392,7 +392,7 @@ class _CallbackFlag(BaseModel):
     experimental_background_callbacks: bool | None = None
 
 
-async def _uses_completion_callback() -> bool:
+async def uses_completion_callback() -> bool:
     """The triggering person's opt-in to sandbox completion callbacks instead of polling crons."""
     login = RunConfig.from_runtime().github_login
     if not login:
@@ -487,7 +487,7 @@ def owns_task(task_id: str) -> bool:
 
 
 async def _control(action: str, task_id: str | None) -> dict[str, Any]:
-    _, backend = _current_backend()
+    _, backend = current_backend()
     script = control_script(action, task_id)
     return await execute(backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3")
 

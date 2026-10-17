@@ -407,7 +407,7 @@ async def test_callbacks_follow_the_triggering_persons_flag(
             module.RunConfig, "from_runtime", return_value=SimpleNamespace(github_login=login)
         ),
     ):
-        assert await module._uses_completion_callback() is enabled
+        assert await module.uses_completion_callback() is enabled
     if login:
         get_profile.assert_awaited_once_with(login)
 
@@ -419,11 +419,11 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
     launches = [{"task_id": "cmd-1", "status": "running"}]
     with (
         patch(
-            "openswe.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=callback),
         ),
         patch(
-            "openswe.tools.background_execute._current_backend", return_value=("thread-1", backend)
+            "openswe.tools.background_execute.current_backend", return_value=("thread-1", backend)
         ),
         patch(
             "openswe.tools.background_execute.execute",
@@ -446,12 +446,12 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
 
     with (
         patch(
-            "openswe.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=False),
         ),
         patch("openswe.tools.background_execute.update_background_task_state", AsyncMock()),
         patch(
-            "openswe.tools.background_execute._current_backend", return_value=("thread-1", backend)
+            "openswe.tools.background_execute.current_backend", return_value=("thread-1", backend)
         ),
         patch(
             "openswe.tools.background_execute.execute",
@@ -757,11 +757,11 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
 
     with (
         patch(
-            "openswe.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=True),
         ),
         patch(
-            "openswe.tools.background_execute._current_backend", return_value=("thread-1", object())
+            "openswe.tools.background_execute.current_backend", return_value=("thread-1", object())
         ),
         patch("openswe.tools.background_execute.execute", side_effect=launch),
         patch("openswe.tools.background_execute.update_background_task_state", side_effect=update),
