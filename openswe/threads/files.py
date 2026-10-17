@@ -99,7 +99,7 @@ async def _run_workspace_script(
     try:
         payload = json.loads(output.splitlines()[-1])
     except (IndexError, json.JSONDecodeError) as exc:
-        logger.warning("Invalid workspace path response", extra={"thread": thread_id})
+        logger.warning("Invalid workspace path response", extra={"thread_id": thread_id})
         raise HTTPException(502, "Could not read the workspace.") from exc
     if "error" in payload:
         raise HTTPException(404, payload["error"])
