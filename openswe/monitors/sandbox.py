@@ -6,12 +6,15 @@ import json
 import shlex
 from functools import cache
 from importlib import resources
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, JsonValue
 
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
+
+if TYPE_CHECKING:
+    # The dashboard reads monitors too, and must not load the agent stack.
+    from deepagents.backends.protocol import SandboxBackendProtocol
 
 ROOT = "/tmp/open-swe-monitors"
 ID_PREFIX = "mon"
