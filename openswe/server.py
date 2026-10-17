@@ -284,8 +284,6 @@ from openswe.tools.task_threads import (
 from openswe.users import User
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import (
-    OPEN_SWE_BOT_EMAIL,
-    OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
     ThreadParticipant,
     resolve_participant_identities,
@@ -512,6 +510,22 @@ async def _thread_participant(
     )
 
 
+async def _resolve_sender(
+    sender: CollaboratorIdentity | None, person_id: str, display_name: str
+) -> CollaboratorIdentity | None:
+    """The sender's identity, from the run's credentials or else their ``users`` row."""
+    if sender is not None:
+        return sender
+    user = await _user_for_person_id(person_id)
+    if user is not None and user.github_login:
+        [identity] = await resolve_participant_identities([user.github_login])
+        return identity
+    name = display_name or (user.display_name if user is not None else "")
+    return (
+        CollaboratorIdentity(display_name=name, commit_name="", commit_email="") if name else None
+    )
+
+
 async def _thread_participants(
     thread_id: str,
     config: RunnableConfig,
@@ -527,26 +541,15 @@ async def _thread_participants(
     The sender is keyed by the id their message envelope carries, so the turn's
     envelope resolves to their block even when no person row exists. Without a
     GitHub account they have no commit identity, and the surface's name for them
-    is all anyone knows.
+    is all anyone knows. A sender nothing identifies gets no block at all: any
+    stand-in would overwrite who that id really is.
     """
-    identities = await _thread_participant_identities(thread_id)
-    if sender is None and not sender_display_name:
-        # Runs started without the sender's credentials, such as background-task
-        # completions, must not describe a known person as the bot.
-        user = await _user_for_person_id(sender_person_id)
-        if user is not None and user.github_login:
-            sender = (await resolve_participant_identities([user.github_login]))[0]
-        elif user is not None:
-            sender_display_name = user.display_name
-    resolved_sender = sender or (
-        CollaboratorIdentity(display_name=sender_display_name, commit_name="", commit_email="")
-        if sender_display_name
-        else CollaboratorIdentity(
-            display_name=OPEN_SWE_BOT_NAME,
-            commit_name=OPEN_SWE_BOT_NAME,
-            commit_email=OPEN_SWE_BOT_EMAIL,
-        )
+    identities, resolved_sender = await asyncio.gather(
+        _thread_participant_identities(thread_id),
+        _resolve_sender(sender, sender_person_id, sender_display_name),
     )
+    if resolved_sender is None:
+        return list(await asyncio.gather(*(_thread_participant(i, config) for i in identities)))
     others = [
         identity for identity in identities if identity.commit_email != resolved_sender.commit_email
     ]

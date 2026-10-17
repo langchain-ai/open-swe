@@ -77,6 +77,9 @@ async def test_unresolved_sender_is_described_from_their_user_row(
     assert participant.identity.github_login == "ramon"
     assert participant.linked is True
 
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=None))
+    assert await _thread_participants("t", {}, None, sender_person_id=person_id) == []
+
 
 async def test_participant_identity_ignores_users_table_email(
     monkeypatch: pytest.MonkeyPatch,
