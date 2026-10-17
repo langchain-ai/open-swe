@@ -24,6 +24,7 @@ from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
+from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.records import lookup_slack_thread_id
@@ -146,15 +147,30 @@ async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
     """Who reads threads: the triggering user, or else the automation whose run this is."""
     if actor := await _actor(state):
         return actor
-    record = await schedules.authorized_schedule_run(RunConfig.parse(_config().get("configurable")))
-    if record is None:
-        return None
-    return _Actor(
-        login=f"system:schedule:{record['id']}",
-        email=None,
-        name=record.get("name") or "Automation",
-        automation=True,
-    )
+    cfg = RunConfig.parse(_config().get("configurable"))
+    if record := await schedules.authorized_schedule_run(cfg):
+        return _Actor(
+            login=f"system:schedule:{record['id']}",
+            email=None,
+            name=record.get("name") or "Automation",
+            automation=True,
+        )
+    slack = cfg.slack_thread
+    if cfg.source == "slack" and slack and slack.triggering_bot_id:
+        bot = await resolve_allowed_slack_bot(
+            slack.team_id,
+            slack.triggering_bot_id,
+            user_id=slack.triggering_user_id,
+            app_id=slack.triggering_bot_app_id,
+        )
+        if bot is not None:
+            return _Actor(
+                login=f"system:slack-bot:{bot.bot_id}",
+                email=None,
+                name=bot.name,
+                automation=True,
+            )
+    return None
 
 
 async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
