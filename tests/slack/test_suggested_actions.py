@@ -66,4 +66,4 @@ async def test_accepting_a_suggestion_asks_the_slack_threads_agent_once(
     assert request.event_ts == "200.5"
     assert request.text == "Get https://github.com/lc/repo/pull/7 reviewed."
     assert "<@U1>" in request.turn_context
-    respond.assert_awaited_once()
+    respond.assert_awaited_once_with(interaction.response_url, {"delete_original": True})

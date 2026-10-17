@@ -39,7 +39,6 @@ class SuggestedAction:
     kind: str
     question: str
     accept_label: str
-    accepted: str
     request: str
     prompt_name: str
 
@@ -125,7 +124,7 @@ async def handle_button(
         return ignored("Suggestion already accepted")
     await respond_to_slack_interaction(
         interaction.response_url,
-        {"replace_original": True, "text": action.accepted.format(subject=value.subject)},
+        {"delete_original": True},
     )
     thread_ts = value.thread_ts
     channel_context = await common.resolve_slack_channel_context(channel_id)
