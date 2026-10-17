@@ -18,6 +18,7 @@ from openswe.review.findings import (
     reviewer_thread_title,
 )
 from openswe.review.session import ReviewSessionMetadata
+from openswe.sandboxes.browsers import ThreadBrowserWindow
 from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
@@ -547,6 +548,7 @@ async def _thread_summary(
         ),
         # Lists skip it: one bridge lookup per thread would cost a query each.
         "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id) if bridge_status else None,
+        "browserScope": browser.scope if (browser := ThreadBrowserWindow.of(metadata)) else None,
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

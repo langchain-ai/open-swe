@@ -111,6 +111,25 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
+export type BrowserController = "agent" | "user"
+
+export interface ThreadBrowserTab {
+  id: string
+  title: string
+  url: string
+}
+
+/** The browser window a thread's agent opened, and who is driving it. */
+export interface ThreadBrowser {
+  scope: "user" | "workspace"
+  controller: BrowserController
+  /** Why the agent asked a person to take over, when it did. */
+  reason: string
+  tabs: Array<ThreadBrowserTab>
+  /** LangSmith's own page for the window, to watch it and use it while a person controls it. */
+  act_url: string
+}
+
 export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
@@ -458,5 +477,17 @@ export const agentsApi = {
     agentsRequest<CloudTerminalConnection>(
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
+    ),
+  getThreadBrowser: (threadId: string) =>
+    agentsRequest<ThreadBrowser>(
+      `/threads/${encodeURIComponent(threadId)}/browser`
+    ),
+  setThreadBrowserController: (
+    threadId: string,
+    controller: BrowserController
+  ) =>
+    agentsRequest<ThreadBrowser>(
+      `/threads/${encodeURIComponent(threadId)}/browser/controller`,
+      { method: "POST", body: JSON.stringify({ controller }) }
     ),
 }

@@ -107,18 +107,26 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
     )
 
 
-async def get_dashboard_terminal_sandbox(
-    thread_id: str, login: str, *, email: str | None = None
-) -> tuple[str, str | None]:
+async def get_promptable_thread_metadata(thread_id: str, login: str) -> dict[str, Any]:
+    """The metadata of a thread ``login`` may prompt, for opening its live capabilities.
+
+    A shell or a browser is a live capability into the owner's sandbox, so admins
+    who may view a private thread still cannot open one.
+    """
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    # A shell is a live capability into the owner's sandbox, so admins who may
-    # view a private thread still cannot open one.
     _assert_thread_promptable(metadata, login)
+    return metadata
+
+
+async def get_dashboard_terminal_sandbox(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[str, str | None]:
+    metadata = await get_promptable_thread_metadata(thread_id, login)
     sandbox_id = metadata.get("sandbox_id")
     if (
         not isinstance(sandbox_id, str)

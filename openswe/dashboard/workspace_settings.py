@@ -83,6 +83,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     sandbox_openai_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    sandbox_browser_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     slack_follow_up_suggestions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -327,6 +330,7 @@ def _default_settings() -> dict[str, Any]:
         "expedited_review_enabled": False,
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
+        "sandbox_browser_enabled": False,
         "slack_follow_up_suggestions": False,
         "managed_tools_gateway_id": None,
         "org_guidelines": None,
@@ -739,6 +743,11 @@ class WorkspaceSettings(Mapping[str, Any]):
     def sandbox_openai_enabled(self) -> bool:
         """Whether sandbox clients may use the experimental Responses API."""
         return self.get("sandbox_openai_enabled") is True
+
+    @property
+    def sandbox_browser_enabled(self) -> bool:
+        """Whether agents may open the LangSmith browser beta from their sandbox."""
+        return self.get("sandbox_browser_enabled") is True
 
     @property
     def managed_tools_gateway_id(self) -> str | None:

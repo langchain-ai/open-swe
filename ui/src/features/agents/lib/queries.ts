@@ -17,7 +17,9 @@ import { agentsApi } from "./api"
 import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
+  BrowserController,
   ScheduleUpdateRequest,
+  ThreadBrowser,
   ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
@@ -64,6 +66,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "working-tree-diff"] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
+  browser: (threadId: string) =>
+    ["agent-threads", threadId, "browser"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
@@ -893,6 +897,36 @@ export function useAgentThreadQueuedMessages(threadId: string) {
     queryFn: () => agentsApi.getThreadQueuedMessages(threadId),
     enabled: Boolean(threadId),
     meta: { invalidatedBy: [invalidationTopic("thread-queues", threadId)] },
+  })
+}
+
+export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: agentThreadKeys.browser(threadId),
+    queryFn: () => agentsApi.getThreadBrowser(threadId),
+    enabled: enabled && Boolean(threadId),
+    retry: false,
+    meta: { invalidatedBy: [invalidationTopic("thread-browsers", threadId)] },
+  })
+}
+
+/** Takes the thread's browser window over from its agent, or hands it back. */
+export function useSetThreadBrowserController(threadId: string) {
+  const queryClient = useQueryClient()
+  const queryKey = agentThreadKeys.browser(threadId)
+  return useMutation({
+    mutationFn: (controller: BrowserController) =>
+      agentsApi.setThreadBrowserController(threadId, controller),
+    meta: { errorTitle: "Couldn't change who controls the browser" },
+    onMutate: async (controller) => ({
+      undo: await optimisticUpdate<ThreadBrowser>(
+        queryClient,
+        queryKey,
+        (browser) => ({ ...browser, controller })
+      ),
+    }),
+    onError: (_error, _controller, context) => context?.undo(),
+    onSuccess: (browser) => queryClient.setQueryData(queryKey, browser),
   })
 }
 

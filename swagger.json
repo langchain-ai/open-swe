@@ -955,6 +955,46 @@
         "title": "BridgeRequestsResponse",
         "type": "object"
       },
+      "BrowserControllerUpdate": {
+        "properties": {
+          "controller": {
+            "enum": [
+              "agent",
+              "user"
+            ],
+            "title": "Controller",
+            "type": "string"
+          }
+        },
+        "required": [
+          "controller"
+        ],
+        "title": "BrowserControllerUpdate",
+        "type": "object"
+      },
+      "BrowserTab": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "BrowserTab",
+        "type": "object"
+      },
       "ChallengeResponse": {
         "properties": {
           "challenge": {
@@ -6778,6 +6818,51 @@
         "title": "TextAnchor",
         "type": "object"
       },
+      "ThreadBrowser": {
+        "description": "A thread's browser window as the dashboard shows it.",
+        "properties": {
+          "act_url": {
+            "title": "Act Url",
+            "type": "string"
+          },
+          "controller": {
+            "enum": [
+              "agent",
+              "user"
+            ],
+            "title": "Controller",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "user",
+              "workspace"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "tabs": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserTab"
+            },
+            "title": "Tabs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scope",
+          "controller",
+          "reason",
+          "tabs",
+          "act_url"
+        ],
+        "title": "ThreadBrowser",
+        "type": "object"
+      },
       "ThreadComment-Input": {
         "properties": {
           "comment_url": {
@@ -8314,6 +8399,18 @@
               }
             ],
             "title": "Review Trace Links"
+          },
+          "sandbox_browser_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Browser Enabled"
           },
           "sandbox_openai_enabled": {
             "agent_feature_flag": true,
@@ -18560,6 +18657,115 @@
         "summary": "Api Get Thread Branch Diff",
         "tags": [
           "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/browser": {
+      "get": {
+        "operationId": "api_thread_browser_dashboard_api_threads__thread_id__browser_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowser"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Thread Browser",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/browser/controller": {
+      "post": {
+        "description": "Take the window over from the agent, or hand it back.",
+        "operationId": "api_thread_browser_controller_dashboard_api_threads__thread_id__browser_controller_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserControllerUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowser"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Thread Browser Controller",
+        "tags": [
+          "dashboard",
+          "threads",
           "threads"
         ]
       }

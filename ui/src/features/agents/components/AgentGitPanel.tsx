@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 
@@ -11,6 +11,7 @@ import {
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import { BrowserPanel } from "@/features/agents/components/BrowserPanel"
 import {
   selectThreadDiffScope,
   useDiffPanelStore,
@@ -73,6 +74,16 @@ export function AgentGitPanel({
   const terminalAvailable =
     Boolean(localThread) ||
     (Boolean(thread.sandboxId) && !thread.sandboxBridgeClient)
+
+  // Show the agent's browser as soon as it opens one, once per thread view.
+  const browserAvailable = Boolean(thread.browserScope)
+  const browserShownRef = useRef(browserAvailable)
+  useEffect(() => {
+    if (!browserAvailable || browserShownRef.current) return
+    browserShownRef.current = true
+    openSurface(threadRef, "preview")
+    onCollapsedChange(false)
+  }, [browserAvailable, onCollapsedChange, openSurface, threadRef])
 
   const isRunning = thread.status === "running"
   const diffVisible = !collapsed && activeSurfaceId === "diff"
@@ -196,6 +207,8 @@ export function AgentGitPanel({
       cwd={cwd}
       terminalAvailable={terminalAvailable}
       diffAvailable
+      browserAvailable={browserAvailable}
+      renderBrowser={() => <BrowserPanel threadId={thread.id} />}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={({ fullScreen }) => (
