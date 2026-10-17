@@ -168,6 +168,16 @@ ENV.var(
     aliases=("LANGCHAIN_PROJECT",),
 )
 ENV.var(
+    "LANGSMITH_AGENT_ID",
+    "LangSmith agent every run traces into, with LANGSMITH_AGENT_ENVIRONMENT; the SDK reads both "
+    "and they take precedence over LANGSMITH_PROJECT.",
+)
+ENV.var(
+    "LANGSMITH_AGENT_ENVIRONMENT",
+    "Environment of LANGSMITH_AGENT_ID that runs trace into: local, development, staging or "
+    "production.",
+)
+ENV.var(
     "TYPESAFE_API_KEY",
     "TypeSafe key for direct Jev model routing when available.",
     secret=True,

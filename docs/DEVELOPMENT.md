@@ -62,6 +62,8 @@ Create `.env` in the repository root; `langgraph dev` loads it.
 LANGSMITH_API_KEY=""            # LangSmith → Settings → API Keys; also used for sandboxes and trace links
 LANGSMITH_TRACING="true"        # trace runs to LangSmith
 LANGSMITH_PROJECT=""            # optional project for traces and "View trace" links; default "default"
+LANGSMITH_AGENT_ID=""           # optional agent to trace into instead of a project; needs LANGSMITH_AGENT_ENVIRONMENT
+LANGSMITH_AGENT_ENVIRONMENT=""  # local, development, staging or production
 
 ANTHROPIC_API_KEY=""            # any provider key; not needed if you use an LLM gateway (e.g. LangSmith Gateway; see the installation guide)
 
