@@ -9,7 +9,10 @@ Open SWE may approve a pull request when it fits one of these and has no unresol
 3. **Small, low-risk code changes.** Roughly 50 changed lines or fewer, in one feature
    area, with tests for any behavior change. For example: UI copy or styling fixes,
    log or error message fixes, type-only changes, lint fixes, or removing dead code
-   that no supported user flow can reach.
+   that no supported user flow can reach. Reusing an existing tested UI component
+   in another view qualifies when its behavior is unchanged and no human-review
+   exclusion applies; existing behavioral coverage is sufficient, without adding
+   duplicate tests solely to assert the component appears in its new location.
 
 4. **Stricter approval policy only.** Changes confined to this file that solely
    narrow the set of PRs eligible for automatic approval (for example, adding an
