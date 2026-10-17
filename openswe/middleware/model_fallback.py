@@ -87,6 +87,8 @@ def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
 
 
 def _should_fallback(exc: BaseException) -> bool:
+    if classify_exception(exc) == "gateway_policy_blocked":
+        return False
     if isinstance(exc, _TRANSIENT_EXCEPTIONS) or _is_legacy_httpx_transport_error(exc):
         return True
     if isinstance(exc, ModelError):
