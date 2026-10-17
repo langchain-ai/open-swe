@@ -3457,6 +3457,17 @@
             ],
             "title": "Reviewdecision"
           },
+          "reviewRequestUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewrequesturl"
+          },
           "reviewRequired": {
             "default": false,
             "title": "Reviewrequired",

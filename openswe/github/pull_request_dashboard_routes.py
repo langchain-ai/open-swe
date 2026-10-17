@@ -26,6 +26,7 @@ from openswe.github.pull_request_status import (
 )
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repos import accessible_repo_full_names
+from openswe.human_review.requests import HumanReviewRequest
 from openswe.threads.pr_fixes import (
     PullRequestThreadIntent,
     PullRequestThreadRun,
@@ -89,7 +90,7 @@ async def api_list_pull_requests(
     session: dict[str, Any] = SESSION_DEP,
 ) -> OpenPullRequests:
     async with GitHubClient.as_user(session["sub"]) as github:
-        return await list_open_pull_requests(
+        result = await list_open_pull_requests(
             github,
             session["sub"],
             repo,
@@ -99,6 +100,12 @@ async def api_list_pull_requests(
             page=page,
             scope=scope,
         )
+    urls = await HumanReviewRequest.active_slack_urls(
+        [(pr.repo, pr.number) for pr in result.pull_requests]
+    )
+    for pr in result.pull_requests:
+        pr.review_request_url = urls.get((pr.repo.lower(), pr.number))
+    return result
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}")
@@ -108,7 +115,11 @@ async def api_pull_request_details(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     async with GitHubClient.as_user(session["sub"]) as github:
-        return await github.repo(owner, repo).pull_request(number).load()
+        result = await github.repo(owner, repo).pull_request(number).load()
+    if result is not None:
+        urls = await HumanReviewRequest.active_slack_urls([(result.repo, result.number)])
+        result.review_request_url = urls.get((result.repo.lower(), result.number))
+    return result
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/action")

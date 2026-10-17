@@ -1028,6 +1028,7 @@ export interface ReviewListPayload {
 }
 
 export interface OpenPullRequest {
+  reviewRequestUrl?: string | null
   detailsLoading?: boolean
   detailsError?: boolean
   repo: string
