@@ -362,10 +362,20 @@ export interface AgentThreadMonitor {
   raw_lines: number
 }
 
+/** What a thread's monitors used of the allowance its last human message opened. */
+export interface AgentMonitorBudget {
+  events: number
+  max_events: number
+  starts: number
+  max_starts: number
+  window_ends_at: number
+}
+
 /** The sandbox commands and monitors running for a thread. */
 export interface AgentBackgroundWork {
   commands: Array<AgentBackgroundCommand>
   monitors: Array<AgentThreadMonitor>
+  monitor_budget: AgentMonitorBudget | null
 }
 
 export interface AgentQueuedMessage {

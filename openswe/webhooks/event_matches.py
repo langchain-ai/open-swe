@@ -95,7 +95,9 @@ class EventMatch(Base):
             )
             .on_conflict_do_nothing(
                 index_elements=["thread_id", "source", "delivery_id"],
-                index_where=cls.delivery_id != "",
+                # A literal: once asyncpg reuses a generic plan, a bound "" no
+                # longer matches the partial index's predicate.
+                index_where=text("delivery_id <> ''"),
             )
             .returning(cls.id)
         )

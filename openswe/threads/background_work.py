@@ -5,6 +5,7 @@ import logging
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from openswe.monitors.budget import MAX_EVENTS, MAX_STARTS, MonitorBudget
 from openswe.monitors.sandbox import MonitorState, SandboxMonitors
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.diffs import connect_sandbox
@@ -21,9 +22,20 @@ class BackgroundCommand(BaseModel):
     started_at: float | None = None
 
 
+class MonitorBudgetUse(BaseModel):
+    """What the thread's monitors used of the allowance the last human message opened."""
+
+    events: int
+    max_events: int
+    starts: int
+    max_starts: int
+    window_ends_at: float
+
+
 class BackgroundWork(BaseModel):
     commands: list[BackgroundCommand] = []
     monitors: list[MonitorState] = []
+    monitor_budget: MonitorBudgetUse | None = None
 
 
 def _tracked(metadata: dict[str, object], key: str) -> bool:
@@ -69,4 +81,13 @@ async def get_dashboard_thread_background_work(
             for item in await SandboxMonitors(sandbox, thread_id).listing()
             if (monitor := MonitorState.model_validate(item)).status == "running"
         ]
+    if work.monitors:
+        budget = MonitorBudget.of(metadata)
+        work.monitor_budget = MonitorBudgetUse(
+            events=budget.events,
+            max_events=MAX_EVENTS,
+            starts=budget.starts,
+            max_starts=MAX_STARTS,
+            window_ends_at=budget.window_ends_at,
+        )
     return work

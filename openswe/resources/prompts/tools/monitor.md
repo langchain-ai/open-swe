@@ -14,7 +14,15 @@ Pick the tool by how many notifications you need:
 
 Silence is not success. A filter that only matches the happy path stays silent through a crash or a hang. Match every terminal state you would act on (`Traceback|Error|FAILED|Killed|exited`), and broaden the filter rather than narrow it when unsure.
 
-A monitor ends when its command exits, its filter exits, it reaches its timeout, you stop it, or it gets too noisy: more than 40 events in 2 minutes or 200 in total. Runs started by monitor events count against a budget of 10 between human messages; once it is spent, an idle thread's monitors are stopped. When a monitor ends you get one notice with the reason, both exit codes, the event and raw line counts, the last 20 raw lines, and the filter's stderr. Read more of the raw log with `output`, for example to see why a monitor timed out without an event.
+A monitor ends when its command exits, its filter exits, it reaches its timeout, you stop it, or it gets too noisy: more than 40 events in 2 minutes or 200 in total.
+
+Each human message opens one allowance for this thread's monitors:
+- 10 monitor starts. Past that, `start` fails until a person writes again.
+- 50 events across all monitors. Past that every monitor stops, and further events are dropped; the raw logs still have them.
+- 24 hours. Every monitor's timeout is clipped to what is left, and `start` fails once it is gone.
+- 10 runs started for monitor output while the thread is idle. After that the output waits for the next run a person starts, and the monitors stop.
+
+When a monitor ends you get one notice with the reason, both exit codes, the event and raw line counts, the last 20 raw lines, and the filter's stderr. Read more of the raw log with `output`, for example to see why a monitor timed out without an event.
 
 At most 3 monitors run per thread. Monitors share the worktree: never race them with edits, installs, commits, or pushes.
 

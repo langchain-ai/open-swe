@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import JsonValue
 
+from openswe.monitors.budget import ThreadMonitorBudget
 from openswe.monitors.delivery import ensure_monitor_polling
 from openswe.monitors.sandbox import ID_PREFIX, MonitorError, SandboxMonitors
 from openswe.tools.background_execute import current_backend, uses_completion_callback
@@ -79,15 +80,20 @@ async def monitor(
             if stopped.get("status") != "running":
                 await _track(thread_id, finished=[monitor_id])
             return {"success": True, **stopped}
+        window = await ThreadMonitorBudget(langgraph_client(), thread_id).start()
         state = await monitors.start(
             f"{ID_PREFIX}-{uuid.uuid4()}",
             command=command,
             filter=filter.strip(),
             description=description.strip(),
-            timeout=timeout,
+            timeout=min(timeout, window),
             callback=await uses_completion_callback(),
         )
         started = state.model_dump(mode="json")
+        if window < timeout:
+            started["note"] = (
+                f"timeout clipped to {window}s: monitors may run for 24 hours after a human message"
+            )
         await _track(thread_id, running=[state.monitor_id])
         if not state.callback:
             try:

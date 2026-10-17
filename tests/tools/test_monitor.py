@@ -8,7 +8,7 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
 from openswe.database import postgres
-from openswe.monitors import delivery, sandbox
+from openswe.monitors import budget, delivery, sandbox
 from openswe.monitors.delivery import ThreadMonitorDelivery
 from openswe.monitors.sandbox import MonitorEnd, MonitorEvent, PendingMonitor, SandboxMonitors
 from openswe.sandboxes.tool_access import ToolAccess
@@ -187,3 +187,87 @@ async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_runnin
     work = await background_work.get_dashboard_thread_background_work("thread-1", "alice")
 
     assert (work.commands, work.monitors) == ([], [])
+
+
+class FakeThreads:
+    """An Agent Server thread whose metadata and messages live in memory."""
+
+    def __init__(self) -> None:
+        self.metadata: dict[str, object] = {}
+        self.messages: list[dict[str, object]] = []
+
+    async def get(self, _thread_id: str) -> dict[str, object]:
+        return {"status": "idle", "metadata": self.metadata}
+
+    async def get_state(self, _thread_id: str) -> dict[str, object]:
+        return {"values": {"messages": self.messages}}
+
+    async def update(self, _thread_id: str, *, metadata: dict[str, object]) -> None:
+        self.metadata = {**self.metadata, **metadata}
+
+
+def _human(text: str) -> dict[str, object]:
+    return {
+        "id": text,
+        "content": f'<input-message sender="u" surface="web" kind="human">{text}</input-message>',
+    }
+
+
+@pytest.mark.usefixtures("memory_event_claims")
+async def test_each_human_message_opens_one_allowance_of_starts_and_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = FakeThreads()
+    threads.messages = [_human("watch the deploy")]
+    allowance = budget.ThreadMonitorBudget(SimpleNamespace(threads=threads), "thread-1")
+    now = 1_000_000.0
+    monkeypatch.setattr(budget.time, "time", lambda: now)
+
+    assert [await allowance.start() for _ in range(budget.MAX_STARTS)][0] == budget.WINDOW_SECONDS
+    with pytest.raises(budget.MonitorBudgetSpent):
+        await allowance.start()
+
+    threads.messages.append(_human("keep going"))
+    now += 1
+    assert await allowance.start() == budget.WINDOW_SECONDS
+    now += budget.WINDOW_SECONDS
+    with pytest.raises(budget.MonitorBudgetSpent):
+        await allowance.start()
+
+
+@pytest.mark.usefixtures("registry_db", "memory_event_claims")
+async def test_events_past_the_allowance_stop_the_monitors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = FakeThreads()
+    client = SimpleNamespace(threads=threads)
+    monkeypatch.setattr(delivery, "langgraph_client", lambda: client)
+    monkeypatch.setattr(event_matches, "dispatch_client", lambda: client)
+    monkeypatch.setattr(EventMatch, "deliver", AsyncMock(return_value=True))
+    noisy = PendingMonitor(
+        monitor_id="mon-noisy",
+        status="running",
+        events_pending=[
+            MonitorEvent(seq=seq, at_raw_line=seq, lines=[f"ERROR {seq}"]) for seq in range(1, 61)
+        ],
+    )
+    stopped: dict[str, str] = {}
+    acked: list[int] = []
+
+    class Monitors:
+        async def pending(self) -> list[PendingMonitor]:
+            return [noisy]
+
+        async def ack(self, monitor_id: str, *, seq: int, end: bool) -> None:
+            acked.append(seq)
+
+        async def stop(self, monitor_id: str, *, reason: str = "") -> dict[str, object]:
+            stopped[monitor_id] = reason
+            return {}
+
+    await ThreadMonitorDelivery("thread-1", {}, Monitors()).sync()
+
+    owed = await EventMatch.owed("thread-1", [])
+    assert len(owed) == budget.MAX_EVENTS
+    assert acked == [60]
+    assert stopped == {"mon-noisy": budget.EVENTS_SPENT_REASON}

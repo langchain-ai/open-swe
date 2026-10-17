@@ -20,6 +20,7 @@ from pydantic import JsonValue
 from openswe.background_tasks import completion_configurable
 from openswe.database import postgres
 from openswe.jobs import queue
+from openswe.monitors.budget import EVENTS_SPENT_REASON, ThreadMonitorBudget
 from openswe.monitors.sandbox import MonitorEvent, PendingMonitor, SandboxMonitors, owner_of
 from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox
@@ -47,6 +48,16 @@ def _tracked(metadata: Mapping[str, object]) -> list[str]:
 
 def _owed(monitors: list[PendingMonitor]) -> list[PendingMonitor]:
     return [monitor for monitor in monitors if monitor.events_pending or monitor.end]
+
+
+def _within(monitors: list[PendingMonitor], allowance: int) -> list[PendingMonitor]:
+    """``monitors`` keeping only the first ``allowance`` events across them."""
+    kept: list[PendingMonitor] = []
+    for monitor in monitors:
+        events = monitor.events_pending[:allowance]
+        allowance -= len(events)
+        kept.append(monitor.model_copy(update={"events_pending": events}))
+    return kept
 
 
 def _fence(*texts: str) -> str:
@@ -148,10 +159,16 @@ class ThreadMonitorDelivery:
             finished=[item for item in _tracked(self._metadata) if item not in running],
             key=RUNNING_MONITORS_KEY,
         )
-        recorded = False
+        budget = ThreadMonitorBudget(langgraph_client(), self._thread_id)
+        recorded = spent = False
         owed = _owed(pending)
         while owed:
-            await self._record(owed)
+            wanted = sum(len(monitor.events_pending) for monitor in owed)
+            granted = await budget.take_events(wanted)
+            # Events past the allowance are skipped, not saved for later: the
+            # monitors stop, and their end notices say why.
+            spent = spent or granted < wanted
+            await self._record(_within(owed, granted))
             for monitor in owed:
                 last = monitor.events_pending[-1].seq if monitor.events_pending else 0
                 await self._monitors.ack(monitor.monitor_id, seq=last, end=monitor.end is not None)
@@ -159,6 +176,8 @@ class ThreadMonitorDelivery:
             if not any(monitor.behind for monitor in owed):
                 break
             owed = _owed(await self._monitors.pending())
+        if spent:
+            await self._stop_running(pending, EVENTS_SPENT_REASON)
         if recorded:
             await Topic.THREAD_BACKGROUND_WORK.invalidate(key=self._thread_id)
             await self._wake(pending)
@@ -204,10 +223,15 @@ class ThreadMonitorDelivery:
         if busy or not await MONITOR_WAKES.exhausted(client, self._thread_id):
             return
         # What is owed now waits for the next run a person starts.
+        await self._stop_running(pending, _WAKE_LIMIT_REASON)
+
+    async def _stop_running(self, pending: list[PendingMonitor], reason: str) -> None:
         for monitor in pending:
             if monitor.status == "running":
-                await self._monitors.stop(monitor.monitor_id, reason=_WAKE_LIMIT_REASON)
-        logger.info("Monitor wake budget spent", extra={"agent_thread_id": self._thread_id})
+                await self._monitors.stop(monitor.monitor_id, reason=reason)
+        logger.info(
+            "Monitor budget spent", extra={"agent_thread_id": self._thread_id, "reason": reason}
+        )
 
 
 async def ensure_monitor_polling(thread_id: str) -> None:

@@ -840,6 +840,16 @@
             "title": "Commands",
             "type": "array"
           },
+          "monitor_budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonitorBudgetUse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "monitors": {
             "default": [],
             "items": {
@@ -3371,6 +3381,40 @@
           "id"
         ],
         "title": "ModelObject",
+        "type": "object"
+      },
+      "MonitorBudgetUse": {
+        "description": "What the thread's monitors used of the allowance the last human message opened.",
+        "properties": {
+          "events": {
+            "title": "Events",
+            "type": "integer"
+          },
+          "max_events": {
+            "title": "Max Events",
+            "type": "integer"
+          },
+          "max_starts": {
+            "title": "Max Starts",
+            "type": "integer"
+          },
+          "starts": {
+            "title": "Starts",
+            "type": "integer"
+          },
+          "window_ends_at": {
+            "title": "Window Ends At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "events",
+          "max_events",
+          "starts",
+          "max_starts",
+          "window_ends_at"
+        ],
+        "title": "MonitorBudgetUse",
         "type": "object"
       },
       "MonitorState": {

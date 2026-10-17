@@ -6,6 +6,7 @@ import type { ComponentType, ReactNode } from "react"
 import { useAgentThreadBackgroundWork } from "@/features/agents/lib/queries"
 import type {
   AgentBackgroundCommand,
+  AgentMonitorBudget,
   AgentThreadMonitor,
 } from "@/features/agents/lib/types"
 import { formatRelativeTime } from "@/lib/utils"
@@ -29,7 +30,11 @@ export function BackgroundWorkSidebar({ threadId }: { threadId: string }) {
         <h2 className="text-sm font-medium text-primary">Background Work</h2>
       </div>
       {monitors.length > 0 && (
-        <Section title="Monitors" icon={PulseIcon}>
+        <Section
+          title="Monitors"
+          icon={PulseIcon}
+          detail={work?.monitor_budget && budgetUse(work.monitor_budget)}
+        >
           {monitors.map((monitor) => (
             <MonitorRow key={monitor.monitor_id} monitor={monitor} />
           ))}
@@ -49,10 +54,12 @@ export function BackgroundWorkSidebar({ threadId }: { threadId: string }) {
 function Section({
   title,
   icon: Icon,
+  detail,
   children,
 }: {
   title: string
   icon: ComponentType<{ className?: string }>
+  detail?: string | null
   children: ReactNode
 }) {
   return (
@@ -61,6 +68,9 @@ function Section({
         <Icon className="size-3.5" />
         {title}
       </h3>
+      {detail && (
+        <p className="px-space-3 pb-space-1 text-xs text-tertiary">{detail}</p>
+      )}
       <ul className="flex flex-col">{children}</ul>
     </section>
   )
@@ -94,6 +104,15 @@ function Row({
       </div>
     </li>
   )
+}
+
+/** How much of the allowance since the last human message the monitors used. */
+function budgetUse(budget: AgentMonitorBudget): string {
+  return [
+    `${budget.events} of ${budget.max_events} events`,
+    `${budget.starts} of ${budget.max_starts} starts`,
+    `stops ${formatRelativeTime(budget.window_ends_at * 1000)}`,
+  ].join(" · ")
 }
 
 function started(startedAt: number | null): string | null {
