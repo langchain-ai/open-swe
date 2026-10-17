@@ -390,7 +390,11 @@ test.describe("Human review in Slack", () => {
           (m) => m.text,
         ),
       )
-      .toContain(`Review requested in <#${REVIEW_CHANNEL}>.`);
+      .toContainEqual(
+        expect.stringMatching(
+          new RegExp(`^<[^|>]+\\|Review requested> in <#${REVIEW_CHANNEL}>\\.$`),
+        ),
+      );
     const posted = await latestRequest(request);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
     expect(posted.slack_thread_ts).toBe("");
