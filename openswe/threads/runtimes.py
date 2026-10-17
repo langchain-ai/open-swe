@@ -95,11 +95,6 @@ class _SdkThreads:
         failure = _ErroredThread.model_validate(thread or {}).error
         return (failure.describe() or None) if failure else None
 
-    async def has_history(self, thread_id: str) -> bool:
-        """Whether runs already left checkpoints here, which keeps the thread on this runtime."""
-        thread = await self.get(thread_id)
-        return thread is not None and bool(thread.get("values") or thread.get("status") != "idle")
-
 
 class MdaRuntime:
     """The MDA deployment, reached for the runs of threads the index marks ``mda``."""
