@@ -1,10 +1,13 @@
 import shlex
 from typing import cast
 
+import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.sandboxes.lifecycle import configure_git_identity
-from openswe.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
+from openswe.sandboxes.paths import resolve_checkout_dir, resolve_repo_dir, resolve_sandbox_work_dir
+from openswe.sandboxes.state import SandboxBackendProxy
+from openswe.walkthrough.checkout import PinnedCheckout
 
 
 class _FakeProvider:
@@ -35,6 +38,11 @@ class _FakeSandboxBackend:
         self.shell_paths = shell_paths or {}
         self.writable_dirs = writable_dirs or set()
         self.commands: list[str] = []
+
+    def get_work_dir(self) -> str:
+        if self.sandbox is None:
+            raise RuntimeError("work dir unavailable")
+        return self.sandbox.get_work_dir()
 
     @property
     def id(self) -> str:
@@ -125,3 +133,49 @@ async def test_a_work_dir_the_identity_write_could_not_ready_is_still_probed() -
     await configure_git_identity(cast(SandboxBackendProtocol, backend))
 
     assert await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend)) == "/home/daytona"
+
+
+@pytest.mark.parametrize("consumer", ["work_dir", "walkthrough"])
+async def test_cold_proxy_resolves_provider_work_dir_before_shell_fallback(consumer: str) -> None:
+    backend = _FakeSandboxBackend(
+        provider=_FakeProvider(work_dir="/workspace"),
+        shell_paths={"pwd": "/root", "printf '%s' \"$HOME\"": "/root"},
+        writable_dirs={"/workspace", "/root"},
+    )
+
+    async def reconnect() -> SandboxBackendProtocol:
+        return cast(SandboxBackendProtocol, backend)
+
+    proxy = SandboxBackendProxy(thread_id="cold-paths", reconnect=reconnect)
+
+    if consumer == "walkthrough":
+        assert (await PinnedCheckout.locate(proxy, "repo")).repo_dir == "/workspace/repo"
+    else:
+        assert await resolve_sandbox_work_dir(proxy) == "/workspace"
+    assert await resolve_sandbox_work_dir(proxy) == "/workspace"
+    assert await resolve_repo_dir(proxy, "repo") == "/workspace/repo"
+
+
+@pytest.mark.parametrize("cold", [False, True])
+async def test_bridged_checkout_keeps_its_work_dir(cold: bool) -> None:
+    class BridgedBackend(_FakeSandboxBackend):
+        @property
+        def id(self) -> str:
+            return "bridge:local"
+
+    backend = BridgedBackend(
+        provider=_FakeProvider(work_dir="/Users/me/repo"),
+        writable_dirs={"/Users/me/repo"},
+    )
+
+    async def reconnect() -> SandboxBackendProtocol:
+        return cast(SandboxBackendProtocol, backend)
+
+    proxy = SandboxBackendProxy(
+        None if cold else cast(SandboxBackendProtocol, backend),
+        thread_id="bridged-paths",
+        reconnect=reconnect,
+    )
+
+    assert await resolve_repo_dir(proxy, "repo") == "/Users/me/repo"
+    assert await resolve_checkout_dir(proxy, "/Users/me/repo", "repo") == "/Users/me/repo"

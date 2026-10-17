@@ -1,8 +1,10 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.review.diff import MaterializedReviewDiff
+from openswe.sandboxes.state import SandboxBackendProxy
 from openswe.tools.fetch_review_diff import fetch_review_diff
 
 
@@ -26,16 +28,19 @@ async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
         }
     }
 
+    backend = MagicMock(spec=SandboxBackendProtocol)
+    backend.id = "review-sandbox"
+    backend.get_work_dir = lambda: "/workspace"
+    backend.aexecute = AsyncMock(return_value=ExecuteResponse(output="/root", exit_code=0))
+
+    async def reconnect() -> SandboxBackendProtocol:
+        return backend
+
+    proxy = SandboxBackendProxy(thread_id="thread-1", reconnect=reconnect)
+
     with (
         patch("openswe.run_config.get_config", return_value=config),
-        patch(
-            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()
-        ),
-        patch(
-            "openswe.tools.fetch_review_diff.resolve_sandbox_work_dir",
-            new_callable=AsyncMock,
-            return_value="/workspace",
-        ),
+        patch("openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=proxy),
         patch(
             "openswe.tools.fetch_review_diff.materialize_review_diff",
             new_callable=AsyncMock,
