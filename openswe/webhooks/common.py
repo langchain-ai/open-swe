@@ -70,7 +70,7 @@ from openswe.github.token import (
     is_bot_token_only_mode,
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
-from openswe.input_messages import PersonIdentity
+from openswe.input_messages import PersonIdentity, RunMessage, person_introduction
 from openswe.linear.comments import get_recent_comments  # noqa: F401
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
@@ -356,6 +356,18 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🤖 **Agent Response**",
     "❌ **Agent Error**",
 )
+
+
+async def edge_person(person: PersonIdentity) -> tuple[PersonIdentity, RunMessage | None]:
+    """``person`` keyed on their Open SWE account, with the introduction the edge owes.
+
+    The run describes every account holder from their ``users`` row. Anyone else
+    is known only to the surface they wrote on, so that surface introduces them.
+    """
+    canonical = await User.canonical_person(person)
+    if canonical["id"].startswith("user:"):
+        return canonical, None
+    return canonical, person_introduction(canonical)
 
 
 def _extract_repo_config_from_thread(thread: ThreadLike) -> dict[str, str] | None:

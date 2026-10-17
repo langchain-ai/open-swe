@@ -113,7 +113,8 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(server, "load_workspace", _async_none)
     monkeypatch.setattr(server, "_resolve_prompt_default_repo", _async_none)
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
-    monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
+    monkeypatch.setattr(server, "_sender_participant", _async_none)
+    monkeypatch.setattr(server, "_thread_participants", _async_list)
     monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
 
     class _Threads:

@@ -88,6 +88,7 @@ from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
+    introduced_person_ids,
     message_sender_id,
     person_introduction,
     visible_dynamic_context_hashes,
@@ -286,7 +287,6 @@ from openswe.utils import ttl_cache
 from openswe.utils.authorship import (
     CollaboratorIdentity,
     ThreadParticipant,
-    resolve_participant_identities,
     resolve_triggering_user_identity,
 )
 from openswe.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
@@ -429,142 +429,142 @@ async def _resolve_repo_custom_instructions(
         return None
 
 
-async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIdentity]:
-    """Git identities of everyone who has posted in this thread."""
-    try:
-        thread = await read_thread(thread_id, client)
-        logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
-        return await resolve_participant_identities(logins)
-    except Exception:
-        logger.debug("Failed to resolve participant identities for %s", thread_id, exc_info=True)
-        return []
+class UnidentifiedSenderError(RuntimeError):
+    """A human sender that neither the ``users`` table nor the run's surface identifies."""
+
+    def __init__(self, person_id: str) -> None:
+        super().__init__(f"Cannot identify the sender {person_id!r}; refusing to run for them")
+        self.person_id = person_id
 
 
-async def _user_for_login(login: str) -> User | None:
-    """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
-    try:
-        return await User.for_login("github", login)
-    except Exception:
-        logger.warning(
-            "Could not resolve a participant; describing them from surface data",
-            extra={"participant_login": login},
-            exc_info=True,
-        )
-        return None
-
-
-async def _user_for_person_id(person_id: str) -> User | None:
-    """The ``users`` row a ``user:<uuid>`` person id names, or ``None``."""
-    platform, _, external_id = person_id.partition(":")
-    if platform != "user":
-        return None
-    try:
-        return await User.get(UUID(external_id))
-    except Exception:
-        logger.warning(
-            "Could not resolve a sender from their person id",
-            extra={"person_key": person_id},
-            exc_info=True,
-        )
-        return None
-
-
-async def _thread_participant(
-    identity: CollaboratorIdentity,
-    config: RunnableConfig,
-    *,
-    person_id: str | None = None,
-    timezone: str = "",
-    slack_user_id: str = "",
-) -> ThreadParticipant:
-    login = identity.github_login or None
-    if login is None:
+async def _user_participant(user: User, person_id: str, *, timezone: str = "") -> ThreadParticipant:
+    """A person with an Open SWE account, described from their ``users`` row alone."""
+    login = user.github_login
+    if not login:
         return ThreadParticipant(
-            identity=identity,
-            person_id=person_id or "",
+            identity=CollaboratorIdentity(
+                display_name=user.display_name, commit_name="", commit_email=""
+            ),
+            person_id=person_id,
+            email=user.email,
             timezone=timezone,
-            slack_user_id=slack_user_id,
+            linked=True,
+            slack_user_id=user.slack_user_id,
         )
-    user, profile, workspace_admin, instructions = await asyncio.gather(
-        _user_for_login(login),
+    participant = await _github_participant(login, user.display_name, person_id)
+    return replace(
+        participant,
+        email=user.email,
+        timezone=timezone,
+        linked=True,
+        slack_user_id=user.slack_user_id,
+    )
+
+
+async def _github_participant(login: str, display_name: str, person_id: str) -> ThreadParticipant:
+    profile, workspace_admin, instructions = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
     )
-    display_name = (user.display_name if user else "") or identity.display_name or login
+    name = display_name or login
+    identity = CollaboratorIdentity(
+        display_name=name, commit_name=name, commit_email="", github_login=login
+    )
     return ThreadParticipant(
-        identity=replace(
-            identity,
-            display_name=display_name,
-            commit_name=display_name,
-            commit_email=identity.login_noreply_email,
-        ),
-        person_id=person_id or (f"user:{user.id}" if user else f"github:{login}"),
+        identity=replace(identity, commit_email=identity.login_noreply_email),
+        person_id=person_id,
         workspace_admin=workspace_admin,
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
-        email=(user.email if user else "") or "",
-        timezone=timezone,
-        linked=user is not None,
-        slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
     )
 
 
-async def _resolve_sender(
-    sender: CollaboratorIdentity | None, person_id: str, display_name: str
-) -> CollaboratorIdentity | None:
-    """The sender's identity, from the run's credentials or else their ``users`` row."""
-    if sender is not None:
-        return sender
-    user = await _user_for_person_id(person_id)
-    if user is not None and user.github_login:
-        [identity] = await resolve_participant_identities([user.github_login])
-        return identity
-    name = display_name or (user.display_name if user is not None else "")
-    return (
-        CollaboratorIdentity(display_name=name, commit_name="", commit_email="") if name else None
-    )
+async def _thread_participant(login: str) -> ThreadParticipant:
+    """A thread participant known only by the GitHub login they posted under."""
+    user = await User.for_login("github", login)
+    if user is not None:
+        return await _user_participant(user, f"user:{user.id}")
+    return await _github_participant(login, "", f"github:{login}")
+
+
+async def _sender_participant(
+    person_id: str, cfg: RunConfig, introduced: set[str]
+) -> ThreadParticipant | None:
+    """The latest human sender, described from the id their envelope carries.
+
+    Edges key everyone with an account on ``user:<uuid>``, so that row is the only
+    source for them. A surface id names someone without one; the run's surface
+    data describes them only when it belongs to that same id. ``None`` means
+    there is nothing to add: a system principal, or a person already described.
+    """
+    platform, _, external_id = person_id.partition(":")
+    slack = cfg.slack_thread
+    if platform == "system":
+        return None
+    if platform == "user":
+        try:
+            user_id = UUID(external_id)
+        except ValueError as exc:
+            raise UnidentifiedSenderError(person_id) from exc
+        user = await User.get(user_id)
+        if user is None:
+            raise UnidentifiedSenderError(person_id)
+        on_slack = (
+            slack is not None
+            and bool(user.slack_user_id)
+            and slack.triggering_user_id == user.slack_user_id
+        )
+        timezone = slack.triggering_user_timezone if slack is not None and on_slack else ""
+        return await _user_participant(user, person_id, timezone=timezone)
+    if platform == "github" and external_id.lower() == (cfg.github_login or "").lower():
+        participant = await _thread_participant(external_id)
+        return replace(participant, person_id=person_id)
+    if platform == "slack" and slack is not None and slack.triggering_user_id == external_id:
+        return ThreadParticipant(
+            identity=CollaboratorIdentity(
+                display_name=slack.triggering_user_name, commit_name="", commit_email=""
+            ),
+            person_id=person_id,
+            timezone=slack.triggering_user_timezone,
+            slack_user_id=external_id,
+        )
+    if (
+        platform == "linear"
+        and cfg.linear_issue is not None
+        and external_id.lower() == (cfg.user_email or "").lower()
+    ):
+        name = (cfg.linear_issue.model_extra or {}).get("triggering_user_name")
+        return ThreadParticipant(
+            identity=CollaboratorIdentity(
+                display_name=name if isinstance(name, str) else "",
+                commit_name="",
+                commit_email="",
+            ),
+            person_id=person_id,
+            email=external_id,
+        )
+    if platform in {"github", "slack", "linear"} and person_id in introduced:
+        return None
+    raise UnidentifiedSenderError(person_id)
 
 
 async def _thread_participants(
-    thread_id: str,
-    config: RunnableConfig,
-    sender: CollaboratorIdentity | None,
-    *,
-    sender_person_id: str,
-    sender_display_name: str = "",
-    sender_timezone: str = "",
-    sender_slack_user_id: str = "",
+    thread_id: str, sender: ThreadParticipant | None
 ) -> list[ThreadParticipant]:
-    """Everyone in the thread, each with the settings the agent acts under for them.
-
-    The sender is keyed by the id their message envelope carries, so the turn's
-    envelope resolves to their block even when no person row exists. Without a
-    GitHub account they have no commit identity, and the surface's name for them
-    is all anyone knows. A sender nothing identifies gets no block at all: any
-    stand-in would overwrite who that id really is.
-    """
-    identities, resolved_sender = await asyncio.gather(
-        _thread_participant_identities(thread_id),
-        _resolve_sender(sender, sender_person_id, sender_display_name),
+    """Everyone in the thread, each with the settings the agent acts under for them."""
+    try:
+        thread = await read_thread(thread_id, client)
+    except Exception:
+        logger.warning("Could not read the thread's participants", exc_info=True)
+        logins: list[str] = []
+    else:
+        logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
+    sender_login = sender.identity.github_login.lower() if sender is not None else ""
+    others = await asyncio.gather(
+        *(_thread_participant(login) for login in logins if login.lower() != sender_login)
     )
-    if resolved_sender is None:
-        return list(await asyncio.gather(*(_thread_participant(i, config) for i in identities)))
-    others = [
-        identity for identity in identities if identity.commit_email != resolved_sender.commit_email
-    ]
-    return list(
-        await asyncio.gather(
-            _thread_participant(
-                resolved_sender,
-                config,
-                person_id=sender_person_id,
-                timezone=sender_timezone,
-                slack_user_id=sender_slack_user_id,
-            ),
-            *(_thread_participant(identity, config) for identity in others),
-        )
-    )
+    return [*([sender] if sender is not None else []), *others]
 
 
 async def _resolve_user_custom_instructions(login: str | None) -> str | None:
@@ -1375,21 +1375,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             sender_messages: list[Any] = []
             if subject_id is not None:
-                participants = await _thread_participants(
-                    self._thread_id,
-                    self._config or {},
-                    triggering_user_identity,
-                    sender_person_id=subject_id,
-                    sender_display_name=(
-                        cfg.slack_thread.triggering_user_name if cfg.slack_thread else ""
-                    ),
-                    sender_timezone=(
-                        cfg.slack_thread.triggering_user_timezone if cfg.slack_thread else ""
-                    ),
-                    sender_slack_user_id=(
-                        cfg.slack_thread.triggering_user_id if cfg.slack_thread else ""
-                    ),
+                sender = await _sender_participant(
+                    subject_id,
+                    cfg,
+                    introduced_person_ids(state.get("messages")),
                 )
+                participants = await _thread_participants(self._thread_id, sender)
                 sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
         try:

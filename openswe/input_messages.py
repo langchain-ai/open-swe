@@ -1,7 +1,7 @@
 """Typed construction and serialization for application-owned model inputs."""
 
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
 from typing import Any, Literal, NotRequired, TypedDict
@@ -220,7 +220,7 @@ def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     }
 
 
-def dynamic_context_hash(content: object) -> str | None:
+def _dynamic_context_roots(content: object) -> Iterator[ElementTree.Element]:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
@@ -230,14 +230,30 @@ def dynamic_context_hash(content: object) -> str | None:
             root = ElementTree.fromstring(text)
         except ElementTree.ParseError:
             continue
-        if root.tag != "dynamic-context":
-            continue
+        if root.tag == "dynamic-context":
+            yield root
+
+
+def dynamic_context_hash(content: object) -> str | None:
+    for root in _dynamic_context_roots(content):
         claimed_hash = root.attrib.pop("hash", None)
         canonical = ElementTree.tostring(root, encoding="unicode")
         context_hash = hashlib.sha256(canonical.encode()).hexdigest()
         if claimed_hash is None or claimed_hash == context_hash:
             return context_hash
     return None
+
+
+def introduced_person_ids(messages: object) -> set[str]:
+    """Ids of every person a context block in ``messages`` has described."""
+    if not isinstance(messages, (list, tuple)):
+        return set()
+    return {
+        root.attrib["id"]
+        for message in messages
+        for root in _dynamic_context_roots(_message_content(message))
+        if root.attrib.get("kind") == "person" and "id" in root.attrib
+    }
 
 
 def _message_content(message: object) -> object:

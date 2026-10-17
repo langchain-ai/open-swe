@@ -13,7 +13,6 @@ from openswe.input_messages import (
     PersonIdentity,
     RunInput,
     human_input,
-    person_introduction,
     system_input,
     system_introduction,
 )
@@ -288,15 +287,12 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             },
         ),
     ]
-    # The last comment triggers the run, and the run describes its author itself.
-    introduced: set[str] = {
-        _linear_person(comment.get("user") or {})["id"] for comment in included_comments[-1:]
-    }
+    introduced: set[str] = set()
     for comment in included_comments:
-        person = _linear_person(comment.get("user") or {})
+        person, introduction = await common.edge_person(_linear_person(comment.get("user") or {}))
         sender_id = person["id"]
-        if sender_id not in introduced:
-            run_messages.append(person_introduction(person))
+        if introduction is not None and sender_id not in introduced:
+            run_messages.append(introduction)
             introduced.add(sender_id)
         body = str(comment.get("body", ""))
         comment_image_blocks = [

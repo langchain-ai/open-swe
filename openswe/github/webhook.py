@@ -25,7 +25,6 @@ from openswe.input_messages import (
     RunInput,
     SystemIdentity,
     human_input,
-    person_introduction,
     system_input,
     system_introduction,
 )
@@ -135,16 +134,17 @@ def _github_person(login: str, user_id: object = None) -> PersonIdentity:
     return person
 
 
-def _github_human_run_input(
+async def _github_human_run_input(
     login: str,
     content: str,
     *,
     user_id: object = None,
     data: EnvelopeData | None = None,
 ) -> RunInput:
-    person = _github_person(login, user_id)
+    person, introduction = await common.edge_person(_github_person(login, user_id))
     return {
         "messages": [
+            *([introduction] if introduction is not None else []),
             human_input(
                 content,
                 {
@@ -180,7 +180,7 @@ def _github_webhook_run_input(content: str, *, data: EnvelopeData) -> RunInput:
     }
 
 
-def _github_issue_run_input(
+async def _github_issue_run_input(
     prompt: str,
     comments: list[dict[str, Any]],
     *,
@@ -208,20 +208,20 @@ def _github_issue_run_input(
             },
         ),
     ]
-    # The run describes the trigger sender itself; only replayed authors nobody
-    # resolves need an introduction here.
-    introduced: set[str] = {_github_person(trigger_login, trigger_user_id)["id"]}
+    introduced: set[str] = set()
     source_messages = [
         {"author": issue_author or trigger_login, "body": description, "type": "description"},
         *comments,
     ]
     for comment in source_messages:
         author = str(comment.get("author") or "unknown")
-        person = _github_person(
-            author, trigger_user_id if author == trigger_login else comment.get("author_id")
+        person, introduction = await common.edge_person(
+            _github_person(
+                author, trigger_user_id if author == trigger_login else comment.get("author_id")
+            )
         )
-        if person["id"] not in introduced:
-            messages.append(person_introduction(person))
+        if introduction is not None and person["id"] not in introduced:
+            messages.append(introduction)
             introduced.add(person["id"])
         body = common.format_github_comment_body_for_prompt(
             author, str(comment.get("body", "")), trusted=trusted
@@ -366,7 +366,7 @@ async def trigger_pr_review_from_ref(
         "Dispatching reviewer run for thread %s from %s PR review request", thread_id, source
     )
     review_input = (
-        _github_human_run_input(
+        await _github_human_run_input(
             github_login,
             review_prompt,
             user_id=github_user_id,
@@ -1195,12 +1195,14 @@ async def process_github_pr_comment(
                 exc_info=True,
             )
     messages = []
-    introduced: set[str] = {_github_person(github_login, github_user_id)["id"]}
+    introduced: set[str] = set()
     for item in comments:
         author = str(item.get("author") or "unknown")
-        person = _github_person(author, github_user_id if author == github_login else None)
-        if person["id"] not in introduced:
-            messages.append(person_introduction(person))
+        person, introduction = await common.edge_person(
+            _github_person(author, github_user_id if author == github_login else None)
+        )
+        if introduction is not None and person["id"] not in introduced:
+            messages.append(introduction)
             introduced.add(person["id"])
         messages.append(
             human_input(
@@ -1356,7 +1358,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         configurable,
         source="github_review_reply",
         thread_title=None,
-        input=_github_human_run_input(
+        input=await _github_human_run_input(
             reply_author,
             finding_reply_prompt,
             user_id=sender.get("id") if isinstance(sender, dict) else None,
@@ -1541,7 +1543,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             if event_type == "issue_comment"
             else github_login
         )
-        run_input = _github_human_run_input(
+        run_input = await _github_human_run_input(
             sender_login,
             prompt,
             user_id=github_user_id,
@@ -1552,7 +1554,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             },
         )
     else:
-        run_input = _github_issue_run_input(
+        run_input = await _github_issue_run_input(
             prompt,
             comments,
             trusted=trusted,

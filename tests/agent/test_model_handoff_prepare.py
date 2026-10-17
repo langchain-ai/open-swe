@@ -63,7 +63,8 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         "_resolve_user_custom_instructions",
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
-    monkeypatch.setattr(server, "_thread_participant_identities", AsyncMock(return_value=[]))
+    monkeypatch.setattr(server, "_sender_participant", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "_thread_participants", AsyncMock(return_value=[]))
     monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kw: "system prompt")
     monkeypatch.setattr(
         server,

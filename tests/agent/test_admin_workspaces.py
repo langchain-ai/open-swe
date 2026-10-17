@@ -11,7 +11,6 @@ from openswe import server
 from openswe.sandboxes import lifecycle
 from openswe.tools import workspaces as env_tools
 from openswe.users import User
-from openswe.utils.authorship import CollaboratorIdentity
 from openswe.workspaces.store import Workspace
 
 _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
@@ -277,17 +276,12 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
     from openswe import server
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
-    monkeypatch.setattr(server, "_user_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "load_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="bob@example.com"))
-    bob = CollaboratorIdentity(
-        display_name="bob", commit_name="bob", commit_email="bob@example.com", github_login="bob"
-    )
-    admin_requester_config = _config(user_email="admin@example.com")
 
-    as_seen_by_admin = await server._thread_participant(bob, admin_requester_config)
-    assert as_seen_by_admin.workspace_admin is False
+    assert (await server._thread_participant("bob")).workspace_admin is False
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com,bob")
-    assert (await server._thread_participant(bob, admin_requester_config)).workspace_admin is True
+    assert (await server._thread_participant("bob")).workspace_admin is True
