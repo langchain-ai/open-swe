@@ -5,6 +5,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 """
 
 from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -1373,8 +1374,43 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     await common.store_current_reviewer_run_id(thread_id, run)
 
 
+@dataclass(frozen=True)
+class GitHubIssueRun:
+    """An issue run, prepared: its thread's metadata is written, the run is not started."""
+
+    thread_id: str
+    input: RunInput
+    configurable: dict[str, Any]
+
+
 async def process_github_issue(payload: dict[str, Any], event_type: str) -> None:
     """Process a GitHub issue or issue comment that tagged @open-swe."""
+    run = await prepare_github_issue_run(payload, event_type)
+    if run is None:
+        return
+    common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", run.thread_id)
+    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    await common.dispatch_agent_run(
+        run.thread_id,
+        None,
+        run.configurable,
+        source="github_issue",
+        thread_title=None,
+        input=run.input,
+        metadata=common.AGENT_VERSION_METADATA,
+        client=langgraph_client,
+    )
+    common.logger.info("LangGraph run dispatched for thread %s from GitHub issue", run.thread_id)
+
+
+async def prepare_github_issue_run(
+    payload: dict[str, Any], event_type: str, thread_id: str | None = None
+) -> GitHubIssueRun | None:
+    """Prepare the run an issue or issue comment that tagged @open-swe starts, or None.
+
+    ``thread_id`` is the conversation's thread when MDA's GitHub channel owns it;
+    Open SWE's own intake uses the issue's thread.
+    """
     issue = payload.get("issue", {})
     repo = payload.get("repository", {})
     repo_config = {
@@ -1401,14 +1437,14 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     if not issue_id or not issue_number:
         common.logger.warning("Missing GitHub issue id/number, skipping")
-        return
+        return None
 
     email = await User.email_for_login(github_login) or ""
     if not email:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
+        return None
 
-    thread_id = github_issue_thread_id(issue_id)
+    thread_id = thread_id or github_issue_thread_id(issue_id)
     existing_thread = await common.thread_exists(thread_id)
     github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()
@@ -1531,10 +1567,8 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             "Not starting a GitHub issue run whose token scope could not be recorded",
             extra={"agent_thread_id": thread_id},
         )
-        return
+        return None
 
-    common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if existing_thread:
         sender_login = (
             comment.get("user", {}).get("login", github_login) or github_login
@@ -1568,17 +1602,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
                 "title": title,
             },
         )
-    await common.dispatch_agent_run(
-        thread_id,
-        None,
-        configurable,
-        source="github_issue",
-        thread_title=None,
-        input=run_input,
-        metadata=common.AGENT_VERSION_METADATA,
-        client=langgraph_client,
-    )
-    common.logger.info("LangGraph run dispatched for thread %s from GitHub issue", thread_id)
+    return GitHubIssueRun(thread_id=thread_id, input=run_input, configurable=configurable)
 
 
 class _PullRequestNumber(BaseModel):

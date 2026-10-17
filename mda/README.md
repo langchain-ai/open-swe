@@ -37,7 +37,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
 | `LANGSMITH_GATEWAY_API_KEY` | Optional gateway key, as on the backend |
-| `MDA_SERVICE_SECRET` | Shared with the backend: the Linear channel presents it when it hands events to the backend. Open SWE's own credential between the two, not an MDA setting |
+| `MDA_SERVICE_SECRET` | Shared with the backend: the Linear and GitHub channels present it when they hand events to the backend. Open SWE's own credential between the two, not an MDA setting |
 
 The backend:
 
@@ -46,7 +46,8 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent and reviewer thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
-| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` answers only callers that present it |
+| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only callers that present it |
+| `GITHUB_ISSUES_VIA_MDA_CHANNEL` | Repositories (`owner/repo`, comma-separated, or `*`) whose issue mentions go to this deployment's GitHub channel; unset keeps them on the backend |
 
 ## Run locally
 
@@ -87,3 +88,11 @@ The channel verifies each delivery (Linear's signature and timestamp). The backe
 Threads of Linear sessions belong to the channel, and MDA scopes threads by owner. The backend reads them as LangSmith Studio does (its LangSmith key with `x-auth-scheme: langsmith`), which MDA allows for reads only, so the dashboard shows them read-only: the backend starts no runs on them and writes nothing there. No run-complete webhook follows a channel's run: the channel reports each run that ended (`on_settled`) to `POST /mda/channel/settled`, which completes it from the run MDA recorded. The report comes from the process that started the run, so the backend's thread status reconcile job completes one whose report a restart lost. The channel reports failures in the session itself.
 
 `mda deploy` sets up the Linear app, which takes a Linear workspace admin; see [Linear](../docs/INSTALLATION.md#linear).
+
+## GitHub
+
+The deployment's GitHub channel (`channels/github.py`) handles `@openswe` mentions on issues: `issues.opened`, `edited` and `reopened` with the handle in the title or body, and `issue_comment.created` and `edited` with it in the comment, on issues only. One issue is one conversation, on the channel's own thread, and a new mention interrupts the run in progress, as before. Pull requests, reviews, CI, the reviewer and automations stay on the backend.
+
+The channel uses Open SWE's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret), and its webhook stays at the backend's `/webhooks/github`. The backend forwards the issue events of the repositories `GITHUB_ISSUES_VIA_MDA_CHANNEL` names to `<deployment>/channels/github/events` exactly as GitHub sent them, and stops starting those runs itself. Deploy remembers that the webhook stays at the backend once you answer "No" to moving it; without a terminal, `MDA_GITHUB_WEBHOOK_ELSEWHERE` names the backend's URL.
+
+The channel's handler asks `POST /github/channel/runs` what the event starts. The backend applies the same gates as its own intake, reacts to the comment, builds the prompt, writes and indexes the thread, and returns the input, the run context with a run token signed for the channel's thread, and the run metadata. Its threads are the channel's, as Linear sessions' are: read-only on the backend, and completed when the channel reports the run ended, or by the reconcile job.
