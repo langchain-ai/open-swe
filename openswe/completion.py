@@ -501,6 +501,17 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    values = payload.get("values")
+    failure = values.get("open_swe_backend_failure") if isinstance(values, dict) else None
+    if (
+        status == "success"
+        and run_id is not None
+        and isinstance(failure, dict)
+        and failure.get("run_id") == run_id
+        and failure.get("phase") in ("prepare", "before_model", "after_model")
+    ):
+        status = "error"
+        payload = {**payload, "status": status, "error": {"error": "BackendUnavailableError"}}
     try:
         await refresh_thread_status(thread_id)
     except Exception:

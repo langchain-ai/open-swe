@@ -16,7 +16,7 @@ from weakref import WeakKeyDictionary
 
 import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from rt.models import ModelSpec, RunModels
 
@@ -69,6 +69,16 @@ class BackendTimeoutError(BackendCallError):
     """The backend did not answer in time; what the call started may still be running."""
 
 
+class HookFailure(BaseModel):
+    """The exception a backend hook raised, as the backend reports it."""
+
+    error: str
+    message: str = ""
+
+    def describe(self) -> str:
+        return ": ".join(part for part in (self.error, self.message) if part)
+
+
 class BackendUnavailableError(BackendCallError):
     """A transport or gateway failure left the call without a usable response."""
 
@@ -99,6 +109,8 @@ class Catalog(BaseModel):
     code_only: list[str] = []
     # Tools the model calls both directly and from code mode.
     also_from_code: list[str] = []
+    # Tools the model labels each call of, with what the label argument tells it.
+    described: dict[str, str] = {}
 
 
 class PhaseReply(BaseModel):
@@ -108,6 +120,7 @@ class PhaseReply(BaseModel):
     events: list[JsonValue] = []
     # Set by before_model: what to send the model this time.
     system_prompt: str | None = None
+    hidden_tools: list[str] = []
     model: ModelSpec | None = None
     fallback: ModelSpec | None = None
     use_gateway: bool = False
@@ -168,6 +181,16 @@ class _Connections:
 _CONNECTIONS: Final = _Connections()
 
 
+def _hook_failure(response: httpx2.Response) -> HookFailure | None:
+    """The hook's own exception from a backend error response, if it reported one."""
+    if response.status_code != 500:
+        return None
+    try:
+        return HookFailure.model_validate_json(response.content)
+    except ValidationError:
+        return None
+
+
 class OpenSweBackend:
     """The Open SWE backend, called with one run's token."""
 
@@ -224,6 +247,11 @@ class OpenSweBackend:
                     )
                     await asyncio.sleep((1, 3, 9)[attempt])
                     continue
+                if isinstance(exc, httpx2.HTTPStatusError) and (
+                    failure := _hook_failure(exc.response)
+                ):
+                    # What the hook itself raised, so the run fails with the cause, as in-process.
+                    raise BackendCallError(f"{hook} failed: {failure.describe()}") from exc
                 error = (
                     BackendUnavailableError
                     if isinstance(exc, httpx2.TransportError) or gateway_failure

@@ -38,7 +38,7 @@ UNLINKED_USER = "U_CAROL"
 
 PORT = os.environ.setdefault("E2E_PORT", "2024")
 BASE_URL = os.environ.setdefault("E2E_BASE", f"http://127.0.0.1:{PORT}")
-# The Managed Deep Agents server (mda-dev.sh) agent and reviewer threads run on.
+# The Managed Deep Agents server (mda-dev.sh) every Open SWE thread runs on.
 MDA_PORT = os.environ.setdefault("E2E_MDA_PORT", "2025")
 
 # Where a browser reaches the dashboard: the app's own server, not this harness.

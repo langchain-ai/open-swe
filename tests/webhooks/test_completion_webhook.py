@@ -241,6 +241,37 @@ def _slack_metadata() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("status", ["success", "interrupted", "error"])
+async def test_stale_backend_failure_does_not_reclassify_completion(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(_slack_metadata()))
+    settle = AsyncMock()
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "_settle_transcript_turn", settle)
+    monkeypatch.setattr(completion, "_post_failure_reply", reply)
+    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", AsyncMock())
+    monkeypatch.setattr(
+        completion, "_handle_successful_run", AsyncMock(return_value={"status": "ok"})
+    )
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-2",
+            "status": status,
+            "values": {"open_swe_backend_failure": {"run_id": "run-1", "phase": "before_model"}},
+        }
+    )
+
+    settle.assert_awaited_once_with("t1", "run-2", status)
+    if status == "error":
+        assert reply.await_args is not None
+        assert reply.await_args.args[-1] is None
+    else:
+        reply.assert_not_awaited()
+
+
 def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:
     # No secret configured: fail closed (reject everything).
     monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", None)
