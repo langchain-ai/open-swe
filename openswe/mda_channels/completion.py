@@ -4,6 +4,10 @@ The channel starts the run itself, so no run-complete webhook follows it. The
 run's middleware calls ``after_agent`` with the run token once the agent is done,
 which is where the backend completes it, as the webhook does for its own runs.
 A run that crashed never gets there; the thread status reconcile job completes it.
+
+The hook sees the run token, not the run's metadata, so a channel's route signs
+``CHANNEL_METADATA_KEY`` into the run's configurable; the thread index's metadata,
+which ``adopt_channel_run`` marks, answers for a token signed without it.
 """
 
 import logging
@@ -35,8 +39,10 @@ async def complete_after_agent(
     if not run_id:
         return
     try:
-        thread = await index.get(run.thread_id)
-        channel = channel_of(thread.metadata) if thread else None
+        channel = channel_of(run.configurable)
+        if channel is None:
+            thread = await index.get(run.thread_id)
+            channel = channel_of(thread.metadata) if thread else None
         if channel is None:
             return
         metadata: dict[str, Any] = {

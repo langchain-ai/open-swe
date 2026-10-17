@@ -25,6 +25,20 @@ class _Runtime:
     async def status(self, thread_id: str) -> ThreadStatus | None:
         return self.statuses.get(thread_id)
 
+    async def indexed(self, thread_id: str) -> index.IndexedThread | None:
+        known = self.statuses.get(thread_id)
+        if known is None:
+            return None
+        now = datetime.now(UTC)
+        return index.IndexedThread(
+            thread_id=thread_id,
+            runtime="mda",
+            metadata={},
+            status=known,
+            created_at=now,
+            updated_at=now,
+        )
+
     async def latest_run(self, thread_id: str) -> dict[str, JsonValue] | None:
         return self.runs.get(thread_id)
 
@@ -171,3 +185,19 @@ async def test_a_completion_that_failed_can_be_retried(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(completion, "handle_run_completion", handle)
     assert await completion.complete_run_once(payload) == {"status": "ok"}
+
+
+async def test_a_channel_thread_mda_says_nothing_about_stays_busy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    long_ago = datetime.now(UTC) - timedelta(hours=1)
+    await _busy_since("hidden", long_ago, metadata={"channel": "linear"})
+    await _busy_since("shown", long_ago, metadata={"channel": "linear"})
+    monkeypatch.setattr(status, "RUNTIMES", _Runtimes({"shown": "idle"}))
+
+    assert await status.reconcile_busy_threads() == 1
+
+    hidden = await index.get("hidden")
+    shown = await index.get("shown")
+    assert hidden is not None and hidden.status == "busy"
+    assert shown is not None and shown.status == "idle"

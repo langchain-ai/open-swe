@@ -35,7 +35,14 @@ async def refresh_thread_status(thread_id: str) -> ThreadStatus | None:
     thread = await index.get(thread_id)
     if thread is None:
         return None
-    status = await RUNTIMES.runs_on(thread.runtime).status(thread_id)
+    runtime = RUNTIMES.runs_on(thread.runtime)
+    if channel_of(thread.metadata) is not None:
+        # Read as Studio, as every MDA read is. A channel's thread MDA doesn't show
+        # the backend says nothing about its run, which must not read as idle.
+        found = await runtime.indexed(thread_id)
+        status = found.status if found else None
+    else:
+        status = await runtime.status(thread_id)
     if status is not None:
         await index.set_status(thread_id, status)
     return status

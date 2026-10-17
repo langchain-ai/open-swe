@@ -70,6 +70,18 @@ async def test_a_channel_run_is_completed_when_the_agent_is_done(
     assert isinstance(message, BaseMessage) and message.content == "Done."
 
 
+async def test_the_run_token_names_the_channel(
+    completed: list[tuple[dict[str, Any], object]],
+) -> None:
+    # Signed into the token by the channel's route, so the hook needs no index read.
+    run = _RUN.model_copy(update={"configurable": {**_RUN.configurable, "channel": "github"}})
+
+    await channel_completion.complete_after_agent(run, "run-2", _messages())
+
+    [(payload, _)] = completed
+    assert payload["metadata"]["channel"] == "github"
+
+
 async def test_runs_the_backend_started_wait_for_their_webhook(
     completed: list[tuple[dict[str, Any], object]],
 ) -> None:

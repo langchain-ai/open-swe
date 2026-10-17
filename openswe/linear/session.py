@@ -194,6 +194,8 @@ class LinearSessionTurn:
             "triggering_user_name": self.author.name,
         }
         configurable: dict[str, JsonValue] = {
+            # Signed into the run token, so the run's after_agent hook knows its channel.
+            CHANNEL_METADATA_KEY: LINEAR_CHANNEL,
             "repo": cast(dict[str, JsonValue], repo),
             "linear_issue": linear_issue,
             "user_email": self.author.email or None,

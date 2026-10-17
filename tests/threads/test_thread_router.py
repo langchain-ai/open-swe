@@ -405,6 +405,22 @@ async def test_reads_reach_mda_as_studio_for_channel_and_own_threads(
     assert THREAD not in harness.runtimes.mda_runtime._mda_threads
 
 
+async def test_a_channel_threads_metadata_is_copied_only_here(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    status, _ = await harness.request(
+        "PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Renamed"}}
+    )
+
+    assert status == 200
+    assert harness.runtimes.local.threads[THREAD]["metadata"]["title"] == "Renamed"
+    # On MDA the thread is the channel's; the backend writes nothing there.
+    assert THREAD not in harness.runtimes.mda.threads
+
+
 async def test_writes_to_the_backends_own_mda_threads_go_through_the_owner_scoped_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

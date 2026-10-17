@@ -302,7 +302,11 @@ class ThreadRouter:
     async def _copy_metadata(self, thread: IndexedThread, patch: Mapping[str, JsonValue]) -> None:
         if not patch:
             return
-        for runtime in RUNTIMES.copies(thread.runtime):
+        # A channel's thread on MDA is the channel's; this deployment's copy feeds the traces here.
+        copies = (
+            [RUNTIMES.local] if channel_of(thread.metadata) else RUNTIMES.copies(thread.runtime)
+        )
+        for runtime in copies:
             try:
                 await runtime.update(
                     thread.thread_id, _for_mda(patch) if runtime is not RUNTIMES.local else patch
