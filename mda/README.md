@@ -37,7 +37,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
 | `LANGSMITH_GATEWAY_API_KEY` | Optional gateway key, as on the backend |
-| `MDA_SERVICE_SECRET` | Shared with the backend: makes it this deployment's trusted service, and authenticates the Linear channel's calls to it |
+| `MDA_SERVICE_SECRET` | Shared with the backend: the Linear channel presents it when it hands events to the backend. Open SWE's own credential between the two, not an MDA setting |
 
 The backend:
 
@@ -46,8 +46,7 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent and reviewer thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
-| `MDA_SERVICE_SECRET` | The same value as this deployment's |
-| `LINEAR_WEBHOOK_SECRET` | The Linear app's webhook signing secret, checked again for each forwarded delivery |
+| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` answers only callers that present it |
 
 ## Run locally
 
@@ -70,7 +69,7 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 Each deployment's configuration is `OPEN_SWE_BACKEND_URL` and `MDA_SERVICE_SECRET` (repository secret `MDA_SERVICE_SECRET_<ENVIRONMENT>`), in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding only that deployment's backend URL:
 
 ```bash
-uv tool install managed-deepagents==0.10.0.dev6
+uv tool install managed-deepagents==0.10.0.dev7
 cd mda
 mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
@@ -81,10 +80,10 @@ Locally, each fresh `mda dev` start rebuilds `.mda/build` and starts with empty 
 
 ## Linear
 
-The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear. Mentioning the app on an issue, or delegating the issue to it, opens an agent session. The channel starts the run on its own thread for the issue, so the answer, Stop and errors reach the session.
+The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear. Mentioning the app on an issue, or delegating the issue to it, opens an agent session. Each session is its own conversation: the channel starts its runs on the session's own thread, so the answer, Stop, interrupt notices and errors reach the session. A reply in the session is the next run there; a new mention on the same issue opens a new session and thread.
 
-The backend decides everything else, as for any other run: the repository, the workspace, the input, and the signed run token. The channel forwards each delivery to `POST /linear/channel/runs` exactly as Linear sent it. The backend checks Linear's signature again, indexes the thread, and returns the run to start. Issue and comment events that start no conversation go to `POST /linear/channel/events` for automations and `listen_events`.
+The channel verifies each delivery (Linear's signature and timestamp). The backend decides everything else, as for any other run: the repository, the workspace, the input, and the signed run token. For a session event the channel posts `{thread_id, delivery_id, key, payload}`, with the payload it validated, to `POST /linear/channel/runs`; the backend indexes the thread and returns the run's input, context and metadata. Issue and comment events that start no conversation go to `POST /linear/channel/events` for automations and `listen_events`. Both routes answer only callers that present `MDA_SERVICE_SECRET`.
 
-Threads of Linear sessions belong to the channel. The identity trusts the backend as this deployment's service (`trusted_service=True`, `MDA_SERVICE_SECRET`), so it still serves them and starts follow-up runs on them; those runs answer in the session too.
+Threads of Linear sessions belong to the channel, and MDA scopes threads by owner. The backend reads them as LangSmith Studio does (its LangSmith key with `x-auth-scheme: langsmith`), which MDA allows for reads only, so the dashboard shows them read-only: the backend starts no runs on them and writes nothing there. No run-complete webhook follows a channel's run: its `after_agent` hook completes it, and the backend's thread status reconcile job completes one that crashed. The channel reports failures in the session itself.
 
 `mda deploy` sets up the Linear app, which takes a Linear workspace admin; see [Linear](../docs/INSTALLATION.md#linear).
