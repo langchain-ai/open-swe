@@ -220,6 +220,26 @@ def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     }
 
 
+def latest_human_message_key(messages: Sequence[object]) -> str:
+    """A key for the newest message a person sent among ``messages``.
+
+    It changes whenever someone sends a new one, which is what resets the runs
+    a thread may start for itself.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        content = _message_content(messages[index])
+        kinds = [
+            kind
+            for element in _input_message_elements(content)
+            if (kind := element.get("kind")) in {"human", "system"}
+        ]
+        if kinds[:1] != ["human"]:
+            continue
+        identity = _message_id(messages[index]) or repr(content)
+        return hashlib.sha256(f"{index}:{identity}".encode()).hexdigest()
+    return "no-human-message"
+
+
 def dynamic_context_hash(content: object) -> str | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
@@ -247,6 +267,17 @@ def _message_content(message: object) -> object:
     if isinstance(message, Mapping):
         return message.get("content")
     return None
+
+
+def _message_id(message: object) -> str | None:
+    message_id = (
+        message.id
+        if isinstance(message, BaseMessage)
+        else message.get("id")
+        if isinstance(message, Mapping)
+        else None
+    )
+    return message_id if isinstance(message_id, str) and message_id else None
 
 
 def dynamic_context_hashes_from_messages(messages: object) -> set[str]:

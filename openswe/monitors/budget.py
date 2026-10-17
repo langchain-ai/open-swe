@@ -14,7 +14,7 @@ from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, ValidationError
 
 from openswe.monitors.sandbox import MonitorError
-from openswe.threads.wake_budget import latest_human_generation
+from openswe.threads.wake_budget import latest_human_message
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
@@ -92,11 +92,7 @@ class ThreadMonitorBudget:
         return await self._update(spend) if wanted else 0
 
     async def _update[T](self, spend: Callable[[MonitorBudget, float], T]) -> T:
-        state = await self._client.threads.get_state(self._thread_id)
-        values = state.get("values") if isinstance(state, dict) else None
-        generation = latest_human_generation(
-            values.get("messages") if isinstance(values, dict) else None
-        )
+        generation = await latest_human_message(self._client, self._thread_id)
         async with agent_thread_pr_state_lock(self._thread_id):
             now = time.time()
             budget = MonitorBudget.of(

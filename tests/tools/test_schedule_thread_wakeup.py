@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from openswe.input_messages import latest_human_message_key
 from openswe.threads import wake_budget
 
 wakeup_tool = importlib.import_module("openswe.tools.schedule_thread_wakeup")
@@ -245,7 +246,7 @@ async def test_schedule_thread_wakeup_schedules_a_wakeup(monkeypatch: pytest.Mon
 async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
     client = _FakeClient([], messages=[human])
-    generation = wake_budget.latest_human_generation([human])
+    generation = latest_human_message_key([human])
     client.threads.metadata.update(
         {
             wake_budget.THREAD_WAKEUP_GENERATION_KEY: generation,
@@ -279,9 +280,7 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(
             _input_message("wakeup-10", kind="system", sender="system:thread-wakeup"),
         ],
         metadata={
-            wake_budget.THREAD_WAKEUP_GENERATION_KEY: (
-                wake_budget.latest_human_generation([human])
-            ),
+            wake_budget.THREAD_WAKEUP_GENERATION_KEY: (latest_human_message_key([human])),
             wake_budget.THREAD_WAKEUP_COUNT_KEY: 10,
         },
     )
@@ -320,7 +319,7 @@ async def test_parallel_schedules_share_one_wakeup_budget(
     monkeypatch: pytest.MonkeyPatch, fake_jobs: _FakeJobs
 ) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
-    generation = wake_budget.latest_human_generation([human])
+    generation = latest_human_message_key([human])
     client = _FakeClient(
         [],
         messages=[human],
