@@ -70,9 +70,7 @@ class IncidentSession:
             destination["reply_thread_ts"] = reply_thread_ts
         self.slack_thread = SlackThreadRef.model_validate(destination)
         self.collector = EvidenceCollector()
-        self.instructions = prompt(
-            "incidents/system", explicit_request=json.dumps(explicit_request)
-        )
+        self.instructions = prompt("incidents/system")
         self.prompt = "\n\n".join(
             [self.instructions, INCIDENT_PROMPT, prompt("incidents/conversation")]
         )
