@@ -2,27 +2,10 @@
 
 from typing import Any
 
-from langgraph_sdk.client import LangGraphClient
-from pydantic import BaseModel, JsonValue
-
-from openswe.input_messages import latest_human_message_key
+from openswe.threads.oswe_thread import OsweThreadState
 
 THREAD_WAKEUP_GENERATION_KEY = "thread_wakeup_generation"
 THREAD_WAKEUP_COUNT_KEY = "thread_wakeup_count"
-
-
-class _ThreadValues(BaseModel):
-    messages: list[JsonValue] = []
-
-
-class _ThreadState(BaseModel):
-    values: _ThreadValues | None = None
-
-
-async def latest_human_message(client: LangGraphClient, thread_id: str) -> str:
-    """The key of the newest human message in ``thread_id``'s saved state."""
-    state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
-    return latest_human_message_key(state.values.messages if state.values else [])
 
 
 class WakeBudget:
@@ -50,7 +33,7 @@ class WakeBudget:
 
     async def used(self, client: Any, thread_id: str) -> tuple[str, int]:
         """The current human-message generation and how many runs it has spent."""
-        generation = await latest_human_message(client, thread_id)
+        generation = (await OsweThreadState.get(client, thread_id)).latest_human_message_key
 
         thread = await client.threads.get(thread_id)
         metadata = thread.get("metadata") if isinstance(thread, dict) else None
