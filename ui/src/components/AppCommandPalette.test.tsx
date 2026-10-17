@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppCommandPalette } from "./AppCommandPalette"
@@ -11,6 +11,16 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),
   cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
+  relatedThread: { id: "related-1", title: "Slack DM fix" } as AgentThread,
+  relatedPullRequest: {
+    repo: "langchain-ai/open-swe",
+    number: 7,
+    url: "https://github.com/langchain-ai/open-swe/pull/7",
+    title: "Route DMs to the concierge",
+    body: "",
+    state: "open",
+    relevance: 0.8,
+  },
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -30,6 +40,17 @@ vi.mock("@/features/agents/lib/queries", () => ({
     fetchNextPage: mocks.fetchNextPage,
   }),
 }))
+vi.mock("@/lib/useAiSearchStream", () => ({
+  useAiSearchStream: (path: string | null) => ({
+    matches: !path
+      ? []
+      : path.startsWith("/threads/")
+        ? [mocks.cloudThread, mocks.relatedThread]
+        : [mocks.relatedPullRequest],
+    scanned: path ? 10 : 0,
+    status: path ? "streaming" : "idle",
+  }),
+}))
 vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
   usePullRequestSearch: () => ({ data: undefined }),
 }))
@@ -37,6 +58,7 @@ vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.useRealTimers()
 })
 
 const commands: Array<AppCommand> = [
@@ -73,6 +95,26 @@ describe("AppCommandPalette", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load more threads" }))
 
     expect(mocks.fetchNextPage).toHaveBeenCalledOnce()
+  })
+
+  it("adds AI-related threads and pull requests the keyword results do not already show", () => {
+    vi.useFakeTimers()
+    render(
+      <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
+    )
+
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "cloud" },
+    })
+    expect(screen.queryByText("Related threads")).toBeNull()
+    act(() => vi.advanceTimersByTime(500))
+
+    expect(screen.getByText("Related threads")).toBeTruthy()
+    expect(screen.getByText("Slack DM fix")).toBeTruthy()
+    expect(screen.getAllByText("Cloud result")).toHaveLength(1)
+    expect(screen.getByText("Related pull requests")).toBeTruthy()
+    expect(screen.getByText("Route DMs to the concierge")).toBeTruthy()
+    expect(screen.getByText("Searching with AI… 20 checked")).toBeTruthy()
   })
 
   it("closes on Escape", () => {

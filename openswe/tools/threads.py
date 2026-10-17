@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
+from langchain_typesafe.client import TypeSafeError
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -28,6 +29,7 @@ from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.threads import plan_api, workflow_approval_api
+from openswe.threads.ai_search import AI_SEARCH_CANDIDATES, rank_threads
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -52,6 +54,7 @@ from openswe.utils.dashboard_links import (
     dashboard_thread_id,
     dashboard_thread_url,
 )
+from openswe.utils.jev import JevUnavailableError
 from openswe.utils.json_types import as_json_object, thread_metadata
 from openswe.utils.langsmith import (
     LangSmithCostUnavailable,
@@ -260,6 +263,7 @@ async def list_threads(
     scope: ThreadScope = "all",
     automation_id: str | None = None,
     admin_threads: bool | None = None,
+    semantic: bool = False,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `list_threads` tool."""
@@ -317,6 +321,8 @@ async def list_threads(
             }
 
     pr_ref = parse_github_pr_url(normalized_query)
+    if semantic and (not normalized_query or pr_ref):
+        return _failure("semantic needs a natural-language query, not a locator or PR URL")
     search_query = pr_ref.url if pr_ref else normalized_query or None
     filter_participant_login = (
         requested if requested and requested.lower() != actor.login.lower() else None
@@ -325,15 +331,15 @@ async def list_threads(
         page = await list_dashboard_threads_page(
             actor.login,
             email=actor.email,
-            limit=limit,
-            offset=offset,
+            limit=AI_SEARCH_CANDIDATES if semantic else limit,
+            offset=0 if semantic else offset,
             include_all=all_users
             or (requested is None and (admin_threads is True or actor.automation)),
             resolved=resolved,
             viewed=viewed,
             source=source,
             status=status,
-            query=search_query,
+            query=None if semantic else search_query,
             scope=scope,
             automation_id=automation_id,
             filter_participant_login=filter_participant_login,
@@ -347,6 +353,8 @@ async def list_threads(
         logger.exception("Could not list threads")
         return _failure("Could not list threads")
     items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
+    if semantic:
+        return await _semantic_page(normalized_query, items, limit=limit, offset=offset)
     if pr_ref:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
     return {
@@ -355,6 +363,26 @@ async def list_threads(
         "limit": page.get("limit"),
         "offset": page.get("offset"),
         "has_more": page.get("hasMore", False),
+    }
+
+
+async def _semantic_page(
+    query: str, candidates: list[Mapping[str, Any]], *, limit: int, offset: int
+) -> dict[str, Any]:
+    try:
+        ranked = await rank_threads(query, candidates)
+    except JevUnavailableError:
+        return _failure("Semantic thread search is not configured", status_code=503)
+    except TypeSafeError, TimeoutError:
+        logger.exception("Semantic thread search failed")
+        return _failure("Semantic thread search failed", status_code=502)
+    safe_offset, safe_limit = max(offset, 0), min(max(limit, 1), 100)
+    return {
+        "success": True,
+        "items": [_list_item(item) for item in ranked[safe_offset : safe_offset + safe_limit]],
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "has_more": len(ranked) > safe_offset + safe_limit,
     }
 
 

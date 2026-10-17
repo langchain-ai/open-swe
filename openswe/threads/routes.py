@@ -17,6 +17,7 @@ from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
 from openswe.threads import terminal
+from openswe.threads.ai_search import stream_thread_matches, with_relevance
 from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
@@ -73,6 +74,8 @@ from openswe.threads.runs import (
     create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
+from openswe.utils.ai_search_stream import ai_search_response
+from openswe.utils.jev import JevUnavailableError, ensure_jev_configured
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -251,6 +254,23 @@ async def api_list_threads_page(
         owned=owned,
         sort_by=sort_by,
         hierarchy=hierarchy,
+    )
+
+
+@router.get("/threads/search")
+async def api_search_threads(
+    q: Annotated[str, Query(min_length=2, max_length=500)],
+    scope: DashboardThreadScope = "all",
+    session: dict[str, Any] = SESSION_DEP,
+) -> StreamingResponse:
+    """Server-sent events: Jev judges the person's threads newest first, ten at a time."""
+    try:
+        ensure_jev_configured()
+    except JevUnavailableError as exc:
+        raise HTTPException(503, "AI search is not configured") from exc
+    return ai_search_response(
+        stream_thread_matches(session["sub"], email=session.get("email"), query=q, scope=scope),
+        with_relevance,
     )
 
 

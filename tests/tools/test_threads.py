@@ -91,6 +91,30 @@ async def test_list_threads_intersects_participant_and_admin_filters(
     assert awaited.kwargs["admin_threads"] is True
 
 
+async def test_list_threads_semantic_ranks_unfiltered_candidates_then_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = [{"id": thread_id, "title": thread_id} for thread_id in ("a", "b", "c")]
+    page = AsyncMock(return_value={"items": candidates, "limit": 60, "offset": 0, "hasMore": False})
+    rank = AsyncMock(return_value=[candidates[2], candidates[0]])
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    monkeypatch.setattr(threads_tool, "rank_threads", rank)
+
+    result = await threads_tool.list_threads(
+        query="the slack dm fix", semantic=True, limit=1, offset=1, status="error"
+    )
+
+    awaited = page.await_args
+    assert awaited is not None
+    assert awaited.kwargs["query"] is None
+    assert awaited.kwargs["offset"] == 0
+    assert awaited.kwargs["status"] == "error"
+    rank.assert_awaited_once_with("the slack dm fix", candidates)
+    assert [item["id"] for item in result["items"]] == ["a"]
+    assert result["has_more"] is False
+
+
 _AUTOMATION_ID = "706242c0-edba-4ab7-a342-154c354f9946"
 
 
