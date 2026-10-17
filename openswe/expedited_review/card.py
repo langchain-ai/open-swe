@@ -295,7 +295,7 @@ def closed_card(
         divider(),
         *_voting_diff(approval, files, diff_image_id),
         section(f"*{outcome}*"),
-        context(_vote_summary(approval, author)),
+        *([context(_vote_summary(approval))] if approval.approvals else []),
     ]
     return f"{outcome} — {pr.url}", blocks
 
