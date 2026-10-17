@@ -1,4 +1,5 @@
 Declare that this turn needs no message sent to the person who asked.
+After this call succeeds, end the turn; do not call it again.
 
 Only for a turn that genuinely warrants silence: you were mentioned in passing,
 another participant already answered, you were asked to stand by, or you consumed
