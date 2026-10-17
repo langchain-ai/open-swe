@@ -293,19 +293,19 @@ test.describe("transcript rendering", () => {
     });
     expect(response.ok()).toBeTruthy();
 
-    // Managed Deep Agents runs carry their configurable inside the signed run
-    // token in their context.
+    // Managed Deep Agents runs carry their configurable in their context, beside
+    // the run token that signs its hash.
     await expect
       .poll(async () => {
         const runs = (await (
           await page.request.get(`/threads/${threadId}/runs`)
-        ).json()) as Array<{ kwargs?: { context?: { __run_token?: string } } }>;
-        const token = runs[0]?.kwargs?.context?.__run_token;
-        if (!token) return undefined;
-        const claims = JSON.parse(
-          Buffer.from(token.split(".")[1], "base64url").toString(),
-        ) as { cfg?: { agent_model_id?: string } };
-        return claims.cfg?.agent_model_id;
+        ).json()) as Array<{
+          kwargs?: { context?: { __run_config?: string } };
+        }>;
+        const config = runs[0]?.kwargs?.context?.__run_config;
+        if (!config) return undefined;
+        return (JSON.parse(config) as { agent_model_id?: string })
+          .agent_model_id;
       })
       .toBe("anthropic:claude-opus-5-5");
   });
