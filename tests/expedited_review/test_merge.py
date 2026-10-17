@@ -382,7 +382,7 @@ async def test_a_head_that_moves_after_the_checks_writes_nothing(
     assert github.reviews == [] and github.merges == []
 
 
-async def test_someone_else_merging_on_github_only_marks_the_card_and_reacts(
+async def test_someone_else_merging_on_github_only_marks_the_card(
     github: _GitHub, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
@@ -398,7 +398,7 @@ async def test_someone_else_merging_on_github_only_marks_the_card_and_reacts(
     await lifecycle.close_for_pull_request("lc", "repo", 7)
 
     assert (await _reload(approval)).state == "merged"
-    reactions.assert_awaited_once_with("C1", "1.0", "merged")
+    reactions.assert_not_awaited()
     posts.assert_not_awaited()
     wakes.assert_not_awaited()
     assert github.dismissed == [] and github.merges == []
