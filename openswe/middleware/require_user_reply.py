@@ -225,7 +225,18 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             }
             if not no_reply_ids & self._successful_call_ids(tail):
                 return None
-            suppressed = [last.model_copy(update={"tool_calls": []})]
+            suppressed = [
+                last.model_copy(
+                    update={
+                        "tool_calls": [],
+                        "additional_kwargs": {
+                            key: value
+                            for key, value in last.additional_kwargs.items()
+                            if key != "tool_calls"
+                        },
+                    }
+                )
+            ]
             update = {
                 "messages": suppressed,
                 "jump_to": "end",

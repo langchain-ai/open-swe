@@ -1,3 +1,4 @@
+import json
 from collections.abc import Awaitable, Callable
 from itertools import pairwise
 from typing import Any, cast
@@ -8,7 +9,15 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    messages_from_dict,
+    messages_to_dict,
+)
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import StateSnapshot
@@ -158,8 +167,9 @@ class TestRequireUserReplyMiddleware:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("completion_required", [False, True])
+    @pytest.mark.parametrize("failed_first", [False, True])
     async def test_background_wake_executes_no_reply_only_once(
-        self, completion_required: bool
+        self, completion_required: bool, failed_first: bool
     ) -> None:
         from openswe.slack.tools.no_reply_needed import REQUIRED_CONFIRMATION, slack_no_reply_needed
 
@@ -173,9 +183,11 @@ class TestRequireUserReplyMiddleware:
                     NO_REPLY_TOOL,
                     call_id,
                     reason="Nothing to report",
-                    confirmation=REQUIRED_CONFIRMATION,
+                    confirmation="incorrect" if call_id == "failed" else REQUIRED_CONFIRMATION,
                 )
-                for call_id in ("first", "repeat")
+                for call_id in (
+                    ("failed", "first", "repeat") if failed_first else ("first", "repeat")
+                )
             ]
             + ([_reply("final"), AIMessage(content="")] if completion_required else [])
         )
@@ -185,7 +197,17 @@ class TestRequireUserReplyMiddleware:
             request: ModelRequest,
             handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
         ) -> ModelResponse:
-            return ModelResponse(result=[next(responses)])
+            message = next(responses)
+            if message.tool_calls:
+                message.additional_kwargs["tool_calls"] = [
+                    {
+                        "id": call["id"],
+                        "type": "function",
+                        "function": {"name": call["name"], "arguments": json.dumps(call["args"])},
+                    }
+                    for call in message.tool_calls
+                ]
+            return ModelResponse(result=[message])
 
         graph = create_agent(
             model=FakeListChatModel(responses=[""]),
@@ -207,9 +229,19 @@ class TestRequireUserReplyMiddleware:
         results = [message for message in result["messages"] if isinstance(message, ToolMessage)]
 
         assert [message.tool_call_id for message in results] == (
-            ["card", "first", "final"] if completion_required else ["first"]
+            (["card"] if completion_required else [])
+            + (["failed"] if failed_first else [])
+            + ["first"]
+            + (["final"] if completion_required else [])
         )
         assert not result["messages"][-1].tool_calls
+        restored = messages_from_dict(messages_to_dict(result["messages"]))
+        assert all(
+            call["id"] != "repeat"
+            for message in restored
+            if isinstance(message, AIMessage)
+            for call in message.tool_calls
+        )
         assert next(responses, None) is None
 
     @pytest.mark.asyncio
