@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from openswe.rollout_events import subscribe_merged_thread
+from openswe.rollout_events import ask_to_monitor_rollout, subscribe_merged_thread
 
 _SHA = "ab" * 20
 
@@ -86,3 +86,28 @@ async def test_subscribe_merged_thread_does_not_listen_twice(
         "thread-1", owner="lc", repo="repo", number=7, sha=_SHA, metadata={}
     )
     assert created == []
+
+
+@pytest.mark.asyncio
+async def test_ask_to_monitor_rollout_asks_when_a_yes_can_subscribe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready(monkeypatch)
+    dispatch = AsyncMock()
+    monkeypatch.setattr("openswe.rollout_events.dispatch_agent_run", dispatch)
+    await ask_to_monitor_rollout("thread-1", owner="lc", repo="repo", number=7, metadata={})
+    dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocker", ["unconfigured", "no_workspace"])
+async def test_ask_to_monitor_rollout_does_not_ask_when_a_yes_cannot_subscribe(
+    monkeypatch: pytest.MonkeyPatch, blocker: str
+) -> None:
+    monkeypatch.setattr("openswe.rollout_events.configured", lambda: blocker != "unconfigured")
+    monkeypatch.setattr("openswe.rollout_events.Repository.get", AsyncMock(return_value=None))
+    monkeypatch.setattr("openswe.rollout_events.workspace_for_repo", AsyncMock(return_value=""))
+    dispatch = AsyncMock()
+    monkeypatch.setattr("openswe.rollout_events.dispatch_agent_run", dispatch)
+    await ask_to_monitor_rollout("thread-1", owner="lc", repo="repo", number=7, metadata={})
+    dispatch.assert_not_awaited()
