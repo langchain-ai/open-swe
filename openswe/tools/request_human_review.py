@@ -9,16 +9,20 @@ from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard import repo_access
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.token import resolve_github_token
 from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import ReviewCard
+from openswe.human_review.request_modal import ReviewRequestContext
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import (
     Origin,
     ReviewStatus,
     assign,
     request_review,
+    review_blockers,
     start_auto_assign,
+    summary_line,
 )
 from openswe.run_config import RunConfig
 from openswe.slack.cards import run_slack_location
@@ -85,6 +89,39 @@ async def request_human_review(
     login = cfg.github_login or ""
     thread_id = cfg.thread_id or ""
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
+    if cfg.source == "slack":
+        slack = cfg.slack_thread
+        if (
+            not slack
+            or slack.triggering_bot_id
+            or not slack.triggering_user_id
+            or not own_channel
+            or not own_thread
+        ):
+            return _failure(
+                "A Slack person and thread are required to describe this review request."
+            )
+        active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        if active is None:
+            async with PullRequestClient.as_app(pr_ref.owner, pr_ref.repo, pr_ref.number) as pull:
+                blockers = await review_blockers(pull)
+            if blockers is None:
+                return _failure("GitHub was unavailable while checking the pull request.")
+            if blockers:
+                return _failure(f"{pr_ref.url} cannot be put up for review: " + "; ".join(blockers))
+        await ReviewRequestContext(
+            pr_url=pr_ref.url,
+            user_id=slack.triggering_user_id,
+            channel_id=own_channel,
+            thread_ts=own_thread,
+            target_channel=channel,
+            thread_id=thread_id,
+            inline_summary=summary_line(inline_summary),
+        ).offer()
+        return {
+            "success": True,
+            "next": "The person was offered an optional description modal; leaving it blank uses the generated summary. No review card has been posted yet. Wait for them to submit it; do not post an announcement.",
+        }
     origin = Origin(
         requester=await User.for_login("github", login) if login else None,
         thread_id=thread_id,
