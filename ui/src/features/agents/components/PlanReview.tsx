@@ -226,7 +226,11 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   html={content}
                   comments={comments}
                   onTextSelected={
-                    canComment && !posting ? setAnchor : undefined
+                    canComment && !posting
+                      ? (next) => {
+                          if (next || !draft.trim()) setAnchor(next)
+                        }
+                      : undefined
                   }
                   onCommentSelected={openComment}
                   focusCommentId={focusComment?.id ?? null}
