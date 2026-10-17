@@ -195,18 +195,21 @@ async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
     http_tool = StructuredTool.from_function(
         coroutine=invoke, name="http_request", description="HTTP"
     )
-    file_tool = StructuredTool.from_function(coroutine=invoke, name="read_file", description="Read")
-    write_tool = StructuredTool.from_function(
-        coroutine=invoke, name="write_file", description="Write"
-    )
     guarded_tools = [
         StructuredTool.from_function(coroutine=invoke, name=name, description="Guarded")
-        for name in ("background_execute", "slack_reply", "slack_no_reply_needed", "cli_result")
+        for name in (
+            "read_file",
+            "write_file",
+            "background_execute",
+            "slack_reply",
+            "slack_no_reply_needed",
+            "cli_result",
+        )
     ]
     exposed = filter_tools_for_ptc(
-        [http_tool, file_tool, write_tool, *guarded_tools], code_mode._ptc, self_tool_name="eval"
+        [http_tool, *guarded_tools], code_mode._ptc, self_tool_name="eval"
     )
-    assert exposed == [tools[0], http_tool, file_tool, write_tool]
+    assert exposed == [tools[0], http_tool]
     state: dict[str, Any] = {"messages": []}
     state.update(await code_mode.abefore_agent(state, MagicMock()) or {})
     offered: list[str] = []
@@ -220,13 +223,13 @@ async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
         ModelRequest(
             model=MagicMock(),
             messages=[],
-            tools=[http_tool, file_tool, write_tool, *guarded_tools],
+            tools=[http_tool, *guarded_tools],
             state=state,
             runtime=MagicMock(),
         ),
         model,
     )
-    assert offered == [tool.name for tool in [file_tool, write_tool, *guarded_tools]]
+    assert offered == [tool.name for tool in guarded_tools]
     assert list(ordinary) == tools[1:]
     dynamic = server._integration_middleware(ordinary, set())
     full = server._integration_middleware(tools, set())

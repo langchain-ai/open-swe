@@ -19,6 +19,7 @@ from langgraph_sdk import get_client
 from openswe.middleware.pr_creation_guard import executable_name, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
+from openswe.sandboxes.context_directory import ContextDirectory
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.slack.client import (
     LANGGRAPH_URL,
@@ -143,8 +144,12 @@ def _thread_id(request: ToolCallRequest) -> str | None:
     return _configurable(request).thread_id or None
 
 
-def _backend(thread_id: str | None) -> Any | None:
-    return SANDBOX_BACKENDS.get(thread_id) if thread_id else None
+def _shell(request: ToolCallRequest) -> Any | None:
+    """The thread's sandbox, running from the open directory as the agent's commands do."""
+    thread_id = _thread_id(request)
+    backend = SANDBOX_BACKENDS.get(thread_id) if thread_id else None
+    directory = ContextDirectory.of(request.state)
+    return directory.shell(backend) if backend is not None and directory is not None else backend
 
 
 # What deepagents' local shell backend reports for a command that printed nothing.
@@ -707,7 +712,7 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         parsed = _parse_git_push(command)
         if parsed is None:
             return None
-        backend = _backend(_thread_id(request))
+        backend = _shell(request)
         if backend is None:
             return parsed.inspection_failed()
         return await _workflow_change_for_push(backend, parsed)
@@ -765,7 +770,7 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         if not isinstance(command, str):
             return False
         dirs = _chained_push_dirs(command)
-        backend = _backend(_thread_id(request)) if dirs else None
+        backend = _shell(request) if dirs else None
         if backend is None:
             return False
         for repo_dir in dirs:
