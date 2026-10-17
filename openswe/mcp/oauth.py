@@ -98,6 +98,12 @@ def _cached_auth(
 
 
 def connection_auth(record: MCPConnection, namespace: tuple[str, ...]) -> httpx2.Auth | None:
+    if record.auth == "oauth":
+        if len(namespace) != 2 or namespace[0] != "user_mcps":
+            raise MCPOAuthError("Interactive OAuth requires a personal MCP connection")
+        from openswe.mcp.hosted_oauth import PersonalOAuthAuth
+
+        return PersonalOAuthAuth(namespace[1], record)
     if record.oauth is None:
         return None
     return _cached_auth((*namespace, record.name), record.oauth, record.encrypted_client_secret)

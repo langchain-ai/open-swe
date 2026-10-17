@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
@@ -19,7 +19,16 @@ import { MCPOAuthFields, SecretInput } from "./MCPOAuthFields"
 type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
-type AuthMode = "headers" | "oauth"
+type AuthMode = "headers" | "client_credentials" | "oauth"
+
+const OAUTH_PENDING_KEY = "open-swe-mcp-oauth"
+const OAUTH_LABELS = {
+  not_connected: "Not connected",
+  connecting: "Waiting for browser consent",
+  connected: "Connected",
+  reconnect_required: "Reconnect required",
+  failed: "Connection failed",
+}
 
 const TRANSPORTS: Array<{ value: MCPConnection["transport"]; label: string }> =
   [
@@ -29,7 +38,7 @@ const TRANSPORTS: Array<{ value: MCPConnection["transport"]; label: string }> =
 
 const AUTH_MODES: Array<{ value: AuthMode; label: string }> = [
   { value: "headers", label: "Headers / API key" },
-  { value: "oauth", label: "OAuth client credentials" },
+  { value: "client_credentials", label: "OAuth client credentials" },
 ]
 
 function editableValues(connection?: MCPConnectionUpdate): string {
@@ -39,6 +48,7 @@ function editableValues(connection?: MCPConnectionUpdate): string {
     connection?.url ?? "",
     connection?.transport ?? "streamable_http",
     connection?.enabled ?? true,
+    connection?.auth ?? null,
     [...(connection?.allowed_tools ?? [])].sort(),
     oauth
       ? [
@@ -68,7 +78,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
   const scopes: Record<MCPScope, MCPScopeConfig> = {
     instance: {
       description:
-        "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs. Discover tools, then explicitly choose which tools Open SWE may use.",
       queryKey: ["instanceMCPs"],
       list: api.getInstanceMCPs,
       save: api.saveInstanceMCP,
@@ -78,7 +88,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
     },
     workspace: {
       description:
-        "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name. Discover tools, then explicitly choose which tools Open SWE may use.",
       queryKey: ["workspaceMCPs", workspace],
       list: () => api.getWorkspaceMCPs(workspace),
       save: (body) => api.saveWorkspaceMCP(workspace, body),
@@ -88,7 +98,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
     },
     user: {
       description:
-        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. Discover tools, then explicitly choose which tools Open SWE may use.",
       queryKey: ["myMCPs"],
       list: api.getMyMCPs,
       save: api.saveMyMCP,
@@ -134,6 +144,9 @@ export function MCPConnectionsSection({
   const [error, setError] = useState<string | null>(null)
   const [toolsExpanded, setToolsExpanded] = useState(true)
   const [importing, setImporting] = useState(false)
+  const [advanced, setAdvanced] = useState(scope !== "user")
+  const [reviewingImport, setReviewingImport] = useState(false)
+  const resumedOAuth = useRef(false)
   const [pendingImports, setPendingImports] = useState<ImportedMCP[]>([])
   const toolsId = useId()
   const editorId = useId()
@@ -143,7 +156,18 @@ export function MCPConnectionsSection({
   const dirty =
     draft !== null &&
     (editableValues(draft) !==
-      editableValues(draft.existing ? savedConnection : undefined) ||
+      editableValues(
+        draft.existing
+          ? savedConnection
+          : {
+              name: "",
+              url: "",
+              transport: "streamable_http",
+              enabled: true,
+              allowed_tools: [],
+              auth: scope === "user" ? "oauth" : null,
+            }
+      ) ||
       (replaceHeaders &&
         (headers.length > 0 ||
           (savedConnection?.header_names.length ?? 0) > 0)))
@@ -159,25 +183,27 @@ export function MCPConnectionsSection({
     ]),
   ].sort()
 
-  const openEditor = (
-    connection: Draft,
-    authentication?: Record<string, string> | null
-  ) => {
-    setDraft(connection)
-    setHeaders(
-      Object.entries(authentication ?? {}).map(([name, value]) => ({
-        name,
-        value,
-      }))
-    )
-    setSavedHeaders(null)
-    setReplaceHeaders(authentication != null || !connection.existing)
-    setCatalog([])
-    setToolsExpanded(true)
-    setError(null)
-  }
+  const openEditor = useCallback(
+    (connection: Draft, authentication?: Record<string, string> | null) => {
+      setDraft(connection)
+      setAdvanced(scope !== "user" || connection.auth !== "oauth")
+      setHeaders(
+        Object.entries(authentication ?? {}).map(([name, value]) => ({
+          name,
+          value,
+        }))
+      )
+      setSavedHeaders(null)
+      setReplaceHeaders(authentication != null || !connection.existing)
+      setCatalog([])
+      setToolsExpanded(true)
+      setError(null)
+    },
+    [scope, setError]
+  )
 
   const edit = (connection?: MCPConnection) => {
+    setReviewingImport(false)
     setImporting(false)
     setPendingImports([])
     openEditor(
@@ -189,6 +215,7 @@ export function MCPConnectionsSection({
             transport: "streamable_http",
             enabled: true,
             allowed_tools: [],
+            auth: scope === "user" ? "oauth" : null,
             existing: false,
           }
     )
@@ -198,16 +225,25 @@ export function MCPConnectionsSection({
     headers: authentication,
     ...connection
   }: ImportedMCP) => {
+    setReviewingImport(true)
     const previous = connections.data?.find(
       (saved) => saved.name === connection.name
     )
     openEditor(
       {
         ...connection,
+        auth:
+          connection.auth ??
+          (connection.oauth === undefined ? previous?.auth : null),
         oauth:
-          connection.oauth === undefined ? previous?.oauth : connection.oauth,
+          connection.auth === "oauth"
+            ? null
+            : connection.oauth === undefined
+              ? previous?.oauth
+              : connection.oauth,
         enabled: previous?.enabled ?? true,
-        allowed_tools: previous?.allowed_tools ?? [],
+        allowed_tools:
+          connection.allowed_tools ?? previous?.allowed_tools ?? [],
         existing: Boolean(previous),
       },
       authentication
@@ -215,6 +251,7 @@ export function MCPConnectionsSection({
   }
 
   const closeEditor = () => {
+    setReviewingImport(false)
     setDraft(null)
     setHeaders([])
     setSavedHeaders(null)
@@ -278,7 +315,19 @@ export function MCPConnectionsSection({
       await qc.invalidateQueries({ queryKey })
   }
 
-  const save = async (discover: boolean) => {
+  const authorize = async (connection: MCPConnection) => {
+    const { authorization_url } = await api.startMyMCPOAuth(connection.name)
+    const destination = new URL(authorization_url)
+    if (destination.protocol !== "https:")
+      throw new Error("The server returned an unsupported authorization URL")
+    sessionStorage.setItem(
+      OAUTH_PENDING_KEY,
+      JSON.stringify({ name: connection.name, url: connection.url })
+    )
+    window.location.assign(destination.href)
+  }
+
+  const save = async (discover: boolean, connect = false) => {
     if (!draft) return
     await run(async () => {
       const authentication: Record<string, string> = {}
@@ -307,8 +356,13 @@ export function MCPConnectionsSection({
         transport: draft.transport,
         enabled: draft.enabled,
         allowed_tools: draft.allowed_tools,
-        headers: replaceHeaders ? authentication : null,
+        headers: replaceHeaders
+          ? authentication
+          : draft.auth === "oauth"
+            ? undefined
+            : null,
         oauth: draft.oauth ?? null,
+        auth: draft.auth ?? null,
       }
       const discovered = discover ? await client.discover(update) : []
       const saved = await client.save(update)
@@ -321,20 +375,85 @@ export function MCPConnectionsSection({
       setDraft({
         ...saved,
         existing: true,
-        allowed_tools:
-          discover && !draft.existing
-            ? discovered.map((tool) => tool.name)
-            : saved.allowed_tools,
+        allowed_tools: saved.allowed_tools,
       })
       setHeaders([])
       setSavedHeaders(null)
       setReplaceHeaders(false)
       await qc.invalidateQueries({ queryKey })
-      if (discover) {
+      if (connect) {
+        await authorize(saved)
+      } else if (discover) {
         setCatalog(discovered)
         setToolsExpanded(true)
       } else finishEditing()
     })
+  }
+
+  useEffect(() => {
+    if (scope !== "user" || !connections.data || resumedOAuth.current) return
+    const outcome = new URLSearchParams(window.location.search).get("mcp_oauth")
+    if (!outcome) return
+    resumedOAuth.current = true
+    const raw = sessionStorage.getItem(OAUTH_PENDING_KEY)
+    sessionStorage.removeItem(OAUTH_PENDING_KEY)
+    let pending: unknown
+    try {
+      pending = raw ? JSON.parse(raw) : null
+    } catch {
+      pending = null
+    }
+    if (
+      !pending ||
+      typeof pending !== "object" ||
+      !("name" in pending) ||
+      !("url" in pending)
+    )
+      return
+    const connection = connections.data.find(
+      (item) =>
+        item.name === pending.name &&
+        item.url === pending.url &&
+        item.auth === "oauth"
+    )
+    if (!connection) return
+    void api
+      .getMyMCPOAuthStatus(connection.name)
+      .then(async (status) => {
+        openEditor({ ...connection, existing: true })
+        if (outcome !== "connected" || status.status !== "connected") {
+          setError(
+            status.error ||
+              "Connection was not completed. Try connecting again."
+          )
+          return
+        }
+        setBusy(true)
+        const tools = await api.discoverMyMCP({
+          ...connection,
+          headers: undefined,
+        })
+        setCatalog(tools)
+        await qc.invalidateQueries({ queryKey: ["myMCPs"] })
+        setBusy(false)
+      })
+      .catch((cause: unknown) => {
+        setBusy(false)
+        setError(
+          cause instanceof Error ? cause.message : "Unable to finish connecting"
+        )
+      })
+  }, [scope, connections.data, openEditor, qc])
+
+  const browserOAuth = draft?.auth === "oauth"
+  const oauthConnected =
+    browserOAuth &&
+    savedConnection?.oauth_status?.status === "connected" &&
+    savedConnection.url === draft?.url
+
+  const connectSaved = (connection: MCPConnection) => {
+    edit(connection)
+    void run(() => authorize(connection))
   }
 
   const updateHeader = (
@@ -358,7 +477,10 @@ export function MCPConnectionsSection({
       }
       onSubmit={(event) => {
         event.preventDefault()
-        void save(false)
+        void save(
+          false,
+          Boolean(browserOAuth && !draft.existing && !reviewingImport)
+        )
       }}
     >
       <fieldset disabled={busy} className="space-y-space-4">
@@ -398,289 +520,396 @@ export function MCPConnectionsSection({
           value={draft.url}
           onChange={(url) => setDraft({ ...draft, url })}
         />
-        <div className="space-y-space-1">
-          <span className="block text-sm font-medium text-primary">
-            Transport
-          </span>
-          <Select
-            aria-label="Transport"
-            size="md"
-            options={TRANSPORTS}
-            value={draft.transport}
-            onChange={(transport) =>
-              transport && setDraft({ ...draft, transport })
-            }
-          />
-        </div>
-        <div className="space-y-space-1">
-          <span className="block text-sm font-medium text-primary">
-            Authentication
-          </span>
-          <Select
-            aria-label="Authentication"
-            size="md"
-            options={AUTH_MODES}
-            value={draft.oauth ? "oauth" : "headers"}
-            onChange={(mode) =>
-              mode &&
-              setDraft({
-                ...draft,
-                oauth:
-                  mode === "oauth"
-                    ? {
-                        grant_type: "client_credentials",
-                        token_url: "",
-                        client_id: "",
-                        scope: "",
-                        token_endpoint_auth_method: "client_secret_post",
-                      }
-                    : null,
-              })
-            }
-          />
-        </div>
-        {draft.oauth && (
-          <MCPOAuthFields
-            key={draft.name}
-            value={draft.oauth}
-            hasSavedSecret={Boolean(
-              draft.existing &&
-              savedConnection?.oauth &&
-              draft.url.trim() === savedConnection.url &&
-              draft.oauth.token_url.trim() ===
-                savedConnection.oauth.token_url &&
-              draft.oauth.client_id === savedConnection.oauth.client_id
-            )}
-            onChange={(oauth) => setDraft({ ...draft, oauth })}
-          />
-        )}
-        <div className="space-y-space-2">
-          <p className="text-sm font-medium text-primary">
-            {draft.oauth ? "Additional headers" : "Authentication headers"}
-          </p>
+        {reviewingImport && browserOAuth && (
           <p className="text-xs text-secondary">
-            {draft.oauth
-              ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
-              : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
+            Save and review your imported connections first. Then connect each
+            account from the saved list; imported credentials are never stored
+            in your browser.
           </p>
-          {!replaceHeaders ? (
-            <>
-              {savedHeaders && (
-                <div className="space-y-space-2" data-dd-privacy="hidden">
-                  {Object.entries(savedHeaders).map(([name, value]) => (
-                    <Input
-                      key={name}
-                      label={name}
-                      aria-label={`Saved ${name} value`}
-                      size="md"
-                      value={value}
-                      onChange={() => {}}
-                      readOnly
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                  ))}
-                  {Object.keys(savedHeaders).length === 0 && (
-                    <p className="text-xs text-secondary">No saved headers.</p>
+        )}
+        {browserOAuth && (
+          <div className="space-y-space-2 rounded-md border border-default bg-surface-level-2 p-space-3">
+            <p className="text-sm font-medium text-primary">
+              Connect with your account
+            </p>
+            <p className="text-xs text-secondary">
+              Sign in securely in your browser. No API keys or OAuth app setup
+              needed when the server supports automatic registration. Your
+              connection is personal and only available in private threads.
+            </p>
+            {savedConnection?.oauth_status && (
+              <p role="status" className="text-sm text-primary">
+                {OAUTH_LABELS[savedConnection.oauth_status.status]}
+              </p>
+            )}
+            {savedConnection?.oauth_status?.error && (
+              <p role="alert" className="text-sm text-error-secondary">
+                {savedConnection.oauth_status.error}
+              </p>
+            )}
+          </div>
+        )}
+        <details
+          open={advanced}
+          onToggle={(event) => setAdvanced(event.currentTarget.open)}
+          className="space-y-space-3"
+        >
+          <summary className="cursor-pointer text-sm font-medium text-primary">
+            Advanced settings
+          </summary>
+          <div className="space-y-space-4">
+            <div className="space-y-space-1">
+              <span className="block text-sm font-medium text-primary">
+                Transport
+              </span>
+              <Select
+                aria-label="Transport"
+                size="md"
+                options={TRANSPORTS}
+                value={draft.transport}
+                onChange={(transport) =>
+                  transport && setDraft({ ...draft, transport })
+                }
+              />
+            </div>
+            <div className="space-y-space-1">
+              <span className="block text-sm font-medium text-primary">
+                Authentication
+              </span>
+              <Select
+                aria-label="Authentication"
+                size="md"
+                options={
+                  scope === "user"
+                    ? [
+                        {
+                          value: "oauth" as const,
+                          label: "Browser OAuth (recommended)",
+                        },
+                        ...AUTH_MODES,
+                      ]
+                    : AUTH_MODES
+                }
+                value={
+                  browserOAuth
+                    ? "oauth"
+                    : draft.oauth
+                      ? "client_credentials"
+                      : "headers"
+                }
+                onChange={(mode) =>
+                  mode &&
+                  setDraft({
+                    ...draft,
+                    auth: mode === "oauth" ? "oauth" : null,
+                    oauth:
+                      mode === "client_credentials"
+                        ? {
+                            grant_type: "client_credentials",
+                            token_url: "",
+                            client_id: "",
+                            scope: "",
+                            token_endpoint_auth_method: "client_secret_post",
+                          }
+                        : null,
+                  })
+                }
+              />
+            </div>
+            {draft.oauth && (
+              <MCPOAuthFields
+                key={draft.name}
+                value={draft.oauth}
+                hasSavedSecret={Boolean(
+                  draft.existing &&
+                  savedConnection?.oauth &&
+                  draft.url.trim() === savedConnection.url &&
+                  draft.oauth.token_url.trim() ===
+                    savedConnection.oauth.token_url &&
+                  draft.oauth.client_id === savedConnection.oauth.client_id
+                )}
+                onChange={(oauth) => setDraft({ ...draft, oauth })}
+              />
+            )}
+            <div className="space-y-space-2">
+              <p className="text-sm font-medium text-primary">
+                {draft.oauth || browserOAuth
+                  ? "Additional Headers"
+                  : "Authentication Headers"}
+              </p>
+              <p className="text-xs text-secondary">
+                {draft.oauth || browserOAuth
+                  ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
+                  : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
+              </p>
+              {!replaceHeaders ? (
+                <>
+                  {savedHeaders && (
+                    <div className="space-y-space-2" data-dd-privacy="hidden">
+                      {Object.entries(savedHeaders).map(([name, value]) => (
+                        <Input
+                          key={name}
+                          label={name}
+                          aria-label={`Saved ${name} value`}
+                          size="md"
+                          value={value}
+                          onChange={() => {}}
+                          readOnly
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      ))}
+                      {Object.keys(savedHeaders).length === 0 && (
+                        <p className="text-xs text-secondary">
+                          No saved headers.
+                        </p>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
-              <div className="flex flex-wrap gap-space-2">
-                <IconButton
-                  type="button"
-                  size="sm"
-                  color="secondary"
-                  variant="outlined"
-                  icon={savedHeaders ? EyeSlashIcon : EyeIcon}
-                  label={
-                    savedHeaders ? "Hide saved headers" : "Show saved headers"
-                  }
-                  aria-expanded={savedHeaders !== null}
-                  onClick={() => {
-                    if (savedHeaders) setSavedHeaders(null)
-                    else
-                      void run(async () => {
-                        setSavedHeaders(await client.revealHeaders(draft.name))
-                      })
-                  }}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  color="secondary"
-                  variant="outlined"
-                  onClick={() => {
-                    setSavedHeaders(null)
-                    setReplaceHeaders(true)
-                  }}
-                >
-                  Replace headers
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              {headers.map((header, index) => (
-                <div className="flex gap-space-2" key={index}>
-                  <Input
-                    aria-label={`Header ${index + 1} name`}
-                    size="md"
-                    placeholder="Authorization"
-                    value={header.name}
-                    onChange={(name) => updateHeader(index, "name", name)}
-                  />
-                  <SecretInput
-                    label={`Header ${index + 1} value`}
-                    placeholder="Bearer …"
-                    revealed={Boolean(header.revealed)}
-                    onRevealedChange={(revealed) =>
-                      setHeaders(
-                        headers.map((item, i) =>
-                          i === index ? { ...item, revealed } : item
-                        )
-                      )
-                    }
-                    value={header.value}
-                    onChange={(event) =>
-                      updateHeader(index, "value", event.target.value)
-                    }
-                  />
+                  <div className="flex flex-wrap gap-space-2">
+                    <IconButton
+                      type="button"
+                      size="sm"
+                      color="secondary"
+                      variant="outlined"
+                      icon={savedHeaders ? EyeSlashIcon : EyeIcon}
+                      label={
+                        savedHeaders
+                          ? "Hide saved headers"
+                          : "Show saved headers"
+                      }
+                      aria-expanded={savedHeaders !== null}
+                      onClick={() => {
+                        if (savedHeaders) setSavedHeaders(null)
+                        else
+                          void run(async () => {
+                            setSavedHeaders(
+                              await client.revealHeaders(draft.name)
+                            )
+                          })
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      color="secondary"
+                      variant="outlined"
+                      onClick={() => {
+                        setSavedHeaders(null)
+                        setReplaceHeaders(true)
+                      }}
+                    >
+                      Replace headers
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {headers.map((header, index) => (
+                    <div className="flex gap-space-2" key={index}>
+                      <Input
+                        aria-label={`Header ${index + 1} name`}
+                        size="md"
+                        placeholder="Authorization"
+                        value={header.name}
+                        onChange={(name) => updateHeader(index, "name", name)}
+                      />
+                      <SecretInput
+                        label={`Header ${index + 1} value`}
+                        placeholder="Bearer …"
+                        revealed={Boolean(header.revealed)}
+                        onRevealedChange={(revealed) =>
+                          setHeaders(
+                            headers.map((item, i) =>
+                              i === index ? { ...item, revealed } : item
+                            )
+                          )
+                        }
+                        value={header.value}
+                        onChange={(event) =>
+                          updateHeader(index, "value", event.target.value)
+                        }
+                      />
+                      <Button
+                        type="button"
+                        size="md"
+                        color="secondary"
+                        variant="outlined"
+                        aria-label={`Remove header ${index + 1}`}
+                        onClick={() =>
+                          setHeaders(headers.filter((_, i) => i !== index))
+                        }
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
                   <Button
                     type="button"
-                    size="md"
+                    size="sm"
                     color="secondary"
                     variant="outlined"
-                    aria-label={`Remove header ${index + 1}`}
                     onClick={() =>
-                      setHeaders(headers.filter((_, i) => i !== index))
+                      setHeaders([...headers, { name: "", value: "" }])
                     }
                   >
-                    Remove
+                    Add header
+                  </Button>
+                  {draft.existing && headers.length === 0 && (
+                    <p className="text-xs text-secondary">
+                      Saving with no headers clears the saved authentication.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </details>
+        {(!browserOAuth || oauthConnected || toolNames.length > 0) && (
+          <div className="space-y-space-2">
+            <p className="text-sm font-medium text-primary">Allowed Tools</p>
+            <p className="text-xs text-secondary">
+              Discover tools, select only what Open SWE may use, then save. No
+              tools are enabled unless you explicitly allow them.
+            </p>
+            {toolNames.length > 0 && (
+              <>
+                <div className="flex flex-wrap items-center gap-space-2">
+                  <span className="mr-auto text-xs text-secondary">
+                    {draft.allowed_tools.length} of {toolNames.length} selected
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    color="secondary"
+                    variant="outlined"
+                    disabled={draft.allowed_tools.length === toolNames.length}
+                    onClick={() =>
+                      setDraft({ ...draft, allowed_tools: toolNames })
+                    }
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    color="secondary"
+                    variant="outlined"
+                    disabled={draft.allowed_tools.length === 0}
+                    onClick={() => setDraft({ ...draft, allowed_tools: [] })}
+                  >
+                    Clear all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    color="secondary"
+                    variant="plain"
+                    aria-expanded={toolsExpanded}
+                    aria-controls={toolsId}
+                    onClick={() => setToolsExpanded(!toolsExpanded)}
+                  >
+                    {toolsExpanded ? "Hide tools" : "Show tools"}
                   </Button>
                 </div>
-              ))}
+                <div
+                  id={toolsId}
+                  role="region"
+                  aria-label="Available tools"
+                  tabIndex={0}
+                  hidden={!toolsExpanded}
+                  className="max-h-80 space-y-space-3 overflow-y-auto overscroll-contain rounded-md border border-default p-space-3"
+                >
+                  {toolNames.map((name) => (
+                    <label
+                      key={name}
+                      className="flex items-start gap-space-2 text-sm text-primary"
+                    >
+                      <Checkbox
+                        containerClassName="mt-0.5 shrink-0"
+                        aria-label={`Allow ${name}`}
+                        checked={selectedTools.has(name)}
+                        onCheckedChange={(checked) =>
+                          setDraft({
+                            ...draft,
+                            allowed_tools:
+                              checked === true
+                                ? [...draft.allowed_tools, name]
+                                : draft.allowed_tools.filter(
+                                    (tool) => tool !== name
+                                  ),
+                          })
+                        }
+                      />
+                      <span className="min-w-0 break-words">
+                        {name}
+                        <span className="block text-xs text-secondary">
+                          {toolDescriptions.get(name)}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-space-2">
+          {browserOAuth && !reviewingImport && (
+            <Button
+              type="button"
+              size="sm"
+              color="primary"
+              disabled={!draft.name || !draft.url}
+              onClick={(event) => {
+                if (event.currentTarget.form?.reportValidity())
+                  void save(false, true)
+              }}
+            >
+              {oauthConnected ? "Reconnect" : "Connect"}
+            </Button>
+          )}
+          {(!browserOAuth || oauthConnected) && (
+            <Button
+              type="button"
+              size="sm"
+              color="secondary"
+              variant="outlined"
+              disabled={!draft.name || !draft.url}
+              onClick={(event) => {
+                if (event.currentTarget.form?.reportValidity()) void save(true)
+              }}
+            >
+              Save and discover tools
+            </Button>
+          )}
+          {(!browserOAuth || draft.existing || reviewingImport) && (
+            <Button
+              type="submit"
+              size="sm"
+              color={browserOAuth ? "secondary" : "primary"}
+            >
+              Save connection
+            </Button>
+          )}
+          {browserOAuth &&
+            savedConnection?.oauth_status?.status === "connected" && (
               <Button
                 type="button"
                 size="sm"
                 color="secondary"
                 variant="outlined"
                 onClick={() =>
-                  setHeaders([...headers, { name: "", value: "" }])
+                  void run(async () => {
+                    await api.disconnectMyMCPOAuth(draft.name)
+                    setCatalog([])
+                    await qc.invalidateQueries({ queryKey })
+                  })
                 }
               >
-                Add header
+                Disconnect account
               </Button>
-              {draft.existing && headers.length === 0 && (
-                <p className="text-xs text-secondary">
-                  Saving with no headers clears the saved authentication.
-                </p>
-              )}
-            </>
-          )}
-        </div>
-        <div className="space-y-space-2">
-          <p className="text-sm font-medium text-primary">Allowed tools</p>
-          <p className="text-xs text-secondary">
-            Discover tools, review the selection, then save. All discovered
-            tools are selected by default for new connections.
-          </p>
-          {toolNames.length > 0 && (
-            <>
-              <div className="flex flex-wrap items-center gap-space-2">
-                <span className="mr-auto text-xs text-secondary">
-                  {draft.allowed_tools.length} of {toolNames.length} selected
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  color="secondary"
-                  variant="outlined"
-                  disabled={draft.allowed_tools.length === toolNames.length}
-                  onClick={() =>
-                    setDraft({ ...draft, allowed_tools: toolNames })
-                  }
-                >
-                  Select all
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  color="secondary"
-                  variant="outlined"
-                  disabled={draft.allowed_tools.length === 0}
-                  onClick={() => setDraft({ ...draft, allowed_tools: [] })}
-                >
-                  Clear all
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  color="secondary"
-                  variant="plain"
-                  aria-expanded={toolsExpanded}
-                  aria-controls={toolsId}
-                  onClick={() => setToolsExpanded(!toolsExpanded)}
-                >
-                  {toolsExpanded ? "Hide tools" : "Show tools"}
-                </Button>
-              </div>
-              <div
-                id={toolsId}
-                role="region"
-                aria-label="Available tools"
-                tabIndex={0}
-                hidden={!toolsExpanded}
-                className="max-h-80 space-y-space-3 overflow-y-auto overscroll-contain rounded-md border border-default p-space-3"
-              >
-                {toolNames.map((name) => (
-                  <label
-                    key={name}
-                    className="flex items-start gap-space-2 text-sm text-primary"
-                  >
-                    <Checkbox
-                      containerClassName="mt-0.5 shrink-0"
-                      aria-label={`Allow ${name}`}
-                      checked={selectedTools.has(name)}
-                      onCheckedChange={(checked) =>
-                        setDraft({
-                          ...draft,
-                          allowed_tools:
-                            checked === true
-                              ? [...draft.allowed_tools, name]
-                              : draft.allowed_tools.filter(
-                                  (tool) => tool !== name
-                                ),
-                        })
-                      }
-                    />
-                    <span className="min-w-0 break-words">
-                      {name}
-                      <span className="block text-xs text-secondary">
-                        {toolDescriptions.get(name)}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-space-2">
-          <Button
-            type="button"
-            size="sm"
-            color="secondary"
-            variant="outlined"
-            disabled={!draft.name || !draft.url}
-            onClick={(event) => {
-              if (event.currentTarget.form?.reportValidity()) void save(true)
-            }}
-          >
-            Save and discover tools
-          </Button>
-          <Button type="submit" size="sm" color="primary">
-            Save connection
-          </Button>
+            )}
           {pendingImports.length > 0 && (
             <Button
               type="button"
@@ -709,6 +938,17 @@ export function MCPConnectionsSection({
   return (
     <SettingsSection title="MCP Servers" description={description}>
       <div className="space-y-space-4 p-space-4">
+        {!draft &&
+          (error ||
+            (scope === "user" &&
+              typeof window !== "undefined" &&
+              new URLSearchParams(window.location.search).get("mcp_oauth") ===
+                "failed")) && (
+            <p role="alert" className="text-sm text-error-secondary">
+              {error ||
+                "Account connection was not completed. Choose Connect on the server to try again."}
+            </p>
+          )}
         {connections.isLoading && (
           <p className="text-sm text-secondary">Loading connections…</p>
         )}
@@ -775,13 +1015,37 @@ export function MCPConnectionsSection({
                     <span className="text-secondary">
                       · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
                       {connection.allowed_tools.length} tools
+                      {connection.auth === "oauth" && (
+                        <>
+                          {" "}
+                          ·{" "}
+                          {
+                            OAUTH_LABELS[
+                              connection.oauth_status?.status ?? "not_connected"
+                            ]
+                          }
+                        </>
+                      )}
                     </span>
                   </p>
                   <p className="text-xs break-all text-secondary">
                     {connection.url}
                   </p>
                 </div>
-                <div className="flex gap-space-2">
+                <div className="flex flex-wrap gap-space-2">
+                  {scope === "user" &&
+                    connection.auth === "oauth" &&
+                    connection.oauth_status?.status !== "connected" && (
+                      <Button
+                        size="xs"
+                        color="primary"
+                        disabled={busy}
+                        onClick={() => connectSaved(connection)}
+                        aria-label={`Connect ${connection.name}`}
+                      >
+                        Connect
+                      </Button>
+                    )}
                   <Button
                     size="xs"
                     color="secondary"
@@ -862,6 +1126,7 @@ export function MCPConnectionsSection({
         })}
         {importing ? (
           <MCPImport
+            allowOAuth={scope === "user"}
             onImport={([first, ...rest]) => {
               if (!first) return
               setImporting(false)
@@ -894,7 +1159,7 @@ export function MCPConnectionsSection({
             </Button>
           </div>
         ) : (
-          !draft.existing && editor
+          (!draft.existing || !savedConnection) && editor
         )}
       </div>
     </SettingsSection>

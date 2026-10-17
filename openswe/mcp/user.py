@@ -22,24 +22,40 @@ async def list_user_mcp_records(login: str) -> list[MCPConnection]:
 
 
 async def list_user_mcps(login: str) -> list[dict[str, Any]]:
-    return [record.public() for record in await list_user_mcp_records(login)]
+    from openswe.mcp.hosted_oauth import oauth_status
+
+    records = await list_user_mcp_records(login)
+    for record in records:
+        if record.auth == "oauth":
+            record.oauth_status = await oauth_status(login, record)
+    return [record.public() for record in records]
 
 
 async def prepare_user_mcp(login: str, name: str, update: MCPConnectionUpdate) -> MCPConnection:
     """Validate a draft, reusing saved authentication only from the same user's record."""
     if name != update.name:
         raise ValueError("Connection name must match its URL path")
-    return await prepare_connection(update, await get_user_mcp(login, name))
+    return await prepare_connection(update, await get_user_mcp(login, name), personal=True)
 
 
 async def save_user_mcp(login: str, name: str, update: MCPConnectionUpdate) -> dict[str, Any]:
+    from openswe.mcp.hosted_oauth import AuthorizationStore, authorization_identity, oauth_status
+
+    previous = await get_user_mcp(login, name)
     record = await prepare_user_mcp(login, name, update)
     await UserMCPConnections(login).put(record)
+    if previous and authorization_identity(previous) != authorization_identity(record):
+        await AuthorizationStore(login, name).delete()
+    if record.auth == "oauth":
+        record.oauth_status = await oauth_status(login, record)
     return record.public()
 
 
 async def delete_user_mcp(login: str, name: str) -> None:
+    from openswe.mcp.hosted_oauth import AuthorizationStore
+
     await UserMCPConnections(login).delete(name)
+    await AuthorizationStore(login, name).delete()
 
 
 async def discover_user_mcp(
