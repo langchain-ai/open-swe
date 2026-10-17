@@ -320,6 +320,11 @@ def _tool_call(name: str, args: ToolArgs, call_id: str) -> ToolCallSpec:
     return ToolCallSpec(name=name, args=args, call_id=call_id)
 
 
+def _open_directory_step(call_id: str) -> StepSpec:
+    """Open the sandbox work directory; editing tools refuse until one is open."""
+    return _tool_step("Opening the work directory.", "open_directory", {"path": "."}, call_id)
+
+
 def _tool_step(content: str, name: str, args: ToolArgs, call_id: str) -> StepSpec:
     return StepSpec(content=content, tool_calls=(_tool_call(name, args, call_id),))
 
@@ -1067,6 +1072,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             {"message": "Preparing the iframe preview now."},
             "call-iframe-ack",
         ),
+        _open_directory_step("call-iframe-open"),
         _tool_step(
             "Writing the iframe HTML.",
             "write_file",
@@ -1207,6 +1213,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             {"command": _SETUP_SCRIPT},
             "call-setup",
         ),
+        _open_directory_step("call-open"),
         _tool_step(
             "Implementing the greeting.",
             "edit_file",
@@ -1452,6 +1459,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "plan": (
         _dynamic_step(_plan_link_step),
         _dynamic_step(_plan_research_step),
+        _open_directory_step("call-plan-open"),
         _dynamic_step(_write_plan_step),
         _dynamic_step(_save_plan_step),
         _dynamic_step(_plan_complete_step),
