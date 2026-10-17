@@ -92,6 +92,8 @@ packages = ["openswe"]
 
 [tool.ruff]
 line-length = 100
+# Vendored upstream code keeps its own style.
+extend-exclude = ["vendor"]
 
 [tool.ruff.lint]
 # PLC2701 (private-name imports) is preview-only; explicit-preview-rules keeps every
