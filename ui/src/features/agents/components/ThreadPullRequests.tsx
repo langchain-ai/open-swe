@@ -26,6 +26,7 @@ import type {
 } from "@/features/agents/lib/types"
 import { SplitButton } from "@/components/SplitButton"
 import { cn } from "@/lib/utils"
+import { useRevealOnToggle } from "@/lib/motion"
 
 /** Surface for {@link PullRequestHoverCard}; the card sets its own width. */
 export const PULL_REQUEST_HOVER_CARD_CLASS = "w-auto rounded-lg p-space-3"
@@ -550,6 +551,7 @@ export function ThreadPullRequests({
   fixDisabled?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const reveal = useRevealOnToggle(expanded)
   if (pullRequests.length === 0) return null
 
   const healthByPullRequest = new Map(
@@ -567,16 +569,20 @@ export function ThreadPullRequests({
       className="space-y-space-2 pb-space-2"
     >
       {visiblePullRequests.map((pullRequest) => (
-        <PullRequestLink
+        <div
           key={healthKey(pullRequest.repoFullName, pullRequest.number)}
-          pullRequest={pullRequest}
-          health={healthByPullRequest.get(
-            healthKey(pullRequest.repoFullName, pullRequest.number)
-          )}
-          healthUnavailable={healthUnavailable}
-          onFix={onFix}
-          fixDisabled={fixDisabled}
-        />
+          {...reveal}
+        >
+          <PullRequestLink
+            pullRequest={pullRequest}
+            health={healthByPullRequest.get(
+              healthKey(pullRequest.repoFullName, pullRequest.number)
+            )}
+            healthUnavailable={healthUnavailable}
+            onFix={onFix}
+            fixDisabled={fixDisabled}
+          />
+        </div>
       ))}
       {hiddenCount > 0 && (
         <Button

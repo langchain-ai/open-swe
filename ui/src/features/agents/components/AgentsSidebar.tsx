@@ -105,6 +105,7 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
+import { useRevealOnToggle } from "@/lib/motion"
 import { useChatRoutes } from "@/lib/chatRoutes"
 import { usePendingVariables } from "@/lib/optimistic"
 
@@ -942,6 +943,7 @@ function WorkspaceGroupSection({
   renderRepoGroup: (group: HydratedRepoGroup) => React.ReactNode
 }) {
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
+  const reveal = useRevealOnToggle(!collapsed)
   return (
     <div className="mb-space-1">
       <button
@@ -961,7 +963,9 @@ function WorkspaceGroupSection({
         />
       </button>
       {!collapsed && (
-        <div className="pl-space-2">{workspace.repos.map(renderRepoGroup)}</div>
+        <div className="pl-space-2" {...reveal}>
+          {workspace.repos.map(renderRepoGroup)}
+        </div>
       )}
     </div>
   )
@@ -1016,6 +1020,7 @@ function RepoGroup({
   ) => React.ReactNode
 }) {
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
+  const reveal = useRevealOnToggle(!collapsed)
   const repo = useSidebarRepoThreads({
     repoFullName: group.repoFullName,
     includeResolved,
@@ -1103,7 +1108,7 @@ function RepoGroup({
         </IconButton>
       </div>
       {!collapsed && (
-        <>
+        <div {...reveal}>
           {shown.map((item) => renderRow(item, pullRequestFor(item)))}
           {shown.length === 0 && loading && (
             <div className="flex items-center gap-space-2 py-space-1 pr-space-2 pl-space-5 text-xs text-tertiary">
@@ -1140,7 +1145,7 @@ function RepoGroup({
               {loading ? "Loading…" : "Show more"}
             </button>
           )}
-        </>
+        </div>
       )}
     </div>
   )

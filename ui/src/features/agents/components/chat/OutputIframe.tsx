@@ -10,6 +10,7 @@ import {
 } from "@/features/agents/lib/artifactShell"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
 import { cn } from "@/lib/utils"
+import { useRevealOnToggle } from "@/lib/motion"
 
 const IFRAME_HEIGHT = 480
 
@@ -24,6 +25,7 @@ function openDownload(url: string) {
 
 export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
   const [expanded, setExpanded] = useState(true)
+  const reveal = useRevealOnToggle(expanded)
   const isLegacy = "html" in display
 
   return (
@@ -59,26 +61,29 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
           />
         )}
       </header>
-      {expanded &&
-        (isLegacy ? (
-          <SandboxedHtmlFrame
-            title={display.title}
-            html={display.html}
-            sandbox={ARTIFACT_SANDBOX}
-            allow={ARTIFACT_ALLOW}
-            className="border-t border-default bg-surface-level-1"
-            style={{ height: IFRAME_HEIGHT }}
-          />
-        ) : (
-          <SandboxedHtmlFrame
-            title={display.title}
-            src={display.previewUrl}
-            sandbox={ARTIFACT_SANDBOX}
-            allow={ARTIFACT_ALLOW}
-            className="border-t border-default bg-surface-level-1"
-            style={{ height: IFRAME_HEIGHT }}
-          />
-        ))}
+      {expanded && (
+        <div {...reveal}>
+          {isLegacy ? (
+            <SandboxedHtmlFrame
+              title={display.title}
+              html={display.html}
+              sandbox={ARTIFACT_SANDBOX}
+              allow={ARTIFACT_ALLOW}
+              className="border-t border-default bg-surface-level-1"
+              style={{ height: IFRAME_HEIGHT }}
+            />
+          ) : (
+            <SandboxedHtmlFrame
+              title={display.title}
+              src={display.previewUrl}
+              sandbox={ARTIFACT_SANDBOX}
+              allow={ARTIFACT_ALLOW}
+              className="border-t border-default bg-surface-level-1"
+              style={{ height: IFRAME_HEIGHT }}
+            />
+          )}
+        </div>
+      )}
     </section>
   )
 }

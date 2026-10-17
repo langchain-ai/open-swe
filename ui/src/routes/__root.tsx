@@ -21,6 +21,7 @@ import { Text } from "@langchain/macaw-components/Text"
 import { Toaster } from "@/components/Toaster"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
+import { MotionSync } from "@/lib/motion"
 import { Favicon } from "@/components/Branding"
 import { PageTracking } from "@/lib/PageTracking"
 import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
@@ -110,6 +111,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Favicon />
           <TooltipProvider>
             <PageTracking />
+            <MotionSync />
             <InvalidationStream />
             <VersionMismatchBanner />
             <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>

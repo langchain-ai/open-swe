@@ -2,6 +2,7 @@ import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useRef, useState } from "react"
 
 import { cn, formatElapsed } from "@/lib/utils"
+import { useRevealOnToggle } from "@/lib/motion"
 import { ElapsedSeconds } from "./ElapsedSeconds"
 
 function reasoningLabel(elapsedMs: number | null): string {
@@ -41,9 +42,9 @@ export function ReasoningBlock({
   }, [isLive])
 
   const trimmed = text.trim()
-  if (!trimmed && !isLive) return null
-
   const expanded = isLive || userExpanded
+  const reveal = useRevealOnToggle(expanded)
+  if (!trimmed && !isLive) return null
 
   return (
     <div className="my-space-1">
@@ -79,7 +80,10 @@ export function ReasoningBlock({
         )}
       </button>
       {expanded && trimmed && (
-        <div className="ms-space-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary">
+        <div
+          {...reveal}
+          className="ms-space-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary"
+        >
           {trimmed}
         </div>
       )}
