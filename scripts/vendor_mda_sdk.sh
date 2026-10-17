@@ -22,7 +22,8 @@ COMMIT="$(git -C "$CLONE" rev-parse FETCH_HEAD)"
 
 rm -rf "$DEST"
 mkdir -p "$DEST"
-git -C "$CLONE" archive FETCH_HEAD "${PATHS[@]}" | tar -x -C "$DEST"
+# The Python runtime's own tests never run here.
+git -C "$CLONE" archive FETCH_HEAD "${PATHS[@]}" | tar -x -C "$DEST" --exclude packages/pypi/tests
 # `make mda-cli` bakes this into `mda --version` instead of this repository's HEAD.
 git -C "$CLONE" show -s --format='%H %cs' FETCH_HEAD >"$DEST/UPSTREAM"
 
