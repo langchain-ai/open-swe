@@ -176,9 +176,27 @@ async def test_pr_ready_draft_user_override_off_wins_over_team_on(
         webhook_common, "get_workspace_settings", AsyncMock(return_value={"review_draft_prs": True})
     )
 
+    monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: True)
+    monkeypatch.setattr(webhook_common, "workspace_for_repo_config", AsyncMock(return_value="oss"))
+    scout = MagicMock()
+    scout.walkthrough = AsyncMock(return_value=None)
+    scout.start = AsyncMock()
+    target = MagicMock(return_value=scout)
+    monkeypatch.setattr(github_webhooks, "ReviewScoutTarget", target)
+
     await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
 
     fake_client.runs.create.assert_not_called()
+    scout.start.assert_awaited_once()
+    assert target.call_args.kwargs == {
+        "owner": "lc",
+        "repo": "repo",
+        "pr_number": 7,
+        "pr_title": "T",
+        "base_sha": "basesha",
+        "head_sha": "headsha",
+        "workspace_slug": "oss",
+    }
 
 
 @pytest.mark.asyncio
