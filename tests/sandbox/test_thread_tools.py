@@ -77,9 +77,9 @@ async def test_task_event_preserves_latest_human_actor(monkeypatch: pytest.Monke
     assert actor.login == "alice"
 
 
-async def integration_echo(value: str) -> str:
+async def integration_echo(value: str, suffix: str = "") -> str:
     """Searchable connected integration."""
-    return value
+    return value + suffix
 
 
 class DenyValue(OpenSWEMiddleware):
@@ -235,7 +235,7 @@ async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() ->
     assert [tool.name for tool in tools.catalog("connected SEARCHABLE")] == ["integration_echo"]
     assert "mcp_provenance" not in tools.catalog()[0].model_dump()
     properties = tools.catalog()[0].parameters["properties"]
-    assert isinstance(properties, dict) and set(properties) == {"value"}
+    assert isinstance(properties, dict) and set(properties) == {"value", "suffix"}
     config: RunnableConfig = {"configurable": {"thread_id": "thread-a"}}
     response = await tools.invoke("thread-a", config, state, "integration_echo", {"value": "hello"})
     assert response == {"status": "success", "content": "hello"}
@@ -251,6 +251,18 @@ async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() ->
             await tools.invoke("thread-a", config, state, name, {})
     await tools.prepare({"plan_mode": True})
     assert "integration_echo" in tools.tools
+
+
+async def test_rejects_non_object_parameter_properties(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = surface()
+    await tools.prepare({})
+    monkeypatch.setattr(tool_runtime, "tool_parameters", lambda tool: {"properties": None})
+    with pytest.raises(HTTPException) as exc:
+        await tools.run({}, {}, "integration_echo", {})
+    assert exc.value.status_code == 422
+    assert "Tool parameter schema properties must be an object" in exc.value.detail
 
 
 async def test_http_list_search_invoke_and_reject_context_overrides(
@@ -303,18 +315,24 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
         invoked = await http.post(
             "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
-            json={"value": "hello"},
+            json={"value": "hello", "suffix": "!"},
         )
-        assert invoked.json() == {"status": "success", "content": "hello"}
+        assert invoked.status_code == 200
+        assert invoked.json() == {"status": "success", "content": "hello!"}
         forged = await http.post(
             "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             json={
                 "value": "hello",
                 "thread_id": "other",
+                "runtime": {},
             },
         )
         assert forged.status_code == 422
+        detail = forged.json()["detail"]
+        assert "Unexpected tool arguments: runtime, thread_id" in detail
+        assert "Accepted parameters: suffix, value*" in detail
+        assert "* = required" in detail
         large = await http.post(
             "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
