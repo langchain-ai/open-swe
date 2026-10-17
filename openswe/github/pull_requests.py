@@ -243,6 +243,30 @@ class PullRequest(Base):
             return list(rows)
 
     @classmethod
+    async def recent_by_author(
+        cls, login: str, *, repositories: Sequence[str], limit: int, offset: int = 0
+    ) -> list[Self]:
+        """The PRs ``login`` authored within ``repositories``, most recently updated first."""
+        if not repositories:
+            return []
+        authored = func.lower(cls.author) == login.lower()
+        if (user := await User.for_login("github", login)) is not None:
+            authored = or_(authored, cls.author_user_id == user.id)
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls)
+                .join(cls.repository)
+                .where(
+                    Repository.key.in_([repository.lower() for repository in repositories]),
+                    authored,
+                )
+                .order_by(cls.updated_at.desc(), cls.id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            return list(rows)
+
+    @classmethod
     async def diff_stats_for(
         cls, prs: Sequence[tuple[str, int]]
     ) -> dict[tuple[str, int], DiffStats]:

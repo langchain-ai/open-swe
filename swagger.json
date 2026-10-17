@@ -12719,6 +12719,55 @@
         ]
       }
     },
+    "/dashboard/api/pull-requests/related": {
+      "get": {
+        "description": "Server-sent events: Jev judges the person's PRs most recently updated first, ten at a time.",
+        "operationId": "api_related_pull_requests_dashboard_api_pull_requests_related_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Related Pull Requests",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
     "/dashboard/api/pull-requests/search": {
       "get": {
         "operationId": "api_search_pull_requests_dashboard_api_pull_requests_search_get",
@@ -18324,6 +18373,71 @@
           }
         ],
         "summary": "Api Resolve All Threads",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/search": {
+      "get": {
+        "description": "Server-sent events: Jev judges the person's threads newest first, ten at a time.",
+        "operationId": "api_search_threads_dashboard_api_threads_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "interactive",
+                "automation",
+                "bot"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Search Threads",
         "tags": [
           "dashboard",
           "threads"

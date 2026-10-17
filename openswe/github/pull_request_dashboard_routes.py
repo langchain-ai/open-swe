@@ -3,6 +3,7 @@
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
@@ -18,6 +19,7 @@ from openswe.github.pull_request_actions import (
     act_on_pull_request,
     resolve_review_threads,
 )
+from openswe.github.pull_request_search import stream_pull_request_matches
 from openswe.github.pull_request_status import (
     OpenPullRequest,
     OpenPullRequests,
@@ -33,6 +35,8 @@ from openswe.threads.pr_fixes import (
     pull_request_thread_running,
     start_pull_request_thread,
 )
+from openswe.utils.ai_search_stream import ai_search_response
+from openswe.utils.jev import JevUnavailableError, ensure_jev_configured
 
 router = APIRouter(tags=["pull-requests"])
 
@@ -76,6 +80,35 @@ async def api_search_pull_requests(
         ],
         has_more=len(rows) > limit,
     )
+
+
+class RelatedPullRequest(PullRequestSearchResult):
+    relevance: float
+
+    @classmethod
+    def of(cls, pr: PullRequest, relevance: float) -> RelatedPullRequest:
+        return cls(
+            repo=pr.repo_full_name,
+            number=pr.number,
+            url=pr.url,
+            title=pr.title,
+            body=pr.body,
+            state=pr.state,
+            relevance=round(relevance, 3),
+        )
+
+
+@router.get("/pull-requests/related")
+async def api_related_pull_requests(
+    q: str = Query(min_length=2, max_length=500),
+    session: dict[str, str] = SESSION_DEP,
+) -> StreamingResponse:
+    """Server-sent events: Jev judges the person's PRs most recently updated first, ten at a time."""
+    try:
+        ensure_jev_configured()
+    except JevUnavailableError as exc:
+        raise HTTPException(503, "AI search is not configured") from exc
+    return ai_search_response(stream_pull_request_matches(session["sub"], q), RelatedPullRequest.of)
 
 
 @router.get("/pull-requests")

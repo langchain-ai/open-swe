@@ -18,6 +18,7 @@ import { Spinner } from "@langchain/macaw-components/Spinner"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CommandIcon } from "@phosphor-icons/react/dist/ssr/Command"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 
@@ -29,6 +30,7 @@ import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { useChatRoutes } from "@/lib/chatRoutes"
+import { useAiSearchStream } from "@/lib/useAiSearchStream"
 
 interface CommandResult {
   id: string
@@ -39,19 +41,53 @@ interface CommandResult {
 
 interface CloudThreadResult {
   id: string
-  kind: "cloud-thread"
+  kind: "cloud-thread" | "related-thread"
   label: string
   thread: AgentThread
 }
 
 interface PullRequestResult {
   id: string
-  kind: "pull-request"
+  kind: "pull-request" | "related-pull-request"
   label: string
   pr: PullRequestSearchResult
 }
 
 type PaletteResult = CommandResult | CloudThreadResult | PullRequestResult
+
+const AI_SEARCH_DEBOUNCE_MS = 500
+const AI_SEARCH_MIN_LENGTH = 3
+const AI_SEARCH_SHOWN = 8
+
+type RelatedThread = AgentThread & { relevance: number }
+type RelatedPullRequest = PullRequestSearchResult & { relevance: number }
+
+const threadKey = (thread: RelatedThread) => thread.id
+const pullRequestKey = (pr: PullRequestSearchResult) =>
+  `${pr.repo}#${pr.number}`
+
+const RESULT_ICONS = {
+  command: CommandIcon,
+  "cloud-thread": ChatCircleIcon,
+  "related-thread": SparkleIcon,
+  "pull-request": GitPullRequestIcon,
+  "related-pull-request": SparkleIcon,
+} as const
+
+function resultGroup(result: PaletteResult): string {
+  switch (result.kind) {
+    case "command":
+      return result.command.group
+    case "cloud-thread":
+      return "Threads"
+    case "related-thread":
+      return "Related threads"
+    case "pull-request":
+      return "Pull requests"
+    case "related-pull-request":
+      return "Related pull requests"
+  }
+}
 
 function ShortcutHint({ shortcut }: { shortcut: string }) {
   const label = useShortcutLabel(shortcut)
@@ -127,16 +163,27 @@ export function AppCommandPalette({
   const chat = useChatRoutes()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
+  const [aiQuery, setAiQuery] = useState("")
+  const trimmedQuery = query.trim()
+  const actionsOnly = trimmedQuery.startsWith(">")
 
   useEffect(() => {
     if (!open) {
       // oxlint-disable-next-line react/set-state-in-effect
       setQuery("")
       setDebouncedQuery("")
+      setAiQuery("")
       return
     }
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 180)
-    return () => window.clearTimeout(timer)
+    const aiTimer = window.setTimeout(
+      () => setAiQuery(query.trim()),
+      AI_SEARCH_DEBOUNCE_MS
+    )
+    return () => {
+      window.clearTimeout(timer)
+      window.clearTimeout(aiTimer)
+    }
   }, [open, query])
 
   const cloudThreads = useInfiniteThreadsPages(
@@ -147,39 +194,80 @@ export function AppCommandPalette({
     },
     { enabled: open, staleWhileRevalidate: true }
   )
-  const pullRequests = usePullRequestSearch(
+  const pullRequests = usePullRequestSearch(query, open && !actionsOnly)
+  const aiSearchEnabled =
+    open &&
+    !actionsOnly &&
+    aiQuery === trimmedQuery &&
+    aiQuery.length >= AI_SEARCH_MIN_LENGTH
+  const relatedThreads = useAiSearchStream<RelatedThread>(
+    aiSearchEnabled
+      ? `/threads/search?${new URLSearchParams({ q: aiQuery, scope: "interactive" })}`
+      : null,
+    threadKey
+  )
+  const relatedPullRequests = useAiSearchStream<RelatedPullRequest>(
+    aiSearchEnabled
+      ? `/pull-requests/related?${new URLSearchParams({ q: aiQuery })}`
+      : null,
+    pullRequestKey
+  )
+  const results = useMemo(() => {
+    const keywordResults = buildPaletteResults(
+      commands,
+      cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
+      query
+    )
+    const shownThreadIds = new Set(
+      keywordResults.flatMap((result) =>
+        result.kind === "cloud-thread" ? [result.thread.id] : []
+      )
+    )
+    const relatedThreadResults = relatedThreads.matches
+      .filter((thread) => !shownThreadIds.has(thread.id))
+      .slice(0, AI_SEARCH_SHOWN)
+      .map((thread): CloudThreadResult => ({
+        id: `related:${thread.id}`,
+        kind: "related-thread",
+        label: thread.title,
+        thread,
+      }))
+    const keywordPullRequests =
+      open && !actionsOnly
+        ? (pullRequests.data?.pages.flatMap((page) => page.pull_requests) ?? [])
+        : []
+    const shownPullRequests = new Set(keywordPullRequests.map(pullRequestKey))
+    const pullRequestResult =
+      (kind: PullRequestResult["kind"]) =>
+      (pr: PullRequestSearchResult): PullRequestResult => ({
+        id: `${kind}:${pullRequestKey(pr)}`,
+        kind,
+        label: pr.title || `${pr.repo} #${pr.number}`,
+        pr,
+      })
+    return [
+      ...keywordResults,
+      ...relatedThreadResults,
+      ...keywordPullRequests.map(pullRequestResult("pull-request")),
+      ...relatedPullRequests.matches
+        .filter((pr) => !shownPullRequests.has(pullRequestKey(pr)))
+        .slice(0, AI_SEARCH_SHOWN)
+        .map(pullRequestResult("related-pull-request")),
+    ]
+  }, [
+    actionsOnly,
+    cloudThreads.data?.pages,
+    commands,
     query,
-    open && !query.trim().startsWith(">")
-  )
-  const results = useMemo(
-    () => [
-      ...buildPaletteResults(
-        commands,
-        cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
-        query
-      ),
-      ...(open && !query.trim().startsWith(">")
-        ? (pullRequests.data?.pages.flatMap((page) =>
-            page.pull_requests.map((pr): PullRequestResult => ({
-              id: `pr:${pr.repo}#${pr.number}`,
-              kind: "pull-request",
-              label: pr.title || `${pr.repo} #${pr.number}`,
-              pr,
-            }))
-          ) ?? [])
-        : []),
-    ],
-    [cloudThreads.data?.pages, commands, query, open, pullRequests.data]
-  )
+    open,
+    pullRequests.data,
+    relatedPullRequests.matches,
+    relatedThreads.matches,
+  ])
   const resultGroups = useMemo(() => {
     const grouped = new Map<string, Array<PaletteResult>>()
     for (const result of results) {
-      const group =
-        result.kind === "command"
-          ? result.command.group
-          : result.kind === "cloud-thread"
-            ? "Threads"
-            : "Pull requests"
+      const group = resultGroup(result)
       grouped.set(group, [...(grouped.get(group) ?? []), result])
     }
     return [...grouped]
@@ -189,9 +277,9 @@ export function AppCommandPalette({
     onOpenChange(false)
     if (result.kind === "command") {
       void result.command.run?.()
-    } else if (result.kind === "cloud-thread" && result.thread.reviewPage) {
+    } else if ("thread" in result && result.thread.reviewPage) {
       void navigate(reviewPageRoute(result.thread.reviewPage))
-    } else if (result.kind === "cloud-thread") {
+    } else if ("thread" in result) {
       void navigate({
         to: chat.thread,
         params: { threadId: result.thread.id },
@@ -206,8 +294,12 @@ export function AppCommandPalette({
     }
   }
 
+  const searchingRelated =
+    relatedThreads.status === "streaming" ||
+    relatedPullRequests.status === "streaming"
+  const relatedScanned = relatedThreads.scanned + relatedPullRequests.scanned
   const showLoading =
-    (cloudThreads.isFetching || pullRequests.isSearching) &&
+    (cloudThreads.isFetching || pullRequests.isSearching || searchingRelated) &&
     results.length === 0
   const showError = cloudThreads.isError && results.length === 0
 
@@ -268,12 +360,7 @@ export function AppCommandPalette({
                     {groupResults.map((result) => {
                       const command =
                         result.kind === "command" ? result.command : null
-                      const Icon =
-                        result.kind === "command"
-                          ? CommandIcon
-                          : result.kind === "pull-request"
-                            ? GitPullRequestIcon
-                            : ChatCircleIcon
+                      const Icon = RESULT_ICONS[result.kind]
                       return (
                         <CommandItem
                           className="gap-space-3 rounded-md px-space-3 py-space-2 text-primary"
@@ -288,7 +375,7 @@ export function AppCommandPalette({
                           />
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
-                            {result.kind === "pull-request" && (
+                            {"pr" in result && (
                               <span className="ml-space-2 text-xs text-secondary">
                                 {result.pr.repo} #{result.pr.number} ·{" "}
                                 {result.pr.state}
@@ -303,7 +390,15 @@ export function AppCommandPalette({
                     })}
                   </CommandGroup>
                 ))}
-                {pullRequests.hasNextPage && !query.trim().startsWith(">") && (
+                {searchingRelated && (
+                  <div className="flex items-center gap-space-2 px-space-3 py-space-2 text-xs text-secondary">
+                    <Spinner size="xs" />
+                    {relatedScanned
+                      ? `Searching with AI… ${relatedScanned} checked`
+                      : "Searching with AI…"}
+                  </div>
+                )}
+                {pullRequests.hasNextPage && !actionsOnly && (
                   <Button
                     className="w-full"
                     color="secondary"
@@ -331,16 +426,14 @@ export function AppCommandPalette({
                 )}
               </>
             )}
-            {query.trim() &&
-              !query.trim().startsWith(">") &&
-              pullRequests.isError && (
-                <p
-                  role="alert"
-                  className="px-space-3 py-space-2 text-xs text-error-secondary"
-                >
-                  Pull request search is unavailable.
-                </p>
-              )}
+            {trimmedQuery && !actionsOnly && pullRequests.isError && (
+              <p
+                role="alert"
+                className="px-space-3 py-space-2 text-xs text-error-secondary"
+              >
+                Pull request search is unavailable.
+              </p>
+            )}
           </CommandList>
         </Command>
       </DialogContent>
