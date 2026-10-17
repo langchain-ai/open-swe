@@ -29,7 +29,7 @@ from openswe.sandboxes.browsers import (
     BrowserWindow,
     ThreadBrowserWindow,
 )
-from openswe.sandboxes.providers.langsmith import sandbox_api_headers
+from openswe.sandboxes.providers.langsmith_api import sandbox_api_headers
 from openswe.threads.handlers import get_promptable_thread_metadata
 from openswe.threads.sockets import ThreadSocket
 from openswe.ui_invalidations.topics import Topic

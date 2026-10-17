@@ -32,6 +32,13 @@ from pydantic import BaseModel
 
 from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR
+from openswe.sandboxes.providers.langsmith_api import (
+    langsmith_api_key,
+    langsmith_api_root,
+    sandbox_api_endpoint,
+    sandbox_api_request,
+    with_response_body,
+)
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.http_pool import pooled_transport
@@ -59,7 +66,6 @@ PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 PROXY_CONFIG_NOT_READY_STATUS = 400
-PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
@@ -71,40 +77,13 @@ _LS_MAX_ENTRIES = 1000
 _FILE_API_READ_MAX_BYTES = 2 * 1024 * 1024
 
 
-def _get_langsmith_api_key() -> str | None:
-    """Get LangSmith API key from environment.
-
-    Same resolution as the rest of the app (``LANGSMITH_API_KEY``).
-    """
-    return ENV.LANGSMITH_API_KEY.optional()
-
-
-def _get_sandbox_endpoint() -> str:
-    """Use the deployment's LangSmith API root for sandbox operations."""
-    return ENV.LANGSMITH_ENDPOINT.get()
-
-
-def _get_sandbox_api_endpoint() -> str:
-    """Sandbox API base URL for the langsmith SDK clients.
-
-    The SDK's ``api_endpoint`` is the sandbox base (root + ``/v2/sandboxes``),
-    not the API root, and its methods append ``/boxes``, ``/snapshots``, etc.
-    """
-    root = _get_sandbox_endpoint().rstrip("/")
-    suffix = "/v2/sandboxes"
-    return root if root.endswith(suffix) else f"{root}{suffix}"
-
-
 def service_identity_jwks_url() -> str:
     """Where an app in a sandbox verifies the identity token LangSmith forwards to it.
 
     The keys are served by the API host, not by the app origin the token names as
     its issuer.
     """
-    root = _get_sandbox_endpoint().rstrip("/")
-    suffix = "/v2/sandboxes"
-    api_root = root[: -len(suffix)] if root.endswith(suffix) else root
-    return f"{api_root}/.well-known/jwks.json"
+    return f"{langsmith_api_root()}/.well-known/jwks.json"
 
 
 def _parse_optional_int(name: str, default: int) -> int:
@@ -323,24 +302,6 @@ async def _create_sandbox_with_retry(
     raise RuntimeError("unreachable sandbox retry state")
 
 
-def _with_response_body(exc: BaseException) -> httpx2.HTTPStatusError | None:
-    """Re-raisable copy of ``exc`` carrying the response body, or ``None`` to re-raise as-is.
-
-    ``raise_for_status`` builds its message from the status line and an MDN link
-    only, so the API's own explanation of a rejection never reaches the logs.
-    """
-    if not isinstance(exc, httpx2.HTTPStatusError):
-        return None
-    body = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
-    if not body:
-        return None
-    return httpx2.HTTPStatusError(
-        f"{exc}\nResponse body: {body}",
-        request=exc.request,
-        response=exc.response,
-    )
-
-
 async def _patch_proxy_config(
     client: httpx2.AsyncClient,
     url: str,
@@ -361,7 +322,7 @@ async def _patch_proxy_config(
             if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
                 exc
             ):
-                enriched = _with_response_body(exc)
+                enriched = with_response_body(exc)
                 if enriched is not None:
                     raise enriched from exc
                 raise
@@ -411,12 +372,11 @@ async def configure_sandbox_proxy(
     thread_id: str | None = None,
 ) -> None:
     """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
-    api_key = _get_langsmith_api_key()
+    api_key = langsmith_api_key()
     if not api_key:
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
-    langsmith_endpoint = _get_sandbox_endpoint()
-    url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
+    url = f"{sandbox_api_endpoint()}/boxes/{sandbox_name}"
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
     # Retire credentials saved by removed built-in integrations.
@@ -484,49 +444,9 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
     return WorkspaceServiceURL.model_validate(response.json()).service_url
 
 
-def sandbox_api_headers() -> dict[str, str]:
-    """Headers that authenticate this deployment to the sandbox API, sockets included."""
-    api_key = _get_langsmith_api_key()
-    if not api_key:
-        msg = "LANGSMITH_API_KEY not set"
-        raise ValueError(msg)
-    return {"X-API-Key": api_key}
-
-
-async def sandbox_api_request(
-    method: Literal["GET", "POST", "PATCH", "DELETE"],
-    path: str,
-    *,
-    json: dict[str, Any] | None = None,
-    timeout: float,
-) -> httpx2.Response:
-    """Call the sandbox API at ``path`` (under ``/v2/sandboxes``) as this deployment.
-
-    For routes the langsmith SDK does not model. Raises ``httpx2.HTTPStatusError``
-    carrying the API's own explanation when it refuses.
-    """
-    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
-        response = await client.request(
-            method,
-            f"{_get_sandbox_api_endpoint()}{path}",
-            json=json,
-            headers=sandbox_api_headers(),
-        )
-    try:
-        response.raise_for_status()
-    except httpx2.HTTPStatusError as exc:
-        enriched = _with_response_body(exc)
-        if enriched is not None:
-            raise enriched from exc
-        raise
-    return response
-
-
 def get_async_sandbox_client() -> AsyncSandboxClient:
     """Build an ``AsyncSandboxClient`` from the resolved sandbox LangSmith credentials."""
-    return AsyncSandboxClient(
-        api_key=_get_langsmith_api_key(), api_endpoint=_get_sandbox_api_endpoint()
-    )
+    return AsyncSandboxClient(api_key=langsmith_api_key(), api_endpoint=sandbox_api_endpoint())
 
 
 async def capture_snapshot_with_tag(
@@ -605,7 +525,7 @@ async def create_langsmith_sandbox(
     Returns:
         SandboxBackendProtocol instance
     """
-    api_key = _get_langsmith_api_key()
+    api_key = langsmith_api_key()
     (
         default_fs_capacity_bytes,
         default_vcpus,
@@ -884,8 +804,8 @@ class LangSmithProvider(SandboxProvider):
     """LangSmith sandbox provider implementation."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or _get_langsmith_api_key()
-        self._api_endpoint = _get_sandbox_api_endpoint()
+        self._api_key = api_key or langsmith_api_key()
+        self._api_endpoint = sandbox_api_endpoint()
         if not self._api_key:
             msg = "LANGSMITH_API_KEY not set"
             raise ValueError(msg)

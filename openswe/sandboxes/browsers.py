@@ -23,7 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.sandboxes.providers.langsmith import sandbox_api_request
+from openswe.sandboxes.providers.langsmith_api import sandbox_api_request
 from openswe.ui_invalidations.topics import Topic
 from openswe.users.records import user_id_for_login
 from openswe.utils.thread_ops import langgraph_client
