@@ -24,7 +24,7 @@ from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
-from openswe.tools.background_execute import TASK_ROOT, control_script, encoded, execute
+from openswe.tools.background_execute import TASK_ROOT, list_tasks
 from openswe.utils.background_task_state import (
     RUNNING_BACKGROUND_TASKS_KEY,
     update_background_task_state,
@@ -131,16 +131,7 @@ async def _mark_delivered(backend: Any, task_id: str) -> None:
 
 
 async def _list_tasks(backend: Any, *, required: bool = False) -> list[dict[str, Any]]:
-    script = control_script("list", None)
-    result = await execute(
-        backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
-    )
-    tasks = result.get("tasks") if isinstance(result, dict) else None
-    if isinstance(tasks, list):
-        return tasks
-    if required:
-        raise RuntimeError("Background-task list could not be read")
-    return []
+    return list(await list_tasks(backend, required=required))
 
 
 class _Reconciled(NamedTuple):

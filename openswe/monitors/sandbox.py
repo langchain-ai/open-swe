@@ -1,15 +1,10 @@
 """One thread's monitors, as its sandbox holds them."""
 
-import base64
-import hashlib
-import json
-import shlex
-from functools import cache
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, JsonValue
 
-from openswe import sandbox_scripts
+from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
 
 if TYPE_CHECKING:
@@ -18,14 +13,13 @@ if TYPE_CHECKING:
 
 ROOT = "/tmp/open-swe-monitors"
 ID_PREFIX = "mon"
-_MISSING_SCRIPT = "open-swe-monitor-script-missing"
 
 type MonitorStatus = Literal[
     "running", "completed", "failed", "timed_out", "stopped", "filter_exited", "too_noisy", "lost"
 ]
 
 
-class MonitorError(RuntimeError):
+class MonitorError(SandboxScriptError):
     """The sandbox refused a monitor action, with a reason fit for the agent."""
 
 
@@ -71,18 +65,6 @@ class PendingMonitor(MonitorState):
 
 class _Pending(BaseModel):
     monitors: list[PendingMonitor]
-
-
-@cache
-def _script() -> tuple[str, str]:
-    """The script's file name, carrying its hash, and its source."""
-    source = sandbox_scripts.source("monitor.py")
-    digest = hashlib.sha256(source.encode()).hexdigest()[:16]
-    return f"monitor-{digest}.py", source
-
-
-def _encoded(value: str) -> str:
-    return base64.b64encode(value.encode()).decode()
 
 
 class SandboxMonitors:
@@ -156,39 +138,14 @@ async def owner_of(backend: SandboxBackendProtocol, monitor_id: str) -> str:
     return owner
 
 
+def monitor_script() -> SandboxScript:
+    return SandboxScript("monitor.py", ROOT)
+
+
 async def _run(
     backend: SandboxBackendProtocol, action: str, **fields: JsonValue
 ) -> dict[str, JsonValue]:
-    request = _encoded(json.dumps({"action": action, **fields}))
-    name, source = _script()
-    script = shlex.quote(f"{ROOT}/{name}")
-    run = (
-        "command -v python3 >/dev/null || "
-        '{ echo \'{"error": "monitors require python3 in the sandbox"}\'; exit 0; }; '
-        f"python3 {script} {shlex.quote(request)}"
-    )
-    response = await backend.aexecute(
-        f"[ -f {script} ] || {{ echo {_MISSING_SCRIPT}; exit 0; }}; {run}", timeout=30
-    )
-    if response.output.strip() == _MISSING_SCRIPT:
-        # Named by its hash, so a sandbox always runs the script this backend ships.
-        response = await backend.aexecute(
-            f"mkdir -p {shlex.quote(ROOT)} && "
-            f"printf %s {shlex.quote(_encoded(source))} | base64 -d > {script}.$$ && "
-            f"mv {script}.$$ {script}; {run}",
-            timeout=30,
-        )
-    lines = response.output.strip().splitlines()
     try:
-        result = json.loads(lines[-1]) if lines else None
-    except json.JSONDecodeError:
-        result = None
-    if not isinstance(result, dict):
-        raise RuntimeError(
-            response.output.strip()
-            or f"monitor {action} failed with exit code {response.exit_code}"
-        )
-    error = result.get("error")
-    if isinstance(error, str):
-        raise MonitorError(error)
-    return result
+        return await monitor_script().run(backend, {"action": action, **fields})
+    except SandboxScriptError as exc:
+        raise MonitorError(str(exc)) from exc

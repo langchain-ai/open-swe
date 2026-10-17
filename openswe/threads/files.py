@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, TypeAdapter
 
-from openswe import sandbox_scripts
+from openswe.sandboxes import scripts as sandbox_scripts
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.diffs import _response_output, connect_sandbox
 from openswe.threads.summary import _assert_thread_promptable, _metadata_repo

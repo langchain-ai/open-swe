@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 
-from openswe import sandbox_scripts
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
+from openswe.sandboxes import scripts as sandbox_scripts
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.proxy import _PROXY_REQUEST_TIMEOUT

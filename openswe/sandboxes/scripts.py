@@ -1,0 +1,91 @@
+"""Run the scripts in ``openswe/sandbox_scripts`` inside a thread's sandbox."""
+
+import base64
+import hashlib
+import json
+import shlex
+from collections.abc import Mapping
+from functools import cache, cached_property
+from importlib import resources
+from typing import TYPE_CHECKING
+
+from pydantic import JsonValue
+
+if TYPE_CHECKING:
+    # The dashboard runs sandbox scripts too, and must not load the agent stack.
+    from deepagents.backends.protocol import SandboxBackendProtocol
+
+_MISSING = "open-swe-sandbox-script-missing"
+
+
+@cache
+def source(name: str) -> str:
+    """The text of ``openswe/sandbox_scripts/<name>``, e.g. ``"monitor.py"``."""
+    return resources.files("openswe.sandbox_scripts").joinpath(name).read_text(encoding="utf-8")
+
+
+def encoded(value: str) -> str:
+    return base64.b64encode(value.encode()).decode()
+
+
+class SandboxScriptError(RuntimeError):
+    """The script refused a request, with a reason fit to show the agent."""
+
+
+class SandboxScript:
+    """A script kept in a sandbox directory under a name carrying its hash.
+
+    Each call runs it with a base64 JSON request and reads back the one JSON
+    line it prints. The copy is written only when that version is missing, so
+    the common case is one exec, and a sandbox always runs the script this
+    backend ships.
+    """
+
+    def __init__(self, name: str, root: str, *, text: str | None = None) -> None:
+        self.name = name
+        self.root = root
+        self._text = text
+
+    @cached_property
+    def text(self) -> str:
+        return self._text if self._text is not None else source(self.name)
+
+    @cached_property
+    def path(self) -> str:
+        stem = self.name.removesuffix(".py")
+        digest = hashlib.sha256(self.text.encode()).hexdigest()[:16]
+        return f"{self.root}/{stem}-{digest}.py"
+
+    async def run(
+        self, backend: SandboxBackendProtocol, request: Mapping[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        """The script's answer to ``request``; raises ``SandboxScriptError`` when it refuses."""
+        script = shlex.quote(self.path)
+        run = (
+            "command -v python3 >/dev/null || "
+            '{ echo \'{"error": "this needs python3 in the sandbox"}\'; exit 0; }; '
+            f"python3 {script} {shlex.quote(encoded(json.dumps(request)))}"
+        )
+        response = await backend.aexecute(
+            f"[ -f {script} ] || {{ echo {_MISSING}; exit 0; }}; {run}", timeout=30
+        )
+        if response.output.strip() == _MISSING:
+            response = await backend.aexecute(
+                f"mkdir -p {shlex.quote(self.root)} && "
+                f"printf %s {shlex.quote(encoded(self.text))} | base64 -d > {script}.$$ && "
+                f"mv {script}.$$ {script}; {run}",
+                timeout=30,
+            )
+        lines = response.output.strip().splitlines()
+        try:
+            result = json.loads(lines[-1]) if lines else None
+        except json.JSONDecodeError:
+            result = None
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                response.output.strip() or f"{self.name} failed with exit code {response.exit_code}"
+            )
+        error = result.get("error")
+        if isinstance(error, str):
+            raise SandboxScriptError(error)
+        return result

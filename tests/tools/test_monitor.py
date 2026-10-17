@@ -11,6 +11,7 @@ from openswe.database import postgres
 from openswe.monitors import budget, delivery, sandbox
 from openswe.monitors.delivery import ThreadMonitorDelivery
 from openswe.monitors.sandbox import MonitorEnd, MonitorEvent, PendingMonitor, SandboxMonitors
+from openswe.sandboxes.scripts import SandboxScript, source
 from openswe.sandboxes.tool_access import ToolAccess
 from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
@@ -95,11 +96,14 @@ async def test_timeout_without_events_still_reports_the_raw_tail(
 async def test_raw_log_rotates_and_keeps_numbering_across_segments(
     monitors: SandboxMonitors, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    name, source = sandbox._script()
-    small = source.replace(
-        "RAW_SEGMENT_BYTES = 10 * 1024 * 1024", "RAW_SEGMENT_BYTES = 64 * 1024"
-    ).replace("MAX_RAW_BYTES = 50 * 1024 * 1024", "MAX_RAW_BYTES = 256 * 1024")
-    monkeypatch.setattr(sandbox, "_script", lambda: (f"small-{name}", small))
+    small = (
+        source("monitor.py")
+        .replace("RAW_SEGMENT_BYTES = 10 * 1024 * 1024", "RAW_SEGMENT_BYTES = 64 * 1024")
+        .replace("MAX_RAW_BYTES = 50 * 1024 * 1024", "MAX_RAW_BYTES = 256 * 1024")
+    )
+    monkeypatch.setattr(
+        sandbox, "monitor_script", lambda: SandboxScript("monitor.py", str(tmp_path), text=small)
+    )
     await monitors.start(
         "mon-3",
         command="seq -f 'line %g of the build log, padded to a realistic width' 20000",
