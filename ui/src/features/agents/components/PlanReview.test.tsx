@@ -9,7 +9,12 @@ import {
 } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { QueryClientProvider } from "@tanstack/react-query"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
+
+import { InlinePlanArtifact } from "./InlinePlanArtifact"
 import { PlanReview } from "./PlanReview"
+import { makeQueryClient } from "@/lib/query"
 import type { PlanComment, PlanData, PlanTextAnchor } from "@/lib/plan"
 
 const mocks = vi.hoisted(() => ({
@@ -18,7 +23,11 @@ const mocks = vi.hoisted(() => ({
   deletePlanComment: vi.fn(),
   submitPlanComments: vi.fn(),
   reportError: vi.fn(),
+  getPlan: vi.fn(),
+  dismissPlan: vi.fn(),
 }))
+
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: mocks.reportError }))
 vi.mock("@/lib/plan", () => ({
@@ -26,6 +35,8 @@ vi.mock("@/lib/plan", () => ({
   deletePlanComment: mocks.deletePlanComment,
   getPlanComments: mocks.getPlanComments,
   submitPlanComments: mocks.submitPlanComments,
+  getPlan: mocks.getPlan,
+  dismissPlan: mocks.dismissPlan,
 }))
 vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
   PlanArtifactFrame: ({
@@ -99,6 +110,61 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+})
+
+describe("InlinePlanArtifact", () => {
+  it.each(["success", "failure"])(
+    "dismisses before the server responds and handles %s",
+    async (outcome) => {
+      let resolveDismiss!: (value: { dismissed: boolean }) => void
+      let rejectDismiss!: (error: Error) => void
+      mocks.dismissPlan.mockReturnValueOnce(
+        new Promise<{ dismissed: boolean }>((resolve, reject) => {
+          resolveDismiss = resolve
+          rejectDismiss = reject
+        })
+      )
+      const artifact = { ...plan, html: "", markdown: "Plan details" }
+      mocks.getPlan.mockResolvedValue(artifact)
+      const client = makeQueryClient()
+      client.setQueryData(["plan", plan.threadId], artifact)
+      render(
+        <QueryClientProvider client={client}>
+          <TooltipProvider>
+            <InlinePlanArtifact threadId={plan.threadId} />
+          </TooltipProvider>
+        </QueryClientProvider>
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss artifact" }))
+      await waitFor(() =>
+        expect(screen.queryByTestId("inline-plan-artifact")).toBeNull()
+      )
+      const error = new Error("Offline")
+      if (outcome === "failure") rejectDismiss(error)
+      else resolveDismiss({ dismissed: true })
+      await waitFor(() => expect(client.isMutating()).toBe(0))
+
+      expect(screen.queryByTestId("inline-plan-artifact") !== null).toBe(
+        outcome === "failure"
+      )
+      expect(mocks.reportError.mock.calls).toEqual(
+        outcome === "failure"
+          ? [
+              [
+                {
+                  title: "Couldn't dismiss the plan",
+                  error,
+                  showToast: true,
+                  mutation: undefined,
+                },
+              ],
+            ]
+          : []
+      )
+      client.clear()
+    }
+  )
 })
 
 describe("PlanReview", () => {
