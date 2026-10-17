@@ -1266,6 +1266,24 @@ async def gh_search_issues(
     )
 
 
+@app.get("/fake-gh/repos/{owner}/{repo}/actions/workflows")
+async def gh_list_workflows(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
+    paths = [".github/workflows/deploy.yml", ".github/workflows/release.yml"]
+    return JSONResponse(
+        {"total_count": len(paths), "workflows": [{"path": path} for path in paths]}
+    )
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/branches")
+async def gh_list_branches(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
+    return JSONResponse([{"name": fakes.BASE_BRANCH}, {"name": "release"}])
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/tags")
+async def gh_list_tags(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
+    return JSONResponse([{"name": "v1.0.0"}])
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
 async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
     if not fakes.branch_exists(owner, repo, branch):
