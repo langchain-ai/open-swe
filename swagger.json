@@ -4398,6 +4398,18 @@
             ],
             "title": "Experimental Mcp Ptc"
           },
+          "experimental_monitor": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Monitor"
+          },
           "experimental_task_coordination": {
             "anyOf": [
               {

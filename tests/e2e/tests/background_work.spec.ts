@@ -1,10 +1,21 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 import {
   SAME_USER,
   dismissOnboardingIfShown,
   loginAs,
 } from "./helpers/dashboard";
+
+// `monitor` is off by default; the sender opts in on their profile.
+async function enableMonitors(page: Page) {
+  const saved = await page.request.get("/dashboard/api/profile");
+  expect(saved.ok()).toBeTruthy();
+  const response = await page.request.put("/dashboard/api/profile", {
+    headers: { origin: new URL(saved.url()).origin },
+    data: { ...(await saved.json()), experimental_monitor: true },
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
+}
 
 // The real agent starts a `background_execute` command and a `monitor` in its
 // (local-provider) sandbox; the thread page lists both in its right sidebar,
@@ -15,6 +26,7 @@ test.describe("background work sidebar (real dashboard UI)", () => {
   }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await loginAs(page, SAME_USER);
+    await enableMonitors(page);
     await page.goto("/mock/slack");
     await page.locator("#reset").click();
     await page
