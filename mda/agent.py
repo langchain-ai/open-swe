@@ -8,6 +8,7 @@ graph's tools, subagents and models from the backend's catalog for the run, and
 middleware there. The run token in the context authenticates every call.
 """
 
+import os
 from collections.abc import Collection, Mapping, Sequence
 from typing import Final, Literal
 
@@ -91,6 +92,24 @@ def _code_mode(
     return [interpreter, *([DescribedToolsMiddleware(described)] if described else [])]
 
 
+def _browser(graph: Graph) -> list[AgentMiddleware]:
+    """The coding agent's browser, a LangSmith browser per thread, when this deployment offers one.
+
+    Off unless ``OPEN_SWE_BROWSER`` is set: the LangSmith browser is a beta each
+    workspace must have enabled, and ``BrowserMiddleware`` ships in
+    managed-deepagents 0.10, so it is imported only when turned on.
+    """
+    if graph != "agent" or os.environ.get("OPEN_SWE_BROWSER", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return []
+    from managed_deepagents.browser import BrowserMiddleware  # noqa: PLC0415
+
+    return [BrowserMiddleware()]
+
+
 # `mda build` reads the agent's name without running this factory, so its body
 # stays assignments and one `return define_deep_agent(...)`.
 async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
@@ -158,6 +177,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(offered, excluded | code_only),
             *_code_mode(context.graph, from_code, catalog.described),
+            *_browser(context.graph),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],
