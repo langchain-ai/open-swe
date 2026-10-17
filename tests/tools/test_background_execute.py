@@ -116,6 +116,58 @@ def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch
         shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
 
 
+@pytest.mark.parametrize("delay_after_spawn", [False, True])
+def test_failed_startup_stops_runner_and_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delay_after_spawn: bool
+) -> None:
+    module = importlib.import_module("openswe.tools.background_execute")
+    monkeypatch.setattr(module, "TASK_ROOT", str(tmp_path / "tasks"))
+    monkeypatch.setattr(module, "LAUNCH_LOCK", str(tmp_path / "tasks" / ".launch-lock"))
+    original_runner = module._runner
+
+    def delayed_runner(
+        task_id: str, command: str, timeout: int, callback: bool, *, owner_thread_id: str
+    ) -> str:
+        source = original_runner(
+            task_id, command, timeout, callback, owner_thread_id=owner_thread_id
+        )
+        target = (
+            'write_state("running", process.pid)'
+            if delay_after_spawn
+            else "process = subprocess.Popen("
+        )
+        return source.replace(target, "time.sleep(2)\n" + target)
+
+    monkeypatch.setattr(module, "_runner", delayed_runner)
+    marker = tmp_path / "command-finished"
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            "-c",
+            module._launch_command(
+                "test-startup",
+                f"sleep 4; touch {marker}",
+                10,
+                callback=False,
+                owner_thread_id="thread-a",
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=8,
+    )
+    assert result.returncode == 70
+    assert "background runner did not start" in result.stderr
+    state_path = tmp_path / "tasks" / "test-startup" / "state.json"
+    state = json.loads(state_path.read_text())
+    assert state["status"] == "stopped"
+    assert (state_path.parent / "notify.done").is_dir()
+    time.sleep(4)
+    assert not marker.exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(state["runner_pid"], 0)
+
+
 def test_background_command_returns_while_running_then_caps_output(fake_curl: Path) -> None:
     task_id = f"test-{uuid.uuid4().hex}"
     task_dir = Path(TASK_ROOT, task_id)

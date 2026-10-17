@@ -158,6 +158,15 @@ def _runner(
                 handle.write(tail)
             os.replace(output_path + ".tmp", output_path)
 
+        cancelled = False
+
+        def cancel_startup(signum, frame):
+            global cancelled
+            cancelled = True
+
+        signal.signal(signal.SIGTERM, cancel_startup)
+        if cancelled:
+            raise SystemExit(70)
         process = subprocess.Popen(
             ["/bin/sh", "-c", command],
             stdin=subprocess.DEVNULL,
@@ -186,7 +195,7 @@ def _runner(
             if time.time() - last_flush >= 1:
                 flush()
                 last_flush = time.time()
-            if os.path.exists(stop_path):
+            if cancelled or os.path.exists(stop_path):
                 status = "stopped"
             elif time.monotonic() - started >= timeout:
                 status = "timed_out"
@@ -212,8 +221,11 @@ def _runner(
                 pass
         exit_code = process.wait()
         flush()
+        if cancelled:
+            os.makedirs(os.path.join(task_dir, "notify.done"), exist_ok=True)
         write_state(status, process.pid, exit_code)
-        notify_complete()
+        if not cancelled:
+            notify_complete()
         """
     ).strip()
 
@@ -243,8 +255,9 @@ def _launch_command(
         f"mkdir {shlex.quote(task_dir)} || exit 73; "
         f"printf %s {shlex.quote(runner)} | base64 -d > {shlex.quote(task_dir + '/runner.py')}; "
         f"python3 {shlex.quote(task_dir + '/runner.py')} </dev/null >/dev/null 2>&1 & "
+        "runner_pid=$!; "
         f"for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f {shlex.quote(task_dir + '/state.json')} ] && break; sleep .1; done; "
-        f"[ -f {shlex.quote(task_dir + '/state.json')} ] || {{ echo 'background runner did not start' >&2; exit 70; }}; "
+        f'[ -f {shlex.quote(task_dir + "/state.json")} ] || {{ kill -TERM "$runner_pid" 2>/dev/null; wait "$runner_pid"; echo \'background runner did not start\' >&2; exit 70; }}; '
         f"rmdir {lock}; trap - 0; cat {shlex.quote(task_dir + '/state.json')}"
     )
 
