@@ -27,7 +27,7 @@ async def save_user_instructions(instructions: str) -> dict[str, Any]:
             "error": (
                 "Could not resolve the triggering user's GitHub login, so there is no "
                 "profile to save instructions to. Ask the user to set them in the "
-                "dashboard Profile tab."
+                "dashboard under Settings → Instructions."
             ),
         }
 
@@ -51,10 +51,10 @@ async def save_user_instructions(instructions: str) -> dict[str, Any]:
         "instructions": saved,
         "reminder": (
             "<system-reminder>\n"
-            f"@{login}'s user-level custom instructions were just replaced with the text "
-            'below. The copy under "Your Custom Instructions (user-level)" in your system '
-            "prompt is the version this thread opened with and is now stale; follow this "
-            "text instead for the rest of the thread.\n\n"
+            f"@{login}'s standing instructions (personal memory) were just replaced with the "
+            "text below. The `standing_instructions` in their `person` block is the version "
+            "this thread was given and is now stale; follow this text instead for the rest "
+            "of the thread.\n\n"
             f"{saved or '(cleared — they now have no user-level instructions)'}\n"
             "</system-reminder>"
         ),
