@@ -147,6 +147,8 @@ class RequestResult(BaseModel):
     channel: str = ""
     permalink: str = ""
     reused: bool = False
+    channel_mismatch: bool = False
+    requested_channel: str = ""
     summary_updated: bool = False
     claimed: bool = False
     auto_merge: bool = True
@@ -298,7 +300,9 @@ async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) ->
     return True
 
 
-async def _existing(active: HumanReviewRequest, auto_merge: bool | None = None) -> RequestResult:
+async def _existing(
+    active: HumanReviewRequest, auto_merge: bool | None = None, requested_channel: str = ""
+) -> RequestResult:
     if active.kind == "expedited":
         permalink = await _permalink(active)
         return RequestResult(
@@ -326,6 +330,8 @@ async def _existing(active: HumanReviewRequest, auto_merge: bool | None = None) 
         channel=active.slack_channel_id,
         permalink=await _permalink(active),
         reused=True,
+        channel_mismatch=bool(requested_channel and requested_channel != active.slack_channel_id),
+        requested_channel=requested_channel,
     )
 
 
@@ -409,6 +415,12 @@ async def _request_review(
         result = await _existing(active, auto_merge)
         if not result.success:
             return result
+        if active.kind == "standard" and channel.strip():
+            target = await _target_channel(pr_ref, pull, channel)
+            if isinstance(target, RequestResult):
+                return target
+            if target.id != active.slack_channel_id:
+                return await _existing(active, auto_merge, target.id)
         if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return result
@@ -460,7 +472,7 @@ async def _request_review(
         winner = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
         if winner is None:
             raise
-        return await _existing(winner, auto_merge)
+        return await _existing(winner, auto_merge, target.id if channel.strip() else "")
     # Without its deadlines a request could wait forever on a reviewer who never approves.
     scheduled = await _schedule(
         request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
