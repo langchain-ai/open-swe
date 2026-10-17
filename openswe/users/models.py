@@ -32,7 +32,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.input_messages import PersonIdentity, split_person_id
+from openswe.input_messages import (
+    PersonIdentity,
+    RunMessage,
+    person_introduction,
+    split_person_id,
+)
 from openswe.users.authorization import UnauthorizedUser, is_authorized_github_login
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
 from openswe.utils.json_types import JsonObject
@@ -198,6 +203,18 @@ class User(Base):
             )
             return person
         return person if user is None else user.as_person(person)
+
+    @classmethod
+    async def introduce(cls, person: PersonIdentity) -> tuple[PersonIdentity, RunMessage | None]:
+        """``person`` keyed on their account, with the introduction a surface owes them.
+
+        The run describes every account holder from their row. Anyone else is
+        known only to the surface they wrote on, so that surface introduces them.
+        """
+        canonical = await cls.canonical_person(person)
+        if canonical["id"].startswith("user:"):
+            return canonical, None
+        return canonical, person_introduction(canonical)
 
     def as_person(self, person: PersonIdentity) -> PersonIdentity:
         """``person`` keyed on this row; only the identity key changes.
