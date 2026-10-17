@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import secrets
 import shlex
 from collections.abc import Mapping
 from functools import cache, cached_property
@@ -14,8 +15,6 @@ from pydantic import JsonValue
 if TYPE_CHECKING:
     # The dashboard runs sandbox scripts too, and must not load the agent stack.
     from deepagents.backends.protocol import SandboxBackendProtocol
-
-_MISSING = "open-swe-sandbox-script-missing"
 
 
 @cache
@@ -61,15 +60,17 @@ class SandboxScript:
     ) -> dict[str, JsonValue]:
         """The script's answer to ``request``; raises ``SandboxScriptError`` when it refuses."""
         script = shlex.quote(self.path)
+        # Fresh each call, so nothing a script or the sandbox prints can pass for it.
+        missing = f"open-swe-script-missing-{secrets.token_hex(16)}"
         run = (
             "command -v python3 >/dev/null || "
             '{ echo \'{"error": "this needs python3 in the sandbox"}\'; exit 0; }; '
             f"python3 {script} {shlex.quote(encoded(json.dumps(request)))}"
         )
         response = await backend.aexecute(
-            f"[ -f {script} ] || {{ echo {_MISSING}; exit 0; }}; {run}", timeout=30
+            f"[ -f {script} ] || {{ echo {missing}; exit 0; }}; {run}", timeout=30
         )
-        if response.output.strip() == _MISSING:
+        if response.output.strip() == missing:
             response = await backend.aexecute(
                 f"mkdir -p {shlex.quote(self.root)} && "
                 f"printf %s {shlex.quote(encoded(self.text))} | base64 -d > {script}.$$ && "
