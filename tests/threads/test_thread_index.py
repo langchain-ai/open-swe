@@ -2,9 +2,12 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import text
 
+from openswe.database import postgres
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
+from openswe.ui_invalidations import Topic, outbox
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -127,3 +130,18 @@ async def test_a_sync_that_read_an_older_copy_never_lands_after_a_newer_one() ->
 
     synced = await index.get("t1")
     assert synced is not None and synced.metadata == {"title": "new"}
+
+
+async def test_thread_writes_invalidate_both_the_listing_and_the_summary() -> None:
+    topics = {Topic.THREADS.name, Topic.THREADS.keyed("live")}
+    await index.create("live", runtime="mda")
+    assert await outbox.invalidated_since(dict.fromkeys(topics, 5)) == topics
+    for write in (
+        lambda: index.update("live", {"title": "New title"}),
+        lambda: index.set_status("live", "busy"),
+        lambda: index.delete("live"),
+    ):
+        async with postgres.transaction() as conn:
+            await conn.execute(text("DELETE FROM ui_invalidation"))
+        await write()
+        assert await outbox.invalidated_since(dict.fromkeys(topics, 5)) == topics

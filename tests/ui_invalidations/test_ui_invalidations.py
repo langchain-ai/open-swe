@@ -51,8 +51,10 @@ async def test_a_reconnecting_reader_is_told_only_what_committed_within_its_wind
     assert await outbox.prune() == 1
 
 
+@pytest.mark.parametrize("kind", [Topic.THREAD_QUEUES, Topic.THREADS])
 async def test_only_readers_of_a_private_thread_hear_its_queue(
     monkeypatch: pytest.MonkeyPatch,
+    kind,
 ) -> None:
     private = {"source": "dashboard", "visibility": "private", "owner_login": "alice"}
     threads = {"t-private": private, "t-shared": {"source": "dashboard"}}
@@ -62,10 +64,10 @@ async def test_only_readers_of_a_private_thread_hear_its_queue(
 
     client = SimpleNamespace(threads=SimpleNamespace(get=get))
     monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: client)
-    topics = [Topic.THREAD_QUEUES.keyed(thread_id) for thread_id in threads]
+    topics = [kind.keyed(thread_id) for thread_id in threads]
 
     assert await Topic.audible({"sub": "alice"}, topics) == set(topics)
-    assert await Topic.audible({"sub": "bob"}, topics) == {"thread-queues/t-shared"}
+    assert await Topic.audible({"sub": "bob"}, topics) == {kind.keyed("t-shared")}
 
 
 async def test_a_workspace_write_reaches_an_open_stream(registry_db: None) -> None:

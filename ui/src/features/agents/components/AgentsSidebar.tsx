@@ -93,6 +93,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
+  groupSidebarThreadsByTime,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -187,6 +188,7 @@ export function AgentsSidebar({
   const newThreadShortcut = useShortcutLabel("mod+n")
   const chat = useChatRoutes()
   const profile = useProfile()
+  const detailed = profile.data?.experimental_detailed_sidebar === true
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
     queryFn: api.concierge,
@@ -463,6 +465,7 @@ export function AgentsSidebar({
     archived: isArchived(item),
     live,
     compact: prefs.compact,
+    detailed,
     onNavigate: layout.closeOnMobile,
     onTogglePin: () => togglePin(item),
     onToggleArchived: () => toggleArchived(item),
@@ -860,9 +863,30 @@ export function AgentsSidebar({
               />
               {!sectionCollapsed("recents") && (
                 <>
-                  {recents.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                  ))}
+                  {detailed
+                    ? groupSidebarThreadsByTime(recents, prefs.sortChats).map(
+                        (bucket) => (
+                          <section key={bucket.key} className="mb-space-3">
+                            <SidebarSectionHeader
+                              label={`${bucket.label} · ${bucket.items.length}`}
+                              collapsed={sectionCollapsed(bucket.key)}
+                              onToggleCollapsed={() =>
+                                toggleSectionCollapsed(bucket.key)
+                              }
+                            />
+                            {!sectionCollapsed(bucket.key) &&
+                              bucket.items.map((item) => (
+                                <SidebarThreadRow
+                                  key={item.key}
+                                  {...rowProps(item)}
+                                />
+                              ))}
+                          </section>
+                        )
+                      )
+                    : recents.map((item) => (
+                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                      ))}
                   {recentsQuery.hasMore && (
                     <LoadMoreThreadsOnScroll
                       label="Load more threads"

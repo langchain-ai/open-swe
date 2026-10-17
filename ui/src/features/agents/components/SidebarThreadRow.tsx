@@ -43,7 +43,11 @@ import type {
   AgentSubagentSummary,
   AgentThread,
 } from "@/features/agents/lib/types"
-import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
+import {
+  isSidebarConversation,
+  type SidebarThreadItem,
+} from "@/features/agents/lib/sidebarThreads"
+import { SidebarThreadCardContent } from "@/features/agents/components/SidebarThreadCardContent"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
@@ -310,6 +314,7 @@ export function SidebarThreadRow({
   archived,
   live,
   compact = false,
+  detailed = false,
   indent = false,
   onNavigate,
   onTogglePin,
@@ -322,6 +327,7 @@ export function SidebarThreadRow({
   archived: boolean
   live?: PullRequestSnapshot
   compact?: boolean
+  detailed?: boolean
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
@@ -425,6 +431,81 @@ export function SidebarThreadRow({
   }
   const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
 
+  const conversation = detailed && isSidebarConversation(item)
+  const indicators = (
+    <span
+      className={cn(
+        "flex shrink-0 items-center gap-space-2",
+        !detailed && "group-focus-within/row:hidden group-hover/row:hidden"
+      )}
+    >
+      {item.status === "error" && <ErrorIndicator label="Thread error" />}
+      {thread.automationActionPosted && (
+        <SlackLogoIcon
+          size={ICON_SIZE}
+          weight="regular"
+          className="text-icon-success"
+          aria-label="Action posted to Slack"
+        />
+      )}
+      {item.reviewPage ? (
+        <BookOpenTextIcon
+          size={ICON_SIZE}
+          weight="regular"
+          className="text-icon-tertiary"
+          aria-label="Pull request review"
+        />
+      ) : (
+        <>
+          {!detailed && source && SourceIcon && !item.pr && (
+            <SourceIcon
+              size={ICON_SIZE}
+              weight="regular"
+              className="text-icon-tertiary"
+              aria-label={source.label}
+            />
+          )}
+          {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
+        </>
+      )}
+      {item.status === "running" ? (
+        <RunningIndicator label="Thread running" />
+      ) : unread ? (
+        <span
+          className="size-2 rounded-full bg-brand"
+          aria-label="Unread thread"
+        />
+      ) : null}
+    </span>
+  )
+  const actions = (
+    <span
+      className={cn(
+        "-mr-[3px] shrink-0 items-center gap-0.5",
+        detailed
+          ? "flex"
+          : "hidden group-focus-within/row:flex group-hover/row:flex"
+      )}
+    >
+      <IconButton
+        icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
+        label={pinned ? "Unpin thread" : "Pin thread"}
+        size="xs"
+        color="secondary"
+        variant="plain"
+        onClick={onPinClick}
+      />
+      <IconButton
+        icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
+        label={archived ? "Unarchive thread" : "Archive thread"}
+        size="xs"
+        color="secondary"
+        variant="plain"
+        onClick={onArchiveClick}
+      />
+    </span>
+  )
+
   const rowContent = (
     <>
       {hasSubagents && (
@@ -473,82 +554,60 @@ export function SidebarThreadRow({
           )}
         </span>
       )}
-      <SidebarRowTitle marquee={marquee} title={item.title} />
-
-      <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
-        {item.status === "error" && <ErrorIndicator label="Thread error" />}
-        {thread.automationActionPosted && (
-          <SlackLogoIcon
-            size={ICON_SIZE}
-            weight="regular"
-            className="text-icon-success"
-            aria-label="Action posted to Slack"
-          />
-        )}
-        {item.reviewPage ? (
-          <BookOpenTextIcon
-            size={ICON_SIZE}
-            weight="regular"
-            className="text-icon-tertiary"
-            aria-label="Pull request review"
-          />
-        ) : (
-          <>
-            {source && SourceIcon && !item.pr && (
+      {detailed ? (
+        <SidebarThreadCardContent
+          item={item}
+          live={live}
+          conversation={conversation}
+          age={compactAge(item.updatedAt)}
+          source={
+            SourceIcon ? (
               <SourceIcon
                 size={ICON_SIZE}
                 weight="regular"
-                className="text-icon-tertiary"
-                aria-label={source.label}
+                aria-label={source?.label}
               />
-            )}
-            {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
-          </>
-        )}
-        {item.status === "running" ? (
-          <RunningIndicator label="Thread running" />
-        ) : unread ? (
-          <span
-            className="size-2 rounded-full bg-brand"
-            aria-label="Unread thread"
-          />
-        ) : null}
-      </span>
-
-      <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
-        <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
-          label={pinned ? "Unpin thread" : "Pin thread"}
-          size="xs"
-          color="secondary"
-          variant="plain"
-          onClick={onPinClick}
+            ) : (
+              <ChatCircleIcon
+                size={ICON_SIZE}
+                weight="regular"
+                aria-label="Dashboard"
+              />
+            )
+          }
+          indicators={indicators}
+          actions={actions}
         />
-        <IconButton
-          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
-          label={archived ? "Unarchive thread" : "Archive thread"}
-          size="xs"
-          color="secondary"
-          variant="plain"
-          onClick={onArchiveClick}
-        />
-      </span>
+      ) : (
+        <>
+          <SidebarRowTitle marquee={marquee} title={item.title} />
+          {indicators}
+          {actions}
+        </>
+      )}
     </>
   )
 
-  const rowClassName = sidebarRowClassName({
-    compact,
-    active: rowIsActive,
-    paddingLeft:
-      hasSubagents || workers.length > 0
-        ? indent
-          ? "pl-space-4"
-          : "pl-space-2"
-        : indent
-          ? "pl-space-5"
-          : "pl-space-2",
-    archived,
-  })
+  const rowClassName = cn(
+    sidebarRowClassName({
+      compact,
+      active: rowIsActive,
+      paddingLeft:
+        hasSubagents || workers.length > 0
+          ? indent
+            ? "pl-space-4"
+            : "pl-space-2"
+          : indent
+            ? "pl-space-5"
+            : "pl-space-2",
+      archived,
+    }),
+    detailed && [
+      "focus-visible:outline-brand h-auto items-start border p-space-4 focus-visible:outline-2",
+      conversation ? "py-space-3" : "min-h-48",
+      rowIsActive ? "border-brand" : "border-subtle bg-surface-level-1",
+    ]
+  )
 
   const review = item.reviewPage
   const link = review ? (
@@ -581,7 +640,8 @@ export function SidebarThreadRow({
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              "group/row relative mb-0.5",
+              "group/row relative",
+              detailed ? "mb-space-2" : "mb-0.5",
               isDeleting && "opacity-50"
             )}
             onMouseEnter={marquee.measure}

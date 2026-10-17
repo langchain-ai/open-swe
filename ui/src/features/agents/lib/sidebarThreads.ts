@@ -152,6 +152,66 @@ export function groupRepoGroupsByWorkspace<TRepo extends SidebarRepoOption>(
   return [...buckets.values()]
 }
 
+export function isSidebarConversation(item: SidebarThreadItem): boolean {
+  const thread = item.thread
+  return (
+    item.source === "slack" &&
+    item.status === "finished" &&
+    thread.sandboxId === null &&
+    !thread.sandboxBridgeClient &&
+    !item.pr &&
+    !thread.pullRequests?.length &&
+    !thread.diffStats?.files &&
+    !thread.diffStats?.additions &&
+    !thread.diffStats?.deletions &&
+    !thread.changedFiles?.length &&
+    !item.reviewPage &&
+    !item.taskWorkers?.length &&
+    !item.subagents?.length &&
+    !thread.attentionReason &&
+    !item.planStatus
+  )
+}
+
+export function groupSidebarThreadsByTime(
+  items: ReadonlyArray<SidebarThreadItem>,
+  sort: "created" | "updated",
+  now = Date.now()
+): Array<{ key: string; label: string; items: Array<SidebarThreadItem> }> {
+  const day = 24 * 60 * 60 * 1000
+  const buckets = [
+    {
+      key: "time:last-day",
+      label: "Last day",
+      until: day,
+      items: [] as Array<SidebarThreadItem>,
+    },
+    {
+      key: "time:last-7-days",
+      label: "Last 7 days",
+      until: 7 * day,
+      items: [] as Array<SidebarThreadItem>,
+    },
+    {
+      key: "time:last-30-days",
+      label: "Last 30 days",
+      until: 30 * day,
+      items: [] as Array<SidebarThreadItem>,
+    },
+    {
+      key: "time:older",
+      label: "Older",
+      until: Infinity,
+      items: [] as Array<SidebarThreadItem>,
+    },
+  ]
+  for (const item of sortSidebarThreads(items, sort)) {
+    const age = now - (sort === "created" ? item.createdAt : item.updatedAt)
+    buckets.find((bucket) => age < bucket.until)!.items.push(item)
+  }
+  return buckets.filter((bucket) => bucket.items.length > 0)
+}
+
 export type SidebarSort = "created" | "updated" | "manual"
 
 function byRecency(left: SidebarThreadItem, right: SidebarThreadItem): number {
