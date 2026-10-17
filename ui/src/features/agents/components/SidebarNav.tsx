@@ -7,6 +7,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
+import { AppWindowIcon } from "@phosphor-icons/react/dist/ssr/AppWindow"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils"
 
 const NAV = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
+  { to: "/agents/apps", label: "Apps", icon: AppWindowIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
