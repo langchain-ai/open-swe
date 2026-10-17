@@ -683,7 +683,9 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
-async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo:
+async def workspace_scoped_default_repo(
+    candidate: Repo | None, workspace: str | None, login: str | None = None
+) -> Repo | None:
     """Keep a defaulted repository unless another workspace prefers it.
 
     Nobody named this repository, so it did not pick the workspace, and the
@@ -691,7 +693,10 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     its own default repository takes over when it has one. Every workspace can
     use every repository, so the candidate stays otherwise.
     """
-    if not workspace:
+    personal = await common.get_profile_default_repo(login, workspace, fallback_global=False)
+    if personal:
+        return Repo.model_validate(personal)
+    if not workspace or candidate is None:
         return candidate
     preferred_by = await workspace_for_repo(candidate.owner, candidate.name)
     if preferred_by is None or preferred_by == workspace:
@@ -1185,8 +1190,8 @@ async def _process_slack_mention_impl(
     if (code_channel or concierge_mode) and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
-    if repo is not None and not resolution.explicit:
-        repo = await workspace_scoped_default_repo(repo, thread_workspace)
+    if not resolution.explicit:
+        repo = await workspace_scoped_default_repo(repo, thread_workspace, mapped_login)
     repo_dict = repo.model_dump() if repo else None
 
     channel_identity = await _slack_channel_identity(

@@ -42,6 +42,7 @@ export interface ComposerRepoInputs {
   override: string | null | undefined
   /** The signed-in user's saved default repository. */
   userDefault: string | null
+  userWorkspaceDefault?: string | null
   /** The selected workspace's effective default repository. */
   workspaceDefault: string | null
   /** The repositories the composer offers: every one the GitHub App can reach. */
@@ -50,17 +51,20 @@ export interface ComposerRepoInputs {
 
 /**
  * The repository a new thread starts in once the workspace is settled: the
- * explicit pick, else the user's default when the workspace may use it, else
+ * explicit pick, else the user's workspace default, else their global default, else
  * the workspace's own default, else none.
  */
 export function pickComposerRepo({
   override,
   userDefault,
+  userWorkspaceDefault,
   workspaceDefault,
   offered,
 }: ComposerRepoInputs): string | null {
   if (override !== undefined) return override
-  const wanted = [userDefault, workspaceDefault].map((c) => c?.toLowerCase())
+  const wanted = [userWorkspaceDefault, userDefault, workspaceDefault].map(
+    (c) => c?.toLowerCase()
+  )
   for (const name of wanted) {
     const match =
       name && offered.find((r) => r.full_name.toLowerCase() === name)

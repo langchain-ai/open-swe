@@ -82,6 +82,7 @@ from openswe.transcript.events import (
 )
 from openswe.transcript.turns import OpenTurn, recorded_turn_id
 from openswe.users import User
+from openswe.users.repository_defaults import RepositoryDefaults
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,
     RELAYED_FROM_KEY,
@@ -415,8 +416,14 @@ async def create_dashboard_session(
     body: SessionCreateBody, login: str, *, email: str | None = None
 ) -> str:
     """Create a fresh owned thread using the person's dashboard defaults."""
-    profile = await get_profile(login) or {}
-    repo = body.repo if body.repo is not None else profile.get("default_repo")
+    profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
+    repo = body.repo if body.repo is not None else profile.repository()
+    workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
+    if body.repo is None:
+        preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
+        if profile.workspace_default_repos.get(preferred_workspace):
+            workspace = preferred_workspace
+        repo = profile.repository(workspace)
     repo_config = _parse_repo(repo) or {}
     if repo:
         if not repo_config:
@@ -430,7 +437,7 @@ async def create_dashboard_session(
         repo_config=repo_config,
         prompt=body.prompt,
         visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
-        workspace=await _resolve_requested_workspace(body.workspace, repo_config, login=login),
+        workspace=workspace,
     )
     return str(thread["thread_id"])
 
@@ -882,6 +889,11 @@ async def _enrich_run_start_command(
             # Whoever can prompt a thread runs commands on its machine.
             visibility = "private"
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
+        workspace = await _resolve_requested_workspace(
+            client_configurable.get("workspace") or client_configurable.get("environment"),
+            repo_config,
+            login=login,
+        )
         thread = await create_dashboard_thread_record(
             thread_id,
             login=login,
@@ -894,11 +906,7 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             model_selection=model_selection or "auto",
-            workspace=await _resolve_requested_workspace(
-                client_configurable.get("workspace") or client_configurable.get("environment"),
-                repo_config,
-                login=login,
-            ),
+            workspace=workspace,
         )
         metadata = thread_metadata(thread)
         if sandbox_bridge is not None:
