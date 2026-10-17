@@ -125,6 +125,13 @@ export function AppCommandProvider({
         run: () => void navigate({ to: "/agents/skills" }),
       },
       {
+        id: "open-apps",
+        label: "Open apps",
+        aliases: ["gadgets"],
+        group: "Navigation",
+        run: () => void navigate({ to: "/agents/apps" }),
+      },
+      {
         id: "open-automations",
         label: "Open automations",
         aliases: ["schedules"],
