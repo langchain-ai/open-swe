@@ -564,6 +564,48 @@ def _pr_url_in(text: str) -> str:
     return match.group(0) if match else ""
 
 
+SLACKLET_MARKER = "E2E_SLACKLET"
+SLACKLET_STATUS_MARKER = "E2E_SLACKLET_STATUS"
+_SLACKLET_COMMAND_RE = re.compile(r"^#(\d+) (\{.*\})$", re.M)
+_SLACKLET_STATE_RE = re.compile(r"^State after #\d+: (\{.*\})$", re.M)
+
+
+def _slacklet_attach_step(messages: list[BaseMessage]) -> AIMessage:
+    humans = _script_humans(messages)
+    url = _pr_url_in(_text(humans[0].content)) if humans else ""
+    return AIMessage(
+        content="Attaching a live slacklet for the pull request.",
+        tool_calls=[{"name": "start_pr_slacklet", "args": {"pr_url": url}, "id": "call-slacklet"}],
+    )
+
+
+def _slacklet_status_step(messages: list[BaseMessage]) -> AIMessage:
+    """Answer only from the slacklet commands queued into the conversation, as a real model would."""
+    seen = "\n".join(_text(m.content) for m in messages if isinstance(m, HumanMessage))
+    commands = {
+        int(seq): json.loads(body)["op"] for seq, body in _SLACKLET_COMMAND_RE.findall(seen)
+    }
+    states = _SLACKLET_STATE_RE.findall(seen)
+    state = json.loads(states[-1]) if states else {}
+    ci = state.get("ci", {})
+    text = (
+        f"The slacklet sent me {len(commands)} commands since I attached it: "
+        f"{', '.join(f'#{seq} {op}' for seq, op in sorted(commands.items()))}. "
+        f"It now says {state.get('status', 'unknown')}, "
+        f"CI {ci.get('status', 'unknown')} on {str(ci.get('sha', ''))[:7]}."
+    )
+    return AIMessage(
+        content="Summarizing the slacklet commands I was sent.",
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {"message": text, "response_type": "final"},
+                "id": "call-slacklet-status",
+            }
+        ],
+    )
+
+
 def _human_review_request_step(messages: list[BaseMessage]) -> AIMessage:
     """Ask the review channel to review the pull request the user named."""
     humans = _script_humans(messages)
@@ -1321,6 +1363,19 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
     ),
     "hello": (_tool_step("Saying hi.", "slack_reply", {"message": "Hi!"}, "call-hello"),),
+    "slacklet": (
+        _dynamic_step(_slacklet_attach_step),
+        _tool_step(
+            "The slacklet is the reply.",
+            "slack_no_reply_needed",
+            {
+                "reason": "The slacklet message answers the request.",
+                "confirmation": "The user cannot see anything I do not send to Slack.",
+            },
+            "call-slacklet-done",
+        ),
+    ),
+    "slacklet_status": (_dynamic_step(_slacklet_status_step),),
     # Woken because nobody signed up within 30 minutes.
     "human_review_assign": (
         _dynamic_step(_human_review_assign_step),
@@ -1590,6 +1645,11 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.pending_text,
     ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
+    ScriptRule("slacklet_status", lambda ctx: SLACKLET_STATUS_MARKER in ctx.pending_text),
+    ScriptRule(
+        "slacklet",
+        lambda ctx: ctx.human_count <= 1 and SLACKLET_MARKER in ctx.first_text,
+    ),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(
         "human_review_resummarize",

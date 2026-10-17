@@ -6,6 +6,7 @@ from openswe.github import webhook as service
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
+from openswe.slacklets.store import SLACKLET_EVENTS, refresh_from_github
 from openswe.ui_invalidations import Topic
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -98,6 +99,9 @@ async def github_webhook(
                 extra={"repository": repository},
             )
             return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
+
+    if event_type in SLACKLET_EVENTS:
+        background_tasks.add_task(refresh_from_github, event_type, payload)
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

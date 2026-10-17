@@ -33,6 +33,7 @@ import {
   replyBody,
 } from "@/features/agents/components/chat/ReplyCard"
 import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
+import { SlackletCard } from "@/features/agents/components/chat/SlackletCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
@@ -323,6 +324,9 @@ export function AgentTurn({
         return item.chunk.display ? (
           <OutputIframe key={item.key} display={item.chunk.display} />
         ) : null
+
+      case "slacklet-item":
+        return <SlackletCard key={item.key} chunk={item.chunk} />
 
       case "sql-item":
         return <SqlResultItem key={item.key} chunk={item.chunk} />
