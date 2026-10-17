@@ -3,38 +3,28 @@
 MDA's Linear channel verifies each delivery (Linear's signature and timestamp) and
 owns the conversation: it starts the run on its thread, one per agent session, so
 the answer, Stop and errors reach the Linear session. The backend decides the rest,
-as for any Open SWE run, from the event's validated payload.
+as for any Open SWE run, from the event's validated payload. Issue and comment
+events start no conversation: the channel forwards them to the backend.
 """
 
-import logging
-import os
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-import httpx2
 from managed_deepagents import (
     ChannelRunOptions,
     ChannelRunResult,
     LinearChannelThread,
-    LinearCommentCreateEvent,
     LinearEvent,
-    LinearIssueCreateEvent,
-    LinearIssueUpdateEvent,
     LinearSessionEvent,
 )
 from pydantic import BaseModel, JsonValue
 
-from rt.backend import BACKEND_URL_ENV
+from rt import intake
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    import httpx
 
-#: Open SWE's own credential between this deployment and its backend (the backend's
-#: MDA_SERVICE_SECRET), which answers only callers that present it.
-SERVICE_SECRET_ENV: Final = "MDA_SERVICE_SECRET"
-_SERVICE_SECRET_HEADER: Final = "x-mda-service-secret"
-# Preparing a run reads the issue's images; Linear waits for no answer meanwhile.
-_SECONDS: Final = 60.0
-
-LinearIssueEvent = LinearIssueCreateEvent | LinearIssueUpdateEvent | LinearCommentCreateEvent
+#: Session turns come to the backend as the runs they start; the rest as Linear sent them.
+_SESSION_KEYS: Final = frozenset({"AgentSessionEvent.created", "AgentSessionEvent.prompted"})
 
 
 class _PreparedRun(BaseModel):
@@ -58,43 +48,29 @@ class LinearIntake:
         A failure raises, so the channel tells the session something went wrong.
         """
         prepared = _Prepared.model_validate(
-            await self._post("/linear/channel/runs", event, thread)
-        ).run
-        if prepared is None:
-            return None
-        options: ChannelRunOptions = {"context": prepared.context, "metadata": prepared.metadata}
-        return (prepared.input, options)
-
-    async def forward(self, event: LinearIssueEvent, thread: LinearChannelThread) -> None:
-        """Log an event that starts no conversation, and run the automations it triggers."""
-        await self._post("/linear/channel/events", event, thread)
-
-    async def _post(
-        self, path: str, event: LinearEvent, thread: LinearChannelThread
-    ) -> dict[str, JsonValue]:
-        base = os.environ.get(BACKEND_URL_ENV, "").strip().rstrip("/")
-        secret = os.environ.get(SERVICE_SECRET_ENV, "").strip()
-        if not base or not secret:
-            raise RuntimeError(f"{BACKEND_URL_ENV} and {SERVICE_SECRET_ENV} are required")
-        async with httpx2.AsyncClient(timeout=_SECONDS) as client:
-            response = await client.post(
-                f"{base}{path}",
-                headers={_SERVICE_SECRET_HEADER: secret},
-                json={
+            await intake.post(
+                "/linear/channel/runs",
+                {
                     "thread_id": thread.id,
                     "delivery_id": event.delivery_id,
                     "key": event.key,
                     "payload": dict(event.payload),
                 },
             )
-        if response.is_error:
-            logger.error(
-                "The backend refused a Linear event",
-                extra={"path": path, "status": response.status_code},
-            )
-            response.raise_for_status()
-        body = response.json()
-        return body if isinstance(body, dict) else {}
+        ).run
+        if prepared is None:
+            return None
+        options: ChannelRunOptions = {"context": prepared.context, "metadata": prepared.metadata}
+        return (prepared.input, options)
+
+    def forward(self, request: "httpx.Request", event: LinearEvent) -> "httpx.Request | None":
+        """Send an event that starts no conversation on to the backend, as Linear sent it.
+
+        The backend logs it and runs the automations it triggers.
+        """
+        if event.key in _SESSION_KEYS:
+            return None
+        return intake.forward(request, "/linear/channel/events")
 
 
 LINEAR: Final = LinearIntake()

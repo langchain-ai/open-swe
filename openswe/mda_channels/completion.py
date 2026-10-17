@@ -1,72 +1,37 @@
-"""Complete an MDA channel's run from its ``after_agent`` hook.
+"""Complete an MDA channel's run once the channel reports that it ended.
 
 The channel starts the run itself, so no run-complete webhook follows it. The
-run's middleware calls ``after_agent`` with the run token once the agent is done,
-which is where the backend completes it, as the webhook does for its own runs.
-A run that crashed never gets there; the thread status reconcile job completes it.
-
-The hook sees the run token, not the run's metadata, so a channel's route signs
-``CHANNEL_METADATA_KEY`` into the run's configurable; the thread index's metadata,
-which ``adopt_channel_run`` marks, answers for a token signed without it.
+channel watches each run it starts and reports how it ended (its ``on_settled``
+hook), which is where the backend completes it, from the run MDA recorded, as the
+webhook does for its own runs. The report comes from the process that started the
+run, so one lost to a restart is the thread status reconcile job's
+(``openswe.threads.status``).
 """
 
-import logging
-from collections.abc import Sequence
-from typing import Any
+from uuid import UUID
 
-from langchain_core.messages import messages_from_dict
-from pydantic import JsonValue
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
-from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
-from openswe.invocation import INVOCATION_ID_KEY, LEGACY_INVOCATION_ID_KEY
-from openswe.remote_runtime.tokens import RemoteRun
+from openswe.dispatch import channel_of
+from openswe.mda_channels.auth import require_mda_channel
 from openswe.threads import index
+from openswe.threads.status import complete_ended_run
 
-logger = logging.getLogger(__name__)
-
-# What the run's configurable carries for its usage telemetry.
-_INVOCATION_KEYS = (INVOCATION_ID_KEY, LEGACY_INVOCATION_ID_KEY, "invocation_started_at")
+router = APIRouter(prefix="/mda/channel", dependencies=[Depends(require_mda_channel)])
 
 
-async def complete_after_agent(
-    run: RemoteRun, run_id: str | None, messages: Sequence[dict[str, JsonValue]]
-) -> None:
-    """Complete a channel's run that finished; any other run waits for its webhook.
+class SettledRun(BaseModel):
+    """A run a channel started on its thread, which ended."""
 
-    Never raises: the agent's work is done either way. Completion that failed before
-    it settled the thread leaves it busy, for the reconcile job to complete.
-    """
-    if not run_id:
-        return
-    try:
-        channel = channel_of(run.configurable)
-        if channel is None:
-            thread = await index.get(run.thread_id)
-            channel = channel_of(thread.metadata) if thread else None
-        if channel is None:
-            return
-        metadata: dict[str, Any] = {
-            key: run.configurable[key] for key in _INVOCATION_KEYS if key in run.configurable
-        }
-        metadata[CHANNEL_METADATA_KEY] = channel
-        values: dict[str, Any] = {"messages": messages_from_dict(list(messages))}
-        # Late: completion pulls in every surface's reply code.
-        from openswe.completion import complete_run_once
+    thread_id: UUID
+    run_id: str = Field(min_length=1, max_length=200)
 
-        await complete_run_once(
-            {
-                "thread_id": run.thread_id,
-                "run_id": run_id,
-                "status": "success",
-                "metadata": metadata,
-                "values": values,
-            },
-            # The run is about to end; MDA still reports it running.
-            thread_status="idle",
-        )
-    except Exception:
-        logger.warning(
-            "Completing a channel run failed",
-            extra={"thread_id": run.thread_id, "run_id": run_id},
-            exc_info=True,
-        )
+
+@router.post("/settled")
+async def complete_settled_run(run: SettledRun) -> dict[str, bool]:
+    """Complete a channel's run that ended; any other thread's runs have their webhook."""
+    thread = await index.get(str(run.thread_id))
+    if thread is None or thread.runtime != "mda" or channel_of(thread.metadata) is None:
+        return {"completed": False}
+    return {"completed": await complete_ended_run(thread, run.run_id)}

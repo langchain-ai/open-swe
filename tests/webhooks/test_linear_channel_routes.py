@@ -43,10 +43,24 @@ async def _post(
         return await client.post(f"/linear/channel{path}", json=body, headers=headers)
 
 
+async def _forward(
+    app: FastAPI, payload: dict[str, Any] | bytes, secret: str | None = _SERVICE_SECRET
+) -> httpx.Response:
+    """A delivery as the channel forwards it: as Linear sent it, with the secret added."""
+    headers = {"linear-delivery": "delivery-1", "linear-signature": "signed-by-linear"}
+    if secret is not None:
+        headers["x-mda-service-secret"] = secret
+    body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.post("/linear/channel/events", content=body, headers=headers)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("secret", [None, "guess"])
 async def test_only_the_mda_deployment_may_call(app: FastAPI, secret: str | None) -> None:
-    response = await _post(app, "/events", _event("Issue.create", {"type": "Issue"}), secret)
+    response = await _forward(app, {"type": "Issue", "action": "create"}, secret)
     assert response.status_code == 401
     app.state.record.assert_not_awaited()
 
@@ -56,26 +70,30 @@ async def test_nobody_may_call_without_a_configured_secret(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("MDA_SERVICE_SECRET")
-    response = await _post(app, "/events", _event("Issue.create", {"type": "Issue"}), "")
+    response = await _forward(app, {"type": "Issue", "action": "create"}, "")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_unknown_events_and_oversized_payloads_are_refused(app: FastAPI) -> None:
-    assert (await _post(app, "/events", _event("Issue.remove", {}))).status_code == 422
-    huge = _event("Issue.create", {"type": "Issue", "data": {"description": "x" * 1_000_001}})
-    assert (await _post(app, "/events", huge)).status_code == 422
+async def test_other_events_are_ignored_and_malformed_ones_refused(app: FastAPI) -> None:
+    ignored = await _forward(app, {"type": "Issue", "action": "remove"})
+    assert ignored.json() == {"status": "ignored"}
+    assert (await _forward(app, b"[]")).status_code == 422
+    huge = {"type": "Issue", "action": "create", "data": {"description": "x" * 1_000_001}}
+    assert (await _forward(app, huge)).status_code == 413
+    huge_turn = _event("AgentSessionEvent.created", huge)
+    assert (await _post(app, "/runs", huge_turn)).status_code == 422
     app.state.record.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_issue_events_are_logged_and_run_automations(app: FastAPI) -> None:
     payload = {"type": "Issue", "action": "create", "actor": {"email": "ada@example.com"}}
-    response = await _post(app, "/events", _event("Issue.create", payload))
-    assert response.status_code == 200
+    response = await _forward(app, payload)
+    assert response.json() == {"status": "accepted"}
     _request, body, source = app.state.record.await_args.args
     kwargs = app.state.record.await_args.kwargs
-    # The event log keeps the payload the channel validated, as JSON.
+    # The event log keeps the delivery as Linear sent it.
     assert (json.loads(body), source) == (payload, "linear")
     assert (kwargs["event_type"], kwargs["delivery_id"]) == ("Issue", "delivery-1")
     assert kwargs["refs"].email == "ada@example.com"
@@ -85,7 +103,7 @@ async def test_issue_events_are_logged_and_run_automations(app: FastAPI) -> None
 
 @pytest.mark.asyncio
 async def test_comments_are_logged_without_automations(app: FastAPI) -> None:
-    response = await _post(app, "/events", _event("Comment.create", {"type": "Comment"}))
+    response = await _forward(app, {"type": "Comment", "action": "create"})
     assert response.status_code == 200
     app.state.record.assert_awaited_once()
     app.state.automations.assert_not_awaited()

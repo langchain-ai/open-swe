@@ -6561,6 +6561,28 @@
         "title": "SessionCreateBody",
         "type": "object"
       },
+      "SettledRun": {
+        "description": "A run a channel started on its thread, which ended.",
+        "properties": {
+          "run_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "run_id"
+        ],
+        "title": "SettledRun",
+        "type": "object"
+      },
       "SkillCreate": {
         "properties": {
           "description": {
@@ -21308,18 +21330,21 @@
     },
     "/linear/channel/events": {
       "post": {
-        "description": "Log a Linear event that starts no conversation, and run the automations it triggers.",
+        "description": "Log a Linear delivery the channel forwarded, and run the automations it triggers.",
         "operationId": "receive_linear_event_linear_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinearChannelEvent"
-              }
+        "parameters": [
+          {
+            "in": "header",
+            "name": "linear-delivery",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Linear-Delivery",
+              "type": "string"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -21386,6 +21411,49 @@
           }
         },
         "summary": "Prepare Linear Run"
+      }
+    },
+    "/mda/channel/settled": {
+      "post": {
+        "description": "Complete a channel's run that ended; any other thread's runs have their webhook.",
+        "operationId": "complete_settled_run_mda_channel_settled_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettledRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Complete Settled Run Mda Channel Settled Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Settled Run"
       }
     },
     "/webhooks/github": {
