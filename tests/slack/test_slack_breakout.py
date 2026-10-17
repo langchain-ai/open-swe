@@ -3,7 +3,7 @@ from unittest.mock import ANY, AsyncMock
 
 import pytest
 
-from openswe.slack import breakout
+from openswe.slack import breakout, breakout_links
 from openswe.slack.channels import SlackChannel
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.request import SlackRequest
@@ -206,6 +206,38 @@ async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(
     assert sent.prior_message_text == "Context for this task.\nMore details"
     assert sent.context_thread_ts == "100.0"
     posted.reactions.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("started", [True, False])
+async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypatch, started):
+    posted = _patch_slack(monkeypatch)
+    monkeypatch.setattr(
+        breakout.service, "process_slack_web_mention", AsyncMock(return_value=started)
+    )
+    monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _: "https://dashboard/agents/new")
+    reply = AsyncMock()
+    react = AsyncMock()
+    monkeypatch.setattr(breakout_links, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(breakout_links, "add_slack_reaction", react)
+
+    await breakout.process_slack_web(_request(), Command("fix it"), None)
+
+    if started:
+        text = "Continued in <https://dashboard/agents/new|the breakout thread> on the web."
+        reply.assert_awaited_once_with(
+            "C1",
+            "100.0",
+            text,
+            blocks=[{"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}],
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        react.assert_awaited_once_with("C1", "105.0", breakout_links.BREAKOUT_REACTION)
+    else:
+        reply.assert_not_awaited()
+        react.assert_not_awaited()
+    posted.ephemeral.assert_not_awaited()
 
 
 @pytest.mark.asyncio
