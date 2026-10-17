@@ -4217,6 +4217,18 @@
             ],
             "title": "Experimental Task Coordination"
           },
+          "experimental_ui_motion": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Ui Motion"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {
