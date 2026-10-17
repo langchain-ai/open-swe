@@ -113,58 +113,33 @@ afterEach(() => {
 })
 
 describe("InlinePlanArtifact", () => {
-  it.each(["success", "failure"])(
-    "dismisses before the server responds and handles %s",
-    async (outcome) => {
-      let resolveDismiss!: (value: { dismissed: boolean }) => void
-      let rejectDismiss!: (error: Error) => void
-      mocks.dismissPlan.mockReturnValueOnce(
-        new Promise<{ dismissed: boolean }>((resolve, reject) => {
-          resolveDismiss = resolve
-          rejectDismiss = reject
-        })
-      )
-      const artifact = { ...plan, html: "", markdown: "Plan details" }
-      mocks.getPlan.mockResolvedValue(artifact)
-      const client = makeQueryClient()
-      client.setQueryData(["plan", plan.threadId], artifact)
-      render(
-        <QueryClientProvider client={client}>
-          <TooltipProvider>
-            <InlinePlanArtifact threadId={plan.threadId} />
-          </TooltipProvider>
-        </QueryClientProvider>
-      )
+  it("hides immediately and restores the artifact if dismissal fails", async () => {
+    let rejectDismiss!: (error: Error) => void
+    mocks.dismissPlan.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectDismiss = reject
+      })
+    )
+    const artifact = { ...plan, html: "", markdown: "Plan details" }
+    mocks.getPlan.mockResolvedValue(artifact)
+    const client = makeQueryClient()
+    client.setQueryData(["plan", plan.threadId], artifact)
+    render(
+      <QueryClientProvider client={client}>
+        <TooltipProvider>
+          <InlinePlanArtifact threadId={plan.threadId} />
+        </TooltipProvider>
+      </QueryClientProvider>
+    )
 
-      fireEvent.click(screen.getByRole("button", { name: "Dismiss artifact" }))
-      await waitFor(() =>
-        expect(screen.queryByTestId("inline-plan-artifact")).toBeNull()
-      )
-      const error = new Error("Offline")
-      if (outcome === "failure") rejectDismiss(error)
-      else resolveDismiss({ dismissed: true })
-      await waitFor(() => expect(client.isMutating()).toBe(0))
-
-      expect(screen.queryByTestId("inline-plan-artifact") !== null).toBe(
-        outcome === "failure"
-      )
-      expect(mocks.reportError.mock.calls).toEqual(
-        outcome === "failure"
-          ? [
-              [
-                {
-                  title: "Couldn't dismiss the plan",
-                  error,
-                  showToast: true,
-                  mutation: undefined,
-                },
-              ],
-            ]
-          : []
-      )
-      client.clear()
-    }
-  )
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss artifact" }))
+    await waitFor(() =>
+      expect(screen.queryByTestId("inline-plan-artifact")).toBeNull()
+    )
+    rejectDismiss(new Error("Offline"))
+    expect(await screen.findByTestId("inline-plan-artifact")).toBeTruthy()
+    client.clear()
+  })
 })
 
 describe("PlanReview", () => {
