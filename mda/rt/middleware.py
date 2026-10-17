@@ -211,6 +211,18 @@ class DescribedToolsMiddleware(AgentMiddleware):
         return await handler(request.override(tool_call={**call, "args": args}))
 
 
+def _gateway_policy_blocked(exc: BaseException) -> bool:
+    body = getattr(exc, "body", None)
+    provider_code = ""
+    if isinstance(body, dict):
+        inner = body.get("error")
+        if isinstance(inner, dict):
+            provider_code = str(inner.get("type") or inner.get("code") or "")
+    return getattr(exc, "status_code", None) == 402 or (
+        "blocked by gateway policies" in f"{provider_code} {exc}".lower()
+    )
+
+
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Run the Open SWE graph's own middleware on the backend, phase by phase."""
 
@@ -261,15 +273,34 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if call.model is not None:
             request = request.override(model=build_model(call.model, use_gateway=call.use_gateway))
         try:
-            return await handler(request)
-        except Exception:
-            if call.fallback is None:
-                raise
-            # As the in-process graph does: another provider before failing the run.
-            logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            return await handler(
-                request.override(model=build_model(call.fallback, use_gateway=call.use_gateway))
-            )
+            try:
+                return await handler(request)
+            except Exception as exc:
+                if call.fallback is None or _gateway_policy_blocked(exc):
+                    raise
+                logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
+                return await handler(
+                    request.override(model=build_model(call.fallback, use_gateway=call.use_gateway))
+                )
+        except Exception as exc:
+            if _gateway_policy_blocked(exc):
+                logger.exception(
+                    "Model call failed",
+                    extra={
+                        "model_call_failure": {
+                            "code": "gateway_policy_blocked",
+                            "error_type": type(exc).__name__,
+                        }
+                    },
+                )
+                try:
+                    await self._backend.call(
+                        "model_error",
+                        run_body(run_id(), request.state, error_type=type(exc).__name__),
+                    )
+                except BackendCallError:
+                    logger.exception("The backend did not record the model error")
+            raise
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

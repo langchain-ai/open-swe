@@ -35,11 +35,7 @@ def code_for_error_type(error_type: str | None) -> str | None:
 
 
 def classify_exception(exc: BaseException) -> str | None:
-    """Failure code for a live exception, using status and provider error body.
-
-    Provider-agnostic on purpose: a gateway can surface an overload as anything
-    from a 529 to a bare ``APIError`` carrying ``overloaded_error`` in its body.
-    """
+    """Failure code for a live exception, using status and provider error body."""
     status = getattr(exc, "status_code", None)
     body = getattr(exc, "body", None)
     provider_code = ""
@@ -49,6 +45,8 @@ def classify_exception(exc: BaseException) -> str | None:
             provider_code = str(inner.get("type") or inner.get("code") or "")
     haystack = f"{provider_code} {exc}".lower()
 
+    if status == 402 or "blocked by gateway policies" in haystack:
+        return "gateway_policy_blocked"
     if status == 429 or "rate_limit" in haystack:
         return "provider_rate_limited"
     if status == 529 or "overloaded" in haystack:
