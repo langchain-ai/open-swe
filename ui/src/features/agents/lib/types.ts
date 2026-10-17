@@ -343,6 +343,31 @@ export interface QueuedThreadMessage {
 }
 
 /** A message in the thread's queue, as `/threads/{id}/queued-messages` returns it. */
+export interface AgentBackgroundCommand {
+  task_id: string
+  command: string | null
+  status: string
+  started_at: number | null
+}
+
+export interface AgentThreadMonitor {
+  monitor_id: string
+  description: string
+  command: string
+  filter: string
+  status: string
+  started_at: number | null
+  timeout: number | null
+  events: number
+  raw_lines: number
+}
+
+/** The sandbox commands and monitors running for a thread. */
+export interface AgentBackgroundWork {
+  commands: Array<AgentBackgroundCommand>
+  monitors: Array<AgentThreadMonitor>
+}
+
 export interface AgentQueuedMessage {
   id: string
   text: string

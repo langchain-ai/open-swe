@@ -25,6 +25,8 @@ from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
 from openswe.tools.schedule_thread_wakeup import WakeBudget
+from openswe.ui_invalidations.topics import Topic
+from openswe.utils.background_task_state import RUNNING_MONITORS_KEY, update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks.event_matches import EventMatch
 
@@ -127,14 +129,23 @@ class ThreadMonitorDelivery:
     async def sync(self) -> bool:
         """Record and deliver what the monitors emitted; whether one is still running."""
         pending = await self._monitors.pending()
+        running = [monitor.monitor_id for monitor in pending if monitor.status == "running"]
+        await update_background_task_state(
+            langgraph_client(),
+            self._thread_id,
+            running=running,
+            finished=[monitor.monitor_id for monitor in pending if monitor.status != "running"],
+            key=RUNNING_MONITORS_KEY,
+        )
         owed = [monitor for monitor in pending if monitor.events_pending or monitor.end]
         if owed:
             await self._record(owed)
             for monitor in owed:
                 last = monitor.events_pending[-1].seq if monitor.events_pending else 0
                 await self._monitors.ack(monitor.monitor_id, seq=last, end=monitor.end is not None)
+            await Topic.THREAD_BACKGROUND_WORK.invalidate(key=self._thread_id)
             await self._wake(pending)
-        return any(monitor.status == "running" for monitor in pending)
+        return bool(running)
 
     async def _record(self, monitors: list[PendingMonitor]) -> None:
         run_config: dict[str, JsonValue] = await completion_configurable(

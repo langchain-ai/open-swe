@@ -36,6 +36,7 @@ class MonitorState(BaseModel):
     exit_code: int | None = None
     filter_exit_code: int | None = None
     timeout: int | None = None
+    started_at: float | None = None
     raw_lines: int = 0
     first_raw_line: int = 1
     events: int = 0

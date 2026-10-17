@@ -150,3 +150,21 @@ async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
     assert [match.delivery_id for match in owed] == ["mon-1:1", "mon-1:end"]
     assert "ERROR one" in owed[0].content
     assert "the command failed" in owed[1].content
+
+
+async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.threads import background_work
+
+    metadata = {"sandbox_id": "sandbox-a", "running_background_tasks": [], "running_monitors": []}
+    monkeypatch.setattr(
+        background_work, "_readable_thread_metadata", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr(background_work, "_assert_thread_promptable", lambda *_: None)
+    connect = AsyncMock(side_effect=AssertionError("connected to an idle sandbox"))
+    monkeypatch.setattr(background_work, "connect_sandbox", connect)
+
+    work = await background_work.get_dashboard_thread_background_work("thread-1", "alice")
+
+    assert (work.commands, work.monitors) == ([], [])

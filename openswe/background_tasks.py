@@ -158,6 +158,18 @@ def _belongs_to_thread(
     return owner == thread_id or (owner is None and owns_legacy_tasks)
 
 
+async def thread_tasks(
+    backend: Any, thread_id: str, metadata: Mapping[str, object]
+) -> list[dict[str, Any]]:
+    """The sandbox commands in ``backend`` that ``thread_id`` launched."""
+    owns_legacy_tasks = not metadata.get(SANDBOX_HOST_THREAD_KEY)
+    return [
+        task
+        for task in await _list_tasks(backend)
+        if _belongs_to_thread(task, thread_id, owns_legacy_tasks=owns_legacy_tasks)
+    ]
+
+
 async def reconcile_background_tasks(thread_id: str) -> dict[str, Any]:
     return (await _reconcile(thread_id)).result
 
@@ -205,11 +217,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
         await sync_slack_background_status(client, thread_id, metadata=metadata)
         return _Reconciled({"status": "missing_sandbox"}, None, tracked=True)
     backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
-    tasks = [
-        task
-        for task in await _list_tasks(backend)
-        if _belongs_to_thread(task, thread_id, owns_legacy_tasks=owns_legacy_tasks)
-    ]
+    tasks = await thread_tasks(backend, thread_id, metadata)
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
     running_ids = [task_id for task in running if isinstance((task_id := task.get("task_id")), str)]

@@ -124,6 +124,7 @@ def _runner(
             payload = {{
                 "task_id": task_id,
                 "owner_thread_id": {owner_thread_id!r},
+                "command": command,
                 "status": status,
                 "pid": pid,
                 "runner_pid": os.getpid(),

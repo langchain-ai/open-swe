@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import JsonValue
@@ -9,6 +10,8 @@ from pydantic import JsonValue
 from openswe.monitors.delivery import ensure_monitor_polling
 from openswe.monitors.sandbox import ID_PREFIX, MonitorError, SandboxMonitors
 from openswe.tools.background_execute import current_backend, uses_completion_callback
+from openswe.utils.background_task_state import RUNNING_MONITORS_KEY, update_background_task_state
+from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,24 @@ _MAX_DESCRIPTION_CHARS = 200
 
 def _error(message: str) -> dict[str, JsonValue]:
     return {"success": False, "error": message}
+
+
+async def _track(
+    thread_id: str, *, running: Sequence[str] = (), finished: Sequence[str] = ()
+) -> None:
+    """Note running monitors on the thread, which is what lets the dashboard list them."""
+    try:
+        await update_background_task_state(
+            langgraph_client(),
+            thread_id,
+            running=running,
+            finished=finished,
+            key=RUNNING_MONITORS_KEY,
+        )
+    except Exception:
+        logger.warning(
+            "Could not track monitors", extra={"agent_thread_id": thread_id}, exc_info=True
+        )
 
 
 async def monitor(
@@ -54,7 +75,10 @@ async def monitor(
             result = await monitors.output(monitor_id, start_line=start_line, end_line=end_line)
             return {"success": True, **result}
         if action == "stop":
-            return {"success": True, **await monitors.stop(monitor_id)}
+            stopped = await monitors.stop(monitor_id)
+            if stopped.get("status") != "running":
+                await _track(thread_id, finished=[monitor_id])
+            return {"success": True, **stopped}
         state = await monitors.start(
             f"{ID_PREFIX}-{uuid.uuid4()}",
             command=command,
@@ -64,6 +88,7 @@ async def monitor(
             callback=await uses_completion_callback(),
         )
         started = state.model_dump(mode="json")
+        await _track(thread_id, running=[state.monitor_id])
         if not state.callback:
             try:
                 await ensure_monitor_polling(thread_id)

@@ -1649,7 +1649,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    monitors_enabled = bool(sender_profile and sender_profile.get("experimental_monitor") is True)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -1771,7 +1770,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         web_search,
         background_execute,
         background_task,
-        *((monitor,) if monitors_enabled else ()),
+        monitor,
         save_plan,
         save_user_instructions,
         save_user_settings,
