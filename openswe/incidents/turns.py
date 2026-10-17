@@ -15,6 +15,7 @@ from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.input_messages import (
     PersonIdentity,
+    RunMessage,
     SystemIdentity,
     human_input,
     system_input,
@@ -194,35 +195,36 @@ def _input(
     automatic_request: str = AUTOMATIC_REQUEST,
 ) -> dict[str, Any]:
     channel = f"slack:{record.channel_id}"
+    messages: list[RunMessage] = []
     if request is None:
-        return {
-            "messages": [
-                system_introduction(_INCIDENTS_SYSTEM),
-                system_input(
-                    automatic_request,
-                    {
-                        "sender_id": _INCIDENTS_SYSTEM["id"],
-                        "channel_id": channel,
-                        "surface": "slack",
-                        "kind": "system",
-                    },
-                ),
-            ]
-        }
-    person: PersonIdentity = requester or {"id": "system:incidents-dashboard"}
-    return {
-        "messages": [
-            human_input(
-                request,
-                {
-                    "sender_id": person["id"],
-                    "channel_id": channel,
-                    "surface": "slack",
-                    "kind": "human",
-                },
-            ),
-        ]
-    }
+        messages.append(system_introduction(_INCIDENTS_SYSTEM))
+        turn = system_input(
+            automatic_request,
+            {
+                "sender_id": _INCIDENTS_SYSTEM["id"],
+                "channel_id": channel,
+                "surface": "slack",
+                "kind": "system",
+            },
+        )
+    else:
+        person: PersonIdentity = requester or {"id": "system:incidents-dashboard"}
+        turn = human_input(
+            request,
+            {
+                "sender_id": person["id"],
+                "channel_id": channel,
+                "surface": "slack",
+                "kind": "human",
+            },
+        )
+    request_block = prompt("incidents/request", explicit_request=json.dumps(request))
+    turn["content"] = [
+        {"type": "text", "text": turn["content"]},
+        {"type": "text", "text": request_block},
+    ]
+    messages.append(turn)
+    return {"messages": messages}
 
 
 async def dispatch_turn(
