@@ -9,6 +9,7 @@ The model loop and its checkpoints run here. Everything else is the in-process O
   - `prepare`: before the run (preparation, transcript turn, skills, reply bookkeeping);
   - `before_model`: follow-up queue, event matches, proxy refresh, task coordination, model routing, a requested conversation offload, plus the system prompt and model for the call;
   - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;
+  - `model_error`: record gateway-policy blocks on the backend thread for the completion reply;
   - `after_model`: reply nudges, which can send the loop back to the model;
   - `after_agent`: usage, transcript, step-limit notice, review-check settle.
 - **Subagents:** MDA runs `task` and its subagents. `RuntimeToolsMiddleware` reports each call to a tool MDA runs itself through `tool_started` and `tool_result`, so the transcript records the `task` call. Every call made from inside a subagent names the `task` call it runs in (`namespace`), and subagents hand their replies to `model_result` too. Their tool calls and replies therefore land under the `task` call, as in-process. Subagents start from the task alone: deepagents' `fork` mode would hand them this agent's middleware, `BackendRunMiddleware` included.

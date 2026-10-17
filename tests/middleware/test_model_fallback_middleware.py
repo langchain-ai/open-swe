@@ -231,3 +231,29 @@ class TestModelFallbackMiddleware:
             await middleware.awrap_model_call(_make_request(), handler)
 
         assert len(calls) == 2
+
+
+@pytest.mark.parametrize("status", [402, 429])
+async def test_gateway_policy_block_is_not_retried(status: int) -> None:
+    from openswe.utils.errors import classify_exception
+
+    body = {"error": {"message": "Blocked by gateway policies"}}
+    response = httpx2.Response(status, request=httpx2.Request("POST", "https://gateway.invalid"))
+    error = openai.APIStatusError(
+        "Payment required" if status == 402 else "Blocked by gateway policies",
+        response=response,
+        body=body,
+    )
+    assert classify_exception(error) == "gateway_policy_blocked"
+    primary = FakeListChatModel(responses=["primary"])
+    fallback = FakeListChatModel(responses=["fallback"])
+    middleware = ModelFallbackMiddleware(fallback, backoff_schedule=(0.0,))
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        if request.model is primary:
+            raise error
+        return ModelResponse(result=[AIMessage(content="fallback")])
+
+    with pytest.raises(openai.APIStatusError) as caught:
+        await middleware.awrap_model_call(ModelRequest(model=primary, messages=[]), handler)
+    assert caught.value is error

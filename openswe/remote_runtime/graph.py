@@ -63,6 +63,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from openswe.middleware.model_errors import record_model_error
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
@@ -558,6 +559,14 @@ class RemoteGraph:
         if hook == "call":
             return await self._call(run, CallBody.model_validate(raw))
         body = HookBody.model_validate(raw)
+        if hook == "model_error":
+            error_type = raw.get("error_type")
+            if not isinstance(error_type, str):
+                raise ValueError("Model error requires an exception type")
+            await record_model_error(
+                error_type, "gateway_policy_blocked", thread_id=run.thread_id, run_id=body.run_id
+            )
+            return {}
         if hook == "catalog":
             return (await self.session(run, body.run_id)).catalog()
         if hook == "prepare":
