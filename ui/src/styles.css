@@ -28,7 +28,6 @@ body:has(.version-mismatch-banner) {
 }
 
 @theme inline {
-    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
     --font-heading: var(--font-sans);
     /* Duty-cycled indicator animation: long holds with stepped ramps, so the
        compositor updates discrete frames instead of every vsync. */
