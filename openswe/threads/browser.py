@@ -9,6 +9,8 @@ person has taken the window over, their input in.
 import asyncio
 import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Literal
 
 import websockets
@@ -75,9 +77,10 @@ async def _thread_window(thread_id: str, login: str) -> ThreadBrowserWindow:
     return record
 
 
-async def _window(record: ThreadBrowserWindow) -> BrowserWindow:
+@contextmanager
+def _langsmith_errors() -> Iterator[None]:
     try:
-        return await record.langsmith.window(record.window)
+        yield
     except BrowserGoneError as exc:
         raise HTTPException(410, "the thread's browser window is closed") from exc
     except BrowserUnavailableError as exc:
@@ -89,7 +92,8 @@ async def api_thread_browser(
     thread_id: str, session: dict[str, Any] = SESSION_DEP
 ) -> ThreadBrowser:
     record = await _thread_window(thread_id, session["sub"])
-    return ThreadBrowser.of(record, await _window(record))
+    with _langsmith_errors():
+        return ThreadBrowser.of(record, await record.langsmith.window(record.window))
 
 
 @router.post("/threads/{thread_id}/browser/controller")
@@ -101,8 +105,8 @@ async def api_thread_browser_controller(
 ) -> ThreadBrowser:
     """Take the window over from the agent, or hand it back."""
     record = await _thread_window(thread_id, session["sub"])
-    await _window(record)
-    window = await record.langsmith.set_controller(record.window, body.controller)
+    with _langsmith_errors():
+        window = await record.langsmith.set_controller(record.window, body.controller)
     await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
     return ThreadBrowser.of(record, window)
 

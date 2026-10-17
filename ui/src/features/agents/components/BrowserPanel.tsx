@@ -61,6 +61,11 @@ export function BrowserPanel({
   const tab = tabs.find((entry) => entry.id === tabId)
   const view = useBrowserView(threadId, tabId)
   const [draftAddress, setDraftAddress] = useState<string | null>(null)
+  // An address the person entered, shown until the tab's URL moves on from
+  // the one it had then, since the tab reports its new URL only later.
+  const [entered, setEntered] = useState<{ url: string; from: string } | null>(
+    null
+  )
   const stageRef = useRef<HTMLDivElement>(null)
   const screenRef = useRef<HTMLImageElement>(null)
   const lastMoveRef = useRef(0)
@@ -92,7 +97,8 @@ export function BrowserPanel({
   const canDrive = isHuman && view.connected
   const sendInput = (message: ViewerMessage) => canDrive && view.send(message)
   const tabUrl = view.url ?? tab?.url ?? ""
-  const address = draftAddress ?? (tabUrl === "about:blank" ? "" : tabUrl)
+  const shownUrl = entered?.from === tabUrl ? entered.url : tabUrl
+  const address = draftAddress ?? (shownUrl === "about:blank" ? "" : shownUrl)
 
   const point = (event: ReactMouseEvent | WheelEvent) => {
     const screen = screenRef.current
@@ -117,6 +123,7 @@ export function BrowserPanel({
   const navigate = () => {
     const url = addressUrl(address)
     if (!url || !sendInput({ type: "navigate", url })) return
+    setEntered({ url, from: tabUrl })
     setDraftAddress(null)
     stageRef.current?.focus()
   }

@@ -11,12 +11,12 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid7
 
 import httpx2
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, BeforeValidator, ValidationError
 from sqlalchemy import ColumnElement, ForeignKey, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -37,6 +37,8 @@ _BROWSER_REQUEST_TIMEOUT_SECONDS = 30.0
 _GONE_STATUSES = frozenset({"failed", "deleting"})
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
 _THREAD_METADATA_KEY = "browser_window"
+# LangSmith's answer for a route it does not have, as opposed to a browser it does not have.
+_ROUTE_MISSING = "The requested path does not exist"
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,11 @@ class BrowserTab(BaseModel):
     url: str = ""
 
 
+def _controller(value: object) -> object:
+    # Deployments older than the controller API call a person's control "human".
+    return "user" if value == "human" else value
+
+
 class BrowserWindow(BaseModel):
     """One window of a browser, attached to one sandbox."""
 
@@ -62,7 +69,7 @@ class BrowserWindow(BaseModel):
     sandbox: str = ""
     cdp_url: str = ""
     localhost_alias: str = ""
-    controller: Literal["agent", "user"]
+    controller: Annotated[Literal["agent", "user"], BeforeValidator(_controller)]
     reason: str = ""
     tabs: list[BrowserTab] = []
     view_url: str = ""
@@ -236,6 +243,10 @@ async def _browser_request(
         if exc.response.status_code == 501:
             raise BrowserUnavailableError(
                 "LangSmith's browser beta is not enabled for this deployment's workspace"
+            ) from exc
+        if exc.response.status_code == 404 and _ROUTE_MISSING in exc.response.text:
+            raise BrowserUnavailableError(
+                "This LangSmith deployment does not support that browser operation yet"
             ) from exc
         if exc.response.status_code == 404 and path.startswith(("/browsers/", "/boxes/")):
             raise BrowserGoneError(str(exc)) from exc
