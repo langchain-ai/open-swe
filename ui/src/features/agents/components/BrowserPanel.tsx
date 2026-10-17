@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
@@ -11,15 +11,21 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwis
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
 import { ArrowRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowRight"
 import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
+import { MagnifyingGlassMinusIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlassMinus"
+import { MagnifyingGlassPlusIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlassPlus"
 import type { MouseEvent as ReactMouseEvent, WheelEvent } from "react"
 
-import type { ViewerMessage } from "@/features/agents/lib/browserInput"
+import type {
+  StageZoom,
+  ViewerMessage,
+} from "@/features/agents/lib/browserInput"
 import {
   addressUrl,
   keyDownMessage,
   keyUpMessage,
   modifiers,
   pagePoint,
+  stageLayout,
 } from "@/features/agents/lib/browserInput"
 import { useBrowserView } from "@/features/agents/lib/browserView"
 import {
@@ -66,9 +72,29 @@ export function BrowserPanel({
   const [entered, setEntered] = useState<{ url: string; from: string } | null>(
     null
   )
-  const stageRef = useRef<HTMLDivElement>(null)
+  const [stage, setStage] = useState<HTMLDivElement | null>(null)
+  const [stageSize, setStageSize] = useState<{
+    width: number
+    height: number
+  } | null>(null)
+  // The panel is narrow and the window wide, so the frame zooms in and pans
+  // with the pointer by default rather than shrinking to a strip.
+  const [zoom, setZoom] = useState<StageZoom>("follow")
+  const [focus, setFocus] = useState({ x: 0.5, y: 0.5 })
   const screenRef = useRef<HTMLImageElement>(null)
   const lastMoveRef = useRef(0)
+
+  useEffect(() => {
+    if (!stage) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) {
+        const { width, height } = entry.contentRect
+        setStageSize({ width, height })
+      }
+    })
+    observer.observe(stage)
+    return () => observer.disconnect()
+  }, [stage])
 
   if (browser.isPending) {
     return (
@@ -125,11 +151,20 @@ export function BrowserPanel({
     if (!url || !sendInput({ type: "navigate", url })) return
     setEntered({ url, from: tabUrl })
     setDraftAddress(null)
-    stageRef.current?.focus()
+    stage?.focus()
   }
-  const aspect = view.metadata?.deviceHeight
-    ? view.metadata.deviceWidth / view.metadata.deviceHeight
-    : 16 / 10
+  const layout =
+    stageSize && view.metadata
+      ? stageLayout(
+          stageSize,
+          {
+            width: view.metadata.deviceWidth,
+            height: view.metadata.deviceHeight,
+          },
+          zoom,
+          focus
+        )
+      : null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -219,18 +254,39 @@ export function BrowserPanel({
           }
           onChange={setDraftAddress}
         />
+        <IconButton
+          icon={
+            zoom === "follow"
+              ? MagnifyingGlassMinusIcon
+              : MagnifyingGlassPlusIcon
+          }
+          label={
+            zoom === "follow"
+              ? "Fit the whole page"
+              : "Zoom in and follow the pointer"
+          }
+          variant="plain"
+          size="sm"
+          onClick={() => setZoom(zoom === "follow" ? "fit" : "follow")}
+        />
       </form>
       <div
-        ref={stageRef}
+        ref={setStage}
         role="application"
         aria-label="Browser window"
         tabIndex={0}
-        // The frame sizes itself against the stage's width and height.
-        style={{ containerType: "size" }}
         className={cn(
           "relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-surface-level-2 outline-none",
           canDrive ? "cursor-default" : "cursor-not-allowed"
         )}
+        onMouseMove={(event) => {
+          if (zoom !== "follow") return
+          const rect = event.currentTarget.getBoundingClientRect()
+          setFocus({
+            x: (event.clientX - rect.left) / rect.width,
+            y: (event.clientY - rect.top) / rect.height,
+          })
+        }}
         onKeyDown={(event) => {
           if (!canDrive) return
           const message = keyDownMessage(event)
@@ -255,11 +311,24 @@ export function BrowserPanel({
             src={view.frame}
             alt="Live view of the browser tab"
             draggable={false}
-            className="h-auto select-none"
-            style={{ width: `min(100cqw, 100cqh * ${aspect})` }}
+            className={cn(
+              "select-none",
+              layout
+                ? "absolute top-0 left-0 max-w-none transition-transform duration-fast ease-out"
+                : "max-h-full max-w-full"
+            )}
+            style={
+              layout && view.metadata
+                ? {
+                    width: view.metadata.deviceWidth * layout.scale,
+                    height: view.metadata.deviceHeight * layout.scale,
+                    transform: `translate(${layout.left}px, ${layout.top}px)`,
+                  }
+                : undefined
+            }
             onMouseDown={(event) => {
               event.preventDefault()
-              stageRef.current?.focus()
+              stage?.focus()
               mouse("mousePressed", event)
             }}
             onMouseUp={(event) => mouse("mouseReleased", event)}

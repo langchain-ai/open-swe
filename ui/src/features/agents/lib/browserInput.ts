@@ -91,3 +91,44 @@ export function addressUrl(typed: string): string | null {
   if (!url) return null
   return /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`
 }
+
+export type StageZoom = "fit" | "follow"
+
+interface Size {
+  width: number
+  height: number
+}
+
+/** Where the frame sits in the stage: its scale, and its offset from the stage's corner. */
+export interface StageLayout {
+  scale: number
+  left: number
+  top: number
+}
+
+/**
+ * Lays the page out in a stage of a different shape. `fit` shows all of it.
+ * `follow` zooms in until it fills the stage (never past one page pixel per
+ * screen pixel) and pans so the pointer's position in the stage, `focus` from
+ * 0 to 1 on each axis, shows the same position on the page: the stage's edges
+ * reach the page's edges, and a click lands where the pointer is.
+ */
+export function stageLayout(
+  stage: Size,
+  page: Size,
+  zoom: StageZoom,
+  focus: { x: number; y: number }
+): StageLayout {
+  const fit = Math.min(stage.width / page.width, stage.height / page.height)
+  const cover = Math.max(stage.width / page.width, stage.height / page.height)
+  const scale = zoom === "follow" ? Math.max(fit, Math.min(cover, 1)) : fit
+  const offset = (stageSize: number, size: number, at: number) =>
+    size <= stageSize
+      ? (stageSize - size) / 2
+      : -Math.min(Math.max(at, 0), 1) * (size - stageSize)
+  return {
+    scale,
+    left: offset(stage.width, page.width * scale, focus.x),
+    top: offset(stage.height, page.height * scale, focus.y),
+  }
+}
