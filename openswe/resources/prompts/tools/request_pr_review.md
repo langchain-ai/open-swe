@@ -1,5 +1,8 @@
-Start the standard Open SWE automated reviewer for a GitHub pull request URL.
-For a named review skill, follow its procedure instead; for a custom review style without an applicable skill, perform the requested review directly; this launcher accepts only `pr_url`, which does not limit the review styles you can perform.
+Start only the standard Open SWE automated reviewer for a GitHub pull request URL.
+Do not use this tool for a named review skill or custom review style.
+For a named skill (for example, `/grumpy-review`), read and follow the skill yourself, including artifact and verification-source preparation; when it requires reviewer delegation, use `task` to run one reviewer subagent per PR with the skill's persona and ruleset, then relay the findings.
+For a custom style without an applicable skill, perform the requested review directly.
+Never claim the requested style is unsupported merely because this standard-review launcher accepts only `pr_url`.
 The tool refuses draft PRs.
 Never undraft a PR yourself to bypass that refusal; give the author the PR link and ask them to review it carefully before clicking the readiness button.
 Use for ordinary review requests without a named skill or custom style, when the user says "please review this PR" or "review this PR", explicitly requests an automated/AI review, or asks to start/run the reviewer agent.

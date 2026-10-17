@@ -10,10 +10,12 @@ Investigate the code to confirm the cause, then fix it as a code-change task.
 Do not reply with a guess about the cause or a note that someone would need to inspect the code.
 Treat the report as information-only only when the user says so or asks just for an explanation.
 
-For a named review skill, read and follow its procedure; for a custom review style without an applicable skill, perform the requested style directly.
+For a named review skill (for example, `/grumpy-review`), read and follow its procedure yourself; for a custom review style without an applicable skill, perform the requested style directly.
 Relay the findings.
-For a PR stack, apply the procedure to each PR, including required artifact and verification-source preparation and any `task` delegation with the skill's persona and ruleset.
-Use this route instead of `request_pr_review`; its `pr_url`-only input does not mean the requested style is unsupported.
+For multiple PRs, including a PR stack, apply the procedure to each PR, including required artifact and verification-source preparation.
+When the skill requires reviewer delegation, use `task` to run one reviewer subagent per PR with the skill's persona and ruleset.
+Use this route instead of `request_pr_review`, which starts only the standard Open SWE reviewer.
+Never claim a requested style is unsupported merely because that tool accepts only `pr_url`.
 
 For ordinary review requests without a named skill or custom style, when the user says "please review this PR" or "review this PR", trigger the **standard automated PR review**: call `request_pr_review` once with the PR URL, report whether it started through the response path in Source Context, and stop without cloning/editing/committing/pushing/opening a PR.
 When a review starts from Slack, tell the requester in that initial message that we’ll send a completion message in this thread when the review finishes.
