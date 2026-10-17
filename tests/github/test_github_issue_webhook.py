@@ -65,8 +65,9 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     return f"v0={sig}"
 
 
+@pytest.mark.parametrize("action", ["opened", "edited"])
 async def test_github_webhook_skips_automatic_review_when_disabled(
-    monkeypatch, registry_db
+    monkeypatch, registry_db, action: str
 ) -> None:
     called = False
 
@@ -84,7 +85,8 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
     response = await _post_github_webhook(
         "pull_request",
         {
-            "action": "opened",
+            "action": action,
+            "changes": {"body": {"from": "Previous description"}},
             "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
             "pull_request": {"number": 1244},
         },
@@ -96,6 +98,34 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
         "reason": "Automatic review disabled for repository",
     }
     assert called is False
+
+
+@pytest.mark.parametrize("changed_field", ["body", "title", "base"])
+async def test_description_edit_triggers_review_only_for_body(
+    monkeypatch: pytest.MonkeyPatch, registry_db, changed_field: str
+) -> None:
+    process_review = AsyncMock()
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        webhook_common, "enforce_public_repo_org_gate", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(webhook_common, "update_agent_thread_pr_state", AsyncMock())
+    monkeypatch.setattr(github_webhooks, "process_github_pr_ready", process_review)
+    payload = {
+        "action": "edited",
+        "changes": {changed_field: {"from": "previous"}},
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+        "pull_request": {"number": 1244},
+    }
+
+    response = await _post_github_webhook("pull_request", payload)
+
+    assert response.status_code == 200
+    if changed_field == "body":
+        process_review.assert_awaited_once_with(payload)
+    else:
+        process_review.assert_not_awaited()
 
 
 async def test_github_webhook_launches_issue_automation_for_external_author(
