@@ -26,6 +26,9 @@ class ListedRepository(TypedDict):
     full_name: str
 
 
+INSTALLATION_PERMISSIONS = {"contents": "write", "actions": "write"}
+
+
 @pytest.fixture
 def github_requests() -> list[httpx.Request]:
     return []
@@ -52,6 +55,8 @@ def github(
 
     def handle(request: httpx.Request) -> httpx.Response:
         github_requests.append(request)
+        if request.url.path == "/app/installations/2":
+            return httpx.Response(200, json={"permissions": INSTALLATION_PERMISSIONS})
         if request.url.path.endswith("/access_tokens"):
             body = json.loads(request.content or b"{}")
             requested = body.get("repository_ids")
@@ -389,6 +394,8 @@ async def test_repository_access_uses_later_installation_pages(
     requests: list[dict[str, object]] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/app/installations/2":
+            return httpx.Response(200, json={"permissions": INSTALLATION_PERMISSIONS})
         if request.method == "POST":
             body = json.loads(request.content or b"{}")
             requests.append(body)
@@ -418,7 +425,10 @@ async def test_repository_access_uses_later_installation_pages(
     try:
         access = await sandbox_access.repository_token(["acme/api"])
         assert access.token == "test-token"
-        assert requests[-1] == {"repository_ids": [101]}
+        assert requests[-1] == {
+            "repository_ids": [101],
+            "permissions": {"contents": "write", "actions": "read"},
+        }
     finally:
         app.clear_app_token_cache()
 

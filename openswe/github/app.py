@@ -154,6 +154,29 @@ async def _local_dev_token() -> str | None:
     return await gh_token()
 
 
+async def _permissions_without_actions_write(installation_id: int) -> PermissionMap:
+    """Everything the installation was granted, with Actions capped at read.
+
+    Only workflow dispatch asks for Actions: write, explicitly; every other token
+    must not inherit it.
+    """
+    async with github_sdk(_app_auth()) as client:
+        installation = await client.rest(GITHUB_API_VERSION).apps.async_get_installation(
+            installation_id
+        )
+    granted = installation.json().get("permissions")
+    if not isinstance(granted, dict) or not granted:
+        raise ValueError("Could not resolve installation permissions safely")
+    permissions = {
+        name: level
+        for name, level in granted.items()
+        if isinstance(name, str) and isinstance(level, str) and name != "actions"
+    }
+    if granted.get("actions") in {"read", "write"}:
+        permissions["actions"] = "read"
+    return permissions or {"metadata": "read"}
+
+
 async def get_github_app_installation_token_with_expiry(
     *,
     installation_id: str | int | None = None,
@@ -178,19 +201,19 @@ async def get_github_app_installation_token_with_expiry(
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
 
-    key = _scope_key(resolved_installation_id, repository_ids, repositories, permissions)
-    now = datetime.now(UTC)
-    cached = _cached_token(key, now=now)
-    if cached is not None:
-        return cached
-
-    body: AppInstallationsInstallationIdAccessTokensPostBodyType = {}
-    if repository_ids:
-        body["repository_ids"] = list(repository_ids)
-    elif repositories:
-        body["repositories"] = list(repositories)
-    permission_key = normalize_permissions(permissions)
     try:
+        if not permissions:
+            permissions = await _permissions_without_actions_write(int(resolved_installation_id))
+        key = _scope_key(resolved_installation_id, repository_ids, repositories, permissions)
+        cached = _cached_token(key, now=datetime.now(UTC))
+        if cached is not None:
+            return cached
+        body: AppInstallationsInstallationIdAccessTokensPostBodyType = {}
+        if repository_ids:
+            body["repository_ids"] = list(repository_ids)
+        elif repositories:
+            body["repositories"] = list(repositories)
+        permission_key = normalize_permissions(permissions)
         if permission_key:
             body["permissions"] = TypeAdapter(AppPermissionsType).validate_python(
                 dict(permission_key), extra="forbid"

@@ -266,6 +266,7 @@ from openswe.tools.admin_gate import (
     actor_has_admin_context,
     participant_is_admin,
 )
+from openswe.tools.github_workflows import manage_workflow_allowlist, trigger_github_workflow
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
@@ -1831,6 +1832,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_feature_flags,
         manage_review_approval_mode,
         manage_review_repos,
+        manage_workflow_allowlist,
+        trigger_github_workflow,
     ]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
