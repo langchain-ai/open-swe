@@ -1,10 +1,8 @@
-"""MDA's Linear channel hands the backend genuine Linear deliveries, and only it can."""
+"""MDA's Linear channel hands the backend the Linear events it verified, and only it can."""
 
-import hashlib
-import hmac
 import json
-import time
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
@@ -14,14 +12,12 @@ from fastapi import FastAPI
 from openswe.linear import channel
 
 _SERVICE_SECRET = "service-secret"  # noqa: S105 - test value
-_SIGNING_SECRET = "lin_wh_signing"  # noqa: S105 - test value
 _THREAD = str(uuid.uuid4())
 
 
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
-    monkeypatch.setattr("openswe.webhooks.common.LINEAR_WEBHOOK_SECRET", _SIGNING_SECRET)
     record = AsyncMock(return_value=True)
     monkeypatch.setattr("openswe.linear.channel.EventLog.record", record)
     automations = AsyncMock()
@@ -33,18 +29,12 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     return api
 
 
-def _delivery(payload: dict[str, object], *, signed_with: str = _SIGNING_SECRET) -> dict[str, str]:
-    raw = json.dumps({"webhookTimestamp": int(time.time() * 1000), **payload})
-    return {
-        "thread_id": _THREAD,
-        "delivery_id": "delivery-1",
-        "raw_body": raw,
-        "signature": hmac.new(signed_with.encode(), raw.encode(), hashlib.sha256).hexdigest(),
-    }
+def _event(key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {"thread_id": _THREAD, "delivery_id": "delivery-1", "key": key, "payload": payload}
 
 
 async def _post(
-    app: FastAPI, path: str, body: dict[str, str], secret: str | None = _SERVICE_SECRET
+    app: FastAPI, path: str, body: dict[str, Any], secret: str | None = _SERVICE_SECRET
 ) -> httpx.Response:
     headers = {"x-mda-service-secret": secret} if secret is not None else {}
     async with httpx.AsyncClient(
@@ -56,35 +46,89 @@ async def _post(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("secret", [None, "guess"])
 async def test_only_the_mda_deployment_may_call(app: FastAPI, secret: str | None) -> None:
-    response = await _post(app, "/events", _delivery({"type": "Issue"}), secret)
+    response = await _post(app, "/events", _event("Issue.create", {"type": "Issue"}), secret)
     assert response.status_code == 401
     app.state.record.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_only_genuine_fresh_linear_deliveries_count(app: FastAPI) -> None:
-    forged = _delivery({"type": "Issue", "action": "create"}, signed_with="other-secret")
-    assert (await _post(app, "/events", forged)).status_code == 401
-    stale = _delivery({"type": "Issue", "action": "create"})
-    stale["raw_body"] = json.dumps({"type": "Issue", "action": "create", "webhookTimestamp": 1})
-    stale["signature"] = hmac.new(
-        _SIGNING_SECRET.encode(), stale["raw_body"].encode(), hashlib.sha256
-    ).hexdigest()
-    assert (await _post(app, "/events", stale)).status_code == 401
+async def test_nobody_may_call_without_a_configured_secret(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MDA_SERVICE_SECRET")
+    response = await _post(app, "/events", _event("Issue.create", {"type": "Issue"}), "")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_unknown_events_and_oversized_payloads_are_refused(app: FastAPI) -> None:
+    assert (await _post(app, "/events", _event("Issue.remove", {}))).status_code == 422
+    huge = _event("Issue.create", {"type": "Issue", "data": {"description": "x" * 1_000_001}})
+    assert (await _post(app, "/events", huge)).status_code == 422
     app.state.record.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_issue_events_are_logged_and_run_automations(app: FastAPI) -> None:
-    response = await _post(app, "/events", _delivery({"type": "Issue", "action": "create"}))
+    payload = {"type": "Issue", "action": "create", "actor": {"email": "ada@example.com"}}
+    response = await _post(app, "/events", _event("Issue.create", payload))
     assert response.status_code == 200
-    app.state.record.assert_awaited_once()
-    payload, delivery_id = app.state.automations.await_args.args
-    assert (payload["type"], delivery_id) == ("Issue", "delivery-1")
+    _request, body, source = app.state.record.await_args.args
+    kwargs = app.state.record.await_args.kwargs
+    # The event log keeps the payload the channel validated, as JSON.
+    assert (json.loads(body), source) == (payload, "linear")
+    assert (kwargs["event_type"], kwargs["delivery_id"]) == ("Issue", "delivery-1")
+    assert kwargs["refs"].email == "ada@example.com"
+    automation_payload, delivery_id = app.state.automations.await_args.args
+    assert (automation_payload, delivery_id) == (payload, "delivery-1")
 
 
 @pytest.mark.asyncio
-async def test_a_delivery_that_is_no_session_turn_starts_no_run(app: FastAPI) -> None:
-    response = await _post(app, "/runs", _delivery({"type": "Comment", "action": "create"}))
+async def test_comments_are_logged_without_automations(app: FastAPI) -> None:
+    response = await _post(app, "/events", _event("Comment.create", {"type": "Comment"}))
+    assert response.status_code == 200
+    app.state.record.assert_awaited_once()
+    app.state.automations.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_event_that_is_no_session_turn_starts_no_run(app: FastAPI) -> None:
+    response = await _post(app, "/runs", _event("Comment.create", {"type": "Comment"}))
     assert response.status_code == 200
     assert response.json() == {"run": None}
+
+
+@pytest.mark.asyncio
+async def test_a_session_turn_is_prepared_on_the_sessions_thread(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = {
+        "input": {"messages": []},
+        "context": {"graph": "agent"},
+        "metadata": {"channel": "linear"},
+    }
+    prepare = AsyncMock(return_value=prepared)
+    monkeypatch.setattr(channel.LinearSessionTurn, "prepare_run", prepare)
+    payload = {
+        "type": "AgentSessionEvent",
+        "action": "created",
+        "agentSession": {
+            "id": "session-1",
+            "issue": {"id": "issue-1", "identifier": "ENG-1", "title": "Bug"},
+            "comment": {"id": "comment-1", "body": "@Open SWE fix it"},
+        },
+    }
+
+    response = await _post(app, "/runs", _event("AgentSessionEvent.created", payload))
+
+    assert response.status_code == 200
+    assert response.json() == {"run": prepared}
+    (thread_id,) = prepare.await_args.args
+    assert thread_id == _THREAD
+    turn = channel.LinearSessionTurn.parse("AgentSessionEvent.created", payload)
+    assert turn is not None
+    assert (turn.session_id, turn.issue.id, turn.body) == (
+        "session-1",
+        "issue-1",
+        "@Open SWE fix it",
+    )

@@ -23,6 +23,7 @@ class TestLinearSessionRepository:
     @staticmethod
     def _turn(body: str) -> LinearSessionTurn:
         turn = LinearSessionTurn.parse(
+            "AgentSessionEvent.created",
             {
                 "type": "AgentSessionEvent",
                 "action": "created",
@@ -32,7 +33,7 @@ class TestLinearSessionRepository:
                     "comment": {"id": "comment-123", "body": body},
                     "creator": {"id": "user-1", "name": "Test User"},
                 },
-            }
+            },
         )
         assert turn is not None
         return turn

@@ -11,6 +11,10 @@ keeps working unchanged:
   deployment's Agent Server for ``local`` threads, Managed Deep Agents for
   ``mda`` ones. A run started there marks the thread busy; the run-complete
   webhook and a reconcile job settle it.
+- Reads reach MDA as LangSmith Studio's, which may read every thread; writes stay
+  scoped to the threads the backend owns. A thread an MDA channel owns (its index
+  metadata names the ``channel``) is read-only here: the channel starts its runs,
+  so a run, a cancel, a state write or a copy is refused with 409.
 - A thread the index does not know yet is read from the Agent Server, indexed,
   and served from then on.
 """
@@ -27,6 +31,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from openswe.api.agent_server_auth import backend_call
+from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
 from openswe.remote_runtime.asgi import (
     StatusRecorder,
     forward,
@@ -56,6 +61,17 @@ _THREAD: Final = re.compile(r"^(?:/noauth)?/threads/(?P<thread_id>[0-9a-fA-F-]{3
 _CANCEL_MANY: Final = re.compile(r"^(?:/noauth)?/runs/cancel$")
 _CREATE_RUN: Final = re.compile(r"^/runs(?:/stream|/wait)?$")
 _CREATE_CRON: Final = "/runs/crons"
+# Thread routes that read though they are POSTs.
+_POST_READS: Final = frozenset({"/history", "/state/checkpoint"})
+# Protocol v2 commands that only watch a thread; ``run.start`` and ``input.respond`` act.
+_READ_COMMANDS: Final = frozenset(
+    {
+        "agent.getTree",
+        "subscription.subscribe",
+        "subscription.unsubscribe",
+        "subscription.reconnect",
+    }
+)
 
 
 def _routed(scope: Scope) -> bool:
@@ -96,19 +112,55 @@ async def _move_to_mda(thread_id: str) -> IndexedThread | None:
     return moved
 
 
-async def adopt_channel_run(thread_id: str) -> None:
+async def adopt_channel_run(thread_id: str, channel: str) -> None:
     """Index an MDA channel's thread for the run the channel is about to start on it.
 
     The channel creates the thread on MDA as its conversation's own, so unlike a
-    claim this never creates it there. Busy now, so the dashboard shows the run;
-    its run-complete webhook settles it.
+    claim this never creates it there, and marks it the channel's, so it stays
+    read-only here. Busy now, so the dashboard shows the run; the run's
+    ``after_agent`` hook settles it, or the reconcile job when the run crashed.
     """
     thread = await index.get(thread_id)
     if thread is None:
         raise LookupError(f"Thread {thread_id} is not indexed")
     if thread.runtime != "mda":
         await _move_to_mda(thread_id)
+    if channel_of(thread.metadata) != channel:
+        await index.update(thread_id, {CHANNEL_METADATA_KEY: channel})
+        await RUNTIMES.local.update(thread_id, {CHANNEL_METADATA_KEY: channel})
     await index.set_status(thread_id, "busy")
+
+
+def _reads(method: str, rest: str, body: bytes) -> bool:
+    """Whether a call to a thread's runtime only reads it."""
+    if method in {"GET", "HEAD"}:
+        return True
+    if method != "POST":
+        return False
+    if rest in _POST_READS:
+        return True
+    if rest == "/commands":
+        command = json_body(body) or {}
+        return command.get("method") in _READ_COMMANDS
+    return False
+
+
+async def _refuse_channel_write(send: Send, thread: IndexedThread) -> bool:
+    """Refuse a write to a thread an MDA channel owns; ``False`` when the thread is not one."""
+    channel = channel_of(thread.metadata)
+    if channel is None:
+        return False
+    await send_json(
+        send,
+        409,
+        {
+            "detail": (
+                f"Thread {thread.thread_id} belongs to the {channel} channel, which starts "
+                f"its runs: continue the conversation in {channel.capitalize()}."
+            )
+        },
+    )
+    return True
 
 
 async def _not_found(send: Send, thread_id: str) -> None:
@@ -315,6 +367,8 @@ class ThreadRouter:
                 await _not_found(send, thread_id)
                 return
             thread = await self._index_new(thread_id, {}, if_exists="do_nothing")
+        if await _refuse_channel_write(send, thread):
+            return
         thread = await self._claim_for_mda(thread, payload.get("assistant_id"))
         # Busy before the answer reaches the caller, so a run that ends at once
         # is not marked busy after its run-complete webhook settled it.
@@ -337,6 +391,19 @@ class ThreadRouter:
             return
         params = command.get("params")
         if command.get("method") == "run.start" and isinstance(params, dict):
+            if (channel := channel_of(thread.metadata)) is not None:
+                await send_json(
+                    send,
+                    200,
+                    {
+                        "type": "error",
+                        "id": command.get("id", 0),
+                        "error": "invalid_argument",
+                        "message": f"This thread belongs to the {channel} channel, which "
+                        f"starts its runs: continue the conversation in {channel.capitalize()}.",
+                    },
+                )
+                return
             thread = await self._claim_for_mda(thread, params.get("assistant_id"))
             if thread.runtime == "mda":
                 reply = await RUNTIMES.mda_runtime.start_command_run(thread_id, command, params)
@@ -354,6 +421,8 @@ class ThreadRouter:
         """A first state write (an upload, a fork) decides the runtime as a first run would."""
         thread = await self._thread(thread_id)
         if thread is not None:
+            if await _refuse_channel_write(send, thread):
+                return
             graph = thread.metadata.get("graph_id") or "agent"
             await self._claim_for_mda(thread, graph)
         await self._to_runtime(scope, receive, send, body, thread_id)
@@ -363,6 +432,8 @@ class ThreadRouter:
         thread = await self._thread(thread_id)
         if thread is None:
             await _not_found(send, thread_id)
+            return
+        if await _refuse_channel_write(send, thread):
             return
         made = _object.validate_python(
             await RUNTIMES.runs_on(thread.runtime).client.http.post(
@@ -386,9 +457,16 @@ class ThreadRouter:
     ) -> None:
         thread = await self._thread(thread_id)
         if thread is not None and thread.runtime == "mda":
+            match = _THREAD.match(scope["path"])
+            rest = (match["rest"] or "") if match else ""
+            reads = _reads(scope["method"], rest, body)
+            if not reads and await _refuse_channel_write(send, thread):
+                return
             mda = RUNTIMES.mda_runtime
-            await mda.ensure_remote_thread(thread_id)
-            await forward(mda.http, scope, send, body)
+            if channel_of(thread.metadata) is None:
+                # The channel created its threads there; the backend's own may need it.
+                await mda.ensure_remote_thread(thread_id)
+            await forward(mda.read_http if reads else mda.http, scope, send, body)
             return
         await self.app(scope, receive, send)
 

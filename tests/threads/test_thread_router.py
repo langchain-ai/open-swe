@@ -97,6 +97,8 @@ class _Runtimes:
 class _Harness:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.forwarded: list[tuple[str, dict[str, JsonValue]]] = []
+        # Calls that reached MDA through its read client, as (method, path).
+        self.read: list[tuple[str, str]] = []
         self.reached_here: list[str] = []
         self.local_status = 200
 
@@ -107,6 +109,14 @@ class _Harness:
         mda_runtime = runtimes.MdaRuntime("http://mda.test")
         mda_runtime._http = httpx.AsyncClient(
             base_url=mda_runtime.url, transport=httpx.MockTransport(mda)
+        )
+
+        def mda_reads(request: httpx.Request) -> httpx.Response:
+            self.read.append((request.method, request.url.path))
+            return httpx.Response(200, json={})
+
+        mda_runtime._read_http = httpx.AsyncClient(
+            base_url=mda_runtime.url, transport=httpx.MockTransport(mda_reads)
         )
         mda_runtime._mda_threads.add(THREAD)
         self.runtimes = _Runtimes(mda_runtime)
@@ -297,15 +307,115 @@ async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
         "POST", "/threads", {"thread_id": THREAD, "metadata": {"source": "linear"}}
     )
 
-    await router.adopt_channel_run(THREAD)
+    await router.adopt_channel_run(THREAD, "linear")
 
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.runtime == "mda"
     assert indexed.status == "busy"
+    assert indexed.metadata["channel"] == "linear"
     assert harness.runtimes.local.threads[THREAD]["metadata"]["runtime"] == "mda"
     # MDA's channel creates it as its conversation's own thread; a copy made
     # here first would belong to the backend and keep the channel out.
     assert THREAD not in harness.runtimes.mda.threads
+
+
+async def _channel_thread(harness: _Harness) -> None:
+    await harness.request(
+        "POST", "/threads", {"thread_id": THREAD, "metadata": {"source": "linear"}}
+    )
+    await router.adopt_channel_run(THREAD, "linear")
+    harness.runtimes.mda_runtime._mda_threads.discard(THREAD)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("POST", "/runs", {"assistant_id": "agent", "input": {}}),
+        ("POST", "/runs/stream", {"assistant_id": "agent", "input": {}}),
+        ("POST", "/state", {"values": {}}),
+        ("POST", "/copy", {}),
+        ("POST", "/runs/run-1/cancel", None),
+        ("POST", "/commands", {"id": 1, "method": "input.respond", "params": {}}),
+    ],
+)
+async def test_a_channel_thread_refuses_writes(
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue
+) -> None:
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    status, reply = await harness.request(method, f"/threads/{THREAD}{path}", body)
+
+    # The channel starts its threads' runs; the backend can't, and says so.
+    assert status == 409
+    assert isinstance(reply, dict) and "linear channel" in str(reply["detail"])
+    assert harness.forwarded == [] and harness.read == []
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.runtime == "mda"
+
+
+async def test_a_channel_thread_refuses_a_run_started_by_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+    command = {"id": 7, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}}
+
+    status, reply = await harness.request("POST", f"/threads/{THREAD}/commands", command)
+
+    assert status == 200
+    assert isinstance(reply, dict) and (reply["type"], reply["id"]) == ("error", 7)
+    assert harness.forwarded == []
+
+
+async def test_a_cancel_of_every_run_on_a_channel_thread_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    status, _ = await harness.request("POST", "/runs/cancel", {"thread_id": THREAD})
+
+    assert status == 409
+    assert harness.forwarded == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/state", None),
+        ("GET", "/runs", None),
+        ("GET", "/runs/run-1/join", None),
+        ("POST", "/history", {"limit": 10}),
+        ("POST", "/commands", {"id": 1, "method": "subscription.subscribe", "params": {}}),
+    ],
+)
+async def test_reads_reach_mda_as_studio_for_channel_and_own_threads(
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue
+) -> None:
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    status, _ = await harness.request(method, f"/threads/{THREAD}{path}", body)
+
+    assert status == 200
+    assert harness.read == [(method, f"/threads/{THREAD}{path}")]
+    assert harness.forwarded == []
+    # The channel created the thread on MDA; the backend creates no copy of its own.
+    assert THREAD not in harness.runtimes.mda_runtime._mda_threads
+
+
+async def test_writes_to_the_backends_own_mda_threads_go_through_the_owner_scoped_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    await index.create(THREAD, runtime="mda")
+
+    await harness.request("POST", f"/threads/{THREAD}/runs/run-1/cancel")
+    await harness.request("GET", f"/threads/{THREAD}/state")
+
+    assert [path for path, _ in harness.forwarded] == [f"/threads/{THREAD}/runs/run-1/cancel"]
+    assert harness.read == [("GET", f"/threads/{THREAD}/state")]
 
 
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:

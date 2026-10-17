@@ -85,9 +85,19 @@ class RunMetadata(BaseModel):
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
 # Run metadata ``kind`` of a run started only to deliver store leftovers.
 FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
-#: Run metadata naming the MDA channel that started the run. The channel answers in its
-#: conversation, failures included, so nothing else replies there for that run.
+#: Names the MDA channel (``linear``, ``github``, ...) that owns a thread or started a
+#: run, in run metadata and in the thread index's metadata alike. The channel answers
+#: in its conversation, failures included, and starts every run on its threads, so the
+#: backend neither replies there nor starts runs on them.
 CHANNEL_METADATA_KEY = "channel"
+
+
+def channel_of(metadata: Mapping[str, Any] | None) -> str | None:
+    """The MDA channel ``metadata`` (a run's or a thread's) names, whatever the provider."""
+    channel = (metadata or {}).get(CHANNEL_METADATA_KEY)
+    return channel if isinstance(channel, str) and channel else None
+
+
 # The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
 # the REST ``POST /runs`` schema.
 V3_RUN_STREAM_MODES: tuple[str, ...] = (

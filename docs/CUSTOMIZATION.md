@@ -314,8 +314,9 @@ have been removed. Configure agent access to LangSmith through Workspace MCPs.
 Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
 `LANGSMITH_ENDPOINT`. Linear sessions arrive through the MDA deployment's Linear
 channel, which posts the agent's answer in the session; configure other Linear
-operations through Workspace MCPs. Failure notices for runs the backend starts on
-a Linear thread use the workspace connection named `linear` and its
+operations through Workspace MCPs. The channel reports a session's failed run in
+the session. Notices a run posts on its issue itself, such as a failing sandbox,
+use the workspace connection named `linear` and its
 selected `save_comment` tool (`create_comment` is also supported). These notices
 run independently of the agent and honor the connection's enabled state and tool
 selection. Delivery failures are logged without marking the run as notified.

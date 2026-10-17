@@ -385,11 +385,11 @@ A workflow that names no `repo` works in its own repository. A machine caller re
 <details id="linear">
 <summary><strong>Linear</strong></summary>
 
-Open SWE works in Linear as an app, through the Linear channel of its Managed Deep Agents deployment (`mda/channels/linear.py`). Mentioning the app on an issue, or delegating the issue to it, opens an agent session. The agent answers there, a reply in the session continues the conversation, and **Stop** cancels the run. One issue is one conversation.
+Open SWE works in Linear as an app, through the Linear channel of its Managed Deep Agents deployment (`mda/channels/linear.py`). Mentioning the app on an issue, or delegating the issue to it, opens an agent session. The agent answers there, a reply in the session continues the conversation, and **Stop** cancels the run. Each session is its own conversation and thread; mentioning the app again on the same issue opens a new one. The dashboard shows these threads read-only: continue them in Linear.
 
-1. Pick a secret (`openssl rand -hex 32`) and set it as `MDA_SERVICE_SECRET` in both `mda/.env` and the backend's environment. The backend presents it as the deployment's trusted service, so it can serve and continue Linear sessions' threads, and the deployment presents it when it hands Linear deliveries to the backend.
-2. Run `mda deploy` in `mda/`. Deploy sets up the Linear app, which takes a Linear workspace admin: it opens Linear's new-app page filled in with the app's name, redirect URI, webhook URL and events, then asks for the app's client ID, client secret and webhook signing secret, and the admin approves the install. Set the same signing secret as `LINEAR_WEBHOOK_SECRET` on the backend: the backend checks every delivery's signature again before acting on it.
-3. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use to read issues and change them. Include `save_comment` (or `create_comment` if offered) so the backend can post failure notices for runs it starts on a Linear thread, such as follow-ups.
+1. Pick a secret (`openssl rand -hex 32`) and set it as `MDA_SERVICE_SECRET` in both `mda/.env` and the backend's environment. The deployment presents it when it hands Linear events to the backend, which answers no one else on those routes.
+2. Run `mda deploy` in `mda/`. Deploy sets up the Linear app, which takes a Linear workspace admin: it opens Linear's new-app page filled in with the app's name, redirect URI, webhook URL and events, then asks for the app's client ID, client secret and webhook signing secret, and the admin approves the install. The deployment checks each delivery's signature with that secret; the backend needs no Linear secret.
+3. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use to read issues and change them. Include `save_comment` (or `create_comment` if offered) so a run can still post a notice on the issue, such as when its sandbox keeps failing; the session's answer and errors need no tool.
 4. Set a workspace default repository under **Open SWE Agent**. Add a `repo:owner/name` token or GitHub URL to the message that mentions the app when the issue belongs to another repository.
 
 Issue events still reach workspace automations and `listen_events`: the channel forwards them to the backend.
@@ -455,7 +455,7 @@ Open SWE keeps all of its state in PostgreSQL and no longer reads the LangGraph 
 
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab. A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
 - Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack. `mda deploy` subscribes the Linear app to the events its channel handles.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401. Linear deliveries reach the backend only from the MDA deployment, which needs `MDA_SERVICE_SECRET` on both sides and `LINEAR_WEBHOOK_SECRET` on the backend.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401. Linear deliveries reach the backend only from the MDA deployment, which verifies them and needs `MDA_SERVICE_SECRET` on both sides.
 
 ### Thread credential scope
 

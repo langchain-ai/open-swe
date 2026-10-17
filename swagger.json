@@ -1921,41 +1921,6 @@
         "title": "FixIntent",
         "type": "object"
       },
-      "ForwardedDelivery": {
-        "description": "A Linear delivery the channel received, forwarded as Linear sent it.",
-        "properties": {
-          "delivery_id": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Delivery Id",
-            "type": "string"
-          },
-          "raw_body": {
-            "maxLength": 1000000,
-            "title": "Raw Body",
-            "type": "string"
-          },
-          "signature": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Signature",
-            "type": "string"
-          },
-          "thread_id": {
-            "format": "uuid",
-            "title": "Thread Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "thread_id",
-          "delivery_id",
-          "raw_body",
-          "signature"
-        ],
-        "title": "ForwardedDelivery",
-        "type": "object"
-      },
       "FunctionCallItem": {
         "description": "A call the client runs itself and answers with a ``function_call_output``.",
         "properties": {
@@ -2481,6 +2446,48 @@
           "body"
         ],
         "title": "LineComment",
+        "type": "object"
+      },
+      "LinearChannelEvent": {
+        "description": "A Linear event the channel received and verified, on the thread it belongs to.",
+        "properties": {
+          "delivery_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Delivery Id",
+            "type": "string"
+          },
+          "key": {
+            "enum": [
+              "Issue.create",
+              "Issue.update",
+              "Comment.create",
+              "AgentSessionEvent.created",
+              "AgentSessionEvent.prompted"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Payload",
+            "type": "object"
+          },
+          "thread_id": {
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "delivery_id",
+          "key",
+          "payload"
+        ],
+        "title": "LinearChannelEvent",
         "type": "object"
       },
       "LinearTrigger": {
@@ -3957,10 +3964,6 @@
             },
             "title": "Metadata",
             "type": "object"
-          },
-          "webhook": {
-            "title": "Webhook",
-            "type": "string"
           }
         },
         "required": [
@@ -21311,7 +21314,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ForwardedDelivery"
+                "$ref": "#/components/schemas/LinearChannelEvent"
               }
             }
           },
@@ -21348,13 +21351,13 @@
     },
     "/linear/channel/runs": {
       "post": {
-        "description": "Prepare the run an agent session turn starts on the channel's thread.",
+        "description": "Prepare the run an agent session turn starts on its session's thread.",
         "operationId": "prepare_linear_run_linear_channel_runs_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ForwardedDelivery"
+                "$ref": "#/components/schemas/LinearChannelEvent"
               }
             }
           },

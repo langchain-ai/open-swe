@@ -215,9 +215,9 @@ ENV.var(
 )
 ENV.var(
     "MDA_SERVICE_SECRET",
-    "Secret shared with MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): the backend presents it as "
-    "MDA's trusted service, so it serves channel threads too, and MDA's channels present it "
-    "to /linear/channel/*. Required for the Linear channel.",
+    "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): its "
+    "channels present it when they hand events to /linear/channel/*. Open SWE's own "
+    "credential between the two; required for the Linear channel.",
     secret=True,
 )
 ENV.var(
@@ -309,7 +309,6 @@ ENV.var(
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
 ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
-ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(

@@ -136,6 +136,8 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
         ("success", {"kind": "follow_up_pickup"}, False, False, False),
         ("success", {}, True, False, True),
         ("success", {}, True, True, False),
+        # An MDA channel starts every run on its threads; the backend can't start one there.
+        ("success", {"channel": "linear"}, False, False, False),
     ],
 )
 async def test_leftover_follow_ups_get_one_pickup_run(

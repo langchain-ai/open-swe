@@ -1,78 +1,65 @@
 """Routes for MDA's Linear channel.
 
-The channel receives Linear's webhooks in the MDA deployment and forwards each
-delivery here exactly as Linear sent it. The backend checks Linear's signature
-again, so only genuine deliveries start runs, and decides what they do.
+The channel receives Linear's webhooks in the MDA deployment, verifies each
+delivery's signature and age, and hands the event here: its key and the payload
+it validated. The backend decides what the event does. Only the deployment, which
+holds Open SWE's shared secret, may call these routes.
 """
 
-import hmac
 import json
-import time
-from typing import TypedDict
+from typing import Literal, Self, TypedDict
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from pydantic import BaseModel, Field, JsonValue, model_validator
 
-from openswe.config import ENV
 from openswe.linear.session import LinearSessionTurn, PreparedRun
-from openswe.remote_runtime.client import MDA_SERVICE_SECRET_HEADER
+from openswe.mda_channels.auth import require_mda_channel
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
 
-# Linear signs webhookTimestamp with the body; an older delivery is a replay.
-_MAX_DELIVERY_AGE_MS = 60_000
 # Linear's deliveries are a few kilobytes; anything near this is not one.
-_MAX_BODY_CHARS = 1_000_000
+_MAX_PAYLOAD_CHARS = 1_000_000
+
+LinearEventKey = Literal[
+    "Issue.create",
+    "Issue.update",
+    "Comment.create",
+    "AgentSessionEvent.created",
+    "AgentSessionEvent.prompted",
+]
+
+router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 
 
-def _require_mda_channel(request: Request) -> None:
-    """Only the MDA deployment, which shares the service secret, calls these routes."""
-    expected = ENV.MDA_SERVICE_SECRET.optional()
-    provided = request.headers.get(MDA_SERVICE_SECRET_HEADER, "")
-    if not expected or not provided or not hmac.compare_digest(expected, provided):
-        raise HTTPException(status_code=401, detail="Invalid service credential")
-
-
-router = APIRouter(prefix="/linear/channel", dependencies=[Depends(_require_mda_channel)])
-
-
-class ForwardedDelivery(BaseModel):
-    """A Linear delivery the channel received, forwarded as Linear sent it."""
+class LinearChannelEvent(BaseModel):
+    """A Linear event the channel received and verified, on the thread it belongs to."""
 
     thread_id: UUID
     delivery_id: str = Field(min_length=1, max_length=200)
-    raw_body: str = Field(max_length=_MAX_BODY_CHARS)
-    signature: str = Field(min_length=1, max_length=200)
+    key: LinearEventKey
+    payload: dict[str, JsonValue]
 
-    def payload(self) -> dict[str, object]:
-        """The delivery's payload, once Linear's signature and its age check out."""
-        raw = self.raw_body.encode()
-        if not common.verify_linear_signature(raw, self.signature, common.LINEAR_WEBHOOK_SECRET):
-            raise HTTPException(status_code=401, detail="Invalid signature")
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="Invalid JSON") from exc
-        if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="Invalid payload")
-        timestamp = payload.get("webhookTimestamp")
-        if not isinstance(timestamp, int) or abs(time.time() * 1000 - timestamp) > (
-            _MAX_DELIVERY_AGE_MS
-        ):
-            raise HTTPException(status_code=401, detail="Stale webhook timestamp")
-        return payload
+    @model_validator(mode="after")
+    def _bounded(self) -> Self:
+        if len(self.body()) > _MAX_PAYLOAD_CHARS:
+            raise ValueError("payload is too large")
+        return self
 
-    async def record(self, request: Request, payload: dict[str, object]) -> None:
-        """Log the delivery and wake the threads that listen for Linear events."""
-        raw = self.raw_body.encode()
+    def body(self) -> bytes:
+        """The payload as JSON, as the event log keeps deliveries."""
+        return json.dumps(self.payload).encode()
+
+    async def record(self, request: Request) -> None:
+        """Log the event and wake the threads that listen for Linear events."""
+        body = self.body()
         await EventLog.record(
             request,
-            raw,
+            body,
             "linear",
-            event_type=str(payload.get("type") or ""),
+            event_type=str(self.payload.get("type") or ""),
             delivery_id=self.delivery_id,
-            refs=EventRefs.linear(raw),
+            refs=EventRefs.linear(body),
         )
 
 
@@ -83,17 +70,16 @@ class PreparedLinearRun(TypedDict):
 
 
 @router.post("/runs")
-async def prepare_linear_run(request: Request, delivery: ForwardedDelivery) -> PreparedLinearRun:
-    """Prepare the run an agent session turn starts on the channel's thread."""
-    payload = delivery.payload()
-    await delivery.record(request, payload)
-    turn = LinearSessionTurn.parse(payload)
+async def prepare_linear_run(request: Request, event: LinearChannelEvent) -> PreparedLinearRun:
+    """Prepare the run an agent session turn starts on its session's thread."""
+    await event.record(request)
+    turn = LinearSessionTurn.parse(event.key, event.payload)
     if turn is None:
         return {"run": None}
-    return {"run": await turn.prepare_run(str(delivery.thread_id))}
+    return {"run": await turn.prepare_run(str(event.thread_id))}
 
 
-async def _launch_automations(payload: dict[str, object], delivery_id: str) -> None:
+async def _launch_automations(payload: dict[str, JsonValue], delivery_id: str) -> None:
     from openswe.schedules.store import launch_linear_automations
 
     try:
@@ -106,11 +92,10 @@ async def _launch_automations(payload: dict[str, object], delivery_id: str) -> N
 
 @router.post("/events")
 async def receive_linear_event(
-    request: Request, delivery: ForwardedDelivery, background_tasks: BackgroundTasks
+    request: Request, event: LinearChannelEvent, background_tasks: BackgroundTasks
 ) -> dict[str, str]:
     """Log a Linear event that starts no conversation, and run the automations it triggers."""
-    payload = delivery.payload()
-    await delivery.record(request, payload)
-    if payload.get("type") == "Issue" and payload.get("action") in {"create", "update"}:
-        background_tasks.add_task(_launch_automations, payload, delivery.delivery_id)
+    await event.record(request)
+    if event.key in {"Issue.create", "Issue.update"}:
+        background_tasks.add_task(_launch_automations, event.payload, event.delivery_id)
     return {"status": "accepted"}

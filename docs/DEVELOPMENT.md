@@ -282,7 +282,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 
 - The tunnel must be running (`make tunnel`) against port 2024, and the URL in GitHub or Slack must be your ngrok domain. Do not swap in a tunnel that forwards the whole port; see step 3. GitHub shows each delivery under the App's **Advanced** tab; ngrok's inspector at `http://localhost:4040` shows what arrived. With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
 - Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime. Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401, and the Linear channel's routes need `MDA_SERVICE_SECRET` and `LINEAR_WEBHOOK_SECRET`.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401, and the Linear channel's routes need `MDA_SERVICE_SECRET`, the same value as `mda/.env`'s.
 
 ### Dashboard login fails or won't stay logged in
 

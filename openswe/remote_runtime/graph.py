@@ -14,7 +14,8 @@ own middleware, which the MDA run hands each phase of its loop to:
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
 - ``after_agent`` runs ``after_agent`` hooks: usage, transcript, step-limit notice,
-  review-check settle
+  review-check settle; then completes the run when an MDA channel started it, since
+  no run-complete webhook follows such a run
 - ``call`` runs one tool through the graph's tools node
 - ``tool_started`` and ``tool_result`` let the transcript record a tool MDA runs
   itself, such as ``task``, whose subagent runs on MDA
@@ -60,6 +61,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from openswe.mda_channels.completion import complete_after_agent
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -542,9 +544,12 @@ class RemoteGraph:
             return await self._phase(session, "after_model", body)
         if hook == "after_agent":
             try:
-                return await self._phase(session, "after_agent", body)
+                reply = await self._phase(session, "after_agent", body)
             finally:
                 self.end(run, body.run_id)
+            # An MDA channel's run gets no run-complete webhook: complete it here.
+            await complete_after_agent(run, body.run_id, body.messages)
+            return reply
         if hook == "model_result":
             return await self._model_result(session, raw, body)
         if hook == "tool_started":

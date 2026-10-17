@@ -1,19 +1,22 @@
 """A run for a Linear agent session, prepared for the MDA channel that starts it.
 
-MDA's Linear channel receives the delivery and starts the run on its own thread,
-so the conversation's reply, Stop and errors reach Linear. The backend decides
-everything else, as it does for its own runs: the repository, the workspace, the
-input, and the signed run token the run calls back with.
+MDA's Linear channel receives the event and starts the run on the session's own
+thread, so the conversation's reply, Stop and errors reach Linear. Each agent
+session is its own thread, so a second session on the same issue is a new
+conversation, with the issue's title. The backend decides everything else, as it
+does for its own runs: the repository, the workspace, the input, and the signed
+run token the run calls back with. The run's ``after_agent`` hook completes it
+(``openswe.mda_channels.completion``); the channel reports its failures.
 """
 
-from typing import NotRequired, TypedDict, cast
+from typing import TypedDict, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
 from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic.alias_generators import to_camel
 
-from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
+from openswe.dispatch import CHANNEL_METADATA_KEY, prepare_durable_run
 from openswe.input_messages import (
     PersonIdentity,
     RunInput,
@@ -29,6 +32,8 @@ from openswe.users import User
 from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks import common
 
+#: The channel's name in run and thread metadata (``CHANNEL_METADATA_KEY``).
+LINEAR_CHANNEL = "linear"
 SESSION_EVENT_KEYS: frozenset[str] = frozenset(
     {"AgentSessionEvent.created", "AgentSessionEvent.prompted"}
 )
@@ -69,6 +74,7 @@ class _Comment(_Model):
 
 
 class _Session(_Model):
+    id: str
     issue: _Issue
     comment: _Comment | None = None
     creator: LinearPerson | None = None
@@ -98,7 +104,6 @@ class PreparedRun(TypedDict):
     input: RunInput
     context: dict[str, JsonValue]
     metadata: dict[str, JsonValue]
-    webhook: NotRequired[str]
 
 
 class LinearSessionTurn:
@@ -106,6 +111,7 @@ class LinearSessionTurn:
 
     def __init__(self, payload: _Payload) -> None:
         session = payload.agent_session
+        self.session_id = session.id
         self.issue = session.issue
         activity = payload.agent_activity
         if activity is not None:
@@ -120,12 +126,9 @@ class LinearSessionTurn:
             self.author = session.creator or payload.actor or LinearPerson()
 
     @classmethod
-    def parse(cls, payload: object) -> LinearSessionTurn | None:
-        """The session turn a delivery carries, or None for any other Linear event."""
-        if not isinstance(payload, dict):
-            return None
-        key = f"{payload.get('type')}.{payload.get('action')}"
-        if key not in SESSION_EVENT_KEYS:
+    def parse(cls, key: str, payload: object) -> LinearSessionTurn | None:
+        """The session turn an event carries, or None for any other Linear event."""
+        if key not in SESSION_EVENT_KEYS or not isinstance(payload, dict):
             return None
         return cls(_Payload.model_validate(payload))
 
@@ -155,7 +158,7 @@ class LinearSessionTurn:
         return repo
 
     async def prepare_run(self, thread_id: str) -> PreparedRun | None:
-        """Index the channel's thread and prepare the run for it, or None to start nothing."""
+        """Index the session's thread and prepare the run for it, or None to start nothing."""
         repo = await self.repository()
         if repo is None:
             return None
@@ -213,25 +216,22 @@ class LinearSessionTurn:
             source_context=SourceContext.parse({"linear_issue": linear_issue}),
             workspace=workspace,
         )
-        await adopt_channel_run(thread_id)
+        await adopt_channel_run(thread_id, LINEAR_CHANNEL)
 
         run_config = await prepare_durable_run(
             "agent",
             {"configurable": configurable},
-            {**common.AGENT_VERSION_METADATA, CHANNEL_METADATA_KEY: "linear"},
+            {**common.AGENT_VERSION_METADATA, CHANNEL_METADATA_KEY: LINEAR_CHANNEL},
             source="linear",
         )
         rewritten = await RUNTIMES.mda_runtime.run_payload(
             thread_id, {"assistant_id": "agent", "config": cast(JsonValue, run_config)}
         )
-        prepared: PreparedRun = {
+        return {
             "input": self._input(issue_prompt, repository, images, description_urls),
             "context": cast(dict[str, JsonValue], rewritten["context"]),
             "metadata": cast(dict[str, JsonValue], run_config["metadata"]),
         }
-        if COMPLETION_WEBHOOK_URL:
-            prepared["webhook"] = COMPLETION_WEBHOOK_URL
-        return prepared
 
     async def _images(
         self, urls: list[str], login: str | None, workspace: str | None
@@ -307,7 +307,7 @@ class LinearSessionTurn:
                         "sender_id": self.author.identity()["id"],
                         "surface": "linear",
                         "kind": "human",
-                        "data": {"comment_id": self.comment_id},
+                        "data": {"comment_id": self.comment_id, "session_id": self.session_id},
                     },
                 ),
             ]
