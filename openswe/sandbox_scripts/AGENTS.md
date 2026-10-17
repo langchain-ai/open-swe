@@ -3,6 +3,7 @@
 Everything here is copied into a thread's sandbox and run with its `python3`. Put any non-trivial in-sandbox logic here as a real script, never as shell or Python built up in f-strings.
 
 - Standard library only, and Python 3.8 syntax. `make lint` (ruff `per-file-target-version`) and `make typecheck` (`ty --python-version 3.8`) check this directory at that version.
-- Read a script with `openswe.sandbox_scripts.source("<name>.py")`. Pass inputs as base64 JSON, either as an argument or substituted for a `__PAYLOAD__` marker. Print one JSON line as the result.
-- A script the sandbox keeps between calls is written under a name with its content hash, so the sandbox always runs the version the backend ships. See `openswe/monitors/sandbox.py`.
+- The backend side lives in `openswe/sandboxes/scripts.py`. Keep it out of this directory, which is held to 3.8.
+- Run a script with `SandboxScript("<name>.py", root).run(backend, request)`. It keeps a copy in `root` named by the script's hash, writes the copy only when that version is missing, passes `request` as base64 JSON, and returns the one JSON line the script prints. A script that answers `{"error": ...}` raises `SandboxScriptError`. Root-relative scripts (`monitor.py`, `background_task.py`) derive their root from their own location.
+- A one-off script can be read with `source("<name>.py")` and run as a heredoc with its inputs substituted for a `__PAYLOAD__` marker, as `recovery_patch.py` and `workspace_path.py` are.
 - Test a script by running it locally through the real client against a temp directory, as `tests/tools/test_monitor.py` does.
