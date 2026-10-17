@@ -1,0 +1,2380 @@
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Column,
+    Computed,
+    Date,
+    DateTime,
+    ForeignKeyConstraint,
+    Identity,
+    Index,
+    Integer,
+    LargeBinary,
+    MetaData,
+    Numeric,
+    PrimaryKeyConstraint,
+    SmallInteger,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
+
+metadata = MetaData()
+
+
+t_additive_event_projection = Table(
+    "additive_event_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("partition_date", Date, primary_key=True),
+    Column("event_name", Text, primary_key=True),
+    Column("event_count", BigInteger, nullable=False),
+    PrimaryKeyConstraint(
+        "workspace_id", "partition_date", "event_name", name="additive_event_projection_pkey"
+    ),
+    schema="open_swe",
+)
+
+t_audit_logs = Table(
+    "audit_logs",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("request_time", DateTime(True), nullable=False),
+    Column("operation_name", String(128), nullable=False),
+    Column("operation_succeeded", Boolean),
+    Column("api_key_id", Text),
+    Column("user_id", Uuid),
+    Column("workspace_id", Uuid),
+    Column("enrichments", JSONB, nullable=False),
+    PrimaryKeyConstraint("id", name="audit_logs_pkey"),
+    Index("audit_logs_operation_time_idx", "operation_name", "request_time", "id"),
+    Index("audit_logs_time_idx", "request_time", "id"),
+    Index("audit_logs_workspace_time_idx", "workspace_id", "request_time", "id"),
+    schema="open_swe",
+)
+
+t_daily_summaries = Table(
+    "daily_summaries",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("summary_version", Integer, primary_key=True),
+    Column("family", Text, primary_key=True),
+    Column("partition_date", Date, primary_key=True),
+    Column("dimension_key", Text, primary_key=True, server_default=text("''::text")),
+    Column("counters", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("sums", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("exact_members", ARRAY(Uuid()), nullable=False, server_default=text("'{}'::uuid[]")),
+    Column(
+        "histogram_bounds",
+        ARRAY(BigInteger()),
+        nullable=False,
+        server_default=text("'{}'::bigint[]"),
+    ),
+    Column(
+        "histogram_counts",
+        ARRAY(BigInteger()),
+        nullable=False,
+        server_default=text("'{}'::bigint[]"),
+    ),
+    Column("completeness", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("data_watermark", DateTime(True)),
+    Column(
+        "recomputed_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    PrimaryKeyConstraint(
+        "workspace_id",
+        "summary_version",
+        "family",
+        "partition_date",
+        "dimension_key",
+        name="daily_summaries_pkey",
+    ),
+    Index(
+        "daily_summaries_query_idx",
+        "workspace_id",
+        "summary_version",
+        "family",
+        "partition_date",
+        "dimension_key",
+    ),
+    schema="open_swe",
+)
+
+t_deployment_metadata = Table(
+    "deployment_metadata",
+    metadata,
+    Column("singleton", Boolean, primary_key=True, server_default=text("true")),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("collection_started_at", DateTime(True)),
+    Column("last_processed_at", DateTime(True)),
+    Column("reporting_cutover_at", DateTime(True)),
+    CheckConstraint("singleton", name="deployment_metadata_singleton_check"),
+    PrimaryKeyConstraint("singleton", name="deployment_metadata_pkey"),
+    UniqueConstraint("workspace_id", name="deployment_metadata_workspace_id_key"),
+    schema="open_swe",
+)
+
+t_dirty_summary_partitions = Table(
+    "dirty_summary_partitions",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("summary_version", Integer, primary_key=True),
+    Column("family", Text, primary_key=True),
+    Column("partition_date", Date, primary_key=True),
+    Column("dimension_key", Text, primary_key=True, server_default=text("''::text")),
+    Column("dirty_since", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("reason_event_id", Uuid, nullable=False),
+    PrimaryKeyConstraint(
+        "workspace_id",
+        "summary_version",
+        "family",
+        "partition_date",
+        "dimension_key",
+        name="dirty_summary_partitions_pkey",
+    ),
+    schema="open_swe",
+)
+
+t_event_claim = Table(
+    "event_claim",
+    metadata,
+    Column("scope", Text, primary_key=True),
+    Column("key", Text, primary_key=True),
+    Column("claimed_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("expires_at", DateTime(True), nullable=False),
+    PrimaryKeyConstraint("scope", "key", name="event_claim_pkey"),
+    Index("event_claim_expires_idx", "expires_at"),
+    schema="open_swe",
+    comment="Exactly-once claims for inbound events, keyed by a scope and a key such as automation id plus delivery id. A claim can be released so a retry runs, and is reclaimable once expired.",
+)
+
+t_event_ids = Table(
+    "event_ids",
+    metadata,
+    Column("event_id", Uuid, primary_key=True),
+    Column("occurred_at", DateTime(True), nullable=False),
+    PrimaryKeyConstraint("event_id", name="event_ids_pkey"),
+    schema="open_swe",
+)
+
+t_event_log = Table(
+    "event_log",
+    metadata,
+    Column(
+        "received_at",
+        DateTime(True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+        comment="Database clock at insert; the partition key.",
+    ),
+    Column("source", Text, nullable=False, comment="Sending service: github, slack, linear."),
+    Column(
+        "endpoint",
+        Text,
+        nullable=False,
+        comment="Request path the delivery arrived on, e.g. /webhooks/slack/interactivity.",
+    ),
+    Column(
+        "event_type",
+        Text,
+        nullable=False,
+        server_default=text("''::text"),
+        comment="GitHub: X-GitHub-Event. Linear: Linear-Event. Slack: inner event type, slash command, or interaction type. Suffixed with .<action> when the payload has a string action, e.g. pull_request.opened.",
+    ),
+    Column(
+        "delivery_id",
+        Text,
+        nullable=False,
+        server_default=text("''::text"),
+        comment="GitHub: X-GitHub-Delivery. Linear: Linear-Delivery. Slack: event_id, or trigger_id for commands and interactions.",
+    ),
+    Column(
+        "payload",
+        JSONB,
+        nullable=False,
+        comment="Request body as sent. Form-encoded bodies are stored as an object of their fields; Slack interactivity keeps its JSON in the payload field as a string.",
+    ),
+    Column(
+        "user_id",
+        Uuid,
+        comment="users.id of the sender (GitHub sender, Slack user, Linear actor email), resolved at insert. No foreign key, so deletes elsewhere never touch the log.",
+    ),
+    Column(
+        "workspace_id",
+        Uuid,
+        comment="workspace.id owning the repository or Slack channel, resolved at insert.",
+    ),
+    Column(
+        "repository_id", Uuid, comment="repository.id of a GitHub delivery, resolved at insert."
+    ),
+    Column(
+        "pull_request_id",
+        Uuid,
+        comment="pull_request.id of a GitHub pull request, review, or PR comment delivery, resolved at insert.",
+    ),
+    Index("event_log_delivery_idx", "source", "delivery_id"),
+    Index("event_log_kind_idx", "source", "event_type", "received_at"),
+    Index(
+        "event_log_pull_request_idx",
+        "pull_request_id",
+        postgresql_where="(pull_request_id IS NOT NULL)",
+    ),
+    Index(
+        "event_log_repository_idx", "repository_id", postgresql_where="(repository_id IS NOT NULL)"
+    ),
+    Index("event_log_user_idx", "user_id", postgresql_where="(user_id IS NOT NULL)"),
+    Index("event_log_workspace_idx", "workspace_id", postgresql_where="(workspace_id IS NOT NULL)"),
+    schema="open_swe",
+    comment="Append-only log of every signature-verified inbound webhook. One partition per UTC day (event_log_YYYYMMDD); EventLog.ensure_partitions() creates today's and tomorrow's and drops everything older than yesterday.",
+)
+
+t_event_match = Table(
+    "event_match",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("thread_id", Text, nullable=False),
+    Column(
+        "subscription_id",
+        Uuid,
+        nullable=False,
+        comment="The event_subscription that matched; no foreign key, since a one-shot is deleted as it matches.",
+    ),
+    Column("source", Text, nullable=False),
+    Column("delivery_id", Text, nullable=False),
+    Column("content", Text, nullable=False, comment="The wake message, rendered at match time."),
+    Column("run_config", JSONB, nullable=False),
+    Column(
+        "delivery_attempts",
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment="Runs started to deliver it. After three, only a run started for another reason delivers it.",
+    ),
+    Column("matched_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("id", name="event_match_pkey"),
+    Index(
+        "event_match_delivery_idx",
+        "thread_id",
+        "source",
+        "delivery_id",
+        postgresql_where="(delivery_id <> ''::text)",
+        unique=True,
+    ),
+    Index("event_match_thread_idx", "thread_id", "matched_at"),
+    schema="open_swe",
+    comment="Events owed to a thread. A match is delivered once a message in the thread state carries its id; older than two days are dropped.",
+)
+
+t_events = Table(
+    "events",
+    metadata,
+    Column("event_id", Uuid, primary_key=True),
+    Column("event_name", Text, nullable=False),
+    Column("schema_version", Integer, nullable=False),
+    Column("occurred_at", DateTime(True), primary_key=True),
+    Column("recorded_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("environment", Text, nullable=False),
+    Column("producer", Text, nullable=False),
+    Column("producer_event_id", Text, nullable=False),
+    Column("source_version", BigInteger),
+    Column("correlation_id", Uuid),
+    Column("causation_id", Uuid),
+    Column("run_id", Uuid),
+    Column("preparation_run_id", Uuid),
+    Column("thread_id", Uuid),
+    Column("task_id", Uuid),
+    Column("pr_id", Uuid),
+    Column("review_id", Uuid),
+    Column("finding_id", Uuid),
+    Column("user_id", Uuid),
+    Column("team_id", Uuid),
+    Column("repository_id", Uuid),
+    Column("model_id", Uuid),
+    Column("entry_point", Text, nullable=False),
+    Column("privacy_classification", Text, nullable=False),
+    Column("payload", JSONB, nullable=False),
+    CheckConstraint(
+        "privacy_classification = ANY (ARRAY['non_personal'::text, 'pseudonymous'::text])",
+        name="events_privacy_classification_check",
+    ),
+    PrimaryKeyConstraint("event_id", "occurred_at", name="events_pkey"),
+    UniqueConstraint(
+        "workspace_id",
+        "producer",
+        "producer_event_id",
+        "event_name",
+        "schema_version",
+        "occurred_at",
+        name="events_workspace_id_producer_producer_event_id_event_name_s_key",
+    ),
+    Index("events_workspace_finding_idx", "workspace_id", "finding_id", "occurred_at"),
+    Index("events_workspace_pr_idx", "workspace_id", "pr_id", "occurred_at"),
+    Index("events_workspace_repo_idx", "workspace_id", "repository_id", "occurred_at"),
+    Index("events_workspace_run_idx", "workspace_id", "run_id", "occurred_at"),
+    Index("events_workspace_time_idx", "workspace_id", "occurred_at"),
+    Index("events_workspace_user_idx", "workspace_id", "user_id", "occurred_at"),
+    schema="open_swe",
+)
+
+t_events_default = Table(
+    "events_default",
+    metadata,
+    Column("event_id", Uuid, primary_key=True),
+    Column("event_name", Text, nullable=False),
+    Column("schema_version", Integer, nullable=False),
+    Column("occurred_at", DateTime(True), primary_key=True),
+    Column("recorded_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("environment", Text, nullable=False),
+    Column("producer", Text, nullable=False),
+    Column("producer_event_id", Text, nullable=False),
+    Column("source_version", BigInteger),
+    Column("correlation_id", Uuid),
+    Column("causation_id", Uuid),
+    Column("run_id", Uuid),
+    Column("preparation_run_id", Uuid),
+    Column("thread_id", Uuid),
+    Column("task_id", Uuid),
+    Column("pr_id", Uuid),
+    Column("review_id", Uuid),
+    Column("finding_id", Uuid),
+    Column("user_id", Uuid),
+    Column("team_id", Uuid),
+    Column("repository_id", Uuid),
+    Column("model_id", Uuid),
+    Column("entry_point", Text, nullable=False),
+    Column("privacy_classification", Text, nullable=False),
+    Column("payload", JSONB, nullable=False),
+    CheckConstraint(
+        "privacy_classification = ANY (ARRAY['non_personal'::text, 'pseudonymous'::text])",
+        name="events_privacy_classification_check",
+    ),
+    PrimaryKeyConstraint("event_id", "occurred_at", name="events_default_pkey"),
+    UniqueConstraint(
+        "workspace_id",
+        "producer",
+        "producer_event_id",
+        "event_name",
+        "schema_version",
+        "occurred_at",
+        name="events_default_workspace_id_producer_producer_event_id_even_key",
+    ),
+    Index(
+        "events_default_workspace_id_finding_id_occurred_at_idx",
+        "workspace_id",
+        "finding_id",
+        "occurred_at",
+    ),
+    Index("events_default_workspace_id_occurred_at_idx", "workspace_id", "occurred_at"),
+    Index(
+        "events_default_workspace_id_pr_id_occurred_at_idx", "workspace_id", "pr_id", "occurred_at"
+    ),
+    Index(
+        "events_default_workspace_id_repository_id_occurred_at_idx",
+        "workspace_id",
+        "repository_id",
+        "occurred_at",
+    ),
+    Index(
+        "events_default_workspace_id_run_id_occurred_at_idx",
+        "workspace_id",
+        "run_id",
+        "occurred_at",
+    ),
+    Index(
+        "events_default_workspace_id_user_id_occurred_at_idx",
+        "workspace_id",
+        "user_id",
+        "occurred_at",
+    ),
+    schema="open_swe",
+)
+
+t_feedback_projection = Table(
+    "feedback_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("feedback_id", Uuid, primary_key=True),
+    Column("run_id", Uuid),
+    Column("task_id", Uuid),
+    Column("user_id", Uuid),
+    Column("sentiment", Text, nullable=False),
+    Column("rating", Integer),
+    Column("submitted_at", DateTime(True), nullable=False),
+    Column("withdrawn_at", DateTime(True)),
+    CheckConstraint(
+        "sentiment = ANY (ARRAY['positive'::text, 'neutral'::text, 'negative'::text])",
+        name="feedback_projection_sentiment_check",
+    ),
+    PrimaryKeyConstraint("workspace_id", "feedback_id", name="feedback_projection_pkey"),
+    schema="open_swe",
+)
+
+t_feedback_withdrawal_projection = Table(
+    "feedback_withdrawal_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("feedback_id", Uuid, primary_key=True),
+    Column("withdrawn_at", DateTime(True), nullable=False),
+    PrimaryKeyConstraint("workspace_id", "feedback_id", name="feedback_withdrawal_projection_pkey"),
+    schema="open_swe",
+)
+
+t_finding_projection = Table(
+    "finding_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("finding_id", Uuid, primary_key=True),
+    Column("review_id", Uuid),
+    Column("pr_id", Uuid),
+    Column("repository_id", Uuid),
+    Column("severity", Text),
+    Column("category", Text),
+    Column("surfaced_at", DateTime(True)),
+    Column("current_state", Text, nullable=False, server_default=text("'open'::text")),
+    Column("resolved_at", DateTime(True)),
+    Column("dismissed_at", DateTime(True)),
+    Column("reopened_count", Integer, nullable=False, server_default=text("0")),
+    Column("source_version", BigInteger),
+    Column("latest_occurred_at", DateTime(True)),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("history_baseline_at", DateTime(True)),
+    Column("history_baseline_resolved_at", DateTime(True)),
+    Column("history_baseline_dismissed_at", DateTime(True)),
+    Column("history_baseline_reopened_count", Integer, nullable=False, server_default=text("0")),
+    CheckConstraint(
+        "current_state = ANY (ARRAY['open'::text, 'resolved'::text, 'dismissed'::text])",
+        name="finding_projection_current_state_check",
+    ),
+    PrimaryKeyConstraint("workspace_id", "finding_id", name="finding_projection_pkey"),
+    Index("finding_projection_cohort_idx", "workspace_id", "surfaced_at", "current_state"),
+    schema="open_swe",
+)
+
+t_finding_usage_projection = Table(
+    "finding_usage_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("finding_id", Uuid, primary_key=True),
+    Column("review_id", Uuid),
+    Column("pr_id", Uuid, nullable=False),
+    Column("repository_id", Uuid, nullable=False),
+    Column("recorded_at", DateTime(True)),
+    Column("surfaced_at", DateTime(True)),
+    Column("resolved_at", DateTime(True)),
+    Column("current_state", Text, nullable=False),
+    Column("severity", Text, nullable=False),
+    Column("category", Text, nullable=False),
+    Column("first_seen_revision_id", Uuid),
+    Column("resolved_revision_id", Uuid),
+    Column("human_replies", Integer, nullable=False),
+    Column("observed_at", DateTime(True), nullable=False),
+    Column("source_version", BigInteger),
+    Column("event_id", Uuid, nullable=False),
+    CheckConstraint(
+        "current_state = ANY (ARRAY['open'::text, 'resolved'::text, 'dismissed'::text])",
+        name="finding_usage_projection_current_state_check",
+    ),
+    CheckConstraint("human_replies >= 0", name="finding_usage_projection_human_replies_check"),
+    PrimaryKeyConstraint("workspace_id", "finding_id", name="finding_usage_projection_pkey"),
+    Index("finding_usage_recorded_idx", "workspace_id", "recorded_at"),
+    Index("finding_usage_surfaced_idx", "workspace_id", "surfaced_at"),
+    schema="open_swe",
+)
+
+t_identity_aliases = Table(
+    "identity_aliases",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("alias_person_id", Uuid, primary_key=True),
+    Column("person_id", Uuid, nullable=False),
+    PrimaryKeyConstraint("workspace_id", "alias_person_id", name="identity_aliases_pkey"),
+    Index("identity_aliases_person_idx", "workspace_id", "person_id"),
+    schema="open_swe",
+)
+
+t_identity_directory = Table(
+    "identity_directory",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("person_id", Uuid, primary_key=True),
+    Column("github_login", Text),
+    Column("display_name", Text),
+    Column("email", Text),
+    Column("team_id", Uuid),
+    Column("anonymize_after", DateTime(True), nullable=False),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("identity_kind", Text, nullable=False, server_default=text("'immutable'::text")),
+    Column("display_name_source", Text),
+    CheckConstraint(
+        "display_name_source = ANY (ARRAY['github'::text, 'slack'::text])",
+        name="identity_directory_display_name_source_check",
+    ),
+    CheckConstraint(
+        "display_name_source IS NULL OR NULLIF(btrim(display_name), ''::text) IS NOT NULL",
+        name="identity_directory_display_name_present_check",
+    ),
+    CheckConstraint(
+        "identity_kind = ANY (ARRAY['immutable'::text, 'provisional'::text])",
+        name="identity_directory_identity_kind_check",
+    ),
+    PrimaryKeyConstraint("workspace_id", "person_id", name="identity_directory_pkey"),
+    Index(
+        "identity_directory_login_idx",
+        "workspace_id",
+        postgresql_where="(github_login IS NOT NULL)",
+        unique=True,
+    ),
+    schema="open_swe",
+)
+
+t_ingestion_receipts = Table(
+    "ingestion_receipts",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("producer", Text, primary_key=True),
+    Column("producer_event_id", Text, primary_key=True),
+    Column("event_name", Text, primary_key=True),
+    Column("event_id", Uuid, nullable=False),
+    Column("received_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("expires_at", DateTime(True), nullable=False),
+    PrimaryKeyConstraint(
+        "workspace_id",
+        "producer",
+        "producer_event_id",
+        "event_name",
+        name="ingestion_receipts_pkey",
+    ),
+    Index("ingestion_receipts_expiry_idx", "expires_at"),
+    schema="open_swe",
+)
+
+t_latest_cost_projection = Table(
+    "latest_cost_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("run_id", Uuid, primary_key=True),
+    Column("observation_revision", BigInteger, nullable=False),
+    Column("observed_at", DateTime(True), nullable=False),
+    Column("status", Text, nullable=False),
+    Column("cost_usd", Numeric(20, 8)),
+    Column("input_tokens", BigInteger),
+    Column("output_tokens", BigInteger),
+    Column("total_tokens", BigInteger),
+    Column("source", Text, nullable=False),
+    Column("missing_reason", Text),
+    Column("event_id", Uuid, nullable=False),
+    CheckConstraint(
+        "status = ANY (ARRAY['complete'::text, 'partial'::text, 'unavailable'::text])",
+        name="latest_cost_projection_status_check",
+    ),
+    PrimaryKeyConstraint("workspace_id", "run_id", name="latest_cost_projection_pkey"),
+    schema="open_swe",
+)
+
+t_model_directory = Table(
+    "model_directory",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("model_id", Uuid, primary_key=True),
+    Column("provider_model_id", Text, nullable=False),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("workspace_id", "model_id", name="model_directory_pkey"),
+    schema="open_swe",
+)
+
+t_named_export_audit = Table(
+    "named_export_audit",
+    metadata,
+    Column("audit_id", Uuid, primary_key=True),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("actor_person_id", Uuid, nullable=False),
+    Column("scope", Text, nullable=False),
+    Column("exported_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("audit_id", name="named_export_audit_pkey"),
+    schema="open_swe",
+)
+
+t_outbox = Table(
+    "outbox",
+    metadata,
+    Column("event_id", Uuid, primary_key=True),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("event_body", JSONB, nullable=False),
+    Column("state", Text, nullable=False, server_default=text("'pending'::text")),
+    Column("attempts", Integer, nullable=False, server_default=text("0")),
+    Column(
+        "next_attempt_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    Column("locked_at", DateTime(True)),
+    Column("acknowledged_at", DateTime(True)),
+    Column("dead_lettered_at", DateTime(True)),
+    Column("last_error", Text),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    CheckConstraint(
+        "state = ANY (ARRAY['pending'::text, 'delivering'::text, 'acknowledged'::text, 'dead_letter'::text])",
+        name="outbox_state_check",
+    ),
+    PrimaryKeyConstraint("event_id", name="outbox_pkey"),
+    Index("outbox_delivery_idx", "state", "next_attempt_at", "created_at"),
+    Index("outbox_run_events_idx", "workspace_id"),
+    Index("outbox_stale_idx", "state", "created_at"),
+    schema="open_swe",
+)
+
+t_pr_distance_measurements = Table(
+    "pr_distance_measurements",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("pr_id", Uuid, primary_key=True),
+    Column("repository_id", Uuid, nullable=False),
+    Column("measurement", JSONB, nullable=False),
+    Column("event_id", Uuid, nullable=False),
+    Column("measured_at", DateTime(True), nullable=False),
+    Column("recorded_at", DateTime(True), nullable=False),
+    CheckConstraint(
+        "jsonb_typeof(measurement -> 'distance_basis_points'::text) = 'number'::text AND measurement ? 'distance_basis_points'::text AND ((measurement ->> 'distance_basis_points'::text)::integer) >= 0 AND ((measurement ->> 'distance_basis_points'::text)::integer) <= 10000",
+        name="pr_distance_measurements_measurement_check",
+    ),
+    PrimaryKeyConstraint("workspace_id", "pr_id", name="pr_distance_measurements_pkey"),
+    schema="open_swe",
+)
+
+t_pr_projection = Table(
+    "pr_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("pr_id", Uuid, primary_key=True),
+    Column("repository_id", Uuid, nullable=False),
+    Column("opening_run_id", Uuid),
+    Column("originating_model_id", Uuid),
+    Column("model_attribution_quality", Text, nullable=False),
+    Column("opened_at", DateTime(True), nullable=False),
+    Column("current_state", Text, nullable=False),
+    Column("outcome_at", DateTime(True)),
+    Column("source_version", BigInteger),
+    Column("repository_private", Boolean),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("latest_transition_at", DateTime(True)),
+    Column("distance_basis_points", Integer),
+    CheckConstraint(
+        "current_state = ANY (ARRAY['open'::text, 'merged'::text, 'closed_without_merge'::text])",
+        name="pr_projection_current_state_check",
+    ),
+    CheckConstraint(
+        "distance_basis_points >= 0 AND distance_basis_points <= 10000",
+        name="pr_projection_distance_basis_points_check",
+    ),
+    PrimaryKeyConstraint("workspace_id", "pr_id", name="pr_projection_pkey"),
+    Index(
+        "pr_projection_cohort_idx",
+        "workspace_id",
+        "opened_at",
+        "originating_model_id",
+        "current_state",
+    ),
+    Index("pr_projection_repo_idx", "workspace_id", "repository_id", "opened_at"),
+    schema="open_swe",
+)
+
+t_pr_revision_evidence = Table(
+    "pr_revision_evidence",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("repository_full_name", Text, nullable=False),
+    Column("pr_number", Integer, nullable=False),
+    Column("endpoint_kind", Text, nullable=False),
+    Column("base_sha", Text, nullable=False),
+    Column("head_sha", Text, nullable=False),
+    Column("endpoint_at", DateTime(True), nullable=False),
+    Column("captured_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("source_kind", Text, nullable=False),
+    Column("source_id", Text),
+    CheckConstraint(
+        "base_sha ~ '^[0-9a-f]{40}$'::text", name="pr_revision_evidence_base_sha_check"
+    ),
+    CheckConstraint(
+        "endpoint_kind = ANY (ARRAY['opening'::text, 'final'::text])",
+        name="pr_revision_evidence_endpoint_kind_check",
+    ),
+    CheckConstraint(
+        "head_sha ~ '^[0-9a-f]{40}$'::text", name="pr_revision_evidence_head_sha_check"
+    ),
+    CheckConstraint("pr_number > 0", name="pr_revision_evidence_pr_number_check"),
+    CheckConstraint(
+        "source_kind = ANY (ARRAY['creation_response'::text, 'webhook'::text])",
+        name="pr_revision_evidence_source_kind_check",
+    ),
+    PrimaryKeyConstraint("id", name="pr_revision_evidence_pkey"),
+    UniqueConstraint(
+        "workspace_id",
+        "repository_full_name",
+        "pr_number",
+        "endpoint_kind",
+        name="pr_revision_evidence_workspace_id_repository_full_name_pr_n_key",
+    ),
+    schema="open_swe",
+)
+
+t_pr_run_link_projection = Table(
+    "pr_run_link_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("pr_id", Uuid, primary_key=True),
+    Column("run_id", Uuid, primary_key=True),
+    Column("link_role", Text, nullable=False),
+    Column("linked_at", DateTime(True), nullable=False),
+    PrimaryKeyConstraint("workspace_id", "pr_id", "run_id", name="pr_run_link_projection_pkey"),
+    schema="open_swe",
+)
+
+t_pr_usage_projection = Table(
+    "pr_usage_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("pr_id", Uuid, primary_key=True),
+    Column("user_id", Uuid),
+    Column("additions", Integer),
+    Column("deletions", Integer),
+    Column("changed_files", Integer),
+    Column("additions_observed_at", DateTime(True)),
+    Column("additions_source_version", BigInteger),
+    Column("additions_event_id", Uuid),
+    Column("deletions_observed_at", DateTime(True)),
+    Column("deletions_source_version", BigInteger),
+    Column("deletions_event_id", Uuid),
+    Column("changed_files_observed_at", DateTime(True)),
+    Column("changed_files_source_version", BigInteger),
+    Column("changed_files_event_id", Uuid),
+    Column("observed_at", DateTime(True), nullable=False),
+    Column("source_version", BigInteger),
+    Column("event_id", Uuid, nullable=False),
+    CheckConstraint("additions >= 0", name="pr_usage_projection_additions_check"),
+    CheckConstraint("changed_files >= 0", name="pr_usage_projection_changed_files_check"),
+    CheckConstraint("deletions >= 0", name="pr_usage_projection_deletions_check"),
+    PrimaryKeyConstraint("workspace_id", "pr_id", name="pr_usage_projection_pkey"),
+    schema="open_swe",
+)
+
+t_projection_conflicts = Table(
+    "projection_conflicts",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("subject_type", Text, primary_key=True),
+    Column("subject_id", Uuid, primary_key=True),
+    Column("conflict_type", Text, primary_key=True),
+    Column("event_ids", ARRAY(Uuid()), nullable=False),
+    Column("detected_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("resolved_at", DateTime(True)),
+    PrimaryKeyConstraint(
+        "workspace_id",
+        "subject_type",
+        "subject_id",
+        "conflict_type",
+        name="projection_conflicts_pkey",
+    ),
+    schema="open_swe",
+)
+
+t_repository = Table(
+    "repository",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("key", Text, nullable=False),
+    Column("full_name", Text, nullable=False),
+    Column("private", Boolean),
+    Column("default_branch", Text, nullable=False, server_default=text("''::text")),
+    Column(
+        "first_seen_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    Column(
+        "last_activity_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    Column("github_id", BigInteger),
+    Column("github_checked_at", DateTime(True)),
+    PrimaryKeyConstraint("id", name="repository_pkey"),
+    UniqueConstraint("key", name="repository_key_key"),
+    schema="open_swe",
+)
+
+t_repository_directory = Table(
+    "repository_directory",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("repository_id", Uuid, primary_key=True),
+    Column("full_name", Text, nullable=False),
+    Column("private", Boolean, nullable=False),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("workspace_id", "repository_id", name="repository_directory_pkey"),
+    schema="open_swe",
+)
+
+t_review_projection = Table(
+    "review_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("review_id", Uuid, primary_key=True),
+    Column("pr_id", Uuid),
+    Column("repository_id", Uuid),
+    Column("published_at", DateTime(True), nullable=False),
+    Column("finding_count", Integer, nullable=False),
+    PrimaryKeyConstraint("workspace_id", "review_id", name="review_projection_pkey"),
+    Index("review_projection_published_idx", "workspace_id", "published_at"),
+    schema="open_swe",
+)
+
+t_run_cost_refresh = Table(
+    "run_cost_refresh",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("run_id", Uuid, primary_key=True),
+    Column("scheduled_at", DateTime(True), nullable=False),
+    PrimaryKeyConstraint("workspace_id", "run_id", name="run_cost_refresh_pkey"),
+    schema="open_swe",
+)
+
+t_run_projection = Table(
+    "run_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("run_id", Uuid, primary_key=True),
+    Column("preparation_run_id", Uuid),
+    Column("thread_id", Uuid),
+    Column("task_id", Uuid),
+    Column("user_id", Uuid),
+    Column("team_id", Uuid),
+    Column("repository_id", Uuid),
+    Column("configured_model_id", Uuid),
+    Column("effective_model_id", Uuid),
+    Column(
+        "model_attribution_quality",
+        Text,
+        nullable=False,
+        server_default=text("'unavailable'::text"),
+    ),
+    Column("entry_point", Text, nullable=False, server_default=text("'unknown'::text")),
+    Column("started_at", DateTime(True)),
+    Column("terminal_at", DateTime(True)),
+    Column("technical_status", Text, nullable=False, server_default=text("'pending'::text")),
+    Column("terminal_conflict", Boolean, nullable=False, server_default=text("false")),
+    Column(
+        "terminal_event_ids", ARRAY(Uuid()), nullable=False, server_default=text("'{}'::uuid[]")
+    ),
+    Column("input_tokens", BigInteger),
+    Column("output_tokens", BigInteger),
+    Column("total_tokens", BigInteger),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("configured_effort", Text),
+    CheckConstraint(
+        "technical_status = ANY (ARRAY['pending'::text, 'completed'::text, 'failed'::text, 'canceled'::text, 'conflicted'::text])",
+        name="run_projection_technical_status_check",
+    ),
+    PrimaryKeyConstraint("workspace_id", "run_id", name="run_projection_pkey"),
+    Index(
+        "run_projection_dimensions_idx",
+        "workspace_id",
+        "team_id",
+        "entry_point",
+        "effective_model_id",
+        "repository_id",
+        "started_at",
+    ),
+    Index("run_projection_leaderboard_idx", "workspace_id", "started_at", "user_id"),
+    schema="open_swe",
+)
+
+t_sandbox_bridge = Table(
+    "sandbox_bridge",
+    metadata,
+    Column("bridge_id", Text, primary_key=True),
+    Column("owner_id", Text, nullable=False),
+    Column("hostname", Text, nullable=False),
+    Column("root_path", Text, nullable=False),
+    Column("label", Text),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column(
+        "last_heartbeat_at",
+        DateTime(True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    ),
+    Column("closed_at", DateTime(True)),
+    Column("client", Text, nullable=False, server_default=text("'cli'::text")),
+    CheckConstraint(
+        "client = ANY (ARRAY['cli'::text, 'desktop'::text])", name="sandbox_bridge_client_check"
+    ),
+    PrimaryKeyConstraint("bridge_id", name="sandbox_bridge_pkey"),
+    Index(
+        "sandbox_bridge_heartbeat_idx", "last_heartbeat_at", postgresql_where="(closed_at IS NULL)"
+    ),
+    Index("sandbox_bridge_owner_idx", "owner_id"),
+    schema="open_swe",
+)
+
+t_sandbox_tool_context = Table(
+    "sandbox_tool_context",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("configurable", JSONB, nullable=False),
+    PrimaryKeyConstraint("thread_id", name="sandbox_tool_context_pkey"),
+    schema="open_swe",
+)
+
+t_slack_channel = Table(
+    "slack_channel",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("name", Text, nullable=False, server_default=text("''::text")),
+    Column("payload", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("fetched_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("id", name="slack_channel_pkey"),
+    Index("slack_channel_name_idx", "name"),
+    schema="open_swe",
+)
+
+t_slack_pull_request_link = Table(
+    "slack_pull_request_link",
+    metadata,
+    Column("team_id", Text, primary_key=True),
+    Column("channel_id", Text, primary_key=True),
+    Column("thread_ts", Text, primary_key=True),
+    Column("pr_url", Text, primary_key=True),
+    Column("message_ts", Text, nullable=False),
+    Column(
+        "first_seen_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    PrimaryKeyConstraint(
+        "team_id", "channel_id", "thread_ts", "pr_url", name="slack_pull_request_link_pkey"
+    ),
+    Index("slack_pull_request_link_pr_idx", "pr_url"),
+    schema="open_swe",
+    comment="Passive, deduplicated PR links observed in Slack threads; does not start agent runs.",
+)
+
+t_store_import = Table(
+    "store_import",
+    metadata,
+    Column("name", Text, primary_key=True),
+    Column("last_run_at", DateTime(True)),
+    Column("moved", Integer, nullable=False, server_default=text("0")),
+    Column("waiting", Integer, nullable=False, server_default=text("0")),
+    Column(
+        "last_moved_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    Column("completed_at", DateTime(True)),
+    PrimaryKeyConstraint("name", name="store_import_pkey"),
+    schema="open_swe",
+)
+
+t_task = Table(
+    "task",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("coordinator_thread_id", Text),
+    Column("title", Text, nullable=False),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("delegated", Boolean, nullable=False, server_default=text("false")),
+    ForeignKeyConstraint(
+        ["id", "coordinator_thread_id"],
+        ["open_swe.task_membership.task_id", "open_swe.task_membership.thread_id"],
+        deferrable=True,
+        initially="DEFERRED",
+        name="task_coordinator_membership",
+    ),
+    ForeignKeyConstraint(
+        ["workspace_id"],
+        ["open_swe.workspace.id"],
+        ondelete="CASCADE",
+        name="task_workspace_id_fkey",
+    ),
+    PrimaryKeyConstraint("id", name="task_pkey"),
+    UniqueConstraint("coordinator_thread_id", name="task_coordinator_thread_id_key"),
+    UniqueConstraint("id", "coordinator_thread_id", name="task_id_coordinator_thread_id_key"),
+    schema="open_swe",
+)
+
+t_task_membership = Table(
+    "task_membership",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("task_id", Uuid, nullable=False),
+    Column("role", Text, nullable=False),
+    CheckConstraint(
+        "role = ANY (ARRAY['coordinator'::text, 'worker'::text])", name="task_membership_role_check"
+    ),
+    ForeignKeyConstraint(
+        ["task_id"], ["open_swe.task.id"], ondelete="CASCADE", name="task_membership_task_id_fkey"
+    ),
+    PrimaryKeyConstraint("thread_id", name="task_membership_pkey"),
+    UniqueConstraint("task_id", "thread_id", name="task_membership_task_id_thread_id_key"),
+    Index(
+        "task_one_coordinator",
+        "task_id",
+        postgresql_where="(role = 'coordinator'::text)",
+        unique=True,
+    ),
+    schema="open_swe",
+)
+
+t_task_projection = Table(
+    "task_projection",
+    metadata,
+    Column("workspace_id", Uuid, primary_key=True),
+    Column("task_id", Uuid, primary_key=True),
+    Column("thread_id", Uuid),
+    Column("user_id", Uuid),
+    Column("marked_complete_at", DateTime(True)),
+    Column("accepted_at", DateTime(True)),
+    Column("major_rework_count", Integer, nullable=False, server_default=text("0")),
+    Column("minor_rework_count", Integer, nullable=False, server_default=text("0")),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("workspace_id", "task_id", name="task_projection_pkey"),
+    schema="open_swe",
+)
+
+t_thread = Table(
+    "thread",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("version", BigInteger, nullable=False, server_default=text("0")),
+    Column("status", Text, nullable=False, server_default=text("'idle'::text")),
+    Column("title", Text),
+    Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    CheckConstraint(
+        "status = ANY (ARRAY['idle'::text, 'running'::text, 'error'::text])",
+        name="thread_status_check",
+    ),
+    PrimaryKeyConstraint("thread_id", name="thread_pkey"),
+    schema="open_swe",
+)
+
+t_thread_blob = Table(
+    "thread_blob",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("path", Text, primary_key=True),
+    Column("value", JSONB, nullable=False),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("thread_id", "path", name="thread_blob_pkey"),
+    schema="open_swe",
+)
+
+t_thread_command_receipt = Table(
+    "thread_command_receipt",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("command_id", Text, primary_key=True),
+    Column("result_version", BigInteger),
+    Column("accepted_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("thread_id", "command_id", name="thread_command_receipt_pkey"),
+    schema="open_swe",
+)
+
+t_thread_queued_message = Table(
+    "thread_queued_message",
+    metadata,
+    Column(
+        "seq",
+        BigInteger,
+        Identity(
+            always=True,
+            start=1,
+            increment=1,
+            minvalue=1,
+            maxvalue=9223372036854775807,
+            cycle=False,
+            cache=1,
+        ),
+        primary_key=True,
+        autoincrement=True,
+    ),
+    Column("thread_id", Text, nullable=False),
+    Column("queue_id", Text),
+    Column("content", JSONB, nullable=False),
+    Column("queued_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    PrimaryKeyConstraint("seq", name="thread_queued_message_pkey"),
+    Index(
+        "thread_queued_message_queue_id_idx",
+        "thread_id",
+        "queue_id",
+        postgresql_where="(queue_id IS NOT NULL)",
+        unique=True,
+    ),
+    Index("thread_queued_message_thread_idx", "thread_id", "seq"),
+    schema="open_swe",
+)
+
+t_ui_invalidation = Table(
+    "ui_invalidation",
+    metadata,
+    Column(
+        "id",
+        BigInteger,
+        Identity(
+            always=True,
+            start=1,
+            increment=1,
+            minvalue=1,
+            maxvalue=9223372036854775807,
+            cycle=False,
+            cache=1,
+        ),
+        primary_key=True,
+        autoincrement=True,
+    ),
+    Column(
+        "topic",
+        Text,
+        nullable=False,
+        comment="What changed, e.g. workspaces or pr/<uuid>. Carries no data: a browser refetches whatever reads that topic.",
+    ),
+    Column(
+        "created_at",
+        DateTime(True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+        comment="Database clock at insert. Replay windows are durations against this clock, so browser clock skew never matters.",
+    ),
+    PrimaryKeyConstraint("id", name="ui_invalidation_pkey"),
+    Index("ui_invalidation_created_idx", "created_at"),
+    Index("ui_invalidation_topic_idx", "topic", "created_at"),
+    schema="open_swe",
+    comment="Dashboard cache invalidations: one row per topic a committed write changed, also sent on pg_notify channel open_swe_ui_invalidations. Read only to replay what a reconnecting browser missed; rows older than a day are pruned.",
+)
+
+t_users = Table(
+    "users",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("display_name", Text, nullable=False, server_default=text("''::text")),
+    Column("avatar_url", Text, nullable=False, server_default=text("''::text")),
+    Column("is_admin", Boolean, nullable=False, server_default=text("false")),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column(
+        "last_seen_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    Column("preferences", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    PrimaryKeyConstraint("id", name="users_pkey"),
+    schema="open_swe",
+)
+
+t_workspace = Table(
+    "workspace",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("slug", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("prompt", Text, nullable=False, server_default=text("''::text")),
+    Column("setup_script", Text, nullable=False, server_default=text("''::text")),
+    Column("update_script", Text, nullable=False, server_default=text("''::text")),
+    Column("base_snapshot_id", Text),
+    Column("mem_bytes", BigInteger),
+    Column("vcpus", Integer),
+    Column("fs_capacity_bytes", BigInteger),
+    Column("create_params", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("snapshot_id", Text),
+    Column("snapshot_name", Text),
+    Column("snapshot_status", Text, nullable=False, server_default=text("'none'::text")),
+    Column("status_message", Text),
+    Column("snapshot_tag", Text),
+    Column("source_sandbox_id", Text),
+    Column("last_captured_at", DateTime(True)),
+    Column("refresh_status", Text, nullable=False, server_default=text("'never'::text")),
+    Column("refresh_kind", Text),
+    Column("refresh_run_id", Text),
+    Column("refresh_started_at", DateTime(True)),
+    Column("refresh_finished_at", DateTime(True)),
+    Column("refresh_log", Text),
+    Column("refresh_error", Text),
+    Column("refresh_cron_id", Text),
+    Column("refresh_steps", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("refresh_sandbox_id", Text),
+    Column("created_by", Text, nullable=False, server_default=text("''::text")),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("breakout_channel_id", Text),
+    Column("inherit_default_sandbox", Boolean, nullable=False, server_default=text("false")),
+    CheckConstraint(
+        "refresh_kind = ANY (ARRAY['full'::text, 'update'::text])",
+        name="workspace_refresh_kind_check",
+    ),
+    CheckConstraint(
+        "refresh_status = ANY (ARRAY['never'::text, 'refreshing'::text, 'success'::text, 'failed'::text])",
+        name="workspace_refresh_status_check",
+    ),
+    CheckConstraint(
+        "snapshot_status = ANY (ARRAY['none'::text, 'capturing'::text, 'ready'::text, 'failed'::text])",
+        name="workspace_snapshot_status_check",
+    ),
+    PrimaryKeyConstraint("id", name="workspace_pkey"),
+    UniqueConstraint("slug", name="workspace_slug_key"),
+    schema="open_swe",
+)
+
+t_api_key = Table(
+    "api_key",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("workspace", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("key_hash", Text, nullable=False),
+    Column("key_suffix", Text, nullable=False),
+    Column("created_by", Text, nullable=False),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("expires_at", DateTime(True), nullable=False),
+    Column("last_used_at", DateTime(True)),
+    Column("revoked_at", DateTime(True)),
+    Column("description", Text),
+    ForeignKeyConstraint(
+        ["workspace_id"],
+        ["open_swe.workspace.id"],
+        ondelete="CASCADE",
+        name="api_key_workspace_id_fkey",
+    ),
+    PrimaryKeyConstraint("id", name="api_key_pkey"),
+    UniqueConstraint("key_hash", name="api_key_key_hash_key"),
+    Index("api_key_workspace_id_idx", "workspace_id"),
+    Index("api_key_workspace_idx", "workspace"),
+    schema="open_swe",
+)
+
+t_automation = Table(
+    "automation",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("prompt", Text, nullable=False),
+    Column("admin_thread", Boolean, nullable=False, server_default=text("false")),
+    Column("model", Text, nullable=False, server_default=text("'Default'::text")),
+    Column("effort", Text),
+    Column("base_branch", Text, nullable=False, server_default=text("'main'::text")),
+    Column("branch_prefix", Text),
+    Column("enabled", Boolean, nullable=False, server_default=text("true")),
+    Column("created_by", Text, nullable=False, server_default=text("''::text")),
+    Column("updated_by", Text, nullable=False, server_default=text("''::text")),
+    Column("user_email", Text, nullable=False, server_default=text("''::text")),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("last_thread_id", Text),
+    Column("last_run_id", Text),
+    Column("last_triggered_at", DateTime(True)),
+    Column("last_error", Text),
+    Column("last_error_at", DateTime(True)),
+    ForeignKeyConstraint(
+        ["workspace_id"],
+        ["open_swe.workspace.id"],
+        ondelete="CASCADE",
+        name="automation_workspace_id_fkey",
+    ),
+    PrimaryKeyConstraint("id", name="automation_pkey"),
+    Index("automation_workspace_idx", "workspace_id"),
+    schema="open_swe",
+    comment="A stored prompt that runs in one workspace whenever one of its triggers fires. Run state lives on the row.",
+)
+
+t_completed_review = Table(
+    "completed_review",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("user_id", Uuid, nullable=False),
+    Column("repository_key", Text, nullable=False),
+    Column("pr_number", Integer, nullable=False),
+    Column("reviewed_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    CheckConstraint("pr_number > 0", name="completed_review_pr_number_check"),
+    ForeignKeyConstraint(
+        ["user_id"], ["open_swe.users.id"], ondelete="CASCADE", name="completed_review_user_id_fkey"
+    ),
+    PrimaryKeyConstraint("id", name="completed_review_pkey"),
+    UniqueConstraint(
+        "user_id",
+        "repository_key",
+        "pr_number",
+        name="completed_review_user_id_repository_key_pr_number_key",
+    ),
+    Index("completed_review_reviewed_at", "reviewed_at"),
+    schema="open_swe",
+)
+
+t_pull_request = Table(
+    "pull_request",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("repository_id", Uuid, nullable=False),
+    Column("number", Integer, nullable=False),
+    Column("owner", Text, nullable=False),
+    Column("repo", Text, nullable=False),
+    Column("state", Text, nullable=False, server_default=text("'open'::text")),
+    Column("title", Text, nullable=False, server_default=text("''::text")),
+    Column("head_ref", Text, nullable=False, server_default=text("''::text")),
+    Column("base_ref", Text, nullable=False, server_default=text("''::text")),
+    Column("author", Text, nullable=False, server_default=text("''::text")),
+    Column("resolves_thread", Boolean, nullable=False, server_default=text("false")),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("legacy_threads_discovered_at", DateTime(True)),
+    Column("author_github_id", BigInteger),
+    Column("author_user_id", Uuid),
+    Column("opening_base_sha", Text, nullable=False, server_default=text("''::text")),
+    Column("opening_head_sha", Text, nullable=False, server_default=text("''::text")),
+    Column("additions", Integer),
+    Column("deletions", Integer),
+    Column("changed_files", Integer),
+    Column("slack_team_id", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_channel_id", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_thread_ts", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_message_ts", Text, nullable=False, server_default=text("''::text")),
+    Column("opening_model_id", Text, nullable=False, server_default=text("''::text")),
+    Column("opening_effort", Text, nullable=False, server_default=text("''::text")),
+    Column("langsmith_run_id", Text, nullable=False, server_default=text("''::text")),
+    Column("body", Text, nullable=False, server_default=text("''::text")),
+    Column(
+        "search_vector",
+        TSVECTOR,
+        Computed(
+            "(setweight(to_tsvector('english'::regconfig, title), 'A'::\"char\") || setweight(to_tsvector('english'::regconfig, body), 'B'::\"char\"))",
+            persisted=True,
+        ),
+        nullable=False,
+    ),
+    CheckConstraint("number > 0", name="pull_request_number_check"),
+    CheckConstraint(
+        "state = ANY (ARRAY['open'::text, 'draft'::text, 'merged'::text, 'closed'::text])",
+        name="pull_request_state_check",
+    ),
+    ForeignKeyConstraint(
+        ["author_user_id"],
+        ["open_swe.users.id"],
+        ondelete="SET NULL",
+        name="pull_request_author_user_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["repository_id"], ["open_swe.repository.id"], name="pull_request_repository_id_fkey"
+    ),
+    PrimaryKeyConstraint("id", name="pull_request_pkey"),
+    UniqueConstraint("repository_id", "number", name="pull_request_repository_id_number_key"),
+    Index(
+        "pull_request_author_user_idx",
+        "author_user_id",
+        postgresql_where="(author_user_id IS NOT NULL)",
+    ),
+    Index("pull_request_search_idx", "search_vector", postgresql_using="gin"),
+    schema="open_swe",
+)
+
+t_sandbox_bridge_request = Table(
+    "sandbox_bridge_request",
+    metadata,
+    Column("request_id", Text, primary_key=True),
+    Column("bridge_id", Text, nullable=False),
+    Column("method", Text, nullable=False),
+    Column("params", JSONB, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("result", JSONB),
+    Column("error", Text),
+    Column(
+        "created_at", DateTime(True), primary_key=True, server_default=text("clock_timestamp()")
+    ),
+    Column("claimed_at", DateTime(True)),
+    Column("finished_at", DateTime(True)),
+    CheckConstraint(
+        "status = ANY (ARRAY['pending'::text, 'claimed'::text, 'done'::text, 'failed'::text])",
+        name="sandbox_bridge_request_status_check",
+    ),
+    ForeignKeyConstraint(
+        ["bridge_id"],
+        ["open_swe.sandbox_bridge.bridge_id"],
+        ondelete="CASCADE",
+        name="sandbox_bridge_request_bridge_id_fkey",
+    ),
+    PrimaryKeyConstraint("request_id", "created_at", name="sandbox_bridge_request_pkey"),
+    Index("sandbox_bridge_request_queue_idx", "bridge_id", "status", "created_at"),
+    schema="open_swe",
+    comment="One partition per UTC day (sandbox_bridge_request_YYYYMMDD); BridgeStore.ensure_partitions() creates today's and tomorrow's and drops everything older than yesterday.",
+)
+
+t_sandbox_bridge_request_20261009 = Table(
+    "sandbox_bridge_request_20261009",
+    metadata,
+    Column("request_id", Text, primary_key=True),
+    Column("bridge_id", Text, nullable=False),
+    Column("method", Text, nullable=False),
+    Column("params", JSONB, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("result", JSONB),
+    Column("error", Text),
+    Column(
+        "created_at", DateTime(True), primary_key=True, server_default=text("clock_timestamp()")
+    ),
+    Column("claimed_at", DateTime(True)),
+    Column("finished_at", DateTime(True)),
+    CheckConstraint(
+        "status = ANY (ARRAY['pending'::text, 'claimed'::text, 'done'::text, 'failed'::text])",
+        name="sandbox_bridge_request_status_check",
+    ),
+    ForeignKeyConstraint(
+        ["bridge_id"],
+        ["open_swe.sandbox_bridge.bridge_id"],
+        ondelete="CASCADE",
+        name="sandbox_bridge_request_bridge_id_fkey",
+    ),
+    PrimaryKeyConstraint("request_id", "created_at", name="sandbox_bridge_request_20261009_pkey"),
+    Index(
+        "sandbox_bridge_request_20261009_bridge_id_status_created_at_idx",
+        "bridge_id",
+        "status",
+        "created_at",
+    ),
+    schema="open_swe",
+)
+
+t_sandbox_bridge_request_20261010 = Table(
+    "sandbox_bridge_request_20261010",
+    metadata,
+    Column("request_id", Text, primary_key=True),
+    Column("bridge_id", Text, nullable=False),
+    Column("method", Text, nullable=False),
+    Column("params", JSONB, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("result", JSONB),
+    Column("error", Text),
+    Column(
+        "created_at", DateTime(True), primary_key=True, server_default=text("clock_timestamp()")
+    ),
+    Column("claimed_at", DateTime(True)),
+    Column("finished_at", DateTime(True)),
+    CheckConstraint(
+        "status = ANY (ARRAY['pending'::text, 'claimed'::text, 'done'::text, 'failed'::text])",
+        name="sandbox_bridge_request_status_check",
+    ),
+    ForeignKeyConstraint(
+        ["bridge_id"],
+        ["open_swe.sandbox_bridge.bridge_id"],
+        ondelete="CASCADE",
+        name="sandbox_bridge_request_bridge_id_fkey",
+    ),
+    PrimaryKeyConstraint("request_id", "created_at", name="sandbox_bridge_request_20261010_pkey"),
+    Index(
+        "sandbox_bridge_request_20261010_bridge_id_status_created_at_idx",
+        "bridge_id",
+        "status",
+        "created_at",
+    ),
+    schema="open_swe",
+)
+
+t_skill = Table(
+    "skill",
+    metadata,
+    Column(
+        "id",
+        BigInteger,
+        Identity(
+            always=True,
+            start=1,
+            increment=1,
+            minvalue=1,
+            maxvalue=9223372036854775807,
+            cycle=False,
+            cache=1,
+        ),
+        primary_key=True,
+        autoincrement=True,
+    ),
+    Column("user_id", Uuid),
+    Column("name", Text, nullable=False),
+    Column("value", JSONB, nullable=False),
+    ForeignKeyConstraint(
+        ["user_id"], ["open_swe.users.id"], ondelete="CASCADE", name="skill_user_id_fkey"
+    ),
+    PrimaryKeyConstraint("id", name="skill_pkey"),
+    Index("skill_owner_name", "name", unique=True),
+    schema="open_swe",
+)
+
+t_task_delegation = Table(
+    "task_delegation",
+    metadata,
+    Column("worker_thread_id", Text, primary_key=True),
+    Column("task_id", Uuid, nullable=False),
+    Column("coordinator_thread_id", Text, nullable=False),
+    Column("instructions", Text, nullable=False),
+    Column("model", Text, nullable=False),
+    Column("effort", Text),
+    Column("launch_error", Text),
+    Column("cancelled", Boolean, nullable=False, server_default=text("false")),
+    CheckConstraint("worker_thread_id <> coordinator_thread_id", name="task_delegation_check"),
+    ForeignKeyConstraint(
+        ["task_id", "coordinator_thread_id"],
+        ["open_swe.task.id", "open_swe.task.coordinator_thread_id"],
+        ondelete="CASCADE",
+        name="task_delegation_task_id_coordinator_thread_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["task_id", "worker_thread_id"],
+        ["open_swe.task_membership.task_id", "open_swe.task_membership.thread_id"],
+        ondelete="CASCADE",
+        name="task_delegation_task_id_worker_thread_id_fkey",
+    ),
+    PrimaryKeyConstraint("worker_thread_id", name="task_delegation_pkey"),
+    Index("task_delegation_task", "task_id"),
+    schema="open_swe",
+)
+
+t_task_message = Table(
+    "task_message",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("task_id", Uuid, nullable=False),
+    Column("thread_id", Text, nullable=False),
+    Column("delivery_id", Text, nullable=False),
+    Column("content", Text, nullable=False),
+    Column("run_config", JSONB, nullable=False),
+    Column("task_event", JSONB),
+    Column("delivery_attempts", Integer, nullable=False, server_default=text("0")),
+    Column("matched_at", DateTime(True), nullable=False, server_default=text("now()")),
+    Column("delivered_at", DateTime(True)),
+    ForeignKeyConstraint(
+        ["task_id"], ["open_swe.task.id"], ondelete="CASCADE", name="task_message_task_id_fkey"
+    ),
+    PrimaryKeyConstraint("id", name="task_message_pkey"),
+    UniqueConstraint("thread_id", "delivery_id", name="task_message_thread_id_delivery_id_key"),
+    Index("task_message_delivered", "delivered_at", postgresql_where="(delivered_at IS NOT NULL)"),
+    Index(
+        "task_message_pending", "thread_id", "matched_at", postgresql_where="(delivered_at IS NULL)"
+    ),
+    schema="open_swe",
+)
+
+t_thread_attachment = Table(
+    "thread_attachment",
+    metadata,
+    Column("attachment_id", Uuid, primary_key=True),
+    Column("thread_id", Text, nullable=False),
+    Column("message_id", Text, nullable=False),
+    Column("position", Integer, nullable=False),
+    Column("mime_type", Text, nullable=False),
+    Column("file_name", Text),
+    Column("data", LargeBinary, nullable=False),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    ForeignKeyConstraint(
+        ["thread_id"],
+        ["open_swe.thread.thread_id"],
+        ondelete="CASCADE",
+        name="thread_attachment_thread_id_fkey",
+    ),
+    PrimaryKeyConstraint("attachment_id", name="thread_attachment_pkey"),
+    Index("thread_attachment_message_idx", "thread_id", "message_id", "position"),
+    schema="open_swe",
+)
+
+t_thread_event = Table(
+    "thread_event",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("version", BigInteger, primary_key=True),
+    Column("event_id", Uuid, nullable=False),
+    Column("event_type", Text, nullable=False),
+    Column("schema_version", SmallInteger, nullable=False, server_default=text("1")),
+    Column("run_id", Text),
+    Column("turn_id", Uuid),
+    Column("command_id", Text),
+    Column("actor_kind", Text, nullable=False),
+    Column("occurred_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("payload", JSONB, nullable=False),
+    CheckConstraint(
+        "actor_kind = ANY (ARRAY['user'::text, 'agent'::text, 'system'::text])",
+        name="thread_event_actor_kind_check",
+    ),
+    ForeignKeyConstraint(
+        ["thread_id"],
+        ["open_swe.thread.thread_id"],
+        ondelete="CASCADE",
+        name="thread_event_thread_id_fkey",
+    ),
+    PrimaryKeyConstraint("thread_id", "version", name="thread_event_pkey"),
+    UniqueConstraint("event_id", name="thread_event_event_id_key"),
+    Index(
+        "thread_event_notice_idx",
+        "thread_id",
+        "turn_id",
+        "version",
+        postgresql_where="(event_type = 'run.notice'::text)",
+    ),
+    Index("thread_event_run_idx", "run_id", postgresql_where="(run_id IS NOT NULL)"),
+    schema="open_swe",
+)
+
+t_thread_message = Table(
+    "thread_message",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("message_id", Text, primary_key=True),
+    Column("turn_id", Uuid, nullable=False),
+    Column("version", BigInteger, nullable=False),
+    Column("role", Text, nullable=False),
+    Column("text", Text, nullable=False, server_default=text("''::text")),
+    Column("reasoning", Text, nullable=False, server_default=text("''::text")),
+    Column("namespace", ARRAY(Text()), nullable=False, server_default=text("'{}'::text[]")),
+    Column("sender", JSONB),
+    Column("attachments", JSONB),
+    Column("usage", JSONB),
+    Column("created_at", DateTime(True), nullable=False),
+    CheckConstraint(
+        "role = ANY (ARRAY['human'::text, 'ai'::text])", name="thread_message_role_check"
+    ),
+    ForeignKeyConstraint(
+        ["thread_id"],
+        ["open_swe.thread.thread_id"],
+        ondelete="CASCADE",
+        name="thread_message_thread_id_fkey",
+    ),
+    PrimaryKeyConstraint("thread_id", "message_id", name="thread_message_pkey"),
+    Index("thread_message_turn_idx", "thread_id", "turn_id", "created_at", "message_id"),
+    schema="open_swe",
+)
+
+t_thread_tool_call = Table(
+    "thread_tool_call",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("tool_call_id", Text, primary_key=True),
+    Column("turn_id", Uuid, nullable=False),
+    Column("message_id", Text),
+    Column("version", BigInteger, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("input", JSONB, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("output_preview", Text),
+    Column("output_truncated", Boolean, nullable=False, server_default=text("false")),
+    Column("namespace", ARRAY(Text()), nullable=False, server_default=text("'{}'::text[]")),
+    Column("started_at", DateTime(True), nullable=False),
+    Column("ended_at", DateTime(True)),
+    CheckConstraint(
+        "status = ANY (ARRAY['in_progress'::text, 'completed'::text, 'error'::text])",
+        name="thread_tool_call_status_check",
+    ),
+    ForeignKeyConstraint(
+        ["thread_id"],
+        ["open_swe.thread.thread_id"],
+        ondelete="CASCADE",
+        name="thread_tool_call_thread_id_fkey",
+    ),
+    PrimaryKeyConstraint("thread_id", "tool_call_id", name="thread_tool_call_pkey"),
+    Index("thread_tool_call_turn_idx", "thread_id", "turn_id", "started_at", "tool_call_id"),
+    schema="open_swe",
+)
+
+t_thread_tool_output = Table(
+    "thread_tool_output",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("tool_call_id", Text, primary_key=True),
+    Column("output", Text, nullable=False),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    ForeignKeyConstraint(
+        ["thread_id"],
+        ["open_swe.thread.thread_id"],
+        ondelete="CASCADE",
+        name="thread_tool_output_thread_id_fkey",
+    ),
+    PrimaryKeyConstraint("thread_id", "tool_call_id", name="thread_tool_output_pkey"),
+    schema="open_swe",
+)
+
+t_thread_turn = Table(
+    "thread_turn",
+    metadata,
+    Column("turn_id", Uuid, primary_key=True),
+    Column("thread_id", Text, nullable=False),
+    Column("run_id", Text),
+    Column("state", Text, nullable=False),
+    Column("requested_at", DateTime(True), nullable=False),
+    Column("started_at", DateTime(True)),
+    Column("completed_at", DateTime(True)),
+    Column("error", Text),
+    CheckConstraint(
+        "state = ANY (ARRAY['requested'::text, 'running'::text, 'completed'::text, 'failed'::text, 'interrupted'::text])",
+        name="thread_turn_state_check",
+    ),
+    ForeignKeyConstraint(
+        ["thread_id"],
+        ["open_swe.thread.thread_id"],
+        ondelete="CASCADE",
+        name="thread_turn_thread_id_fkey",
+    ),
+    PrimaryKeyConstraint("turn_id", name="thread_turn_pkey"),
+    Index("thread_turn_thread_idx", "thread_id", "requested_at", "turn_id"),
+    schema="open_swe",
+)
+
+t_thread_turn_checkpoint = Table(
+    "thread_turn_checkpoint",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("turn_id", Uuid, primary_key=True),
+    Column("checkpoint_turn_count", Integer, nullable=False),
+    Column("checkpoint_ref", Text, nullable=False),
+    Column("commit", Text),
+    Column("status", Text, nullable=False),
+    Column("files", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("assistant_message_id", Text),
+    Column("error", Text),
+    Column("completed_at", DateTime(True), nullable=False),
+    CheckConstraint(
+        "status = ANY (ARRAY['ready'::text, 'missing'::text, 'error'::text])",
+        name="thread_turn_checkpoint_status_check",
+    ),
+    ForeignKeyConstraint(
+        ["thread_id"],
+        ["open_swe.thread.thread_id"],
+        ondelete="CASCADE",
+        name="thread_turn_checkpoint_thread_id_fkey",
+    ),
+    PrimaryKeyConstraint("thread_id", "turn_id", name="thread_turn_checkpoint_pkey"),
+    Index("thread_turn_checkpoint_count_idx", "thread_id", "checkpoint_turn_count", unique=True),
+    schema="open_swe",
+)
+
+t_user_identity = Table(
+    "user_identity",
+    metadata,
+    Column("user_id", Uuid, nullable=False),
+    Column("provider", Text, primary_key=True),
+    Column("external_id", Text, primary_key=True),
+    Column("login", Text, nullable=False, server_default=text("''::text")),
+    Column("email", Text, nullable=False, server_default=text("''::text")),
+    Column("team_id", Text, nullable=False, server_default=text("''::text")),
+    Column("linked_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column(
+        "last_seen_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    CheckConstraint(
+        "provider = ANY (ARRAY['github'::text, 'slack'::text])", name="user_identity_provider_check"
+    ),
+    ForeignKeyConstraint(
+        ["user_id"], ["open_swe.users.id"], ondelete="CASCADE", name="user_identity_user_id_fkey"
+    ),
+    PrimaryKeyConstraint("provider", "external_id", name="user_identity_pkey"),
+    Index("user_identity_email_idx", postgresql_where="(email <> ''::text)"),
+    Index("user_identity_login_idx", "provider", postgresql_where="(login <> ''::text)"),
+    Index("user_identity_user_idx", "user_id"),
+    schema="open_swe",
+)
+
+t_user_oauth_credential = Table(
+    "user_oauth_credential",
+    metadata,
+    Column("user_id", Uuid, primary_key=True),
+    Column("provider", Text, primary_key=True),
+    Column("encrypted_access_token", Text, nullable=False),
+    Column("encrypted_refresh_token", Text),
+    Column("access_token_expires_at", DateTime(True)),
+    Column("client_id", Text, nullable=False),
+    Column("encrypted_client_secret", Text),
+    Column("token_endpoint", Text, nullable=False),
+    Column("account_email", Text),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    ForeignKeyConstraint(
+        ["user_id"],
+        ["open_swe.users.id"],
+        ondelete="CASCADE",
+        name="user_oauth_credential_user_id_fkey",
+    ),
+    PrimaryKeyConstraint("user_id", "provider", name="user_oauth_credential_pkey"),
+    schema="open_swe",
+)
+
+t_user_record = Table(
+    "user_record",
+    metadata,
+    Column("user_id", Uuid, primary_key=True),
+    Column("kind", Text, primary_key=True),
+    Column("key", Text, primary_key=True, server_default=text("''::text")),
+    Column("value", JSONB, nullable=False),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    ForeignKeyConstraint(
+        ["user_id"], ["open_swe.users.id"], ondelete="CASCADE", name="user_record_user_id_fkey"
+    ),
+    PrimaryKeyConstraint("user_id", "kind", "key", name="user_record_pkey"),
+    schema="open_swe",
+)
+
+t_workspace_repository = Table(
+    "workspace_repository",
+    metadata,
+    Column("repository_id", Uuid, primary_key=True),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("linked_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("may_start_threads", Boolean, nullable=False, server_default=text("false")),
+    ForeignKeyConstraint(
+        ["repository_id"],
+        ["open_swe.repository.id"],
+        ondelete="CASCADE",
+        name="workspace_repository_repository_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["workspace_id"],
+        ["open_swe.workspace.id"],
+        ondelete="CASCADE",
+        name="workspace_repository_workspace_id_fkey",
+    ),
+    PrimaryKeyConstraint("repository_id", name="workspace_repository_pkey"),
+    Index("workspace_repository_workspace_idx", "workspace_id"),
+    schema="open_swe",
+)
+
+t_workspace_slack_channel = Table(
+    "workspace_slack_channel",
+    metadata,
+    Column("channel_id", Text, primary_key=True),
+    Column("workspace_id", Uuid, nullable=False),
+    Column("linked_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("kitchen", Boolean, nullable=False, server_default=text("false")),
+    ForeignKeyConstraint(
+        ["workspace_id"],
+        ["open_swe.workspace.id"],
+        ondelete="CASCADE",
+        name="workspace_slack_channel_workspace_id_fkey",
+    ),
+    PrimaryKeyConstraint("channel_id", name="workspace_slack_channel_pkey"),
+    Index("workspace_slack_channel_workspace_idx", "workspace_id"),
+    schema="open_swe",
+)
+
+t_automation_trigger = Table(
+    "automation_trigger",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("automation_id", Uuid, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("config", JSONB, nullable=False),
+    Column(
+        "match_key",
+        Text,
+        comment="What a delivery is matched on: the lowercased repository for GitHub triggers, the channel ID for Slack triggers, and the team key for Linear triggers.",
+    ),
+    Column("cron_id", Text),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    CheckConstraint(
+        "kind = ANY (ARRAY['schedule'::text, 'github'::text, 'slack'::text, 'linear'::text])",
+        name="automation_trigger_kind_check",
+    ),
+    ForeignKeyConstraint(
+        ["automation_id"],
+        ["open_swe.automation.id"],
+        ondelete="CASCADE",
+        name="automation_trigger_automation_id_fkey",
+    ),
+    PrimaryKeyConstraint("id", name="automation_trigger_pkey"),
+    Index("automation_trigger_automation_idx", "automation_id"),
+    Index(
+        "automation_trigger_match_idx",
+        "kind",
+        "match_key",
+        postgresql_where="(match_key IS NOT NULL)",
+    ),
+    schema="open_swe",
+    comment="What fires an automation: a cron schedule or matching GitHub events. config holds each kind's own filters, such as a GitHub trigger's repository and events, and is validated by the application; match_key is the lowercased repository for GitHub triggers.",
+)
+
+t_event_subscription = Table(
+    "event_subscription",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("thread_id", Text, nullable=False),
+    Column(
+        "workspace_id",
+        Uuid,
+        nullable=False,
+        comment="Matches event_log rows with this workspace_id: the subscribing thread's workspace.",
+    ),
+    Column(
+        "sources",
+        ARRAY(Text()),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+        comment="event_log.source values to match; empty matches every source.",
+    ),
+    Column("repository_id", Uuid, comment="When set, only rows for this repository match."),
+    Column("pull_request_id", Uuid, comment="When set, only rows for this pull request match."),
+    Column(
+        "event_types",
+        ARRAY(Text()),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+        comment="event_log.event_type values to match; empty matches every type.",
+    ),
+    Column(
+        "payload_match",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+        comment="A JSON object the event_log payload must contain (jsonb @>); the empty object matches every payload.",
+    ),
+    Column("multitask_strategy", Text, nullable=False),
+    Column("instructions", Text, nullable=False, server_default=text("''::text")),
+    Column(
+        "one_shot",
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        comment="Deleted after its first match.",
+    ),
+    Column(
+        "run_config", JSONB, nullable=False, comment="The configurable each woken run starts with."
+    ),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("expires_at", DateTime(True), nullable=False),
+    Column(
+        "trigger_count",
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment="Events this subscription has matched.",
+    ),
+    Column("last_triggered_at", DateTime(True)),
+    CheckConstraint(
+        "multitask_strategy = ANY (ARRAY['enqueue'::text, 'interrupt'::text])",
+        name="event_subscription_multitask_strategy_check",
+    ),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="event_subscription_pull_request_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["repository_id"],
+        ["open_swe.repository.id"],
+        ondelete="CASCADE",
+        name="event_subscription_repository_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["workspace_id"],
+        ["open_swe.workspace.id"],
+        ondelete="CASCADE",
+        name="event_subscription_workspace_id_fkey",
+    ),
+    PrimaryKeyConstraint("id", name="event_subscription_pkey"),
+    Index("event_subscription_thread_idx", "thread_id"),
+    Index("event_subscription_workspace_idx", "workspace_id"),
+    schema="open_swe",
+    comment="An agent thread listening for event_log rows; each matching row is recorded in event_match for the thread.",
+)
+
+t_human_review_request = Table(
+    "human_review_request",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("pull_request_id", Uuid, nullable=False),
+    Column("thread_id", Text, nullable=False, server_default=text("''::text")),
+    Column("head_sha", Text, nullable=False),
+    Column("diff_fingerprint", Text, nullable=False, server_default=text("''::text")),
+    Column("state", Text, nullable=False),
+    Column("detail", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_channel_id", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_thread_ts", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_message_ts", Text, nullable=False, server_default=text("''::text")),
+    Column("run_config", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("updated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("slack_diff_file_id", Text, nullable=False, server_default=text("''::text")),
+    Column("awaiting_ready", Boolean, nullable=False, server_default=text("false")),
+    Column("slack_broadcast", Boolean, nullable=False, server_default=text("false")),
+    Column("kind", Text, nullable=False),
+    Column("requested_by_user_id", Uuid),
+    Column("tldr", Text, nullable=False, server_default=text("''::text")),
+    Column("approved_at", DateTime(True)),
+    Column("ready_since", DateTime(True)),
+    Column("slack_channel_choices", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("slack_copy_channel_id", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_copy_ts", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_dm_channel_id", Text, nullable=False, server_default=text("''::text")),
+    Column("slack_dm_message_ts", Text, nullable=False, server_default=text("''::text")),
+    Column("screenshot_body", Text, nullable=False, server_default=text("''::text")),
+    Column("excluded_hunks", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    CheckConstraint(
+        "kind = ANY (ARRAY['expedited'::text, 'standard'::text, 'posted'::text])",
+        name="human_review_request_kind_check",
+    ),
+    CheckConstraint(
+        "state = ANY (ARRAY['open'::text, 'merged'::text, 'rejected'::text, 'superseded'::text, 'cancelled'::text])",
+        name="human_review_request_state_check",
+    ),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="expedited_approval_pull_request_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["requested_by_user_id"],
+        ["open_swe.users.id"],
+        ondelete="SET NULL",
+        name="human_review_request_requested_by_user_id_fkey",
+    ),
+    PrimaryKeyConstraint("id", name="expedited_approval_pkey"),
+    Index(
+        "human_review_request_open_idx",
+        "pull_request_id",
+        postgresql_where="(state = 'open'::text)",
+        unique=True,
+    ),
+    schema="open_swe",
+)
+
+t_pull_request_finding = Table(
+    "pull_request_finding",
+    metadata,
+    Column("pull_request_id", Uuid, primary_key=True),
+    Column("id", Text, primary_key=True),
+    Column("position", Integer, nullable=False),
+    Column("rank", Integer),
+    Column("severity", Text, nullable=False),
+    Column("confidence", Text, nullable=False),
+    Column("category", Text, nullable=False),
+    Column("title", Text, nullable=False),
+    Column("file", Text, nullable=False),
+    Column("start_line", Integer),
+    Column("end_line", Integer),
+    Column("side", Text, nullable=False),
+    Column("in_diff", Boolean, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("suggestion", Text),
+    Column("status", Text, nullable=False),
+    Column("first_seen_sha", Text, nullable=False),
+    Column("last_confirmed_sha", Text, nullable=False),
+    Column("github_review_id", BigInteger),
+    Column("github_review_run_id", Text),
+    Column("github_review_comment_ids", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("github_review_thread_ids", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("github_resolved_thread_ids", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column(
+        "github_posted_resolution_comment_ids",
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    ),
+    Column("surface_state", Text, nullable=False),
+    Column("last_human_reply_at", Text),
+    Column("last_human_reply_author", Text),
+    Column("last_human_reply_body", Text),
+    Column("last_reconciliation_note", Text),
+    Column("resolution_note", Text),
+    Column("diff_hunk", Text),
+    Column("fingerprint", Text, nullable=False),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="pull_request_finding_pull_request_id_fkey",
+    ),
+    PrimaryKeyConstraint("pull_request_id", "id", name="pull_request_finding_pkey"),
+    UniqueConstraint(
+        "pull_request_id", "position", name="pull_request_finding_pull_request_id_position_key"
+    ),
+    schema="open_swe",
+)
+
+t_pull_request_finding_state = Table(
+    "pull_request_finding_state",
+    metadata,
+    Column("pull_request_id", Uuid, primary_key=True),
+    Column("reviewer_thread_id", Text, nullable=False),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="pull_request_finding_state_pull_request_id_fkey",
+    ),
+    PrimaryKeyConstraint("pull_request_id", name="pull_request_finding_state_pkey"),
+    UniqueConstraint(
+        "reviewer_thread_id", name="pull_request_finding_state_reviewer_thread_id_key"
+    ),
+    schema="open_swe",
+)
+
+t_pull_request_review = Table(
+    "pull_request_review",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("pull_request_id", Uuid, nullable=False),
+    Column("reviewer_thread_id", Text, nullable=False, server_default=text("''::text")),
+    Column("github_review_id", BigInteger),
+    Column("url", Text, nullable=False, server_default=text("''::text")),
+    Column("head_sha", Text, nullable=False, server_default=text("''::text")),
+    Column("finding_count", Integer),
+    Column(
+        "published_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="pull_request_review_pull_request_id_fkey",
+    ),
+    PrimaryKeyConstraint("id", name="pull_request_review_pkey"),
+    Index(
+        "pull_request_review_github_idx",
+        "pull_request_id",
+        "github_review_id",
+        postgresql_where="(github_review_id IS NOT NULL)",
+        unique=True,
+    ),
+    Index(
+        "pull_request_review_local_idx",
+        "pull_request_id",
+        "reviewer_thread_id",
+        "head_sha",
+        postgresql_where="(github_review_id IS NULL)",
+        unique=True,
+    ),
+    schema="open_swe",
+)
+
+t_pull_request_thread = Table(
+    "pull_request_thread",
+    metadata,
+    Column("pull_request_id", Uuid, primary_key=True),
+    Column("thread_id", Text, primary_key=True),
+    Column("role", Text, nullable=False),
+    Column("source", Text, nullable=False, server_default=text("''::text")),
+    Column("linked_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    CheckConstraint(
+        "role = ANY (ARRAY['primary'::text, 'secondary'::text])",
+        name="pull_request_thread_role_check",
+    ),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="pull_request_thread_pull_request_id_fkey",
+    ),
+    PrimaryKeyConstraint("pull_request_id", "thread_id", name="pull_request_thread_pkey"),
+    Index(
+        "pull_request_thread_primary_idx",
+        "pull_request_id",
+        postgresql_where="(role = 'primary'::text)",
+        unique=True,
+    ),
+    Index("pull_request_thread_thread_idx", "thread_id"),
+    schema="open_swe",
+)
+
+t_pull_request_walkthrough = Table(
+    "pull_request_walkthrough",
+    metadata,
+    Column("pull_request_id", Uuid, primary_key=True),
+    Column("head_sha", Text, nullable=False),
+    Column("merge_base_sha", Text, nullable=False),
+    Column(
+        "generated_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")
+    ),
+    Column("human_input_summary", Text, nullable=False, server_default=text("''::text")),
+    Column("plan", JSONB, nullable=False),
+    Column("complete", Boolean, nullable=False, server_default=text("false")),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="pull_request_walkthrough_pull_request_id_fkey",
+    ),
+    PrimaryKeyConstraint("pull_request_id", name="pull_request_walkthrough_pkey"),
+    schema="open_swe",
+)
+
+t_review_guide_seen_line = Table(
+    "review_guide_seen_line",
+    metadata,
+    Column("user_id", Uuid, primary_key=True),
+    Column("pull_request_id", Uuid, primary_key=True),
+    Column(
+        "line_key",
+        Text,
+        primary_key=True,
+        comment="sha256 hex of path, sign (+ or -) and line text, NUL-separated: the line by content, not position or commit.",
+    ),
+    Column(
+        "seen_count",
+        Integer,
+        nullable=False,
+        comment="How many copies of that exact line were approved; identical lines, such as a closing brace, each count once.",
+    ),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="review_guide_seen_line_pull_request_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["user_id"],
+        ["open_swe.users.id"],
+        ondelete="CASCADE",
+        name="review_guide_seen_line_user_id_fkey",
+    ),
+    PrimaryKeyConstraint(
+        "user_id", "pull_request_id", "line_key", name="review_guide_seen_line_pkey"
+    ),
+    schema="open_swe",
+    comment="Changed lines each person has approved on a pull request, by content, so a rebase or force-push never shows them again.",
+)
+
+t_review_guide_session = Table(
+    "review_guide_session",
+    metadata,
+    Column(
+        "thread_id",
+        Text,
+        primary_key=True,
+        comment="LangGraph thread the review-guide graph runs on; also the code channel's session id.",
+    ),
+    Column("pull_request_id", Uuid, nullable=False),
+    Column("user_id", Uuid, nullable=False, comment="users.id of the reader being walked through."),
+    Column("slack_channel_id", Text, nullable=False, comment="The code channel."),
+    Column(
+        "workspace_slug",
+        Text,
+        comment="Sandbox workspace the guide boots from; NULL is the default image.",
+    ),
+    Column("created_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column(
+        "mode",
+        Text,
+        nullable=False,
+        server_default=text("'reviewer'::text"),
+        comment="reviewer ends by approving on GitHub; author ends by marking a draft ready.",
+    ),
+    Column(
+        "walkthrough",
+        JSONB,
+        comment="Walk state for the head it was built at: chunks shown, queued, approved or skipped, and the lines sent to Other.",
+    ),
+    Column(
+        "closed_at",
+        DateTime(True),
+        comment="When the walkthrough ended or its channel was archived; NULL while open.",
+    ),
+    Column(
+        "summary_message_ts",
+        Text,
+        nullable=False,
+        server_default=text("''::text"),
+        comment="Slack ts of the progress message edited in place; empty before it is posted.",
+    ),
+    Column(
+        "paused_message_ts",
+        Text,
+        nullable=False,
+        server_default=text("''::text"),
+        comment="Slack ts of the note that the pull request changed, with its Continue button; empty when not paused.",
+    ),
+    CheckConstraint(
+        "mode = ANY (ARRAY['reviewer'::text, 'author'::text])",
+        name="review_guide_session_mode_check",
+    ),
+    ForeignKeyConstraint(
+        ["pull_request_id"],
+        ["open_swe.pull_request.id"],
+        ondelete="CASCADE",
+        name="review_guide_session_pull_request_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["user_id"],
+        ["open_swe.users.id"],
+        ondelete="CASCADE",
+        name="review_guide_session_user_id_fkey",
+    ),
+    PrimaryKeyConstraint("thread_id", name="review_guide_session_pkey"),
+    Index("review_guide_session_pull_request_idx", "pull_request_id"),
+    schema="open_swe",
+    comment="One Slack code channel walking one person through one pull request, a chunk at a time.",
+)
+
+t_human_review_participant = Table(
+    "human_review_participant",
+    metadata,
+    Column("request_id", Uuid, primary_key=True),
+    Column("user_id", Uuid, primary_key=True),
+    Column("decision", Text, nullable=False),
+    Column("github_review_id", BigInteger),
+    Column("joined_at", DateTime(True), nullable=False, server_default=text("clock_timestamp()")),
+    Column("github_review_sha", Text, nullable=False, server_default=text("''::text")),
+    Column("assigned_by_agent", Boolean, nullable=False, server_default=text("false")),
+    Column("dm_channel_id", Text, nullable=False, server_default=text("''::text")),
+    Column("dm_ts", Text, nullable=False, server_default=text("''::text")),
+    Column("dm_text", Text, nullable=False, server_default=text("''::text")),
+    CheckConstraint(
+        "decision = ANY (ARRAY['approve'::text, 'reject'::text, 'review'::text, 'picked'::text, 'expired'::text])",
+        name="human_review_participant_decision_check",
+    ),
+    ForeignKeyConstraint(
+        ["request_id"],
+        ["open_swe.human_review_request.id"],
+        ondelete="CASCADE",
+        name="expedited_approval_vote_approval_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["user_id"],
+        ["open_swe.users.id"],
+        ondelete="CASCADE",
+        name="expedited_approval_vote_voter_user_id_fkey",
+    ),
+    PrimaryKeyConstraint("request_id", "user_id", name="expedited_approval_vote_pkey"),
+    schema="open_swe",
+)
+
+t_pull_request_finding_interaction = Table(
+    "pull_request_finding_interaction",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("pull_request_id", Uuid, nullable=False),
+    Column("finding_id", Text, nullable=False),
+    Column("position", Integer, nullable=False),
+    Column("kind", Text),
+    Column("github_comment_id", BigInteger),
+    Column("github_parent_comment_id", BigInteger),
+    Column("author", Text),
+    Column("author_user_id", Uuid),
+    Column("body", Text),
+    Column("created_at", Text),
+    Column("needs_reassessment", Boolean),
+    ForeignKeyConstraint(
+        ["author_user_id"],
+        ["open_swe.users.id"],
+        ondelete="SET NULL",
+        name="pull_request_finding_interaction_author_user_id_fkey",
+    ),
+    ForeignKeyConstraint(
+        ["pull_request_id", "finding_id"],
+        ["open_swe.pull_request_finding.pull_request_id", "open_swe.pull_request_finding.id"],
+        ondelete="CASCADE",
+        name="pull_request_finding_interactio_pull_request_id_finding_id_fkey",
+    ),
+    PrimaryKeyConstraint("id", name="pull_request_finding_interaction_pkey"),
+    UniqueConstraint(
+        "pull_request_id",
+        "finding_id",
+        "position",
+        name="pull_request_finding_interact_pull_request_id_finding_id_po_key",
+    ),
+    Index(
+        "pull_request_finding_interaction_author_user_idx",
+        "author_user_id",
+        postgresql_where="(author_user_id IS NOT NULL)",
+    ),
+    schema="open_swe",
+)
