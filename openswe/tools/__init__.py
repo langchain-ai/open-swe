@@ -25,6 +25,7 @@ _TOOL_MODULES = {
     "list_automations": ".automations",
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
+    "monitor": ".monitor",
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -107,6 +108,7 @@ __all__ = [
     "list_automations",
     "list_event_types",
     "listen_events",
+    "monitor",
     "list_workspaces",
     "list_findings",
     "list_review_findings",
@@ -207,6 +209,7 @@ if TYPE_CHECKING:
     from openswe.tools.listen_events import list_event_types, listen_events
     from openswe.tools.manage_baby_sit import manage_baby_sit
     from openswe.tools.merge_expedited_pr import merge_expedited_pr
+    from openswe.tools.monitor import monitor
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
     from openswe.tools.output_iframe import output_iframe

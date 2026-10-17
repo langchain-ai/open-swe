@@ -8,6 +8,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Link } from "@langchain/macaw-components/Link"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
+import { BackgroundWorkSidebar } from "@/features/agents/components/BackgroundWorkSidebar"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
@@ -171,6 +172,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
           <Composer initialRepo={initialRepo} />
         </div>
       </ThreadPrimitive.Root>
+      {thread && <BackgroundWorkSidebar threadId={thread.id} />}
       {thread && (
         <AgentGitPanel
           thread={thread}

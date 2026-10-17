@@ -24,19 +24,28 @@ from openswe.database.orm import NOW, Base
 from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import (
     RunMessage,
+    Surface,
     SystemIdentity,
     build_input_messages,
     delivered_event_match_ids,
 )
+from openswe.threads.wake_budget import MONITOR_WAKES
 from openswe.webhooks.event_log import RETAINED_DAYS, WebhookSource
 
 logger = logging.getLogger(__name__)
 
 type MultitaskStrategy = Literal["enqueue", "interrupt"]
+# ``sandbox`` is output a monitor the thread started in its sandbox emitted.
+type EventSource = WebhookSource | Literal["sandbox"]
 
 _SYSTEM: SystemIdentity = {
     "id": "system:event-subscription",
     "display_name": "Event listener",
+    "platform": "open-swe",
+}
+_MONITOR_SYSTEM: SystemIdentity = {
+    "id": "system:monitor",
+    "display_name": "Monitor",
     "platform": "open-swe",
 }
 _RETAINED = timedelta(days=RETAINED_DAYS)
@@ -60,11 +69,11 @@ class EventMatch(Base):
     __tablename__ = "event_match"
 
     thread_id: Mapped[str]
-    subscription_id: Mapped[UUID]
-    source: Mapped[WebhookSource] = mapped_column(Text)
+    source: Mapped[EventSource] = mapped_column(Text)
     delivery_id: Mapped[str]
     content: Mapped[str]
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
+    subscription_id: Mapped[UUID | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delivery_attempts: Mapped[int] = mapped_column(server_default="0", init=False)
     matched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -86,7 +95,9 @@ class EventMatch(Base):
             )
             .on_conflict_do_nothing(
                 index_elements=["thread_id", "source", "delivery_id"],
-                index_where=cls.delivery_id != "",
+                # A literal: once asyncpg reuses a generic plan, a bound "" no
+                # longer matches the partial index's predicate.
+                index_where=text("delivery_id <> ''"),
             )
             .returning(cls.id)
         )
@@ -122,20 +133,27 @@ class EventMatch(Base):
         messages: list[RunMessage] = []
         for match in matches:
             data: dict[str, str] = {"event_match": str(match.id)}
+            system, surface = match.sender
             built = build_input_messages(
                 match.content,
                 {
-                    "sender_id": _SYSTEM["id"],
-                    "surface": match.source,
+                    "sender_id": system["id"],
+                    "surface": surface,
                     "kind": "system",
                     "data": data,
                 },
-                systems=[_SYSTEM],
+                systems=[system],
                 injected_dynamic_context_hashes=introduced,
             )
             built[-1]["id"] = f"event-match:{match.id}"
             messages.extend(built)
         return messages
+
+    @property
+    def sender(self) -> tuple[SystemIdentity, Surface]:
+        if self.source == "sandbox":
+            return _MONITOR_SYSTEM, "automation"
+        return _SYSTEM, self.source
 
     @classmethod
     async def deliver(cls, thread_id: str, strategy: MultitaskStrategy) -> bool:
@@ -160,6 +178,12 @@ class EventMatch(Base):
             state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
             owed = await cls.owed(thread_id, state.values.messages if state.values else [])
             if all(match.delivery_attempts >= _MAX_ATTEMPTS for match in owed):
+                return False
+            # Monitor output alone may start only so many runs between human
+            # messages; past that it waits for a run a person starts.
+            if all(match.source == "sandbox" for match in owed) and not await MONITOR_WAKES.spend(
+                client, thread_id
+            ):
                 return False
             owed_ids = [match.id for match in owed]
             async with postgres.session() as session:
