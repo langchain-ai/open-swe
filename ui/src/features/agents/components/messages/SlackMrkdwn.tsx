@@ -160,6 +160,19 @@ function slackTokenNode(token: string, key: string): ReactNode {
   )
 }
 
+function markdownLink(
+  text: string,
+  start: number,
+  end: number
+): { label: string; target: string; next: number } | null {
+  const match = /^\[([^\]\n|]+)\]\((https?:\/\/[^\s)>|]+)\)/.exec(
+    text.slice(start, end)
+  )
+  const [whole, label, target] = match ?? []
+  if (!whole || !label || !target) return null
+  return { label, target, next: start + whole.length }
+}
+
 function renderRange(
   text: string,
   start: number,
@@ -207,6 +220,17 @@ function renderRange(
         else if (character === "_") nodes.push(<em key={key}>{children}</em>)
         else nodes.push(<s key={key}>{children}</s>)
         cursor = closing + 1
+        literalStart = cursor
+        continue
+      }
+    }
+
+    if (character === "[") {
+      const link = markdownLink(text, cursor, end)
+      if (link) {
+        flushLiteral(cursor)
+        nodes.push(slackTokenNode(`${link.target}|${link.label}`, key))
+        cursor = link.next
         literalStart = cursor
         continue
       }

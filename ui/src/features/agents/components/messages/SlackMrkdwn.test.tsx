@@ -29,6 +29,15 @@ describe("SlackMrkdwn", () => {
     expect(html).toContain("@Alice")
   })
 
+  it("renders standard Markdown links", () => {
+    const html = renderToStaticMarkup(
+      <SlackMrkdwn text="[Draft PR](https://example.com/pull/1) is up" />
+    )
+
+    expect(html).toContain('href="https://example.com/pull/1"')
+    expect(html).toContain(">Draft PR</a> is up")
+  })
+
   it("keeps formatting active across Slack tokens", () => {
     const html = renderToStaticMarkup(
       <SlackMrkdwn
