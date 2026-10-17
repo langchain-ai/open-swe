@@ -36,6 +36,7 @@ _TOOL_MODULES = {
     "manage_incident": "openswe.incidents.tools",
     "manage_thread": ".threads",
     "merge_expedited_pr": ".merge_expedited_pr",
+    "open_browser": ".open_browser",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
@@ -118,6 +119,7 @@ __all__ = [
     "manage_incident",
     "manage_thread",
     "merge_expedited_pr",
+    "open_browser",
     "open_pull_request",
     "output_iframe",
     "publish_review",
@@ -207,6 +209,7 @@ if TYPE_CHECKING:
     from openswe.tools.listen_events import list_event_types, listen_events
     from openswe.tools.manage_baby_sit import manage_baby_sit
     from openswe.tools.merge_expedited_pr import merge_expedited_pr
+    from openswe.tools.open_browser import open_browser
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
     from openswe.tools.output_iframe import output_iframe

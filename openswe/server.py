@@ -221,6 +221,7 @@ from openswe.tools import (
     manage_incident,
     manage_thread,
     merge_expedited_pr,
+    open_browser,
     open_pull_request,
     output_iframe,
     publish_workspace,
@@ -564,6 +565,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "background_execute",
         "background_task",
         "expose_port",
+        "open_browser",
         "http_request",
         "expedite_pr_approval",
         "merge_expedited_pr",
@@ -1794,6 +1796,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             if sandbox_file_downloads
             else ()
         ),
+        *((open_browser,) if sandbox_file_downloads and settings.sandbox_browser_enabled else ()),
         read_user_settings,
         request_pr_review,
         *((connect_managed_tools,) if managed_gateway else ()),

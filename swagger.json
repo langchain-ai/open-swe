@@ -8315,6 +8315,18 @@
             ],
             "title": "Review Trace Links"
           },
+          "sandbox_browser_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Browser Enabled"
+          },
           "sandbox_openai_enabled": {
             "agent_feature_flag": true,
             "anyOf": [

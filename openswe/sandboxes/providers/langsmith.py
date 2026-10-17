@@ -475,27 +475,46 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
     exists for the same port, and while the tenant's
     ``sandbox_service_url_langsmith_login`` flag is off.
     """
+    response = await sandbox_api_request(
+        "POST",
+        f"/boxes/{sandbox_id}/service-url",
+        json={"port": port, "access": "workspace"},
+        timeout=SERVICE_URL_TIMEOUT_SECONDS,
+    )
+    return WorkspaceServiceURL.model_validate(response.json()).service_url
+
+
+async def sandbox_api_request(
+    method: Literal["GET", "POST", "PATCH", "DELETE"],
+    path: str,
+    *,
+    json: dict[str, Any] | None = None,
+    timeout: float,
+) -> httpx2.Response:
+    """Call the sandbox API at ``path`` (under ``/v2/sandboxes``) as this deployment.
+
+    For routes the langsmith SDK does not model. Raises ``httpx2.HTTPStatusError``
+    carrying the API's own explanation when it refuses.
+    """
     api_key = _get_langsmith_api_key()
     if not api_key:
         msg = "LANGSMITH_API_KEY not set"
         raise ValueError(msg)
-    url = f"{_get_sandbox_api_endpoint()}/boxes/{sandbox_id}/service-url"
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=SERVICE_URL_TIMEOUT_SECONDS
-    ) as client:
-        response = await client.post(
-            url,
-            json={"port": port, "access": "workspace"},
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=timeout) as client:
+        response = await client.request(
+            method,
+            f"{_get_sandbox_api_endpoint()}{path}",
+            json=json,
             headers={"X-API-Key": api_key},
         )
-        try:
-            response.raise_for_status()
-        except httpx2.HTTPStatusError as exc:
-            enriched = _with_response_body(exc)
-            if enriched is not None:
-                raise enriched from exc
-            raise
-    return WorkspaceServiceURL.model_validate(response.json()).service_url
+    try:
+        response.raise_for_status()
+    except httpx2.HTTPStatusError as exc:
+        enriched = _with_response_body(exc)
+        if enriched is not None:
+            raise enriched from exc
+        raise
+    return response
 
 
 def get_async_sandbox_client() -> AsyncSandboxClient:
