@@ -17,7 +17,6 @@
 
 import {
   INTERNAL_TOOLS,
-  mergeTextChunks,
   toolKind,
   toolTitle,
 } from "@/features/agents/lib/streamMessagesToUi"
@@ -1065,7 +1064,7 @@ function turnMessages(
       ...(agent.invocationIds.length
         ? { invocationIds: agent.invocationIds }
         : {}),
-      chunks: mergeTextChunks(agent.chunks),
+      chunks: agent.chunks,
     })
     agent = null
   }
