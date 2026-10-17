@@ -1,11 +1,4 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 
 import { DiffView } from "../../chat/DiffView"
@@ -129,7 +122,7 @@ function WorkGroup({
     : chunks.slice(chunks.length - MAX_VISIBLE_WORK_LOG_ENTRIES)
 
   return (
-    <div>
+    <div data-motion-reveal-children={expanded ? "" : undefined}>
       {hiddenCount > 0 && (
         <WorkGroupToggleRow
           hiddenCount={hiddenCount}
@@ -370,7 +363,11 @@ export function AgentTurn({
       : collapsedWorkItems(segment.items, !isStreaming)
 
     return (
-      <Fragment key={segment.key}>
+      <div
+        key={segment.key}
+        className="space-y-space-2"
+        data-motion-reveal-children={expanded && !isStreaming ? "" : undefined}
+      >
         <TurnFoldRow
           label={
             actionCount > 0
@@ -382,7 +379,7 @@ export function AgentTurn({
           onToggle={() => toggleFold(segment.key)}
         />
         {visible.map(renderItem)}
-      </Fragment>
+      </div>
     )
   }
 

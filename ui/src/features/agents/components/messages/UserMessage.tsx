@@ -92,6 +92,7 @@ function StandardUserMessage({ message }: { message: Message }) {
           {text && (
             <div
               ref={textRef}
+              data-motion-clamp={isSystem ? undefined : ""}
               className={cn(
                 "text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-primary",
                 !isSystem && !expanded && "overflow-hidden"

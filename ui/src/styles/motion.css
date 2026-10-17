@@ -1,0 +1,25 @@
+@media (prefers-reduced-motion: no-preference) {
+    :root[data-motion] [data-motion-clamp] {
+        interpolate-size: allow-keywords;
+        max-height: max-content;
+        overflow-y: clip;
+        transition: max-height var(--duration-normal) var(--ease-out);
+    }
+
+    :root[data-motion] [data-motion-reveal],
+    :root[data-motion] [data-motion-reveal-children] > * {
+        transition:
+            opacity var(--duration-normal) var(--ease-out),
+            translate var(--duration-normal) var(--ease-out);
+
+        @starting-style {
+            opacity: 0;
+            translate: 0 -0.25rem;
+        }
+    }
+
+    :root[data-motion]::view-transition-group(*) {
+        animation-duration: var(--duration-normal);
+        animation-timing-function: var(--ease-out);
+    }
+}

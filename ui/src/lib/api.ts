@@ -312,6 +312,7 @@ export interface Profile {
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_mcp_ptc?: boolean
+  experimental_ui_motion?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -335,6 +336,7 @@ export interface ProfileUpdate {
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_mcp_ptc?: boolean
+  experimental_ui_motion?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null

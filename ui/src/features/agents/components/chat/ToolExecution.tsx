@@ -15,6 +15,7 @@ import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
 import { cn } from "@/lib/utils"
+import { useRevealOnToggle } from "@/lib/motion"
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk
@@ -54,6 +55,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   isError: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const reveal = useRevealOnToggle(expanded)
   const toggle = useCallback(() => setExpanded((prev) => !prev), [])
   const diffOptions = useDiffOptions()
   const inlineDiffOptions = useMemo(
@@ -123,7 +125,10 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-subtle bg-surface-level-2">
+      <div
+        {...reveal}
+        className="overflow-hidden rounded-lg border border-subtle bg-surface-level-2"
+      >
         <div className="flex items-center gap-space-2 px-space-3 py-space-2">
           <span
             className={cn(
