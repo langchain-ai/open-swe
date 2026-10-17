@@ -30,6 +30,7 @@ import {
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
+import { canHydrateDiffs } from "@/features/reviews/lib/walkthroughDiff"
 import { toPierreSide } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
@@ -175,6 +176,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     ]
   )
   const items = useCodeViewItems(entries, sources, viewed, flipped)
+  const canHydrate = canHydrateDiffs(entries.map((entry) => entry.fileDiff))
 
   const filesByPath = useMemo(
     () => new Map((diff.data?.files ?? []).map((file) => [file.path, file])),
@@ -239,11 +241,16 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       },
       layout: { paddingTop: 0, paddingBottom: 160, gap: 10 },
       __devOnlyValidateItemHeights: import.meta.env.DEV,
-      loadDiffFiles,
+      loadDiffFiles: canHydrate ? loadDiffFiles : undefined,
       // Hunks highlighted alone lose multi-line string state; hydrate once shown.
       onPostRender: (_node, instance, phase) => {
         if (phase === "unmount") return void hydrating.delete(instance)
-        if (instance.options.collapsed || hydrating.has(instance)) return
+        if (
+          !canHydrate ||
+          instance.options.collapsed ||
+          hydrating.has(instance)
+        )
+          return
         hydrating.add(instance)
         ;(instance as unknown as LoadsFiles).loadFilesIfNecessary()
       },
@@ -257,7 +264,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           commentOn(context.item.id, range)
       },
     }
-  }, [diffStyle, overflow, theme, loadDiffFiles, commentOn])
+  }, [diffStyle, overflow, theme, canHydrate, loadDiffFiles, commentOn])
 
   const renderHeader = useCallback(
     () => (

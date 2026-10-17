@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { walkthroughFileDiff } from "@/features/reviews/lib/walkthroughDiff"
+import { getSingularPatch } from "@pierre/diffs"
+
+import {
+  canHydrateDiffs,
+  walkthroughFileDiff,
+} from "@/features/reviews/lib/walkthroughDiff"
 import type { ReviewDiffFile } from "@/lib/api"
 
 // One hunk holding two edits git merged because they sit a few lines apart.
@@ -57,6 +62,35 @@ describe("walkthroughFileDiff", () => {
     ).toEqual([[4, 6]])
     expect(second?.additionLines.join("")).toContain("SEVEN")
     expect(second?.additionLines.join("")).not.toContain("TWO")
+  })
+
+  it("disables full-file hydration for a view containing a slice with omitted deletions", () => {
+    const changed = file()
+    changed.deletions = 3
+    changed.patch = changed
+      .patch!.replace("@@ -1,9 +1,9 @@", "@@ -1,9 +1,8 @@")
+      .replace("-seven\n+SEVEN\n eight", "-seven\n-eight\n+SEVEN")
+    const whole = getSingularPatch(changed.patch)
+    const slice = walkthroughFileDiff(changed, {
+      path: changed.path,
+      added: [[2, 2]],
+      deleted: [[2, 2]],
+    })!
+
+    expect(slice.additionLines.join("")).not.toContain("SEVEN")
+    expect(slice.isPartial).toBe(true)
+    expect(canHydrateDiffs([whole])).toBe(true)
+    expect(canHydrateDiffs([whole, slice])).toBe(false)
+    expect(
+      canHydrateDiffs([
+        walkthroughFileDiff(changed, {
+          path: changed.path,
+          added: [[2, 2]],
+          deleted: [[2, 2]],
+        })!,
+      ])
+    ).toBe(false)
+    expect(canHydrateDiffs([whole])).toBe(true)
   })
 
   it("renders the whole file when the step holds every changed line", () => {
