@@ -299,10 +299,13 @@ test.describe("transcript rendering", () => {
       .poll(async () => {
         const runs = (await (
           await page.request.get(`/threads/${threadId}/runs`)
-        ).json()) as Array<{ kwargs?: { context?: { __run_config?: string } } }>;
+        ).json()) as Array<{
+          kwargs?: { context?: { __run_config?: string } };
+        }>;
         const config = runs[0]?.kwargs?.context?.__run_config;
         if (!config) return undefined;
-        return (JSON.parse(config) as { agent_model_id?: string }).agent_model_id;
+        return (JSON.parse(config) as { agent_model_id?: string })
+          .agent_model_id;
       })
       .toBe("anthropic:claude-opus-5-5");
   });
