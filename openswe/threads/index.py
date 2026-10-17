@@ -311,17 +311,6 @@ async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedTh
     return None if row is None else IndexedThread.from_row(row)
 
 
-async def set_runtime(thread_id: str, runtime: Runtime) -> None:
-    async with transaction() as conn:
-        await conn.execute(
-            text(
-                "UPDATE thread_index SET runtime = :runtime, updated_at = clock_timestamp() "
-                "WHERE thread_id = :thread_id"
-            ),
-            {"thread_id": thread_id, "runtime": runtime},
-        )
-
-
 async def set_status(thread_id: str, status: ThreadStatus) -> None:
     async with transaction() as conn:
         await conn.execute(
