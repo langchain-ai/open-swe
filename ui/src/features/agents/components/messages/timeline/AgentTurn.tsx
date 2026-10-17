@@ -291,7 +291,9 @@ export function AgentTurn({
                 loadError={loadError}
               />
             )}
-            defaultExpanded={item.chunk.status === "pending"}
+            defaultExpanded={
+              item.chunk.toolKind === "code" || item.chunk.status === "pending"
+            }
           />
         )
 

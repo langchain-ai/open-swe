@@ -162,6 +162,14 @@ function toolDisplayParts(
         return { heading: "Shell", preview: truncateMiddle(command, 60) }
       return plain(humanizeToolTitle(title))
     }
+    case "code": {
+      const code = firstStringArg(input, ["code"])
+      const firstLine = code?.split("\n").find((line) => line.trim())
+      return {
+        heading: "JavaScript",
+        preview: firstLine ? truncateMiddle(firstLine.trim(), 60) : null,
+      }
+    }
     case "sql":
       return {
         heading: "SQL query",
