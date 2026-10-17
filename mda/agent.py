@@ -67,6 +67,7 @@ class OpenSweRunContext(BaseModel):
     event_streaming_v2: bool = Field(default=False, alias="__event_streaming_v2")
     # Dunder keys stay out of the trace metadata the context is mirrored into.
     run_token: str | None = Field(default=None, alias="__run_token")
+    run_config: str | None = Field(default=None, alias="__run_config")
     invocation_id: str | None = None
     # JSON, not RunModels: the gRPC runtime serializes only the context's top level.
     models: dict[str, JsonValue] | None = None
@@ -98,7 +99,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     context = OpenSweRunContext.model_validate(
         execution.context if execution is not None and execution.context is not None else {}
     )
-    backend = OpenSweBackend(context.run_token)
+    backend = OpenSweBackend(context.run_token, context.run_config)
     # Runs without a context (state reads, assistant reads) never call a model or a tool.
     catalog = await backend.catalog(None) if backend.has_run else Catalog()
     models = catalog.models or (
