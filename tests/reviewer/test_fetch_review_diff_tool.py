@@ -1,13 +1,42 @@
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.review.diff import MaterializedReviewDiff
+from openswe.sandboxes.state import SandboxBackendProxy
 from openswe.tools.fetch_review_diff import fetch_review_diff
 
 
+class _ReviewBackend:
+    id = "review-diff-sandbox"
+
+    def get_work_dir(self) -> str:
+        return "/workspace"
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        del timeout
+        outputs = {
+            "pwd": "/root\n",
+            "test -d /workspace && test -w /workspace": "",
+            "test -d /root && test -w /root": "",
+        }
+        return ExecuteResponse(output=outputs[command], exit_code=0)
+
+
 @pytest.mark.asyncio
-async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
+async def test_fetch_review_diff_returns_metadata_without_diff_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("openswe.sandboxes.state.SANDBOX_BACKENDS", {})
+    monkeypatch.setattr("openswe.sandboxes.state.SANDBOX_CONNECTIONS", {})
+
+    async def reconnect() -> SandboxBackendProtocol:
+        return cast(SandboxBackendProtocol, _ReviewBackend())
+
+    backend = SandboxBackendProxy(thread_id="thread-1", reconnect=reconnect)
+    assert not backend.has_backend
     diff_text = "diff --git a/app.py b/app.py\n@@ -1 +1 @@\n-old\n+new\n"
     materialized = MaterializedReviewDiff(
         path="/workspace/review-diff.patch",
@@ -28,14 +57,7 @@ async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
 
     with (
         patch("openswe.run_config.get_config", return_value=config),
-        patch(
-            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()
-        ),
-        patch(
-            "openswe.tools.fetch_review_diff.resolve_sandbox_work_dir",
-            new_callable=AsyncMock,
-            return_value="/workspace",
-        ),
+        patch("openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=backend),
         patch(
             "openswe.tools.fetch_review_diff.materialize_review_diff",
             new_callable=AsyncMock,

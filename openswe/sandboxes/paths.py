@@ -9,6 +9,7 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from openswe.bridge.constants import SANDBOX_ID_PREFIX
+from openswe.sandboxes.state import SandboxBackendProxy
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,9 @@ async def resolve_checkout_dir(
 
 async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
     """Resolve a writable base directory for repository operations."""
+    if isinstance(sandbox_backend, SandboxBackendProxy):
+        await sandbox_backend.ready()
+
     cached_work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
     if isinstance(cached_work_dir, str) and cached_work_dir:
         return cached_work_dir
@@ -60,7 +64,8 @@ async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> s
     async for candidate in _iter_work_dir_candidates(sandbox_backend):
         checked_candidates.append(candidate)
         if await _is_writable_directory(sandbox_backend, candidate):
-            _cache_work_dir(sandbox_backend, candidate)
+            if candidate == declared_work_dir(sandbox_backend):
+                _cache_work_dir(sandbox_backend, candidate)
             return candidate
 
     msg = "Failed to resolve a writable sandbox work directory"
