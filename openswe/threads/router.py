@@ -87,6 +87,27 @@ def _marks_busy(thread_id: str) -> Callable[[], Awaitable[None]]:
     return mark
 
 
+def _warn_in_process(scope: Scope, thread: IndexedThread, assistant_id: JsonValue = None) -> None:
+    """Every thread should run on MDA, so one still served here is worth chasing down."""
+    logger.warning(
+        "Served a thread that is not on Managed Deep Agents in-process",
+        extra={
+            "thread_id": thread.thread_id,
+            "thread_runtime": thread.runtime,
+            "thread_status": thread.status,
+            "thread_created_at": thread.created_at.isoformat(),
+            "thread_updated_at": thread.updated_at.isoformat(),
+            "thread_metadata": thread.metadata,
+            "graph_id": thread.metadata.get("graph_id"),
+            "assistant_id": assistant_id,
+            "http_method": scope["method"],
+            "http_path": scope["path"],
+            "query_string": bytes(scope.get("query_string", b"")).decode("latin-1"),
+            "user_agent": Headers(scope=scope).get("user-agent"),
+        },
+    )
+
+
 async def _not_found(send: Send, thread_id: str) -> None:
     await send_json(send, 404, {"detail": f"Thread {thread_id} not found"})
 
@@ -138,7 +159,7 @@ class ThreadRouter:
             elif method == "POST" and rest == "/commands":
                 await self._command(scope, replayed, send, body, thread_id)
             elif method == "POST" and rest == "/copy":
-                await self._copy(send, thread_id)
+                await self._copy(scope, send, thread_id)
             elif method == "POST" and rest == "/state":
                 await self._write_state(scope, replayed, send, body, thread_id)
             else:
@@ -303,6 +324,7 @@ class ThreadRouter:
             rewritten = await mda.run_payload(thread_id, payload)
             await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
         else:
+            _warn_in_process(scope, thread, payload.get("assistant_id"))
             await self.app(scope, receive, recorder)
 
     async def _command(
@@ -322,6 +344,7 @@ class ThreadRouter:
                     await index.set_status(thread_id, "busy")
                 await send_json(send, 200, reply)
                 return
+            _warn_in_process(scope, thread, params.get("assistant_id"))
             await self.app(scope, receive, StatusRecorder(send, on_success=_marks_busy(thread_id)))
             return
         await self._to_runtime(scope, receive, send, body, thread_id)
@@ -336,12 +359,14 @@ class ThreadRouter:
             await self._claim_for_mda(thread, graph)
         await self._to_runtime(scope, receive, send, body, thread_id)
 
-    async def _copy(self, send: Send, thread_id: str) -> None:
+    async def _copy(self, scope: Scope, send: Send, thread_id: str) -> None:
         """Copy a thread on its runtime, and index the copy as the source is."""
         thread = await self._thread(thread_id)
         if thread is None:
             await _not_found(send, thread_id)
             return
+        if thread.runtime != "mda":
+            _warn_in_process(scope, thread)
         made = _object.validate_python(
             await RUNTIMES.runs_on(thread.runtime).client.http.post(
                 f"/threads/{thread_id}/copy", json={}
@@ -368,6 +393,8 @@ class ThreadRouter:
             await mda.ensure_remote_thread(thread_id)
             await forward(mda.http, scope, send, body)
             return
+        if thread is not None:
+            _warn_in_process(scope, thread)
         await self.app(scope, receive, send)
 
     async def _cancel_many(self, scope: Scope, receive: Receive, send: Send, body: bytes) -> None:

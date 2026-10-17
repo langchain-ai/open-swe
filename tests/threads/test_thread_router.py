@@ -211,7 +211,10 @@ async def test_a_thread_only_the_agent_server_knows_is_indexed_on_first_read(
 
 @pytest.mark.parametrize("runtime", ["local", "mda"])
 async def test_a_run_goes_to_its_threads_runtime_and_marks_the_thread_busy(
-    monkeypatch: pytest.MonkeyPatch, secret: None, runtime: Runtime
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    secret: None,
+    runtime: Runtime,
 ) -> None:
     harness = _Harness(monkeypatch)
     await index.create(THREAD, runtime=runtime, metadata={"owner_login": "ada"})
@@ -230,10 +233,17 @@ async def test_a_run_goes_to_its_threads_runtime_and_marks_the_thread_busy(
     assert status == 200
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "busy"
+    in_process = [
+        r for r in caplog.records if r.name == router.__name__ and r.levelname == "WARNING"
+    ]
     if runtime == "local":
         assert harness.reached_here == [f"/threads/{THREAD}/runs"]
         assert harness.forwarded == []
+        [warning] = in_process
+        assert warning.__dict__["thread_id"] == THREAD
+        assert warning.__dict__["assistant_id"] == "agent"
     else:
+        assert in_process == []
         assert harness.reached_here == []
         [(path, sent)] = harness.forwarded
         assert path == f"/threads/{THREAD}/runs" and sent["assistant_id"] == "open-swe"
