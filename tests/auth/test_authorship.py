@@ -22,7 +22,7 @@ async def test_sender_is_described_only_from_their_envelope_id(
 
     from openswe.input_messages import person_introduction
     from openswe.run_config import RunConfig
-    from openswe.server import UnidentifiedSenderError, _sender_participant
+    from openswe.threads.roster import ThreadRoster, UnidentifiedSenderError
     from openswe.users.models import UserIdentity
 
     user = User(
@@ -32,17 +32,19 @@ async def test_sender_is_described_only_from_their_envelope_id(
             UserIdentity(provider="slack", external_id="U_LINKED"),
         ],
     )
-    monkeypatch.setattr("openswe.server.load_profile", AsyncMock(return_value={}))
-    monkeypatch.setattr("openswe.server.participant_is_admin", AsyncMock(return_value=False))
+    monkeypatch.setattr("openswe.threads.roster.load_profile", AsyncMock(return_value={}))
     monkeypatch.setattr(
-        "openswe.server._resolve_user_custom_instructions", AsyncMock(return_value="")
+        "openswe.threads.roster.participant_is_admin", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        "openswe.threads.roster.get_user_custom_instructions", AsyncMock(return_value="")
     )
     # A run started without the sender's credentials, like a background-task completion.
-    anonymous = RunConfig.parse({"thread_id": "t"})
+    anonymous = ThreadRoster("t", RunConfig.parse({"thread_id": "t"}), frozenset())
     person_id = "user:01a0ac0d-35b2-74be-bf3c-94de8522386a"
 
     monkeypatch.setattr(User, "get", AsyncMock(return_value=user))
-    participant = await _sender_participant(person_id, anonymous, set())
+    participant = await anonymous.sender(person_id)
     assert participant is not None
     content = person_introduction(participant.as_person())["content"]
     assert f'id="{person_id}"' in content
@@ -52,11 +54,12 @@ async def test_sender_is_described_only_from_their_envelope_id(
 
     monkeypatch.setattr(User, "get", AsyncMock(return_value=None))
     with pytest.raises(UnidentifiedSenderError):
-        await _sender_participant(person_id, anonymous, set())
+        await anonymous.sender(person_id)
     with pytest.raises(UnidentifiedSenderError):
-        await _sender_participant("slack:U_OTHER", anonymous, set())
-    assert await _sender_participant("slack:U_OTHER", anonymous, {"slack:U_OTHER"}) is None
-    assert await _sender_participant("system:background-task", anonymous, set()) is None
+        await anonymous.sender("slack:U_OTHER")
+    introduced = ThreadRoster("t", anonymous.cfg, frozenset({"slack:U_OTHER"}))
+    assert await introduced.sender("slack:U_OTHER") is None
+    assert await anonymous.sender("system:background-task") is None
 
 
 async def test_participant_identity_ignores_users_table_email(

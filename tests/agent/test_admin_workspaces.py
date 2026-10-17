@@ -273,15 +273,25 @@ async def test_refresh_start_refuses_while_one_is_running(
 
 async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.MonkeyPatch) -> None:
     """An admin requester must not make everyone else in the roster look like one."""
-    from openswe import server
+    from openswe.run_config import RunConfig
+    from openswe.threads import roster
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
-    monkeypatch.setattr(server, "load_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(server, "_resolve_user_custom_instructions", AsyncMock(return_value=None))
+    monkeypatch.setattr(roster, "load_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(roster, "get_user_custom_instructions", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="bob@example.com"))
+    requested_by_admin = roster.ThreadRoster(
+        "t",
+        RunConfig.parse(
+            {"thread_id": "t", "github_login": "bob", "user_email": "admin@example.com"}
+        ),
+        frozenset(),
+    )
 
-    assert (await server._thread_participant("bob")).workspace_admin is False
+    bob = await requested_by_admin.sender("github:bob")
+    assert bob is not None and bob.workspace_admin is False
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com,bob")
-    assert (await server._thread_participant("bob")).workspace_admin is True
+    bob = await requested_by_admin.sender("github:bob")
+    assert bob is not None and bob.workspace_admin is True

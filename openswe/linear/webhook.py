@@ -289,7 +289,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     ]
     introduced: set[str] = set()
     for comment in included_comments:
-        person, introduction = await common.edge_person(_linear_person(comment.get("user") or {}))
+        person, introduction = await User.introduce(_linear_person(comment.get("user") or {}))
         sender_id = person["id"]
         if introduction is not None and sender_id not in introduced:
             run_messages.append(introduction)

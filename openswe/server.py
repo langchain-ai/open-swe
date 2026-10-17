@@ -14,7 +14,6 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
-from uuid import UUID
 
 from openswe.config import ENV
 
@@ -30,7 +29,6 @@ from langgraph_sdk import get_client
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
 import asyncio
-from dataclasses import replace
 
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -190,6 +188,7 @@ from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_ti
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
+from openswe.threads.roster import ThreadRoster
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
     assign_human_reviewer,
@@ -266,7 +265,6 @@ from openswe.tools import (
 from openswe.tools.access import permitted, resolve_access
 from openswe.tools.admin_gate import (
     actor_has_admin_context,
-    participant_is_admin,
 )
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
@@ -282,10 +280,8 @@ from openswe.tools.task_threads import (
     spawn_worker,
     task_status,
 )
-from openswe.users import User
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import (
-    CollaboratorIdentity,
     ThreadParticipant,
     resolve_triggering_user_identity,
 )
@@ -300,7 +296,6 @@ from openswe.utils.model import (
     provider_model_kwargs,
 )
 from openswe.utils.startup_trace import aphase
-from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from openswe.utils.thread_reads import read_thread, shared_thread_reads
 from openswe.utils.thread_settings import (
     ThreadSettings,
@@ -426,157 +421,6 @@ async def _resolve_repo_custom_instructions(
         return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
     except Exception:
         logger.debug("Failed to load repo custom agent instructions", exc_info=True)
-        return None
-
-
-class UnidentifiedSenderError(RuntimeError):
-    """A human sender that neither the ``users`` table nor the run's surface identifies."""
-
-    def __init__(self, person_id: str) -> None:
-        super().__init__(f"Cannot identify the sender {person_id!r}; refusing to run for them")
-        self.person_id = person_id
-
-
-async def _user_participant(user: User, person_id: str, *, timezone: str = "") -> ThreadParticipant:
-    """A person with an Open SWE account, described from their ``users`` row alone."""
-    login = user.github_login
-    if not login:
-        return ThreadParticipant(
-            identity=CollaboratorIdentity(
-                display_name=user.display_name, commit_name="", commit_email=""
-            ),
-            person_id=person_id,
-            email=user.email,
-            timezone=timezone,
-            linked=True,
-            slack_user_id=user.slack_user_id,
-        )
-    participant = await _github_participant(login, user.display_name, person_id)
-    return replace(
-        participant,
-        email=user.email,
-        timezone=timezone,
-        linked=True,
-        slack_user_id=user.slack_user_id,
-    )
-
-
-async def _github_participant(login: str, display_name: str, person_id: str) -> ThreadParticipant:
-    profile, workspace_admin, instructions = await asyncio.gather(
-        load_profile(login),
-        participant_is_admin(login),
-        _resolve_user_custom_instructions(login),
-    )
-    name = display_name or login
-    identity = CollaboratorIdentity(
-        display_name=name, commit_name=name, commit_email="", github_login=login
-    )
-    return ThreadParticipant(
-        identity=replace(identity, commit_email=identity.login_noreply_email),
-        person_id=person_id,
-        workspace_admin=workspace_admin,
-        draft_prs=profile_draft_prs(profile),
-        instructions=instructions or "",
-    )
-
-
-async def _thread_participant(login: str) -> ThreadParticipant:
-    """A thread participant known only by the GitHub login they posted under."""
-    user = await User.for_login("github", login)
-    if user is not None:
-        return await _user_participant(user, f"user:{user.id}")
-    return await _github_participant(login, "", f"github:{login}")
-
-
-async def _sender_participant(
-    person_id: str, cfg: RunConfig, introduced: set[str]
-) -> ThreadParticipant | None:
-    """The latest human sender, described from the id their envelope carries.
-
-    Edges key everyone with an account on ``user:<uuid>``, so that row is the only
-    source for them. A surface id names someone without one; the run's surface
-    data describes them only when it belongs to that same id. ``None`` means
-    there is nothing to add: a system principal, or a person already described.
-    """
-    platform, _, external_id = person_id.partition(":")
-    slack = cfg.slack_thread
-    if platform == "system":
-        return None
-    if platform == "user":
-        try:
-            user_id = UUID(external_id)
-        except ValueError as exc:
-            raise UnidentifiedSenderError(person_id) from exc
-        user = await User.get(user_id)
-        if user is None:
-            raise UnidentifiedSenderError(person_id)
-        on_slack = (
-            slack is not None
-            and bool(user.slack_user_id)
-            and slack.triggering_user_id == user.slack_user_id
-        )
-        timezone = slack.triggering_user_timezone if slack is not None and on_slack else ""
-        return await _user_participant(user, person_id, timezone=timezone)
-    if platform == "github" and external_id.lower() == (cfg.github_login or "").lower():
-        participant = await _thread_participant(external_id)
-        return replace(participant, person_id=person_id)
-    if platform == "slack" and slack is not None and slack.triggering_user_id == external_id:
-        return ThreadParticipant(
-            identity=CollaboratorIdentity(
-                display_name=slack.triggering_user_name, commit_name="", commit_email=""
-            ),
-            person_id=person_id,
-            timezone=slack.triggering_user_timezone,
-            slack_user_id=external_id,
-        )
-    if (
-        platform == "linear"
-        and cfg.linear_issue is not None
-        and external_id.lower() == (cfg.user_email or "").lower()
-    ):
-        name = (cfg.linear_issue.model_extra or {}).get("triggering_user_name")
-        return ThreadParticipant(
-            identity=CollaboratorIdentity(
-                display_name=name if isinstance(name, str) else "",
-                commit_name="",
-                commit_email="",
-            ),
-            person_id=person_id,
-            email=external_id,
-        )
-    if platform in {"github", "slack", "linear"} and person_id in introduced:
-        return None
-    raise UnidentifiedSenderError(person_id)
-
-
-async def _thread_participants(
-    thread_id: str, sender: ThreadParticipant | None
-) -> list[ThreadParticipant]:
-    """Everyone in the thread, each with the settings the agent acts under for them."""
-    try:
-        thread = await read_thread(thread_id, client)
-    except Exception:
-        logger.warning("Could not read the thread's participants", exc_info=True)
-        logins: list[str] = []
-    else:
-        logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
-    sender_login = sender.identity.github_login.lower() if sender is not None else ""
-    others = await asyncio.gather(
-        *(_thread_participant(login) for login in logins if login.lower() != sender_login)
-    )
-    return [*([sender] if sender is not None else []), *others]
-
-
-async def _resolve_user_custom_instructions(login: str | None) -> str | None:
-    """Load user-level custom agent instructions for the triggering user."""
-    if not login:
-        return None
-    try:
-        from openswe.dashboard.user_instructions import get_user_custom_instructions
-
-        return await get_user_custom_instructions(login)
-    except Exception:
-        logger.debug("Failed to load user custom agent instructions", exc_info=True)
         return None
 
 
@@ -1375,12 +1219,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             sender_messages: list[Any] = []
             if subject_id is not None:
-                sender = await _sender_participant(
-                    subject_id,
+                participants = await ThreadRoster(
+                    self._thread_id,
                     cfg,
-                    introduced_person_ids(state.get("messages")),
-                )
-                participants = await _thread_participants(self._thread_id, sender)
+                    frozenset(introduced_person_ids(state.get("messages"))),
+                    client,
+                ).participants(subject_id)
                 sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
         try:

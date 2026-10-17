@@ -141,7 +141,7 @@ async def _github_human_run_input(
     user_id: object = None,
     data: EnvelopeData | None = None,
 ) -> RunInput:
-    person, introduction = await common.edge_person(_github_person(login, user_id))
+    person, introduction = await User.introduce(_github_person(login, user_id))
     return {
         "messages": [
             *([introduction] if introduction is not None else []),
@@ -215,7 +215,7 @@ async def _github_issue_run_input(
     ]
     for comment in source_messages:
         author = str(comment.get("author") or "unknown")
-        person, introduction = await common.edge_person(
+        person, introduction = await User.introduce(
             _github_person(
                 author, trigger_user_id if author == trigger_login else comment.get("author_id")
             )
@@ -1198,7 +1198,7 @@ async def process_github_pr_comment(
     introduced: set[str] = set()
     for item in comments:
         author = str(item.get("author") or "unknown")
-        person, introduction = await common.edge_person(
+        person, introduction = await User.introduce(
             _github_person(author, github_user_id if author == github_login else None)
         )
         if introduction is not None and person["id"] not in introduced:
