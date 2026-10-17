@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import posixpath
 import shlex
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -75,7 +74,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
         return
     try:
-        sandbox_id, repo_name = await get_dashboard_terminal_sandbox(
+        sandbox_id, cwd = await get_dashboard_terminal_sandbox(
             thread_id, session["sub"], email=session.get("email")
         )
     except HTTPException as exc:
@@ -93,7 +92,6 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         from openswe.sandboxes.providers.langsmith import connect_async_langsmith_sandbox
 
         client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
-        cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"
         if not (await sandbox.run(f"test -d {shlex.quote(cwd)}")).success:
             cwd = "/workspace"
         handle = await sandbox.run(

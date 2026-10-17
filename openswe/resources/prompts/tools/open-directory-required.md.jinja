@@ -1,0 +1,5 @@
+{% if relative %}
+No directory is open, so this relative path does not resolve. Call `open_directory` with the repository checkout (or the package within it) you are working in, then retry; or pass an absolute path.
+{% else %}
+No directory is open. Call `open_directory` with the repository checkout (or the package within it) you are working in before editing files, then retry.
+{% endif %}

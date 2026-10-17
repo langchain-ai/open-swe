@@ -5,4 +5,4 @@ Move this thread out of the user's own checkout into a new git worktree on a new
 - `start_from_origin`: fetch `origin` and start from its copy of `base_ref` rather than the local one. Defaults to true.
 - `user_checkout`: switch the user's own checkout to `branch` and move the thread there instead of creating a worktree, for when the user asks to work in their checkout rather than a worktree. Refused while another thread runs there or when `branch` is checked out in a worktree. Defaults to false.
 
-On success it returns the worktree's path: use it for absolute paths from now on, in place of the working directory named earlier. Creating a new worktree fails when the thread already runs in a worktree of its own.
+On success it returns the worktree's path, which replaces the working directory named earlier. The handoff closes the open directory, since it was in the checkout the thread left: call `open_directory` within the worktree before working on files again. Creating a new worktree fails when the thread already runs in a worktree of its own.

@@ -107,7 +107,10 @@ async def test_admin_can_view_but_not_open_terminal(private_thread):
     with pytest.raises(HTTPException) as exc:
         await handlers.get_dashboard_terminal_sandbox("private-thread", "admin")
     assert exc.value.status_code == 404
-    assert await handlers.get_dashboard_terminal_sandbox("private-thread", "alice") == ("sbx", None)
+    assert await handlers.get_dashboard_terminal_sandbox("private-thread", "alice") == (
+        "sbx",
+        "/workspace",
+    )
 
 
 async def test_admin_can_read_artifact_but_not_mutate(private_thread, monkeypatch):

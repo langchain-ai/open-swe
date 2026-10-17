@@ -19,6 +19,7 @@ from openswe.github.pull_request_status import get_pull_request_statuses
 from openswe.github.thread_token import invalidate_cached_github_token
 from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
+from openswe.sandboxes.context_directory import ContextDirectory
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
@@ -109,7 +110,8 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
 
 async def get_dashboard_terminal_sandbox(
     thread_id: str, login: str, *, email: str | None = None
-) -> tuple[str, str | None]:
+) -> tuple[str, str]:
+    """The thread's sandbox and the directory its agent works in."""
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -126,10 +128,13 @@ async def get_dashboard_terminal_sandbox(
         or sandbox_id == _SANDBOX_CREATING_SENTINEL
     ):
         raise HTTPException(404, "thread sandbox is not ready")
+    directory = ContextDirectory.of(metadata)
+    if directory is not None:
+        return sandbox_id, directory.path
     repo_name = metadata.get("repo_name")
-    if not isinstance(repo_name, str) or posixpath.basename(repo_name) != repo_name:
-        repo_name = None
-    return sandbox_id, repo_name
+    if isinstance(repo_name, str) and posixpath.basename(repo_name) == repo_name:
+        return sandbox_id, posixpath.join("/workspace", repo_name)
+    return sandbox_id, "/workspace"
 
 
 async def get_dashboard_thread(

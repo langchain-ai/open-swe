@@ -125,6 +125,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.code_mode import CodeModeMiddleware
+from openswe.middleware.context_directory import OPEN_DIRECTORY, ContextDirectoryMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
@@ -810,8 +811,9 @@ async def _run_mcp_tools(
 
 # The sandbox's file and shell tools, which code mode offers directly as well.
 SANDBOX_TOOL_NAMES = frozenset({*FILESYSTEM_TOOL_NAMES, "delete", "background_execute"})
-# In-process code mode calls tools directly, skipping the guards that wrap these calls.
-_GUARDED_SHELL_TOOLS = frozenset({"execute", "background_execute"})
+# In-process code mode calls tools directly, skipping the middleware that wraps these
+# calls: the guards, and the open directory their commands and paths start from.
+_GUARDED_SANDBOX_TOOLS = SANDBOX_TOOL_NAMES
 # Never called from code: subagents, the replies a run waits on, and tools whose
 # results update graph state, which a call from code drops.
 _NOT_FROM_CODE = (
@@ -829,6 +831,8 @@ _NOT_FROM_CODE = (
             "spawn_worker",
             "control_worker",
             "message_task_thread",
+            OPEN_DIRECTORY,
+            "worktree_handoff",
         }
     )
 )
@@ -868,7 +872,7 @@ async def _mcp_code_mode(
     ptc_tools.extend(
         name
         for name in additional_tools
-        if callable_from_code(name) and name not in _GUARDED_SHELL_TOOLS
+        if callable_from_code(name) and name not in _GUARDED_SANDBOX_TOOLS
     )
     if not ptc_tools:
         return None, tools
@@ -1924,7 +1928,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ],
         ],
     )
-    integration_reserved_names = {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names}
+    integration_reserved_names = {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names, OPEN_DIRECTORY}
     full_dynamic_tools = _integration_middleware(
         mcp_tools,
         integration_reserved_names,
@@ -2097,10 +2101,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
         and _registered_tool_name(tool) not in sandbox_only_tools
     ]
+    filesystem = FilesystemMiddleware(backend=agent_backend, offload_binary_content=True)
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
-            FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
+            filesystem,
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ConversationOffloadingMiddleware(
                 main_model, agent_backend, manual=cfg.offload_conversation is True
@@ -2124,7 +2129,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ),
             ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=excluded_tools),
-            SubdirAgentsReadMiddleware(),
             ToolRetryMiddleware(
                 max_retries=2,
                 tools=["task"],
@@ -2135,6 +2139,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ),
             PullRequestCreationGuardMiddleware(),
             WorkflowPushGuardMiddleware(),
+            # Inside the guards that read commands as written, outside the reader of resolved paths.
+            ContextDirectoryMiddleware(filesystem),
+            SubdirAgentsReadMiddleware(),
             *([task_coordination] if task_coordination else []),
             *(
                 []
@@ -2235,6 +2242,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
                 tools=(
                     *FILESYSTEM_TOOL_NAMES,
+                    OPEN_DIRECTORY,
                     *(
                         name
                         for name in map(_registered_tool_name, subagent_tools)

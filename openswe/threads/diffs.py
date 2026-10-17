@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
+from openswe.sandboxes.context_directory import ContextDirectory
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.proxy import _PROXY_REQUEST_TIMEOUT
@@ -185,8 +186,12 @@ async def get_dashboard_thread_working_tree_diff(
         logger.exception("Could not connect to sandbox %s for working tree diff", sandbox_id)
         raise HTTPException(503, "Could not connect to the workspace.") from exc
     work_dir = await resolve_sandbox_work_dir(sandbox)
+    # The checkout the agent opened, else the one the thread's repository would be in.
+    directory = ContextDirectory.of(metadata)
+    repo_path = directory.checkout if directory is not None else None
     _, repo_name, _ = _metadata_repo(metadata)
-    repo_path = await resolve_checkout_dir(sandbox, work_dir, repo_name) if repo_name else None
+    if repo_path is None and repo_name:
+        repo_path = await resolve_checkout_dir(sandbox, work_dir, repo_name)
     return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)
 
 

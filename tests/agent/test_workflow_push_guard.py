@@ -87,16 +87,20 @@ class _Request:
     runtime = _Runtime()
 
     def __init__(
-        self, command: str = "git -C /repo push origin feature", name: str = "execute"
+        self,
+        command: str = "git -C /repo push origin feature",
+        name: str = "execute",
+        state: dict[str, Any] | None = None,
     ) -> None:
         self.tool_call = {
             "name": name,
             "args": {"command": command},
             "id": "call-1",
         }
+        self.state = state or {}
 
     def override(self, **kwargs: Any) -> _Request:
-        next_request = _Request()
+        next_request = _Request(state=self.state)
         next_request.tool_call = kwargs.get("tool_call", self.tool_call)
         return next_request
 
@@ -384,6 +388,35 @@ async def test_approved_workflow_push_runs_fixed_command(
     assert result.content == "pushed"
     options = f"--set-upstream {lease} ".replace("  ", " ")
     assert pushed_command == (f"git -C /repo push {options}origin {'a' * 40}:refs/heads/feature")
+
+
+async def test_push_from_the_open_directory_is_inspected_there(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _Backend()
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, backend), thread_id="thread-1"
+    )
+
+    async def fake_approved(thread_id: str, fingerprint: str) -> bool:
+        return True
+
+    monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
+    pushed_command = ""
+
+    async def handler(request: Any) -> ToolMessage:
+        nonlocal pushed_command
+        pushed_command = request.tool_call["args"]["command"]
+        return ToolMessage(content="pushed", tool_call_id="call-1")
+
+    open_directory = {"context_directory": {"path": "/repo/pkg", "repo": "o/r", "subpath": "pkg"}}
+    await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request("git push origin feature", state=open_directory)), handler
+    )
+
+    assert backend.commands
+    assert all(command.startswith("cd /repo/pkg && {") for command in backend.commands)
+    assert pushed_command == f"git -C /repo push origin {'a' * 40}:refs/heads/feature"
 
 
 @pytest.mark.parametrize(

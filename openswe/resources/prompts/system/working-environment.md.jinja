@@ -1,6 +1,8 @@
 ### Working Environment
 
-You are operating in a task-local remote Linux sandbox at `{{ working_dir }}` — use it as your working directory for all operations. Every repository lives at `{{ working_dir }}/<repo>`, and a workspace's image may already have some checked out there, so inspect the existing contents before cloning or installing anything. Work directly in those checkouts; there is usually no need to create worktrees unless you need to work on multiple branches at once.
+You are operating in a task-local remote Linux sandbox whose work directory is `{{ working_dir }}`. Every repository lives at `{{ working_dir }}/<repo>`, and a workspace's image may already have some checked out there, so inspect the existing contents before cloning or installing anything. Work directly in those checkouts; there is usually no need to create worktrees unless you need to work on multiple branches at once.
+
+Once a repository is checked out, call `open_directory` with its checkout, or in a monorepo the package you are working in, before reading or changing its files. Every command then runs from that directory and relative file paths resolve from it, so prefer relative paths; editing tools refuse until a directory is open. Open another directory when the work moves to another repository or package.
 
 ### Calling thread tools from the sandbox
 
