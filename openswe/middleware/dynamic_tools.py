@@ -88,14 +88,16 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         reserved_names: Collection[str] = (),
         *,
         model_visible: bool = True,
+        model_tool_names: Collection[str] | None = None,
     ) -> None:
-        """With ``model_visible`` false, only sandbox tool calls can reach the integrations."""
+        """Resolve every integration while exposing only selected tools to the model."""
         reserved = {_LOAD_TOOL_NAME, *reserved_names}
         self._model_visible = model_visible
         self._groups: dict[str, IntegrationGroup] = {}
         self._group_of: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        visible_names = set(model_tool_names) if model_tool_names is not None else None
         catalog: list[str] = []
 
         for group, spec in groups.items():
@@ -109,13 +111,21 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             if not names:
                 continue
             self._groups[group] = entry
-            catalog.extend(f"- {name} (integration: {group})" for name in sorted(names))
+            catalog.extend(
+                f"- {name} (integration: {group})"
+                for name in sorted(names)
+                if visible_names is None or name in visible_names
+            )
+
+        self._model_tool_names = {
+            name for name in self._group_of if visible_names is None or name in visible_names
+        }
 
         aliases = {
             alias: name
             for name, group in self._group_of.items()
             for alias in (f"{group}:{name}", f"{group}: {name}")
-            if alias not in self._group_of
+            if name in self._model_tool_names and alias not in self._group_of
         }
 
         async def load_integration_tools(
@@ -124,7 +134,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             tool_call_id: Annotated[str, InjectedToolCallId] = "",
         ) -> Command:
             normalized_names = [aliases.get(name, name) for name in tool_names]
-            unknown = sorted(set(normalized_names) - self._group_of.keys())
+            unknown = sorted(set(normalized_names) - self._model_tool_names)
             if unknown:
                 return Command(
                     update={
@@ -174,9 +184,11 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             )
 
         description = prompt("tools/load_integration_tools")
-        if self._group_of:
+        if self._model_tool_names:
             example_name = (
-                "analyzePlan" if "analyzePlan" in self._group_of else next(iter(self._group_of))
+                "analyzePlan"
+                if "analyzePlan" in self._model_tool_names
+                else next(name for name in self._group_of if name in self._model_tool_names)
             )
             example = json.dumps({"tool_names": [example_name]}, separators=(",", ":"))
             description += f"\nExample: {example}\nAvailable tools:\n" + "\n".join(catalog)
@@ -188,7 +200,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                     description=description,
                 )
             ]
-            if model_visible
+            if model_visible and self._model_tool_names
             else []
         )
 
@@ -237,7 +249,9 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     ) -> ModelResponse:
         if not self._model_visible:
             return await handler(request)
-        loaded = self._loaded_names(request.state)
+        loaded = [
+            name for name in self._loaded_names(request.state) if name in self._model_tool_names
+        ]
         if loaded:
             await self._build(loaded)
         tools = {name: tool for name in loaded if (tool := self._tool(name)) is not None}

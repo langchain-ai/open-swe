@@ -882,11 +882,13 @@ def _integration_middleware(
     reserved_names: set[str],
     *,
     model_visible: bool = True,
+    model_tool_names: Sequence[str] | None = None,
 ) -> DynamicToolMiddleware | None:
     candidate = DynamicToolMiddleware(
         {"MCPs": mcp_tools},
         reserved_names=reserved_names,
         model_visible=model_visible,
+        model_tool_names=model_tool_names,
     )
     return candidate if candidate.has_groups else None
 
@@ -1932,9 +1934,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     )
     dynamic_tool_middleware = (
         _integration_middleware(
-            ordinary_mcp_tools,
+            mcp_tools,
             integration_reserved_names,
             model_visible=not prefer_tools_in_sandbox,
+            model_tool_names=[tool.name for tool in ordinary_mcp_tools],
         )
         if mcp_ptc is not None
         else full_dynamic_tools
