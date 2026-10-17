@@ -9,7 +9,7 @@ from openswe.tools.access import Policy, access
 
 DEFAULT_CHANNEL_MESSAGE_LIMIT = 30
 
-_NOT_PUBLIC = (
+PUBLIC_CHANNEL_REQUIRED = (
     "Only public channels can be read this way. That channel is private, a direct message, "
     "or shared with another organization, and reading it here would bypass its membership. "
     "Ask the person for what you need instead."
@@ -23,7 +23,7 @@ async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[
         return {"success": False, "error": "channel_id is required"}
     channel = await SlackChannel.load(channel_id.strip())
     if channel is None or not channel.public:
-        return {"success": False, "error": _NOT_PUBLIC}
+        return {"success": False, "error": PUBLIC_CHANNEL_REQUIRED}
 
     requested = limit if isinstance(limit, int) and limit > 0 else DEFAULT_CHANNEL_MESSAGE_LIMIT
     messages = await channel.messages(requested)
