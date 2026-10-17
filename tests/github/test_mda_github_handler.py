@@ -42,7 +42,7 @@ def _backend(monkeypatch: pytest.MonkeyPatch, answer: dict[str, Any]) -> list[ht
         return httpx2.Response(200, json=answer)
 
     monkeypatch.setattr(
-        "rt.github.httpx2.AsyncClient",
+        "rt.intake.httpx2.AsyncClient",
         lambda **kwargs: real_client(transport=httpx2.MockTransport(handler), **kwargs),
     )
     return seen

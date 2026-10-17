@@ -131,10 +131,9 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(prepared: As
     prepared.assert_awaited_once()
     assert prepared.await_args.args[1:] == ("issues", THREAD)
     channel.adopt_channel_run.assert_awaited_once_with(THREAD, "github")  # type: ignore[attr-defined]
-    # The run token is signed for the channel's thread, and names the channel.
+    # The run token is signed for the channel's thread.
     token = verify_runtime_token(run["context"]["__run_token"])
     assert token.thread_id == THREAD
-    assert token.configurable["channel"] == "github"
     assert token.configurable["github_login"] == "ada"
     assert run["context"]["graph"] == "agent"
     # Run metadata keeps only keys MDA accepts from a handler.

@@ -138,11 +138,9 @@ async def _prepare_run(event: ChannelEvent, event_type: str) -> PreparedRun | No
     if prepared is None:
         return None
     await adopt_channel_run(thread_id, CHANNEL)
-    # Signed into the run token too, so the run's after_agent hook completes it.
-    configurable = {**prepared.configurable, CHANNEL_METADATA_KEY: CHANNEL}
     run_config = await prepare_durable_run(
         "agent",
-        {"configurable": configurable},
+        {"configurable": prepared.configurable},
         {
             **common.AGENT_VERSION_METADATA,
             CHANNEL_METADATA_KEY: CHANNEL,

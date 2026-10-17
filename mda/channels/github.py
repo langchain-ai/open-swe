@@ -6,6 +6,7 @@ GitHub sent them. Pull requests, reviews, CI and automations stay on the backend
 """
 
 from managed_deepagents import channels
+from rt import intake
 from rt.github import GITHUB
 
 channel = channels.github(
@@ -18,4 +19,6 @@ channel = channels.github(
         "issue_comment.created": GITHUB.start_run,
         "issue_comment.edited": GITHUB.start_run,
     },
+    # The channel starts the runs, so no run-complete webhook follows them.
+    on_settled=intake.settled,
 )
