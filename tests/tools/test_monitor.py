@@ -92,6 +92,41 @@ async def test_timeout_without_events_still_reports_the_raw_tail(
     assert ended.end.tail == [(1, "waiting for port 8080")]
 
 
+async def test_raw_log_rotates_and_keeps_numbering_across_segments(
+    monitors: SandboxMonitors, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    name, source = sandbox._script()
+    small = source.replace(
+        "RAW_SEGMENT_BYTES = 10 * 1024 * 1024", "RAW_SEGMENT_BYTES = 64 * 1024"
+    ).replace("MAX_RAW_BYTES = 50 * 1024 * 1024", "MAX_RAW_BYTES = 256 * 1024")
+    monkeypatch.setattr(sandbox, "_script", lambda: (f"small-{name}", small))
+    await monitors.start(
+        "mon-3",
+        command="seq -f 'line %g of the build log, padded to a realistic width' 20000",
+        filter="grep NO_SUCH_LINE",
+        description="build log",
+        timeout=30,
+        callback=False,
+    )
+
+    ended = await _ended(monitors)
+
+    segments = sorted((tmp_path / "mon-3").glob("raw-*.log"))
+    assert len(segments) > 1
+    # A segment closes once a read takes it past its size, so it can overshoot by one read.
+    assert sum(segment.stat().st_size for segment in segments) <= (256 + 64 + 64) * 1024
+    assert ended.end is not None and ended.end.tail[-1][0] == 20000
+    first = int(segments[0].stem.removeprefix("raw-"))
+    assert first > 1
+    boundary = int(segments[1].stem.removeprefix("raw-"))
+    output = await monitors.output("mon-3", start_line=boundary - 1, end_line=boundary)
+    assert [int(line.split("\t")[0]) for line in str(output["output"]).splitlines()] == [
+        boundary - 1,
+        boundary,
+    ]
+    assert f"line {boundary} of" in str(output["output"])
+
+
 async def test_sandbox_cannot_deliver_for_a_thread_it_does_not_serve(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

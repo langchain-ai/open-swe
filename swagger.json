@@ -3485,9 +3485,9 @@
             "title": "Raw Lines",
             "type": "integer"
           },
-          "raw_log": {
+          "raw_logs": {
             "default": "",
-            "title": "Raw Log",
+            "title": "Raw Logs",
             "type": "string"
           },
           "started_at": {

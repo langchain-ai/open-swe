@@ -45,7 +45,8 @@ class MonitorState(BaseModel):
     events: int = 0
     dropped_filter_bytes: int = 0
     callback: bool = False
-    raw_log: str = ""
+    raw_logs: str = ""
+    """A glob of the raw log segments, oldest first by name."""
 
 
 class MonitorEvent(BaseModel):

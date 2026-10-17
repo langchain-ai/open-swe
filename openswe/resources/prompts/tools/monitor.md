@@ -3,7 +3,7 @@ Run a long-lived sandbox command and get its output as events while you keep wor
 `start` returns at once. The command keeps running after this run ends, and every event wakes this thread: it is added before your next model call while a run is active, or starts a new run when the thread is idle. Each event costs a model turn, so filter for the lines you would act on.
 
 How output becomes events:
-- The command's stdout and stderr, merged, are saved line by line, numbered from 1, in the monitor's raw log. Nothing is lost to the filter; `output` reads it back.
+- The command's stdout and stderr, merged, are saved line by line, numbered from 1, in the monitor's raw log. Nothing is lost to the filter; `output` reads it back. The log rotates into 10 MiB segment files (`raw_logs`) and keeps the newest 50 MiB, so a long run drops its oldest lines.
 - `filter` is a separate shell command that reads those lines on stdin. Each line it prints is event output; it is line-buffered for you, so `grep`, `awk` and `sed` need no flush flags. With no filter every raw line is event output.
 - Lines printed within 200ms of each other arrive as one event, which names the raw line it starts at.
 

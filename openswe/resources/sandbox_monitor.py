@@ -30,7 +30,10 @@ LAUNCH_LOCK = os.path.join(ROOT, ".launch-lock")
 ID_PATTERN = re.compile(r"^mon-[0-9a-f-]{1,64}$")
 TERMINAL = ("completed", "failed", "timed_out", "stopped", "filter_exited", "too_noisy", "lost")
 MAX_ACTIVE_PER_THREAD = 3
+# The raw log rotates into segments; the oldest are deleted past MAX_RAW_BYTES.
+RAW_SEGMENT_BYTES = 10 * 1024 * 1024
 MAX_RAW_BYTES = 50 * 1024 * 1024
+RAW_SEGMENT = re.compile(r"^raw-(\d{12})\.log$")
 MAX_FILTER_BACKLOG = 4 * 1024 * 1024
 BATCH_SECONDS = 0.2
 MAX_EVENT_LINES = 50
@@ -110,7 +113,6 @@ class Monitor:
         self.dir = os.path.join(ROOT, monitor_id)
         self.config_path = os.path.join(self.dir, "config.json")
         self.state_path = os.path.join(self.dir, "state.json")
-        self.raw_path = os.path.join(self.dir, "raw.log")
         self.events_path = os.path.join(self.dir, "events.jsonl")
         self.filter_err_path = os.path.join(self.dir, "filter.err")
         self.acked_path = os.path.join(self.dir, "acked.json")
@@ -169,44 +171,63 @@ class Monitor:
             "callback",
         )
         summary = {key: state.get(key) for key in keys}
-        summary["raw_log"] = self.raw_path
+        summary["raw_logs"] = os.path.join(self.dir, "raw-*.log")
         summary["events_log"] = self.events_path
         return summary
 
+    def segments(self):
+        """``(first line, path)`` of each retained raw log segment, oldest first."""
+        try:
+            names = os.listdir(self.dir)
+        except OSError:
+            return []
+        found = [
+            (int(match.group(1)), name) for name in names if (match := RAW_SEGMENT.match(name))
+        ]
+        return [(first, os.path.join(self.dir, name)) for first, name in sorted(found)]
+
     def numbered(self, start, end):
         """``(number, text)`` for retained raw lines ``start..end`` (1-based, inclusive)."""
-        state = self.state() or {}
-        first = state.get("first_raw_line") or 1
+        segments = self.segments()
         lines = []
         size = 0
-        try:
-            with open(self.raw_path, "rb") as handle:
-                for offset, raw in enumerate(handle):
-                    number = first + offset
-                    if number < start:
-                        continue
-                    if number > end:
-                        break
-                    text = raw.rstrip(b"\n").decode(errors="replace")
-                    size += len(text) + 8
-                    if size > MAX_OUTPUT_BYTES or len(lines) >= MAX_OUTPUT_LINES:
-                        break
-                    lines.append((number, text))
-        except OSError:
-            pass
+        for index, (first, path) in enumerate(segments):
+            following = segments[index + 1][0] if index + 1 < len(segments) else None
+            if following is not None and following <= start:
+                continue
+            if first > end:
+                break
+            try:
+                with open(path, "rb") as handle:
+                    for number, raw in enumerate(handle, start=first):
+                        if number < start:
+                            continue
+                        if number > end:
+                            break
+                        text = raw.rstrip(b"\n").decode(errors="replace")
+                        size += len(text) + 8
+                        if size > MAX_OUTPUT_BYTES or len(lines) >= MAX_OUTPUT_LINES:
+                            return lines
+                        lines.append((number, text))
+            except OSError:
+                continue
         return lines
 
-    def tail(self, count):
-        state = self.state() or {}
-        last = (state.get("first_raw_line") or 1) + self.retained_lines() - 1
-        return self.numbered(max(1, last - count + 1), last)
+    def first_line(self):
+        segments = self.segments()
+        return segments[0][0] if segments else 1
 
-    def retained_lines(self):
+    def tail(self, count):
+        segments = self.segments()
+        if not segments:
+            return []
+        first, path = segments[-1]
         try:
-            with open(self.raw_path, "rb") as handle:
-                return sum(1 for _ in handle)
+            with open(path, "rb") as handle:
+                last = first + sum(1 for _ in handle) - 1
         except OSError:
-            return 0
+            return []
+        return self.numbered(max(1, last - count + 1), last)
 
     def events_after(self, seq, limit):
         events = []
@@ -236,14 +257,29 @@ class Monitor:
 
 
 class RawLog:
-    """Every line the command printed, numbered from 1, keeping the newest ``MAX_RAW_BYTES``."""
+    """Every line the command printed, numbered from 1, in segments named by their first line.
 
-    def __init__(self, path):
-        self.path = path
-        self.handle = open(path, "ab")
+    A segment past ``RAW_SEGMENT_BYTES`` is closed and a new one opened; the
+    oldest are deleted while the retained segments exceed ``MAX_RAW_BYTES``.
+    """
+
+    def __init__(self, directory):
+        self.dir = directory
         self.count = 0
-        self.first = 1
-        self.size = 0
+        self.segments = collections.deque()
+        self.handle = None
+        self.open_segment(1)
+
+    @property
+    def first(self):
+        return self.segments[0][0]
+
+    def open_segment(self, first):
+        if self.handle is not None:
+            self.handle.close()
+        path = os.path.join(self.dir, f"raw-{first:012d}.log")
+        self.handle = open(path, "ab")
+        self.segments.append([first, path, 0])
 
     def append(self, lines):
         if not lines:
@@ -251,25 +287,22 @@ class RawLog:
         data = b"".join(line + b"\n" for line in lines)
         self.handle.write(data)
         self.count += len(lines)
-        self.size += len(data)
-        if self.size > MAX_RAW_BYTES:
-            self.trim()
+        self.segments[-1][2] += len(data)
+        if self.segments[-1][2] >= RAW_SEGMENT_BYTES:
+            self.open_segment(self.count + 1)
+            self.prune()
+
+    def prune(self):
+        # Never the segment just closed, however large one write made it.
+        while len(self.segments) > 2 and sum(size for _, _, size in self.segments) > MAX_RAW_BYTES:
+            _, path, _ = self.segments.popleft()
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     def flush(self):
         self.handle.flush()
-
-    def trim(self):
-        self.handle.close()
-        with open(self.path, "rb") as handle:
-            data = handle.read()
-        cut = data.find(b"\n", len(data) // 2) + 1
-        kept = data[cut:]
-        self.first += data[:cut].count(b"\n")
-        with open(self.path + ".tmp", "wb") as handle:
-            handle.write(kept)
-        os.replace(self.path + ".tmp", self.path)
-        self.size = len(kept)
-        self.handle = open(self.path, "ab")
 
 
 class Lines:
@@ -295,7 +328,7 @@ class Runner:
     def __init__(self, monitor):
         self.monitor = monitor
         self.config = read_json(monitor.config_path)
-        self.raw = RawLog(monitor.raw_path)
+        self.raw = RawLog(monitor.dir)
         self.events = open(monitor.events_path, "a")
         self.seq = 0
         self.recent = collections.deque()
@@ -761,8 +794,7 @@ def output(request):
     if start_line is None and end_line is None:
         lines = monitor.tail(DEFAULT_OUTPUT_LINES)
     else:
-        first = state.get("first_raw_line") or 1
-        start_line = max(int(start_line or first), 1)
+        start_line = max(int(start_line or monitor.first_line()), 1)
         end_line = int(end_line) if end_line is not None else start_line + DEFAULT_OUTPUT_LINES - 1
         lines = monitor.numbered(start_line, end_line)
     result = monitor.summary(state)
