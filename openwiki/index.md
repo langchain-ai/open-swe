@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Codebase Guide](quickstart.md) - Start here to set up Open SWE, choose the entrypoint and owner for a safe change, and run focused validation. Links route contributors to the detailed architecture, workflow, integration, operations, and testing guides.
+- [Open SWE Engineering Guide](quickstart.md) - Set up Open SWE, select the runtime and change owner, and validate only the boundary you changed. This guide routes contributors to the architecture, domain, integration, workflow, operations, and testing pages for deeper context.
 
 # Directories
 

@@ -1,115 +1,113 @@
 ---
 type: workflow
-title: Input Context and Prompt Construction
-description: How events from Slack, Linear, GitHub, and other surfaces become structured run input, then combine with source provenance, dynamic identities, instructions, repository conventions, and virtual skills for agent and analyzer prompts.
+title: Context Assembly and Prompt Engineering
+description: How Open SWE converts external events into safe, attributed model input and assembles per-run system context from prompts, repository rules, workspace settings, source guidance, and skills.
 tags: [context-engineering, prompts, input-messages, source-context, agents-md, skills]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-17T08:12:29.923Z
 sources:
-  - id: openwiki-source-63ebc853556c1b852ed80aff
-    resource: repo://agent/analyzer.py
-  - id: openwiki-source-c48b309c5ca416cf623f0866
-    resource: repo://agent/dispatch.py
-  - id: openwiki-source-ba064e884edcde6097165df2
-    resource: repo://agent/github/webhook.py
-  - id: openwiki-source-cb4e403499865fd6b797127c
-    resource: repo://agent/input_messages.py
-  - id: openwiki-source-2d78b3dc0a340eaacb9e53e2
-    resource: repo://agent/linear/webhook.py
-  - id: openwiki-source-de97adb0acb9dec0664a44b6
-    resource: repo://agent/middleware/prepare_run.py
-  - id: openwiki-source-6a91255d02f2954f4233c8bb
-    resource: repo://agent/middleware/subdir_agents.py
-  - id: openwiki-source-10938886c8b24d0cdc72ad9e
-    resource: repo://agent/prompt.py
-  - id: openwiki-source-92590907348b7bf56e1762fa
-    resource: repo://agent/review/style_jobs.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-4ffd3d31ffb2d798faaaad59
-    resource: repo://agent/slack/webhook.py
-  - id: openwiki-source-db8a5812295508f44c54b439
-    resource: repo://agent/source_context.py
-  - id: openwiki-source-67ffc2016995f2003206500d
-    resource: repo://agent/utils/agents_md.py
-  - id: openwiki-source-ff16fde3cd496fd0b8de20da
-    resource: repo://agent/utils/analyzer_skills.py
-  - id: openwiki-source-25a50e8385de61204afe1bcf
-    resource: repo://agent/webhooks/common.py
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+  - id: openwiki-source-1685d34aae8025be9332f45a
+    resource: repo://openswe/dispatch.py
+  - id: openwiki-source-836966ba5e0c4d710801c9a9
+    resource: repo://openswe/input_messages.py
+  - id: openwiki-source-052a9a68c52dca5bb8277219
+    resource: repo://openswe/middleware/prepare_run.py
+  - id: openwiki-source-16e333a939d057e31c63690d
+    resource: repo://openswe/middleware/subdir_agents.py
+  - id: openwiki-source-c950a10d3272291deaffd090
+    resource: repo://openswe/prompt.py
+  - id: openwiki-source-3554a18b9529d3d118344e34
+    resource: repo://openswe/prompts.py
+  - id: openwiki-source-1c7c5f1a7efc26b4594613d2
+    resource: repo://openswe/resources/prompts/system/main.md.jinja
+  - id: openwiki-source-4b3bf000502ef658b64c0b0f
+    resource: repo://openswe/resources/prompts/system/repository-setup.md.jinja
+  - id: openwiki-source-919e16feae379651f2cbc1c9
+    resource: repo://openswe/server.py
+  - id: openwiki-source-54be351bb3f7329e63dbf9af
+    resource: repo://openswe/skill_store/backend.py
+  - id: openwiki-source-76820c5856f1479d850c1ab9
+    resource: repo://openswe/source_context.py
+  - id: openwiki-source-6cab3229da0697cc82ed6224
+    resource: repo://openswe/utils/agents_md.py
+  - id: openwiki-source-3087256f0cd599176fba3c38
+    resource: repo://openswe/webhooks/common.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-17T08:12:29.923Z" }
 ---
 
-# Input Context and Prompt Construction
+# Context Assembly and Prompt Engineering
 
-Context is assembled in layers rather than by passing an event body verbatim to a model. Surface adapters construct a `RunInput` transcript and run configuration; `dispatch_agent_run` is the common durable-run boundary and rejects ambiguous calls that combine a prebuilt input with raw content or identities. At execution time prepare middleware resolves fresh, run-specific prompt material, checkpoints it, and supplies a wrapped system message to the deep agent.
+Open SWE does not send a webhook body directly to a model. It separates **the conversation transcript** (`RunInput.messages`), **durable routing provenance** (`source_context` in thread metadata), and **per-run system instructions** (`rendered_system_prompt`). This division prevents current identity or operational context from rewriting historical turns, while allowing a resumed run to reconstruct fresh credentials, sandbox state, and instructions.
 
 ```mermaid
-sequenceDiagram
-    participant Surface
-    participant Adapter
-    participant Dispatch
-    participant Thread
-    participant Prepare
-    participant Agent
-    Surface->>Adapter: event and surface history
-    Adapter->>Adapter: build identity and input envelopes
-    Adapter->>Thread: store source context metadata
-    Adapter->>Dispatch: input and configurable state
-    Dispatch->>Thread: create durable run
-    Thread->>Prepare: invoke graph
-    Prepare->>Prepare: resolve sandbox and prompt additions
-    Prepare->>Agent: wrapped system prompt and transcript
+flowchart TD
+    Event["Slack, Linear, GitHub, web, or automation event"] --> Adapter["Surface adapter or dispatcher"]
+    Adapter --> Input["RunInput transcript with input-message envelopes"]
+    Adapter --> Provenance["Thread metadata source_context"]
+    Input --> Durable["Durable LangGraph run"]
+    Durable --> Prepare["PrepareAgentRunMiddleware"]
+    Prepare --> Prompt["Rendered system prompt"]
+    Prepare --> Sender["Dynamic sender and participant context"]
+    Prompt --> Model["Deep agent model call"]
+    Sender --> Model
+    Input --> Model
+    Rules["AGENTS.md, workspace, repository, source guidance"] --> Prompt
+    Skills["Read-only virtual skill routes"] --> Model
 ```
 
-This shows the separation between event normalization at dispatch and run-specific prompt preparation at execution. [Invocation](invocation.md) covers durable execution and [Follow-up messages](follow-up-messages.md) covers subsequent thread turns.
+The diagram shows the assembly boundary: adapters normalize event data before dispatch; preparation resolves run-specific context before model calls; virtual skills remain files the agent may read rather than bulk prompt text. The [agent graph](../architecture/agent-graph.md) describes execution, while [models, profiles, and instructions](../concepts/models-profiles-instructions.md) describes model selection and instruction ownership.
 
-## Normalized input transcript
+## 1. Normalize an event into a transcript
 
-`agent/input_messages.py` is the serialization boundary for application-owned input. A human or system message is represented as an `<input-message>` envelope with a namespaced sender, surface, kind, optional channel, structured `<data>`, and escaped content. It supports multimodal block lists by enveloping text blocks while preserving non-text blocks. Entity introductions appear first as content-addressed `<dynamic-context>` messages for people, channels, and systems. Channel `topic` and `purpose` are explicitly marked `trust="untrusted"`; they are context, not trusted instructions.
+`openswe.input_messages` owns the typed input format. `RunInput` contains ordered `user`-role and system-origin messages, optionally with files. Human and system-origin content is serialized as an escaped `<input-message>` envelope containing a namespaced sender, surface, kind, optional channel, and structured data. Text blocks in multimodal content are enveloped; non-text blocks, such as images, remain intact and in order. Entity identifiers are validated before serialization and XML parsing helpers ignore malformed fragments.
 
-The generic dispatcher derives identities when an adapter has not supplied a complete input: Slack uses the triggering-user and channel information in `RunConfig`; GitHub login or Linear email supplies a person identity; otherwise the event is attributed to a synthetic system identity. Adapters can instead pass a deliberately ordered prebuilt transcript, which is necessary when history contains several participants or system/bot messages.
+`dispatch_agent_run` is the common agent dispatch contract. A caller may provide an already ordered `input`, or provide raw content plus an explicit context, or let the dispatcher derive context from `RunConfig`; it may not combine a prebuilt input with raw fields. Fallback attribution is deliberate: Slack derives a triggering person and channel when present, GitHub login and Linear email become person identities, and otherwise the event is attributed to a synthetic `system:` identity. The function then creates a durable agent or reviewer run through `create_durable_run`.
 
-### Surface-specific history
+### Dynamic identity context and summarization
 
-- **Slack** builds a channel introduction, then serializes prior thread messages in order with each human, Open SWE, and third-party bot attributed separately. It adds an operational system-context message and appends the triggering request as a human message. The trigger-user fallback prevents edits and button interactions from being attributed to the bot or to nobody.
-- **Linear** makes the issue description a system message with issue metadata, then appends relevant comments as human messages with per-author introductions and comment IDs. It uses comments from the triggering comment onward when available; otherwise it uses recent comments while filtering known bot responses. Images from the description and included comments remain multimodal blocks.
-- **GitHub** creates attributed messages carrying issue/PR, comment type, path, line, and time metadata. A new issue thread fetches its comments to construct initial context, while an existing issue thread sends only the new follow-up/update. PR-comment runs similarly pass the comment sequence as structured input.
+Introductions for channels, systems, and people are separate `<dynamic-context>` messages. Their canonical XML is SHA-256 hashed, so `build_input_messages` avoids repeating an introduction already supplied during that construction. The state-level visibility check is intentionally narrower than “ever seen”: after deepagents summarization, messages before its cutoff are no longer sent to the model, so their dynamic contexts are eligible to be introduced again. This preserves sender resolution after history compaction.
 
-### Dynamic context across turns
+Channel fields such as Slack topic and purpose are ordinary escaped dynamic context, not a privileged instruction channel. Treat all event content as data unless it has been incorporated into an explicit system prompt section by trusted application logic.
 
-An introduction includes a SHA-256 hash of canonical XML. `build_input_messages` suppresses identities already supplied to that construction, while thread metadata records injected hashes across invocations. The visible-message check accounts for deepagents summarization: only contexts at or after the summarization cutoff count as visible, allowing a forgotten identity to be introduced again. Parsing helpers also validate sender/entity identifiers and safely ignore malformed XML rather than treating it as authoritative context.
+## 2. Keep source provenance outside model history
 
-## Provenance is persistent metadata, not the transcript
+`SourceContext` records where a thread originated: Slack thread or ask route, Linear issue, GitHub issue, and PR number. Webhook setup writes it as `source_context` in LangGraph thread metadata; later webhook activity preserves an existing nonempty context rather than repointing the thread. This provenance supports reply routing and lifecycle behavior, but is distinct from the model-visible transcript.
 
-`SourceContext` records the durable routing origin: a Slack thread, Linear issue, GitHub issue, and/or PR number. Webhook/adapters upsert it under `source_context` in LangGraph thread metadata; the first nonempty origin is preserved when later messages arrive, and the same record is carried by baby-sit watches. This is a pointer used for communication and lifecycle behavior, whereas the normalized `RunInput` carries what the model should see now.
+The model is designed for compatibility with metadata written by different releases and integrations. Source-context models allow unknown fields; `dump()` uses `exclude_unset=True`, which avoids manufacturing omitted defaults during a read/enrich/write cycle. `parse()` accepts mappings only and returns an empty context after validation failure, logging a warning rather than failing the run because old metadata is malformed.
 
-The type is intentionally tolerant of distributed writers. All context models allow unknown fields and `dump()` uses `exclude_unset=True`, preserving unrecognized data through a read-enrich-write cycle instead of inventing defaults. `parse()` accepts only mappings and returns an empty context—with a warning on validation failure—rather than failing a run on malformed historical metadata.
+## 3. Render the system prompt at run preparation
 
-## Prompt preparation and instruction ordering
+The graph starts with an empty static system prompt. `BasePrepareRunMiddleware` runs before the agent and stores a preparation latch keyed by a hash of the latest message, middleware class, and configuration fingerprint. A checkpointed repeat of the same invocation skips completed setup; a later turn gets fresh setup. Implementations must be idempotent because a failure before the checkpoint can cause setup to run again. Forked deepagents contexts skip this preparation, and a replica that resumes a checkpoint can run `_rejoin` to restore process-local resources.
 
-The graph factory creates a deep agent with an initially empty system prompt. `PrepareAgentRunMiddleware` performs setup before the agent: it obtains the sandbox/work directory, resolves the environment and sender information, schedules thread-title work, writes run metadata, and produces `rendered_system_prompt` plus separate sender-context messages. It deliberately does not splice sender metadata into a historical user message, because changing cached history would make later invocations send a different transcript.
+`PrepareAgentRunMiddleware` is the main-agent implementation. It resolves GitHub credentials and default repository information, waits for a sandbox and determines its work directory, loads workspace settings, optionally gathers recent-thread context, resolves participants, schedules title generation, and records run metadata. Sandbox-connect failures notify the user and are re-raised rather than allowing an agent to operate without its workspace.
 
-`BasePrepareRunMiddleware` fingerprints the latest message and relevant configuration. Once its before-agent update is checkpointed, a resumed attempt with the same fingerprint skips preparation; a later invocation prepares fresh credentials, prompt, and context. Preparation must therefore be idempotent, and a sandbox failure is surfaced and re-raised rather than silently continuing without a workspace.
+The middleware returns a rendered prompt and, when needed, dynamic person-introduction messages. It does not modify an old user turn to attach current sender details: the sender blocks are independent messages and are omitted only when their hashes are still visible. Immediately before each model call, the base middleware prepends `rendered_system_prompt` to any existing system message. Thus preparation controls current system context without changing the durable conversation transcript.
 
-For every model call, the middleware combines the rendered prompt with any existing system message and calls `wrap_system_prompt`. The result is a `<system-instructions format="open-swe-v1">` envelope containing an Open SWE system identity, serialized system instruction message, and any serialized additions. The main prompt states that repository custom instructions and environment instructions are mandatory, while `AGENTS.md` overrides them on conflict; sender-level standing instructions also yield to repository instructions and `AGENTS.md`.
+`construct_system_prompt` renders the `system/main` Jinja prompt and its included resources. Its inputs select working-environment instructions, dashboard and source guidance, an optional configured default prompt, repository scope, collaboration guidance, external-comment safety rules, repository custom instructions, recent context, and workspace instructions/repositories. Jinja uses `StrictUndefined`; prompt paths reject absolute paths, traversal, and unsupported suffixes, so missing template variables and unsafe resource names fail rather than silently rendering a partial or unintended prompt. Preview and staging deployments additionally receive common deployment context.
 
-## Repository conventions: `AGENTS.md`
+## 4. Repository and scoped instructions
 
-The main-agent prompt requires that, after a repository is synchronized or cloned, the agent read the root `AGENTS.md` in full before other work. Its rules override defaults. `SubdirAgentsReadMiddleware` supplies a second, scoped mechanism: after a successful string-result `read_file`, it reads ancestor `AGENTS.md` files from the run sandbox and appends a `<system-reminder>`. Candidates are shallowest to deepest, and the reminder states that deeper scope wins. It tracks loaded paths per thread, treats a direct `AGENTS.md` read as loaded, limits reads to 1,000 lines and 64 KiB (with truncation), and lets a missing, unreadable, non-UTF-8, or otherwise unusable candidate fail without breaking the requested read.
+The main repository-setup prompt tells the agent to inspect the checkout and, after synchronizing/cloning a hosted repository or before substantive work in a local checkout, read root `AGENTS.md` in full when it exists. The prompt gives those repository rules the authority to override agent defaults. It also tells the agent where repository-local skills may be found: `<repo>/.agents/skills/<name>/SKILL.md` and `<repo>/.claude/skills/<name>/SKILL.md`.
 
-The reviewer cannot assume a sandbox clone. It fetches the root convention document from GitHub Contents at the PR base SHA, preferring `AGENTS.md` and falling back to `CLAUDE.md` only after a 404. A non-200 response, network failure, or content over 64 KiB produces no root context rather than stale fallback rules. It also derives ancestor convention paths for changed files and fetches scoped files concurrently under a semaphore; each candidate independently skips failures and the ordered results make nested instructions override parent instructions.
+`SubdirAgentsReadMiddleware` adds runtime scoping. After a successful string-result `read_file` for an absolute path, it finds ancestor `AGENTS.md` candidates from shallow to deep, reads candidates through the thread's sandbox backend, and appends successful results in a `<system-reminder>`. The reminder explicitly makes deeper instructions take precedence. Loaded paths are tracked per thread, including a directly read `AGENTS.md`, so rules are not repeatedly appended. Candidate failures—missing files, backend errors, non-UTF-8 data, or empty content—do not invalidate the requested file read. Reads are limited to 1,000 lines and content is capped at 64 KiB, with oversized UTF-8 content marked as truncated.
 
-## Skills: lazily readable prompt extensions
+Reviewers have a different trust boundary because convention files are loaded deterministically for a reviewed revision. `fetch_agents_md` fetches root `AGENTS.md` at a supplied GitHub ref and considers `CLAUDE.md` only after a 404; HTTP errors, request failures, or an oversized preferred document produce no fallback. `fetch_scoped_agents_md` derives changed-file ancestor paths and reads `AGENTS.md`, with `CLAUDE.md` as a per-directory fallback, from the clone's specified Git tree—not its possibly untrusted working-tree HEAD. It returns an empty result on execution or parse failure and orders paths shallow-to-deep so consumers can apply nested rules last. See [reviewer and review scout](../architecture/reviewer-and-review-scout.md).
 
-Skills are instructions exposed as virtual `SKILL.md` files rather than copied wholesale into the prompt. A `CompositeBackend` keeps the run backend as default and routes skill prefixes to specialized backends; it strips the route prefix before delegation. Passing those prefixes in `create_deep_agent(skills=[...])` lets deepagents advertise skills while the agent reads full instructions through ordinary `read_file`.
+## 5. Skills are virtual, read-only files
 
-The main graph always mounts repository-bundled `baby-sit` and `html-artifacts` skills read-only at `/bundled-skills/`. Hosted runs additionally mount organization skills read-only at `/organization-skills/` and, when a profile login exists, per-user skills read-only at `/skills/`; the user route is first, so it has priority. Skills are persisted as `/<name>/SKILL.md` under the appropriate store namespace with YAML name/description front matter and a replacement instruction body. Names, sizes, and organization count are bounded; user tools resolve the current GitHub login, while organization-skill tools require an admin. Desktop runs instead source user skills from run state, omit organization skills, and route artifacts away from the project checkout.
+The main agent uses a `CompositeBackend`: the ordinary sandbox remains the default backend, while skill prefixes route to read-only specialized backends. Bundled package skills are exposed from `/bundled-skills/`; organization skills from `/organization-skills/`; and authenticated user skills from `/skills/`. When a credential login is available, the user route is listed first in the skill sources, ahead of organization and bundled sources. The skill-store backend lazily reads stored skills on first access into a store backend and wraps it read-only, so skills can be discovered and read through normal file tools without giving the agent write access to the skill store.
 
-The style analyzer uses an independent `/skills/` `StateBackend` route. Launchers seed its run input `files` with the prefix-stripped bundled playbooks, and `skill_path_for_mode` chooses `bootstrap-repo-analysis` or `continual-learning`. Its prepare middleware renders a focused analyzer prompt that requires reading that mode's playbook; it does not write a skill into the analyzer sandbox.
+Repository-local skills are separate from these mounted routes: they live in the checked-out project and must be discovered by the repository instructions rather than assumed to be in the global skill catalog. For available tool and filesystem behavior, see [Tools](../concepts/tools.md).
 
-## Safe change and focused verification
+## Safety, extension points, and verification
 
-Changes to this workflow should preserve the boundary between untrusted event content, structured identity metadata, durable provenance, and system instructions. In particular, do not turn channel fields into trusted prompt text, mutate cached historical messages to add current sender data, or suppress a dynamic context merely because it exists before the summarization cutoff.
+When changing this flow:
 
-Focused tests live in `tests/agent/test_input_messages.py`, `tests/agent/test_source_context.py`, `tests/agent/test_dispatch.py`, `tests/agent/test_agents_md.py`, `tests/middleware/test_subdir_agents_middleware.py`, `tests/slack/test_slack_context.py`, and `tests/agent/test_skills.py`. They are the first checks for envelope/hashing behavior, malformed provenance, dispatch contracts, convention-document failure modes, scoped injection, Slack attribution, and virtual-skill routing.
+- Preserve the distinction among untrusted event text, structured identity metadata, durable provenance, and system instructions. Do not elevate channel metadata or external comments into trusted instructions.
+- Preserve ordering when adapters provide a prebuilt transcript; use `dispatch_agent_run` rather than creating runs directly when adding a new event surface.
+- Keep preparation idempotent and include any setup-affecting configuration in its fingerprint. Fail workspace setup explicitly instead of continuing with a missing sandbox.
+- Treat scoped instruction loading as best effort, but retain its ordering, duplicate suppression, path normalization, and size/line limits.
+- Keep skills read-only and routed outside the project checkout; do not solve skill discovery by appending every skill body to the system prompt.
+
+Focused regression coverage includes `tests/agent/test_input_messages.py` for escaping, multimodal preservation, and summarization visibility; `tests/agent/test_dispatch.py` for dispatch contracts; `tests/agent/test_source_context.py` for tolerant metadata round trips; `tests/middleware/test_prepare_run_middleware.py` and `tests/agent/test_agent_assembly_context.py` for preparation and agent assembly; `tests/middleware/test_subdir_agents_middleware.py` for scoped reminders; `tests/agent/test_agents_md.py` for reviewer convention retrieval; and `tests/agent/test_skills.py` for skill routing.
