@@ -49,7 +49,7 @@ The backend:
 ## Run locally
 
 1. In the repository root `.env`, add `REMOTE_RUNTIME_TOKEN_SECRET` (any random string) and `MDA_RUNTIME_URL=http://localhost:2025`, then start the backend with `make dev`.
-2. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above. Then run `make dev-mda` from the repository root. Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
+2. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above. Then run `make dev-mda` from the repository root. It first builds the `mda` CLI from the vendored SDK, so it needs `cargo`. Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
 3. Use Open SWE as usual: your dashboard, Slack and GitHub threads run here. `uv run python -m evals.reviewer.run_eval --limit 3` runs reviews here without publishing to GitHub.
 
 The browser E2E suite runs this project the same way, with a scripted model: `tests/e2e/mda-dev.sh`.
@@ -67,10 +67,12 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 Each deployment's only configuration is `OPEN_SWE_BACKEND_URL`, in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding only that deployment's backend URL:
 
 ```bash
-uv tool install managed-deepagents==0.9.1
+make mda-cli
 cd mda
-mda deploy --name open-swe-mda-staging --deployment-type prod
+uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
+
+The SDK, runtime and CLI alike, is vendored in `vendor/managed-deepagents-sdk` ([vendor/README.md](../vendor/README.md)): `mda/` installs that runtime, and every build bundles it into the deployment.
 
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 
