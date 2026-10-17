@@ -5,6 +5,7 @@ import type { AgentPullRequestStatusResponse } from "./types"
 import type { SidebarThreadItem } from "./sidebarThreads"
 import { agentsApi } from "./api"
 import { agentThreadKeys } from "./queries"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 
 /** Cap matches the server's, so the request never silently drops the tail. */
 const MAX_TRACKED = 50
@@ -52,7 +53,14 @@ export function useSidebarPullRequests(
     queryFn: () => agentsApi.getPullRequestChecks(refs.map(([, ref]) => ref)),
     enabled: enabled && refs.length > 0,
     staleTime: 60_000,
-    refetchInterval: 60_000,
+    meta: {
+      invalidatedBy: refs.map(([, ref]) =>
+        invalidationTopic(
+          "pull-requests",
+          `${ref.repoFullName}/${ref.number}`.toLowerCase()
+        )
+      ),
+    },
     // Keeps dots on screen while a refetch for a changed key set is in flight.
     placeholderData: (previous) => previous,
     retry: false,
@@ -64,6 +72,12 @@ export function useSidebarPullRequests(
   const perThread = useQueries({
     queries: cloudIds.map((threadId) => ({
       queryKey: agentThreadKeys.pullRequestStatus(threadId),
+      meta: {
+        invalidatedBy: [
+          invalidationTopic("threads", threadId),
+          invalidationTopic("pull-requests"),
+        ],
+      },
       enabled: false,
       staleTime: Infinity,
     })),
@@ -71,7 +85,12 @@ export function useSidebarPullRequests(
       new Map(
         cloudIds.map((threadId, index) => [
           threadId,
-          results[index]?.data as AgentPullRequestStatusResponse | undefined,
+          {
+            status: results[index]?.data as
+              | AgentPullRequestStatusResponse
+              | undefined,
+            updatedAt: results[index]?.dataUpdatedAt ?? 0,
+          },
         ])
       ),
   })
@@ -80,7 +99,11 @@ export function useSidebarPullRequests(
     if (!item.prRef) return undefined
     const { repoFullName, number } = item.prRef
     const batched = batch.data?.[`${repoFullName}#${number}`]
-    const fresh = liveState(perThread.get(item.id), repoFullName, number)
+    const cached = perThread.get(item.id)
+    const fresh =
+      cached && cached.updatedAt >= batch.dataUpdatedAt
+        ? liveState(cached.status, repoFullName, number)
+        : null
     if (!batched) return fresh ? { checks: "unknown", state: fresh } : undefined
     return fresh ? { ...batched, state: fresh } : batched
   }

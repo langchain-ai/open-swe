@@ -94,3 +94,21 @@ async def test_follow_up_withdrawn_from_the_queue_leaves_the_thread_running(monk
     # What the commands proxy reads to steer or queue the next follow-up.
     metadata = client.threads.thread["metadata"]
     assert (metadata["latest_run_status"], metadata["latest_run_id"]) == ("running", "live")
+
+
+async def test_rereading_a_viewed_thread_does_not_write_and_reinvalidate_it(monkeypatch) -> None:
+    client = FakeClient(
+        {
+            "source": "dashboard",
+            "github_login": "octocat",
+            "latest_run_id": "run-1",
+            "latest_run_status": "success",
+        },
+        "success",
+    )
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    first = await thread_api.get_dashboard_thread("tid", "octocat")
+    writes = len(client.threads.updates)
+    second = await thread_api.get_dashboard_thread("tid", "octocat")
+    assert first["viewed"] and second["viewed"]
+    assert len(client.threads.updates) == writes

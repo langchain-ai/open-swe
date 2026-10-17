@@ -658,8 +658,12 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
     refetchOnWindowFocus: "always",
     select: (threads) =>
       threads.map((thread) => sidebarThreadForMode(thread, hierarchy)),
-    refetchInterval: (query) =>
-      sidebarRefreshInterval(query.state.data, hierarchy),
+    meta: {
+      invalidatedBy: [
+        invalidationTopic("threads"),
+        invalidationTopic("pull-requests"),
+      ],
+    },
   })
 }
 
@@ -679,6 +683,12 @@ export function useSidebarRepos({
   return useQuery({
     queryKey: agentThreadKeys.repos(params),
     queryFn: () => agentsApi.listThreadRepos(params),
+    meta: {
+      invalidatedBy: [
+        invalidationTopic("threads"),
+        invalidationTopic("pull-requests"),
+      ],
+    },
     enabled: enabled && hydrated,
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
@@ -713,11 +723,11 @@ export function useSidebarActiveThread({
     enabled: enabled && Boolean(activeThreadId) && !detail && !loaded,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    refetchInterval: (current) =>
-      sidebarRefreshInterval(
-        current.state.data ? [current.state.data] : [],
-        hierarchy
-      ),
+    meta: {
+      invalidatedBy: activeThreadId
+        ? [invalidationTopic("threads", activeThreadId)]
+        : [],
+    },
     select: (thread) => sidebarThreadForMode(thread, hierarchy),
     retry: false,
   })
@@ -733,7 +743,6 @@ function useSidebarThreadPages(
   params = { ...params, hierarchy }
   const query = useInfiniteThreadsPages(params, {
     enabled: enabled && hydrated,
-    pollWhileRunning: true,
   })
   return {
     items:
@@ -823,13 +832,12 @@ export function useSidebarRepoThreads({
   )
 }
 
-// Run costs land through a deferred refresh 15s+ after a run ends (see
-// `agent_cost._RETRY_DELAYS_SECONDS`), after the running-state poll has stopped.
-const RUN_COST_REFETCH_DELAYS_MS = [20_000, 60_000, 120_000]
-
 function agentThreadDetailOptions(threadId: string, queryClient: QueryClient) {
   return queryOptions({
     queryKey: agentThreadKeys.detail(threadId),
+    meta: {
+      invalidatedBy: threadId ? [invalidationTopic("threads", threadId)] : [],
+    },
     queryFn: async ({ queryKey }) => {
       const thread = await agentsApi.getThread(threadId)
       const cached = queryClient.getQueryData<AgentThread>(queryKey)
@@ -842,34 +850,13 @@ function agentThreadDetailOptions(threadId: string, queryClient: QueryClient) {
 
 export function useAgentThread(threadId: string) {
   const queryClient = useQueryClient()
-  const query = useQuery({
+  return useQuery({
     ...agentThreadDetailOptions(threadId, queryClient),
-    // Server truth heartbeat while a run is live. The SDK's SSE transport does
-    // not reconnect once a custom `fetch` is supplied (it needs the dashboard
-    // session cookie), so a dropped event stream must not leave the view — and
-    // its stop button — believing the run already ended.
-    refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
-
-  const isRunning = query.data?.status === "running"
-  const { refetch } = query
-  const wasRunning = useRef(isRunning)
-  useEffect(() => {
-    const settled = wasRunning.current && !isRunning
-    wasRunning.current = isRunning
-    if (!settled) return
-    const timers = RUN_COST_REFETCH_DELAYS_MS.map((delay) =>
-      window.setTimeout(() => void refetch(), delay)
-    )
-    return () => timers.forEach(window.clearTimeout)
-  }, [isRunning, refetch])
-
-  return query
 }
 
 export function useAgentThreadPullRequestStatus(
@@ -881,7 +868,12 @@ export function useAgentThreadPullRequestStatus(
     queryFn: () => agentsApi.getThreadPullRequestStatus(threadId),
     enabled: enabled && Boolean(threadId),
     staleTime: 15_000,
-    refetchInterval: 30_000,
+    meta: {
+      invalidatedBy: [
+        invalidationTopic("threads", threadId),
+        invalidationTopic("pull-requests"),
+      ],
+    },
     refetchOnWindowFocus: "always",
     retry: false,
   })
@@ -1378,6 +1370,12 @@ export function useInfiniteThreadsPages(
   const queryKey = agentThreadKeys.infinitePages(params)
   const pagesQuery = useInfiniteQuery({
     queryKey,
+    meta: {
+      invalidatedBy: [
+        invalidationTopic("threads"),
+        invalidationTopic("pull-requests"),
+      ],
+    },
     queryFn: ({ pageParam }) =>
       agentsApi.listThreadsPage({ ...params, offset: pageParam }),
     initialPageParam: 0,
