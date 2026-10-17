@@ -365,7 +365,7 @@ class ThreadRouter:
         if thread is None:
             await _not_found(send, thread_id)
             return
-        if thread.runtime != "mda":
+        if thread.runtime != "mda" and await RUNTIMES.local.has_history(thread_id):
             _warn_in_process(scope, thread)
         made = _object.validate_python(
             await RUNTIMES.runs_on(thread.runtime).client.http.post(
@@ -393,7 +393,8 @@ class ThreadRouter:
             await mda.ensure_remote_thread(thread_id)
             await forward(mda.http, scope, send, body)
             return
-        if thread is not None:
+        # A fresh thread stays here only until its first run claims it for MDA.
+        if thread is not None and await RUNTIMES.local.has_history(thread_id):
             _warn_in_process(scope, thread)
         await self.app(scope, receive, send)
 
