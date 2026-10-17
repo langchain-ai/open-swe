@@ -2,6 +2,7 @@ import type {
   AgentSchedule,
   AutomationTriggerConfig,
   GitHubTriggerEvent,
+  WorkflowConclusion,
   LinearTriggerEvent,
   SlackTriggerEvent,
   SlackTriggerSenders,
@@ -26,6 +27,7 @@ export type TriggerDraft =
       kind: "github"
       repo: string | null
       events: Array<GitHubTriggerEvent>
+      conclusion: WorkflowConclusion | null
     }
   | {
       key: string
@@ -60,9 +62,10 @@ export function scheduleDraft(cron: string) {
 
 export function githubDraft(
   repo: string | null = null,
-  events: Array<GitHubTriggerEvent> = []
+  events: Array<GitHubTriggerEvent> = [],
+  conclusion: WorkflowConclusion | null = null
 ) {
-  return { key: draftKey(), kind: "github" as const, repo, events }
+  return { key: draftKey(), kind: "github" as const, repo, events, conclusion }
 }
 
 export function slackDraft(
@@ -103,7 +106,7 @@ export function draftsFor(
       case "schedule":
         return scheduleDraft(trigger.cron)
       case "github":
-        return githubDraft(trigger.repo, trigger.events)
+        return githubDraft(trigger.repo, trigger.events, trigger.conclusion)
       case "slack":
         return slackDraft(trigger)
       case "linear":
@@ -155,7 +158,14 @@ export function toTriggers(
         return [{ kind: "schedule", cron: draft.cron.trim() }]
       case "github":
         return draft.repo
-          ? [{ kind: "github", repo: draft.repo, events: draft.events }]
+          ? [
+              {
+                kind: "github",
+                repo: draft.repo,
+                events: draft.events,
+                ...(draft.conclusion ? { conclusion: draft.conclusion } : {}),
+              },
+            ]
           : []
       case "slack":
         return draft.channel
@@ -201,7 +211,13 @@ export function describeTriggers(schedule: AgentSchedule): string {
         : trigger.kind === "slack"
           ? trigger.channel
           : trigger.team
-    return `${provider.label} ${scope}: ${named}`
+    const filter =
+      trigger.kind === "github" &&
+      trigger.conclusion &&
+      trigger.events.includes("workflow_run.completed")
+        ? ` (workflow: ${trigger.conclusion.replaceAll("_", " ")})`
+        : ""
+    return `${provider.label} ${scope}: ${named}${filter}`
   })
   return parts.length > 0 ? parts.join(" · ") : "No trigger"
 }

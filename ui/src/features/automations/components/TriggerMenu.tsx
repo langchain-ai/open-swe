@@ -114,7 +114,7 @@ export function TriggerMenu({
             label={AUTOMATION_EVENT_PROVIDERS.github.label}
           >
             <TriggerItem
-              label="Issue and pull request events"
+              label="Issue, pull request and workflow events"
               more
               onSelect={onGitHub}
             />
