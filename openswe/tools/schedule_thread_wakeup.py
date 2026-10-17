@@ -40,6 +40,7 @@ _WAKEUP_SENDER_ID = "system:thread-wakeup"
 _MAX_WAKEUPS_BETWEEN_USER_MESSAGES = 10
 _WAKEUP_GENERATION_METADATA_KEY = "thread_wakeup_generation"
 _WAKEUP_COUNT_METADATA_KEY = "thread_wakeup_count"
+_PENDING_WAKEUPS_METADATA_KEY = "pending_wakeups_at_ms"
 _WAKEUP_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _PURGE_PAGE_SIZE = 100
 
@@ -148,6 +149,45 @@ async def _record_wakeup(client: Any, thread_id: str, generation: str, count: in
     )
 
 
+async def _wakeup_crons(client: Any, *, thread_id: str | None = None) -> list[dict[str, Any]]:
+    """Every ``thread_wakeup`` cron, optionally of one thread, fully paginated."""
+    crons: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = await client.crons.search(
+            thread_id=thread_id,
+            metadata={"kind": _WAKEUP_KIND},
+            limit=_PURGE_PAGE_SIZE,
+            offset=offset,
+        )
+        if not page:
+            break
+        crons.extend(cron for cron in page if isinstance(cron, dict))
+        if len(page) < _PURGE_PAGE_SIZE:
+            break
+        offset += len(page)
+    return crons
+
+
+async def _sync_pending_wakeups(client: Any, thread_id: str) -> None:
+    """Mirror the thread's pending wakeup fire times into its metadata; never raises.
+
+    Every pending time is kept so readers can skip the ones that have since fired
+    without anything rewriting the metadata when a wakeup runs.
+    """
+    now = datetime.now(UTC)
+    try:
+        jobs = await queue.find({"kind": _WAKEUP_KIND, "thread_id": thread_id})
+        fire_times = [int(job.due_at.timestamp() * 1000) for job in jobs if job.due_at > now]
+        await client.threads.update(
+            thread_id=thread_id, metadata={_PENDING_WAKEUPS_METADATA_KEY: fire_times}
+        )
+    except Exception:
+        logger.warning(
+            "Failed to sync pending thread wakeups", extra={"thread_id": thread_id}, exc_info=True
+        )
+
+
 async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[str]:
     """Return the ids of ``thread_wakeup`` crons whose ``end_time`` has passed.
 
@@ -156,25 +196,11 @@ async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[st
     fully before returning so the result is stable to delete afterwards.
     """
     expired_ids: list[str] = []
-    offset = 0
-    while True:
-        page = await client.crons.search(
-            metadata={"kind": _WAKEUP_KIND},
-            limit=_PURGE_PAGE_SIZE,
-            offset=offset,
-        )
-        if not page:
-            break
-        for cron in page:
-            if not isinstance(cron, dict):
-                continue
-            end_time = _parse_iso(cron.get("end_time"))
-            cron_id = cron.get("cron_id")
-            if end_time is not None and end_time < now and isinstance(cron_id, str) and cron_id:
-                expired_ids.append(cron_id)
-        if len(page) < _PURGE_PAGE_SIZE:
-            break
-        offset += len(page)
+    for cron in await _wakeup_crons(client):
+        end_time = _parse_iso(cron.get("end_time"))
+        cron_id = cron.get("cron_id")
+        if end_time is not None and end_time < now and isinstance(cron_id, str) and cron_id:
+            expired_ids.append(cron_id)
     return expired_ids
 
 
@@ -197,24 +223,12 @@ async def cancel_thread_wakeups(thread_id: str) -> None:
     await queue.cancel_matching({"kind": _WAKEUP_KIND, "thread_id": thread_id})
     # Wakeups scheduled before the job queue are Agent Server crons.
     client = get_client(url=langgraph_url())
-    cron_ids: list[str] = []
-    offset = 0
-    while True:
-        page = await client.crons.search(
-            thread_id=thread_id,
-            metadata={"kind": _WAKEUP_KIND},
-            limit=_PURGE_PAGE_SIZE,
-            offset=offset,
-        )
-        cron_ids.extend(cron["cron_id"] for cron in page)
-        if len(page) < _PURGE_PAGE_SIZE:
-            break
-        offset += len(page)
-    for cron_id in cron_ids:
+    for cron in await _wakeup_crons(client, thread_id=thread_id):
         try:
-            await client.crons.delete(cron_id)
+            await client.crons.delete(cron["cron_id"])
         except NotFoundError:
-            logger.info("Thread wakeup already removed", extra={"cron_id": cron_id})
+            logger.info("Thread wakeup already removed", extra={"cron_id": cron["cron_id"]})
+    await _sync_pending_wakeups(client, thread_id)
 
 
 async def _purge_expired_wakeups_best_effort() -> None:
@@ -367,7 +381,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
             logger.exception("Failed to record thread wakeup budget for %s", thread_id)
             return {"success": False, "error": "Unable to record the thread wakeup limit"}
         try:
-            return await _schedule_wakeup(
+            result = await _schedule_wakeup(
                 thread_id=thread_id,
                 fire_time=fire_time,
                 prompt=wakeup_prompt,
@@ -376,3 +390,5 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         except Exception as exc:
             logger.exception("Failed to schedule thread wakeup for %s", thread_id)
             return {"success": False, "error": str(exc)}
+        await _sync_pending_wakeups(client, thread_id)
+    return result

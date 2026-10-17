@@ -15,10 +15,14 @@ class _FakeJobs:
     def __init__(self) -> None:
         self.scheduled: list[dict[str, Any]] = []
         self.cancelled: list[dict[str, Any]] = []
+        self.pending: list[Any] = []
 
     async def schedule(self, kind: str, payload: dict[str, Any], **kwargs: Any) -> Any:
         self.scheduled.append({"kind": kind, "payload": payload, **kwargs})
         return type("Job", (), {"id": f"job-{len(self.scheduled)}"})()
+
+    async def find(self, metadata: dict[str, Any]) -> list[Any]:
+        return self.pending
 
     async def cancel_matching(self, metadata: dict[str, Any]) -> int:
         self.cancelled.append(metadata)
@@ -163,6 +167,7 @@ async def test_cancel_thread_wakeups_removes_every_timer_only_for_that_thread(
 
     assert fake_jobs.cancelled == [{"kind": "thread_wakeup", "thread_id": "worker"}]
     assert await client.crons.search() == unrelated
+    assert client.threads.metadata["pending_wakeups_at_ms"] == []
 
 
 def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:
@@ -378,3 +383,19 @@ async def test_a_wakeup_the_worker_reaches_after_its_expiry_starts_no_run(
     on_time = {**payload, "expires_at": (now + timedelta(minutes=1)).isoformat()}
     assert await wakeup_tool.run_thread_wakeup(on_time) == "run-1"
     assert started == ["t1"]
+
+
+async def test_sync_records_only_pending_wakeups_in_fire_order(fake_jobs: _FakeJobs) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    soon, later = now + timedelta(minutes=5), now + timedelta(hours=1)
+    fake_jobs.pending = [
+        type("Job", (), {"due_at": at})() for at in [now - timedelta(minutes=1), soon, later]
+    ]
+    client = _FakeClient([])
+
+    await wakeup_tool._sync_pending_wakeups(client, "thread-1")
+
+    assert client.threads.metadata["pending_wakeups_at_ms"] == [
+        int(soon.timestamp() * 1000),
+        int(later.timestamp() * 1000),
+    ]

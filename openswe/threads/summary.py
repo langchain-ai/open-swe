@@ -62,6 +62,17 @@ TRIGGERING_BOT_KEY = "triggering_bot"
 BOT_THREAD_READ_ONLY = "This thread was started by a Slack bot. Reply in Slack to steer it."
 
 
+def _next_wakeup_at(metadata: dict[str, Any]) -> int | None:
+    pending = metadata.get("pending_wakeups_at_ms")
+    now = _now_ms()
+    upcoming = (
+        [at for at in pending if isinstance(at, int) and at > now]
+        if isinstance(pending, list)
+        else []
+    )
+    return min(upcoming, default=None)
+
+
 def _now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
@@ -524,6 +535,7 @@ async def _thread_summary(
         ),
         "resolved": _is_thread_resolved(metadata),
         "attentionReason": _metadata_string(metadata, "attention_reason"),
+        "nextWakeupAt": _next_wakeup_at(metadata),
         "resolvedAt": (
             int(metadata["resolved_at_ms"])
             if isinstance(metadata.get("resolved_at_ms"), (int, float))
