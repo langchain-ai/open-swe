@@ -35,24 +35,42 @@ INDEXED_FIELDS: Final[list[ThreadSelectField]] = [
     "updated_at",
 ]
 _COLUMNS: Final = "thread_id, runtime, metadata, status, created_at, updated_at"
+# The thread's sidebar title, derived as ``summary.metadata_title`` does.
+_TITLE: Final = """(CASE
+    WHEN jsonb_typeof(metadata->'title') = 'string' AND btrim(metadata->>'title') <> ''
+        THEN metadata->>'title'
+    WHEN metadata->>'kind' = 'reviewer' THEN coalesce('Review: ' || nullif(concat_ws(' ',
+        CASE WHEN jsonb_typeof(metadata->'pr'->'number') = 'number'
+            THEN '#' || (metadata->'pr'->>'number') END,
+        nullif(btrim(metadata->'pr'->>'title'), '')), ''), 'Review: pending')
+    ELSE 'Untitled agent'
+END)"""
+
+
+def _values(path: str) -> str:
+    """The values at a JSON path as plain text, so quotes and backslashes match unescaped."""
+    return f"(SELECT string_agg(value #>> '{{}}', ' ') FROM jsonb_path_query(metadata, '{path}'))"
+
+
 # Every metadata field the dashboard's thread search reads, lowercased. It may
-# hold more than the dashboard matches (JSON keys, say), never less, since the
-# dashboard checks each thread it gets back again.
-_SEARCHABLE: Final = """lower(concat_ws(' ',
-    metadata->>'title', metadata->'pr',
+# hold more than the dashboard matches, never less, since the dashboard checks
+# each thread it gets back again.
+_SEARCHABLE: Final = f"""lower(concat_ws(' ',
+    {_TITLE},
     metadata->>'repo_owner', metadata->>'repo_name',
     (metadata->>'repo_owner') || '/' || (metadata->>'repo_name'),
-    metadata->'repo', (metadata->'repo'->>'owner') || '/' || (metadata->'repo'->>'name'),
+    (metadata->'repo'->>'owner') || '/' || (metadata->'repo'->>'name'),
     metadata->>'branch_name', metadata->>'base_branch',
-    metadata->>'pr_url', metadata->>'pr_number', metadata->'pull_requests'))"""
+    metadata->>'pr_url', metadata->>'pr_number',
+    {_values("lax $.repo.*")}, {_values("lax $.pr.*")}, {_values("lax $.pull_requests[*].*")}))"""
 # A title match outranks a match elsewhere at any age (3 x the floor > 1); within
 # each, recent activity counts most, its weight halving every half-life down to
 # the floor, so an old thread stays findable.
 _RECENCY_HALF_LIFE: Final = timedelta(days=7)
 _RECENCY_FLOOR: Final = 0.4
 _RANK: Final = f"""CAST((CASE
-        WHEN starts_with(lower(metadata->>'title'), :text) THEN 4
-        WHEN strpos(lower(metadata->>'title'), :text) > 0 THEN 3
+        WHEN starts_with(lower({_TITLE}), :text) THEN 4
+        WHEN strpos(lower({_TITLE}), :text) > 0 THEN 3
         ELSE 1
     END) * ({_RECENCY_FLOOR} + {1 - _RECENCY_FLOOR} * power(0.5, least(
         extract(epoch FROM clock_timestamp() - updated_at)

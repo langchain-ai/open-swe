@@ -107,6 +107,25 @@ async def test_a_text_search_ranks_title_matches_and_recent_activity_first() -> 
     assert "search_rank" not in (await ThreadSearch(limit=1).run())[0].as_langgraph()
 
 
+async def test_a_text_search_matches_derived_titles_and_unescaped_values() -> None:
+    now = datetime.now(UTC)
+    for thread_id, metadata in [
+        ("quoted", {"title": "Fix", "pull_requests": [{"title": 'Handle "retry" in C:\\tmp'}]}),
+        ("untitled", {}),
+        ("review", {"kind": "reviewer", "pr": {"number": 12, "title": "Ship it"}}),
+        ("branch", {"title": "Other", "branch_name": "review-12"}),
+    ]:
+        await index.create(thread_id, runtime="mda", metadata=metadata, updated_at=now)
+
+    async def ids(text: str) -> list[str]:
+        return [thread.thread_id for thread in await ThreadSearch(text=text).run()]
+
+    assert await ids('"retry" in c:\\tmp') == ["quoted"]
+    assert await ids("untitled") == ["untitled"]
+    assert await ids("review: #12") == ["review"]
+    assert await ids("review") == ["review", "branch"]
+
+
 async def test_a_status_change_restarts_its_clock_but_a_repeat_does_not() -> None:
     await index.create("t1", runtime="mda")
 
