@@ -1,15 +1,19 @@
-"""Per-user cache of the GitHub repo list behind the dashboard repo picker.
+"""Per-user cache of the repositories a person reaches through the GitHub App.
 
-Building the picker payload fans out to ``/user/installations`` plus a
-paginated ``/user/installations/{id}/repositories`` sweep per installation,
-which takes 10s+ for users whose App is installed across hundreds of repos.
-Installations change rarely, so the payload is cached per person in
-``user_record`` and served stale-while-revalidate.
+Listing them fans out to ``/user/installations`` plus a paginated
+``/user/installations/{id}/repositories`` sweep per installation, which takes
+10s+ for users whose App is installed across hundreds of repos. The listing is
+cached per person in ``user_record``, where every replica sees it:
+
+- The repo picker serves it stale-while-revalidate.
+- ``accessible_repo_full_names`` is an authorization boundary (it decides which
+  private PR metadata a person may see), so it trusts a listing for at most
+  ``ACCESS_FRESH_MS``. Installation webhooks clear every listing, so a repo
+  removed from the App drops at once; access lost on GitHub's side, such as
+  leaving an org, shows within that window.
 
 Keys are derived from the authenticated session login only, so a cached
-payload is never served to a different user. Only the picker listing reads
-this cache — ``accessible_repo_full_names`` (an authorization boundary) stays
-fresh on every call.
+listing is never served to a different user.
 """
 
 import asyncio
@@ -18,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from openswe.github import repos
 from openswe.users.records import UserRecords
 
 logger = logging.getLogger(__name__)
@@ -25,6 +30,7 @@ logger = logging.getLogger(__name__)
 REPO_LIST_CACHE = UserRecords("repo_list_cache")
 REPO_LIST_FRESH_MS = 10 * 60 * 1000
 REPO_LIST_MAX_AGE_MS = 24 * 60 * 60 * 1000
+ACCESS_FRESH_MS = 60 * 1000
 
 _refreshing: set[str] = set()
 _refresh_tasks: set[asyncio.Task[None]] = set()
@@ -94,3 +100,52 @@ def schedule_repo_cache_refresh(login: str, refresh: Callable[[], Awaitable[Any]
     task = loop.create_task(run())
     _refresh_tasks.add(task)
     task.add_done_callback(_refresh_tasks.discard)
+
+
+async def build_repo_payload(login: str) -> dict[str, Any]:
+    """List the person's installations and repos from GitHub now, and cache the listing."""
+    installations, repositories = await repos.fetch_user_installations_and_repos(login)
+    payload = {
+        "installations": [
+            {
+                "id": i.get("id"),
+                "account": (i.get("account") or {}).get("login"),
+                "account_type": (i.get("account") or {}).get("type"),
+            }
+            for i in installations
+        ],
+        "repositories": [
+            {
+                "full_name": r.get("full_name"),
+                "private": r.get("private", False),
+                "archived": r.get("archived", False),
+            }
+            for r in repositories
+            if r.get("full_name")
+        ],
+    }
+    await write_cached_repos(login, payload)
+    return payload
+
+
+async def accessible_repo_full_names(login: str) -> frozenset[str]:
+    """Lowercased ``owner/name`` of repos the user can access, as of ``ACCESS_FRESH_MS`` ago at most."""
+    cached = await read_cached_repos(login)
+    if cached is not None and cached[1] <= ACCESS_FRESH_MS:
+        payload = cached[0]
+    else:
+        payload = await build_repo_payload(login)
+    repositories = payload.get("repositories")
+    return frozenset(
+        repo["full_name"].lower()
+        for repo in (repositories if isinstance(repositories, list) else [])
+        if isinstance(repo, dict) and isinstance(repo.get("full_name"), str)
+    )
+
+
+async def forget_cached_repos() -> None:
+    """Drop everyone's listing, for an installation or its repositories changed."""
+    try:
+        await REPO_LIST_CACHE.clear()
+    except Exception:
+        logger.warning("repo list cache clear failed", exc_info=True)

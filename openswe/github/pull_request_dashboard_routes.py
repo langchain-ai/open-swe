@@ -25,7 +25,7 @@ from openswe.github.pull_request_status import (
     pull_request_identity,
 )
 from openswe.github.pull_requests import PullRequest
-from openswe.github.repos import accessible_repo_full_names
+from openswe.github.repo_cache import accessible_repo_full_names
 from openswe.threads.pr_fixes import (
     PullRequestThreadIntent,
     PullRequestThreadRun,
@@ -42,7 +42,6 @@ class PullRequestSearchResult(BaseModel):
     number: int
     url: str
     title: str
-    body: str
     state: PrState
 
 
@@ -69,7 +68,6 @@ async def api_search_pull_requests(
                 number=row.number,
                 url=row.url,
                 title=row.title,
-                body=row.body,
                 state=row.state,
             )
             for row in rows[:limit]

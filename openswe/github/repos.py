@@ -135,18 +135,3 @@ async def _fetch_with_token(
                 for repo in repos
             )
     return installations, repositories
-
-
-async def accessible_repo_full_names(login: str) -> frozenset[str]:
-    """Lowercased ``owner/name`` of repos the user can currently access.
-
-    Resolved fresh on every call (a fixed, repo-count-independent burst of
-    GitHub calls) rather than cached. ``/reviews`` uses this set to decide
-    which private PR metadata a user may see, so it's an authorization
-    boundary: a stale set would leak repo/PR titles, branches, authors and
-    finding counts for repos the user just lost access to.
-    """
-    _, repositories = await fetch_user_installations_and_repos(login)
-    return frozenset(
-        repo["full_name"].lower() for repo in repositories if isinstance(repo.get("full_name"), str)
-    )

@@ -4701,10 +4701,6 @@
       },
       "PullRequestSearchResult": {
         "properties": {
-          "body": {
-            "title": "Body",
-            "type": "string"
-          },
           "number": {
             "title": "Number",
             "type": "integer"
@@ -4737,7 +4733,6 @@
           "number",
           "url",
           "title",
-          "body",
           "state"
         ],
         "title": "PullRequestSearchResult",

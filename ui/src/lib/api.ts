@@ -1125,7 +1125,6 @@ export interface PullRequestSearchResult {
   number: number
   url: string
   title: string
-  body: string
   state: "open" | "draft" | "merged" | "closed"
 }
 
