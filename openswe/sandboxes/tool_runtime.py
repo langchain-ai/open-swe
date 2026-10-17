@@ -14,14 +14,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
-from langgraph_sdk import get_client
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.prompts import prompt
-from openswe.run_config import RunConfig
-from openswe.sandboxes.tool_data import ToolContext, load_context, save_context
 from openswe.sandboxes.tool_models import ToolDescription
 
 _json = TypeAdapter(JsonValue)
@@ -29,16 +26,6 @@ _json = TypeAdapter(JsonValue)
 EXCLUDED_TOOLS = frozenset(
     {"load_integration_tools", "spawn_worker", "control_worker", "message_task_thread"}
 )
-
-
-async def save_tool_context(thread_id: str, config: RunnableConfig) -> None:
-    cfg = RunConfig.from_config(config)
-    values = {
-        name: _json.validate_python(value)
-        for name, value in cfg.dump().items()
-        if name in RunConfig.model_fields and name not in {"run_id", "invocation_id"}
-    }
-    await save_context(thread_id, ToolContext(configurable=values))
 
 
 def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
@@ -118,12 +105,9 @@ class ToolSurface:
         excluded = self.excluded | EXCLUDED_TOOLS
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
 
-    def catalog(self, query: str = "") -> list[ToolDescription]:
-        terms = query.casefold().split()
+    def catalog(self) -> list[ToolDescription]:
         results: list[ToolDescription] = []
         for name, tool in sorted(self.tools.items()):
-            if not all(term in f"{name} {tool.description}".casefold() for term in terms):
-                continue
             parameters = tool_parameters(tool)
             provenance = (tool.metadata or {}).get("mcp_provenance")
             description = tool.description
@@ -142,17 +126,6 @@ class ToolSurface:
                 )
             )
         return results
-
-    async def invoke(
-        self,
-        thread_id: str,
-        config: RunnableConfig,
-        state: dict[str, object],
-        name: str,
-        arguments: dict[str, JsonValue],
-    ) -> dict[str, JsonValue]:
-        result = await self.run(config, state, name, arguments)
-        return {"status": result.message.status, "content": result.content}
 
     async def run(
         self,
@@ -289,27 +262,3 @@ async def invoke_tool_node(
     """Run one tool call through ``node`` and return its status and content."""
     result = await run_tool_node(node, state_schema, state, config, name, arguments)
     return {"status": result.message.status, "content": result.content}
-
-
-async def load_tool_surface(
-    thread_id: str,
-) -> tuple[ToolSurface, RunnableConfig, dict[str, object]]:
-    from openswe.server import build_agent
-
-    context = await load_context(thread_id)
-    if context is None:
-        raise HTTPException(409, "Thread tools have not been initialized")
-    snapshot = await get_client().threads.get_state(thread_id)
-    values = snapshot.get("values")
-    state: dict[str, object] = dict(values) if isinstance(values, dict) else {}
-    config: RunnableConfig = {
-        "configurable": {
-            **context.configurable,
-            "thread_id": thread_id,
-            "__is_for_execution__": True,
-        },
-    }
-    surface = ToolSurface()
-    await build_agent(config, tool_surface=surface)
-    await surface.prepare(state)
-    return surface, config, state
