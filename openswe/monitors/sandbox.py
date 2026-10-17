@@ -5,11 +5,11 @@ import hashlib
 import json
 import shlex
 from functools import cache
-from importlib import resources
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, JsonValue
 
+from openswe import sandbox_scripts
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
 
 if TYPE_CHECKING:
@@ -76,9 +76,9 @@ class _Pending(BaseModel):
 @cache
 def _script() -> tuple[str, str]:
     """The script's file name, carrying its hash, and its source."""
-    source = resources.files("openswe.resources").joinpath("sandbox_monitor.py").read_text()
+    source = sandbox_scripts.source("monitor.py")
     digest = hashlib.sha256(source.encode()).hexdigest()[:16]
-    return f"sandbox_monitor-{digest}.py", source
+    return f"monitor-{digest}.py", source
 
 
 def _encoded(value: str) -> str:

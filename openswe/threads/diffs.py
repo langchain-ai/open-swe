@@ -3,12 +3,11 @@
 import base64
 import json
 import logging
-from functools import cache
-from importlib import resources
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 
+from openswe import sandbox_scripts
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
 from openswe.slack.client import parse_github_pr_url
@@ -34,13 +33,8 @@ async def connect_sandbox(sandbox_id: str, *, thread_id: str) -> SandboxBackendP
     return await _connect_sandbox(sandbox_id, thread_id=thread_id)
 
 
-@cache
 def _recovery_patch_script() -> str:
-    return (
-        resources.files("openswe.resources")
-        .joinpath("recovery_patch.py")
-        .read_text(encoding="utf-8")
-    )
+    return sandbox_scripts.source("recovery_patch.py")
 
 
 def _recovery_patch_filename(thread_id: str) -> str:

@@ -1,7 +1,7 @@
 """Runs inside a thread's sandbox to start, run, read and stop monitors.
 
 Written to the sandbox by ``openswe.monitors.sandbox`` and invoked as
-``python3 sandbox_monitor.py <base64 JSON request>``. Every action prints one
+``python3 monitor-<hash>.py <base64 JSON request>``. Every action prints one
 JSON line; ``run`` is the detached runner that ``start`` spawns.
 
 A monitor runs ``command`` with stdout and stderr merged, numbers every line it
@@ -267,19 +267,17 @@ class RawLog:
         self.dir = directory
         self.count = 0
         self.segments = collections.deque()
-        self.handle = None
-        self.open_segment(1)
+        self.handle = self.segment(1)
 
     @property
     def first(self):
         return self.segments[0][0]
 
-    def open_segment(self, first):
-        if self.handle is not None:
-            self.handle.close()
+    def segment(self, first):
+        """Open the segment whose first line is ``first``."""
         path = os.path.join(self.dir, f"raw-{first:012d}.log")
-        self.handle = open(path, "ab")
         self.segments.append([first, path, 0])
+        return open(path, "ab")
 
     def append(self, lines):
         if not lines:
@@ -289,7 +287,8 @@ class RawLog:
         self.count += len(lines)
         self.segments[-1][2] += len(data)
         if self.segments[-1][2] >= RAW_SEGMENT_BYTES:
-            self.open_segment(self.count + 1)
+            self.handle.close()
+            self.handle = self.segment(self.count + 1)
             self.prune()
 
     def prune(self):
