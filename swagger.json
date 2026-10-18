@@ -12644,6 +12644,7 @@
     },
     "/dashboard/api/plan/{thread_id}/comments/submit": {
       "post": {
+        "description": "Send the caller's comments as excerpt messages, then drop them from the artifact.",
         "operationId": "submit_plan_comments_dashboard_api_plan__thread_id__comments_submit_post",
         "parameters": [
           {
@@ -12661,9 +12662,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
+                  "additionalProperties": true,
                   "title": "Response Submit Plan Comments Dashboard Api Plan  Thread Id  Comments Submit Post",
                   "type": "object"
                 }
