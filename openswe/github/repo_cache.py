@@ -1,15 +1,15 @@
-"""Per-user cache of the GitHub repo list behind the dashboard repo picker.
+"""Per-user cache of the repositories a person reaches through the GitHub App.
 
-Building the picker payload fans out to ``/user/installations`` plus a
-paginated ``/user/installations/{id}/repositories`` sweep per installation,
-which takes 10s+ for users whose App is installed across hundreds of repos.
-Installations change rarely, so the payload is cached per person in
-``user_record`` and served stale-while-revalidate.
+Listing them fans out to ``/user/installations`` plus a paginated
+``/user/installations/{id}/repositories`` sweep per installation, which takes
+10s+ for users whose App is installed across hundreds of repos. The listing is
+cached per person in ``user_record``, where every replica sees it. The repo
+picker serves it stale-while-revalidate; ``repos.accessible_repo_full_names``,
+an authorization boundary, trusts it only briefly. Installation webhooks clear
+every listing.
 
 Keys are derived from the authenticated session login only, so a cached
-payload is never served to a different user. Only the picker listing reads
-this cache — ``accessible_repo_full_names`` (an authorization boundary) stays
-fresh on every call.
+listing is never served to a different user.
 """
 
 import asyncio
@@ -94,3 +94,11 @@ def schedule_repo_cache_refresh(login: str, refresh: Callable[[], Awaitable[Any]
     task = loop.create_task(run())
     _refresh_tasks.add(task)
     task.add_done_callback(_refresh_tasks.discard)
+
+
+async def forget_cached_repos() -> None:
+    """Drop everyone's listing, for an installation or its repositories changed."""
+    try:
+        await REPO_LIST_CACHE.clear()
+    except Exception:
+        logger.warning("repo list cache clear failed", exc_info=True)
