@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -129,6 +130,28 @@ async def test_dismissal_clears_when_artifact_is_republished(
 
     await plan_store.save_plan_content("t1", html="<p>v2</p>")
     assert (await plan_api.get_plan("t1", session=session))["dismissed"] is False
+
+
+async def test_republishing_keeps_comments_posted_after_the_run_was_requested(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    from openswe.threads import plan_api, plan_store
+
+    await _seed_plan("t", {"html": "<p>v1</p>"})
+    monkeypatch.setattr(
+        plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
+    )
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
+    author = {"sub": "alice", "name": "Alice"}
+    await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Seen"), author)
+    run_requested_at = datetime.now(UTC)
+    later = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Unseen"), author)
+
+    await plan_store.save_plan_content(
+        "t", html="<p>v2</p>", clear_comments_before=run_requested_at
+    )
+
+    assert (await plan_api.get_plan_comments("t", author))["comments"] == [later]
 
 
 @pytest.mark.parametrize("status", ["ready", "approved", "cancelled", "shared"])

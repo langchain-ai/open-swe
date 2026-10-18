@@ -91,10 +91,10 @@ async def save_plan_content(
     html: str | None = None,
     markdown: str | None = None,
     status: str = PLAN_STATUS_SHARED,
-    clear_comments: bool = True,
+    clear_comments_before: datetime | None = None,
     plan_file_path: str | None = None,
 ) -> None:
-    """Publish an artifact, clearing old comments unless this is a manual edit."""
+    """Publish an artifact, clearing comments posted before ``clear_comments_before``."""
     if plan_file_path is None:
         plan_file_path = await _stored_plan_file_path(thread_id)
     record: dict[str, Any] = {"status": status, "revision": str(uuid.uuid4())}
@@ -113,8 +113,13 @@ async def save_plan_content(
                 set_={"value": record, "dismissed": False, "updated_at": NOW},
             )
         )
-        if clear_comments:
-            await session.execute(delete(PlanComment).where(PlanComment.thread_id == thread_id))
+        if clear_comments_before is not None:
+            await session.execute(
+                delete(PlanComment).where(
+                    PlanComment.thread_id == thread_id,
+                    PlanComment.created_at < clear_comments_before,
+                )
+            )
     metadata = {"plan_status": status, "plan_approved_by": None, "plan_approved_at": None}
     await _merge_thread_metadata(thread_id, metadata)
 

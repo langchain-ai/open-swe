@@ -143,7 +143,6 @@ async def update_plan(
             thread_id,
             markdown=value,
             status=PLAN_STATUS_SHARED,
-            clear_comments=False,
             plan_file_path=plan_file_path,
         )
     else:
@@ -151,7 +150,6 @@ async def update_plan(
             thread_id,
             html=value,
             status=PLAN_STATUS_SHARED,
-            clear_comments=False,
             plan_file_path=plan_file_path,
         )
     await write_plan_to_sandbox(thread_id, value, plan_file_path=plan_file_path)

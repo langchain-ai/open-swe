@@ -3,6 +3,7 @@
 import logging
 import re
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from openswe.run_config import RunConfig
@@ -13,6 +14,7 @@ from openswe.threads.plan_store import (
     save_plan_content,
 )
 from openswe.utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
+from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +47,32 @@ async def save_plan(
             return {"success": False, "error": "plan file cannot be empty"}
         document = wrap_html_artifact(content, title=_title_from_path(path))
         await save_plan_content(
-            str(thread_id), html=document, status=PLAN_STATUS_SHARED, plan_file_path=path
+            str(thread_id),
+            html=document,
+            status=PLAN_STATUS_SHARED,
+            clear_comments_before=await _run_requested_at(str(thread_id), cfg.run_id),
+            plan_file_path=path,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}
     return {"success": True, "path": path}
+
+
+async def _run_requested_at(thread_id: str, run_id: str | None) -> datetime | None:
+    """When this run was requested; comments posted later have not reached it."""
+    if not run_id:
+        return None
+    try:
+        run = await langgraph_client().runs.get(thread_id, run_id)
+        return datetime.fromisoformat(str(_value(run, "created_at")))
+    except Exception:
+        logger.warning(
+            "Could not read run creation time; keeping artifact comments",
+            extra={"agent_thread_id": thread_id, "agent_run_id": run_id},
+            exc_info=True,
+        )
+        return None
 
 
 async def _read_plan_file(thread_id: str, path: str) -> str:
