@@ -83,6 +83,18 @@ def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
     return suggestion, False
 
 
+def split_leaked_title(title: str, description: str) -> tuple[str, str]:
+    """Recover description parameter markup serialized into a finding title."""
+    headline, marker, remainder = title.partition("</title>")
+    if not marker:
+        return title, description
+    if not description:
+        _, description_tag, body = remainder.partition('<parameter name="description">')
+        if description_tag:
+            description = body.strip().removesuffix("</parameter>").strip()
+    return headline.strip(), description
+
+
 def normalize_finding_title(title: str | None, description: str = "") -> str:
     """Return a compact finding title suitable for a review comment headline."""
     raw = title.strip() if isinstance(title, str) else ""

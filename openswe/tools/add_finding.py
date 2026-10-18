@@ -20,6 +20,7 @@ from openswe.review.findings import (
     new_finding,
     normalize_finding_title,
     resolve_review_head_sha,
+    split_leaked_title,
     thread_missing_tool_result,
 )
 from openswe.run_config import RunConfig
@@ -31,7 +32,7 @@ async def add_finding(
     category: str,
     file: str,
     title: str,
-    description: str,
+    description: str = "",
     start_line: int | None = None,
     end_line: int | None = None,
     suggestion: str | None = None,
@@ -39,6 +40,13 @@ async def add_finding(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `add_finding` tool."""
+    title, description = split_leaked_title(title, description)
+    if not description:
+        return {
+            "success": False,
+            "error": "description is required; pass title and description as separate arguments",
+        }
+
     if start_line is not None and end_line is None:
         end_line = start_line
     if start_line is None and end_line is not None:
