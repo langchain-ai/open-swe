@@ -8,7 +8,7 @@ profile holds, until someone deletes it there.
 from alembic import op
 
 revision = "f491ea369aab"
-down_revision = "9f867d4517fa"
+down_revision = "8272dd05ca91"
 branch_labels = None
 depends_on = None
 

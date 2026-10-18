@@ -105,6 +105,8 @@ class Topic(BaseTopic):
 
     THREAD_BROWSERS: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the browser window that thread's agent opened, and who controls it."""
+    THREAD_BACKGROUND_WORK: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: the sandbox commands and monitors running for that thread."""
 
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
@@ -220,4 +222,7 @@ Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
 Topic.THREAD_BROWSERS = KeyedTopic("thread-browsers", authorize_keys=_readable_threads)
+Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
+    "thread-background-work", authorize_keys=_readable_threads
+)
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")

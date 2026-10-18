@@ -2,6 +2,7 @@ import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
   AgentPullRequestStatusResponse,
+  AgentBackgroundWork,
   AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
@@ -396,6 +397,10 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
+    ),
+  getThreadBackgroundWork: (threadId: string) =>
+    agentsRequest<AgentBackgroundWork>(
+      `/threads/${encodeURIComponent(threadId)}/background-work`
     ),
   getThreadQueuedMessages: (threadId: string) =>
     agentsRequest<Array<AgentQueuedMessage>>(
