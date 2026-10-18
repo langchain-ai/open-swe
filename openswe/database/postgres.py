@@ -250,37 +250,48 @@ def upgrade(
         },
     )
     if ENV.OPENSWE_ENV.optional() == "preview":
-        drop_superseded_revisions(conn, context, migrations, schema)
+        drop_stale_revisions(conn, context, migrations, schema)
     with Operations.context(context):
         context.run_migrations()
 
 
-def drop_superseded_revisions(
+def drop_stale_revisions(
     conn: Connection,
     context: MigrationContext,
     migrations: ScriptDirectory,
     schema: str,
 ) -> None:
-    """Forget stamped revisions that a rebased preview branch now chains beneath another."""
+    """Forget stamped revisions the preview tree no longer chains to its heads.
+
+    A revision is stale when its branch left the preview tree, so no script knows it
+    (its tables stay behind), or when a rebase chained it beneath another stamped one.
+    """
     current = set(context.get_current_heads())
-    superseded = current & {
+    unknown = current - {script.revision for script in migrations.walk_revisions()}
+    known = current - unknown
+    superseded = known & {
         script.revision
-        for head in current
+        for head in known
         for script in migrations.walk_revisions(head=head)
         if script.revision != head
     }
-    if not superseded:
-        return
-    logger.warning(
-        "Dropping superseded migration revisions",
-        extra={"superseded_revisions": sorted(superseded)},
-    )
-    conn.execute(
-        text(f"DELETE FROM {schema}.alembic_version WHERE version_num IN :revisions").bindparams(
-            bindparam("revisions", expanding=True)
-        ),
-        {"revisions": sorted(superseded)},
-    )
+    if unknown:
+        logger.warning(
+            "Dropping unknown migration revisions",
+            extra={"unknown_revisions": sorted(unknown)},
+        )
+    if superseded:
+        logger.warning(
+            "Dropping superseded migration revisions",
+            extra={"superseded_revisions": sorted(superseded)},
+        )
+    if stale := sorted(unknown | superseded):
+        conn.execute(
+            text(
+                f"DELETE FROM {schema}.alembic_version WHERE version_num IN :revisions"
+            ).bindparams(bindparam("revisions", expanding=True)),
+            {"revisions": stale},
+        )
 
 
 def execute_revision(conn: Connection, migrations: ScriptDirectory, revision: str) -> None:
