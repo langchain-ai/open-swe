@@ -184,6 +184,9 @@ async def test_submit_sends_own_comments_as_a_message_and_removes_them(
     first = await plan_api.post_plan_comment(
         "t", plan_api.CommentBody(body="Shorten this", anchor=anchor), alice
     )
+    general = await plan_api.post_plan_comment(
+        "t", plan_api.CommentBody(body="Add examples"), alice
+    )
     bobs = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Bob's note"), bob)
     dispatch = AsyncMock()
     monkeypatch.setattr(plan_api, "dispatch_agent_run", dispatch)
@@ -197,9 +200,10 @@ async def test_submit_sends_own_comments_as_a_message_and_removes_them(
     dispatch.assert_not_awaited()
 
     result = await plan_api.submit_plan_comments("t", alice)
-    assert result == {"status": "submitted", "comment_ids": [first["id"]]}
+    assert result == {"status": "submitted", "comment_ids": [first["id"], general["id"]]}
     message = dispatch.await_args.args[1]
-    assert "> Report\n\nShorten this" in message
+    assert "`Artifact selection`\n```text\nReport\n```\n\nShorten this" in message
+    assert "On the artifact:\n\nAdd examples" in message
     assert "Bob's note" not in message
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
 

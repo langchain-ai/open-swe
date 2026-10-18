@@ -1,5 +1,6 @@
 """REST API for published HTML artifacts and comments."""
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -59,6 +60,11 @@ class TextAnchor(BaseModel):
 class CommentBody(BaseModel):
     body: str = Field(min_length=1, max_length=10_000)
     anchor: TextAnchor | None = None
+
+    def transcript_message(self) -> str:
+        quote = self.anchor.exact if self.anchor else ""
+        fence = "`" * max([3, *(len(run) + 1 for run in re.findall(r"`+", quote))])
+        return prompt("threads/submit-artifact-comments", comment=self, fence=fence)
 
 
 class PlanUpdate(BaseModel):
@@ -191,7 +197,7 @@ async def post_plan_comment(
 async def submit_plan_comments(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, object]:
-    """Send the caller's comments to the agent as one message, then drop them from the artifact."""
+    """Send the caller's comments as excerpt messages, then drop them from the artifact."""
     metadata = await fetch_thread_metadata(thread_id)
     login = session["sub"]
     _assert_thread_postable(metadata, login, session.get("email"))
@@ -206,12 +212,8 @@ async def submit_plan_comments(
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     await dispatch_agent_run(
         thread_id,
-        prompt(
-            "threads/submit-artifact-comments",
-            comments=[
-                {"quote": (comment.get("anchor") or {}).get("exact"), "body": comment["body"]}
-                for comment in comments
-            ],
+        "\n\n".join(
+            CommentBody.model_validate(comment).transcript_message() for comment in comments
         ),
         configurable,
         source="dashboard",

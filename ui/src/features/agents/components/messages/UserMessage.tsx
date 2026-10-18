@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
-import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
+import { parseExcerptSections } from "@/features/agents/utils/codeExcerpt"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
@@ -31,7 +31,7 @@ export function UserMessage({ message }: { message: Message }) {
 function StandardUserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
-  const { excerpts, text } = parseExcerpts(
+  const sections = parseExcerptSections(
     message.chunks
       .filter((c) => c.kind === "text")
       .map((c) => c.text)
@@ -39,21 +39,9 @@ function StandardUserMessage({ message }: { message: Message }) {
   )
 
   const images = message.chunks.filter((c) => c.kind === "image")
-  const hasBody = Boolean(text) || images.length > 0 || excerpts.length > 0
-  const [expanded, setExpanded] = useState(false)
-  const [isTruncated, setIsTruncated] = useState(false)
-  const textRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const el = textRef.current
-    if (!el) return
-    const measure = () =>
-      setIsTruncated(el.scrollHeight > COLLAPSED_MAX_HEIGHT_PX + 1)
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [text])
+  const hasBody =
+    sections.some(({ text, excerpts }) => text || excerpts.length > 0) ||
+    images.length > 0
 
   const body = (
     <>
@@ -66,14 +54,6 @@ function StandardUserMessage({ message }: { message: Message }) {
               : "bg-surface-level-2"
           )}
         >
-          {excerpts.map((excerpt, i) => (
-            <CodeBlock
-              key={i}
-              title={excerpt.location}
-              language={excerpt.language}
-              text={excerpt.code}
-            />
-          ))}
           {images.length > 0 && (
             <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">
               {images.map((img, i) => (
@@ -89,37 +69,23 @@ function StandardUserMessage({ message }: { message: Message }) {
               ))}
             </div>
           )}
-          {text && (
-            <div
-              ref={textRef}
-              className={cn(
-                "text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-primary",
-                !isSystem && !expanded && "overflow-hidden"
-              )}
-              style={
-                !isSystem && !expanded
-                  ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX }
-                  : undefined
-              }
-            >
-              {isSlack ? (
-                <SlackMrkdwn text={text} />
-              ) : (
-                <SkillPromptText text={text} />
-              )}
+          {sections.map(({ excerpts, text }, i) => (
+            <div key={i}>
+              {excerpts.map((excerpt, j) => (
+                <CodeBlock
+                  key={j}
+                  title={excerpt.location}
+                  language={excerpt.language}
+                  text={excerpt.code}
+                />
+              ))}
+              <UserMessageText
+                text={text}
+                isSlack={isSlack}
+                isSystem={isSystem}
+              />
             </div>
-          )}
-          {!isSystem && isTruncated && (
-            <button
-              type="button"
-              onClick={() => setExpanded((value) => !value)}
-              aria-expanded={expanded}
-              data-testid="user-message-show-more"
-              className="mt-space-1 rounded-sm text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-            >
-              {expanded ? "Show less" : "Show more"}
-            </button>
-          )}
+          ))}
         </div>
       )}
       {!message.timestampIsFallback && (
@@ -227,5 +193,66 @@ function StandardUserMessage({ message }: { message: Message }) {
         )}
       </div>
     </div>
+  )
+}
+
+function UserMessageText({
+  text,
+  isSlack,
+  isSystem,
+}: {
+  text: string
+  isSlack: boolean
+  isSystem: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [isTruncated, setIsTruncated] = useState(false)
+  const textRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = textRef.current
+    if (!el) return
+    const measure = () =>
+      setIsTruncated(el.scrollHeight > COLLAPSED_MAX_HEIGHT_PX + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text])
+
+  return (
+    <>
+      {text && (
+        <div
+          ref={textRef}
+          className={cn(
+            "text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-primary",
+            !isSystem && !expanded && "overflow-hidden"
+          )}
+          style={
+            !isSystem && !expanded
+              ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX }
+              : undefined
+          }
+        >
+          {isSlack ? (
+            <SlackMrkdwn text={text} />
+          ) : (
+            <SkillPromptText text={text} />
+          )}
+        </div>
+      )}
+      {!isSystem && isTruncated && (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          data-testid="user-message-show-more"
+          className="mt-space-1 rounded-sm text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </>
   )
 }

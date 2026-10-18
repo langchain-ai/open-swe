@@ -1,13 +1,12 @@
-Comments on the artifact:
-{% for comment in comments %}
-{% if not loop.first %}
-
----
-{% endif %}
-{% if comment.quote %}
-
-> {{ comment.quote.strip().split("\n") | join("\n> ") }}
-{% endif %}
+{% if comment.anchor %}
+`Artifact selection`
+{{ fence }}text
+{{ comment.anchor.exact }}
+{{ fence }}
 
 {{ comment.body }}
-{% endfor %}
+{% else %}
+On the artifact:
+
+{{ comment.body }}
+{% endif %}
