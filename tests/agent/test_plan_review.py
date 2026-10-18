@@ -207,7 +207,7 @@ async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
     write.assert_awaited_once_with("t", "# Updated", plan_file_path=path)
 
 
-async def test_artifact_replies_persist_in_thread_and_cascade_with_parent(
+async def test_artifact_replies_survive_parent_deletion(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api
@@ -230,4 +230,9 @@ async def test_artifact_replies_persist_in_thread_and_cascade_with_parent(
             )
         assert exc.value.status_code == status
     await plan_api.remove_plan_comment("t", parent["id"], alice)
-    assert (await plan_api.get_plan_comments("t", bob))["comments"] == []
+    assert (await plan_api.get_plan_comments("t", bob))["comments"] == [
+        {**reply, "parent_id": None}
+    ]
+    with pytest.raises(HTTPException) as exc:
+        await plan_api.remove_plan_comment("t", reply["id"], alice)
+    assert exc.value.status_code == 403

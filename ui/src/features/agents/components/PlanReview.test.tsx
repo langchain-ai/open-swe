@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -308,6 +309,49 @@ describe("PlanReview", () => {
     await waitFor(() =>
       expect(mocks.submitPlanComments).toHaveBeenCalledWith("thread-1")
     )
+  })
+
+  it("preserves a reply draft when polling removes its parent", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.getPlanComments.mockResolvedValue([comment])
+      await act(async () => {
+        render(<PlanReview plan={plan} />)
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Reply" }))
+      fireEvent.change(screen.getByTestId("comment-input"), {
+        target: { value: "Keep this draft" },
+      })
+      mocks.getPlanComments.mockResolvedValue([])
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(screen.getByRole("status").textContent).toContain(
+        "The original comment was deleted"
+      )
+      expect(
+        (screen.getByTestId("comment-input") as HTMLTextAreaElement).value
+      ).toBe("Keep this draft")
+      expect(
+        (screen.getByTestId("comment-submit") as HTMLButtonElement).disabled
+      ).toBe(true)
+      fireEvent.keyDown(screen.getByTestId("comment-input"), {
+        key: "Enter",
+        ctrlKey: true,
+      })
+      expect(mocks.addPlanComment).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("comment-submit"))
+      })
+      expect(mocks.addPlanComment).toHaveBeenCalledWith(
+        "thread-1",
+        "Keep this draft",
+        null
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("shows historical artifacts without approval or implementation actions", async () => {

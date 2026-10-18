@@ -91,9 +91,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     }
   }, [plan.threadId])
 
+  const replyParentMissing =
+    replyTo !== null && !comments.some((comment) => comment.id === replyTo.id)
+
   const submitComment = useCallback(async () => {
     const body = draft.trim()
-    if (!body || pendingComment.current) return
+    if (!body || pendingComment.current || replyParentMissing) return
     const id = crypto.randomUUID()
     pendingComment.current = id
     setPosting(true)
@@ -132,7 +135,15 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       commentMutation.current += 1
       setPosting(false)
     }
-  }, [anchor, draft, replyTo, plan.threadId, plan.user.name, plan.user.login])
+  }, [
+    anchor,
+    draft,
+    replyTo,
+    replyParentMissing,
+    plan.threadId,
+    plan.user.name,
+    plan.user.login,
+  ])
 
   const handleCommentKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -162,20 +173,20 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       try {
         await deletePlanComment(plan.threadId, id)
         setComments((current) =>
-          current.filter(
-            (comment) => comment.id !== id && comment.parent_id !== id
-          )
+          current
+            .filter((comment) => comment.id !== id)
+            .map((comment) =>
+              comment.parent_id === id
+                ? { ...comment, parent_id: null }
+                : comment
+            )
         )
-        if (replyTo?.id === id) {
-          setReplyTo(null)
-          setDraft("")
-        }
         setSubmitted(false)
       } catch (deleteError) {
         reportError({ title: "Couldn't delete comment", error: deleteError })
       }
     },
-    [plan.threadId, replyTo]
+    [plan.threadId]
   )
 
   const openComment = useCallback((id: string) => {
@@ -203,6 +214,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     >
       {replyTo && (
         <p className="text-xs text-secondary">Reply to {replyTo.author}</p>
+      )}
+      {replyParentMissing && (
+        <p role="status" className="mt-space-2 text-xs text-secondary">
+          The original comment was deleted. Your draft is preserved. Use Add
+          comment to post it as a general comment, or cancel.
+        </p>
       )}
       {anchor && (
         <blockquote className="line-clamp-3 border-l-2 border-brand pl-space-2 text-xs text-secondary">
@@ -243,7 +260,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           aria-keyshortcuts="Meta+Enter Control+Enter"
           aria-label={posting ? "Posting…" : replyTo ? "Reply" : "Comment"}
           size="xs"
-          disabled={posting || !draft.trim()}
+          disabled={posting || replyParentMissing || !draft.trim()}
           onClick={() => void submitComment()}
         >
           {posting ? "Posting…" : replyTo ? "Reply" : "Comment"}
@@ -340,7 +357,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                       Add a general comment or highlight text to annotate.
                     </p>
                   </div>
-                  {!replyTo && composer}
+                  {(!replyTo || replyParentMissing) && composer}
                   <div className="min-h-0 flex-1 overflow-y-auto p-space-3">
                     {comments.length === 0 ? (
                       <p className="text-xs text-secondary">No comments yet.</p>

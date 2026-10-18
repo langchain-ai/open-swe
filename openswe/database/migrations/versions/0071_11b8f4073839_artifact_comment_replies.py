@@ -17,7 +17,7 @@ def upgrade() -> None:
         "thread_plan_comment",
         ["thread_id", "parent_id"],
         ["thread_id", "id"],
-        ondelete="CASCADE",
+        ondelete="SET NULL (parent_id)",
     )
 
 

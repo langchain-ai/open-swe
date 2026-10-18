@@ -40,7 +40,7 @@ class PlanComment(Base):
         ForeignKeyConstraint(
             ["thread_id", "parent_id"],
             ["thread_plan_comment.thread_id", "thread_plan_comment.id"],
-            ondelete="CASCADE",
+            ondelete="SET NULL (parent_id)",
             name="thread_plan_comment_parent_fk",
         ),
     )
