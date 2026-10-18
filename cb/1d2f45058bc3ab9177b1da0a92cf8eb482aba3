@@ -1,0 +1,30 @@
+mda/rt/browser.py
+  s_9bea6febbf0405::t_0b3d57ad70d01a 1-445
+  s_9bea6febbf0405::t_9bc24697525b6d 446-455
+tests/agent/test_mda_browser.py
+  s_9bea6febbf0405::t_67c83a550e0fae 1-123
+mda/uv.lock
+  s_9bea6febbf0405::t_1187f8672c83cc 102-118,1335,1350,2153-2169
+mda/pyproject.toml
+  s_9bea6febbf0405::t_0dc4caebd2278e 15-16
+mda/agent.py
+  s_9bea6febbf0405::t_5661e4fba80473 28,90-94,162
+mda/README.md
+  s_9bea6febbf0405::t_02ae48f80d336f 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cb1d2f45058bc3ab9177b1da0a92cf8eb482aba3",
+  "prompts": {},
+  "sessions": {
+    "s_9bea6febbf0405": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7db27352-288e-41e0-b3b5-f2975383eefa",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
