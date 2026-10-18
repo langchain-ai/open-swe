@@ -15,6 +15,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from pydantic import BaseModel, Field, create_model
 
+from openswe.middleware.pr_creation_guard import SHELL_TOOL_ARGS
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -35,7 +36,6 @@ _PATH_ARGUMENTS = {
     "grep": "path",
 }
 _EDIT_TOOLS = frozenset({"write_file", "edit_file", "delete"})
-_SHELL_TOOLS = frozenset({"execute", "background_execute"})
 
 
 def _replace(left: JsonObject | None, right: JsonObject | None) -> JsonObject | None:
@@ -112,10 +112,15 @@ class ContextDirectoryMiddleware(OpenSWEMiddleware[ContextDirectoryState]):
             if name in _EDIT_TOOLS or relative:
                 return _refusal(request, relative=name not in _EDIT_TOOLS)
             return await handler(request)
+        commands = {
+            key: value
+            for key in SHELL_TOOL_ARGS.get(name, ())
+            if isinstance(value := args.get(key), str) and value
+        }
         if argument is not None and (relative or path is None):
             args[argument] = directory.resolve(path) if isinstance(path, str) else directory.path
-        elif name in _SHELL_TOOLS and isinstance(command := args.get("command"), str):
-            args["command"] = directory.command(command)
+        elif commands:
+            args.update({key: directory.command(value) for key, value in commands.items()})
         else:
             return await handler(request)
         return await handler(request.override(tool_call={**request.tool_call, "args": args}))

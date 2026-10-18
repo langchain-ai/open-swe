@@ -80,11 +80,19 @@ async def test_open_directory_anchors_paths_and_commands() -> None:
     _, absolute = await _run("read_file", {"file_path": "/tmp/notes.md"}, _OPEN)
     _, search = await _run("grep", {"pattern": "TODO"}, _OPEN)
     _, command = await _run("execute", {"command": "make test || true"}, _OPEN)
+    _, monitor = await _run(
+        "monitor", {"action": "start", "command": "make watch", "filter": "grep FAIL"}, _OPEN
+    )
 
     assert edit is not None and edit["file_path"] == "/workspace/mono/packages/lib/a.py"
     assert absolute == {"file_path": "/tmp/notes.md"}
     assert search == {"pattern": "TODO", "path": "/workspace/mono/packages/app"}
     assert command == {"command": "cd /workspace/mono/packages/app && {\nmake test || true\n}"}
+    assert monitor == {
+        "action": "start",
+        "command": "cd /workspace/mono/packages/app && {\nmake watch\n}",
+        "filter": "cd /workspace/mono/packages/app && {\ngrep FAIL\n}",
+    }
 
 
 class _Sandbox:

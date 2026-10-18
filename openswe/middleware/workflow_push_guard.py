@@ -16,7 +16,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langgraph_sdk import get_client
 
-from openswe.middleware.pr_creation_guard import executable_name, shell_tokens
+from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
 from openswe.sandboxes.context_directory import ContextDirectory
@@ -101,14 +101,6 @@ class WorkflowPushChange:
 class GitInspectResult:
     output: str
     ok: bool
-
-
-def _tool_name(request: ToolCallRequest) -> str | None:
-    tool_call = getattr(request, "tool_call", None)
-    if isinstance(tool_call, Mapping):
-        name = tool_call.get("name")
-        return name if isinstance(name, str) else None
-    return None
 
 
 def _tool_args(request: ToolCallRequest) -> dict[str, Any]:
@@ -704,18 +696,15 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
     state_schema = AgentState
 
     async def _change_for_request(self, request: ToolCallRequest) -> WorkflowPushChange | None:
-        if _tool_name(request) not in {"execute", "background_execute"}:
-            return None
-        command = _tool_args(request).get("command")
-        if not isinstance(command, str):
-            return None
-        parsed = _parse_git_push(command)
-        if parsed is None:
-            return None
-        backend = _shell(request)
-        if backend is None:
-            return parsed.inspection_failed()
-        return await _workflow_change_for_push(backend, parsed)
+        for command in shell_commands(request):
+            parsed = _parse_git_push(command)
+            if parsed is None:
+                continue
+            backend = _shell(request)
+            if backend is None:
+                return parsed.inspection_failed()
+            return await _workflow_change_for_push(backend, parsed)
+        return None
 
     async def _handle_change_async(
         self,
@@ -764,12 +753,11 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
 
     async def _chained_workflow_push(self, request: ToolCallRequest) -> bool:
         """Whether ``request`` pushes workflow changes as one step of a longer command."""
-        if _tool_name(request) not in {"execute", "background_execute"}:
-            return False
-        command = _tool_args(request).get("command")
-        if not isinstance(command, str):
-            return False
-        dirs = _chained_push_dirs(command)
+        dirs = [
+            repo_dir
+            for command in shell_commands(request)
+            for repo_dir in _chained_push_dirs(command)
+        ]
         backend = _shell(request) if dirs else None
         if backend is None:
             return False
