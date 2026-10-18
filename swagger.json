@@ -1027,23 +1027,6 @@
         "title": "BridgeRequestsResponse",
         "type": "object"
       },
-      "BrowserControllerUpdate": {
-        "properties": {
-          "controller": {
-            "enum": [
-              "agent",
-              "user"
-            ],
-            "title": "Controller",
-            "type": "string"
-          }
-        },
-        "required": [
-          "controller"
-        ],
-        "title": "BrowserControllerUpdate",
-        "type": "object"
-      },
       "BrowserTab": {
         "properties": {
           "id": {
@@ -7067,22 +7050,15 @@
         "type": "object"
       },
       "ThreadBrowser": {
-        "description": "A thread's browser window as the dashboard shows it.",
+        "description": "A thread's browser window as the dashboard embeds it.",
         "properties": {
           "act_url": {
             "title": "Act Url",
             "type": "string"
           },
-          "controller": {
-            "enum": [
-              "agent",
-              "user"
-            ],
-            "title": "Controller",
-            "type": "string"
-          },
-          "reason": {
-            "title": "Reason",
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
             "type": "string"
           },
           "scope": {
@@ -7103,10 +7079,9 @@
         },
         "required": [
           "scope",
-          "controller",
-          "reason",
           "tabs",
-          "act_url"
+          "act_url",
+          "expires_at"
         ],
         "title": "ThreadBrowser",
         "type": "object"
@@ -19036,66 +19011,6 @@
           }
         ],
         "summary": "Api Thread Browser",
-        "tags": [
-          "dashboard",
-          "threads",
-          "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/browser/controller": {
-      "post": {
-        "description": "Take the window over from the agent, or hand it back.",
-        "operationId": "api_thread_browser_controller_dashboard_api_threads__thread_id__browser_controller_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BrowserControllerUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadBrowser"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Thread Browser Controller",
         "tags": [
           "dashboard",
           "threads",

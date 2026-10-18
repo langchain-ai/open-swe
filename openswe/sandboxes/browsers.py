@@ -66,7 +66,6 @@ class BrowserWindow(BaseModel):
     reason: str = ""
     tabs: list[BrowserTab] = []
     view_url: str = ""
-    act_url: str = ""
 
     def localhost_url(self, url: str) -> str:
         """``url`` with a loopback host pointed at this window's sandbox.
@@ -83,6 +82,14 @@ class BrowserWindow(BaseModel):
             return url
         netloc = self.localhost_alias + (f":{parts.port}" if parts.port else "")
         return urlunsplit(parts._replace(netloc=netloc))
+
+
+class WindowLinks(BaseModel):
+    """A window's view and act links, minted for pages on the given origins to frame."""
+
+    view_url: str
+    act_url: str
+    expires_at: datetime
 
 
 class BrowserState(BaseModel):
@@ -137,28 +144,15 @@ class LangSmithBrowser:
                 return window
         raise BrowserGoneError(f"window {window_id} of browser {self.name} is closed")
 
-    async def set_controller(
-        self, window_id: str, controller: Literal["agent", "user"]
-    ) -> BrowserWindow:
+    async def links(self, window_id: str, *, embed_origins: list[str]) -> WindowLinks:
+        """Mint view and act links that pages on ``embed_origins`` may show in an iframe."""
         response = await _browser_request(
             "POST",
-            f"/browsers/{self.name}/attachments/{window_id}/controller",
-            json={"controller": controller},
+            f"/browsers/{self.name}/attachments/{window_id}/links",
+            json={"embed_origins": embed_origins},
             timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS,
         )
-        return BrowserWindow.model_validate(response.json())
-
-    async def _running_state(self) -> BrowserState:
-        state = await self._state()
-        if state.status == "stopped":
-            # Starting returns once Chrome answers, with every window it had.
-            await _browser_request(
-                "POST", f"/boxes/{self.name}/start", timeout=_BROWSER_START_TIMEOUT_SECONDS
-            )
-            state = await self._state()
-        if state.status in _GONE_STATUSES:
-            raise BrowserGoneError(f"browser {self.name} is {state.status}")
-        return state
+        return WindowLinks.model_validate(response.json())
 
     async def detach(self, window_id: str) -> None:
         """Close a window, which also removes its sandbox's link to the browser."""
@@ -172,6 +166,18 @@ class LangSmithBrowser:
             # The window, or the whole browser, is already gone.
             if exc.response.status_code != 404:
                 raise
+
+    async def _running_state(self) -> BrowserState:
+        state = await self._state()
+        if state.status == "stopped":
+            # Starting returns once Chrome answers, with every window it had.
+            await _browser_request(
+                "POST", f"/boxes/{self.name}/start", timeout=_BROWSER_START_TIMEOUT_SECONDS
+            )
+            state = await self._state()
+        if state.status in _GONE_STATUSES:
+            raise BrowserGoneError(f"browser {self.name} is {state.status}")
+        return state
 
     async def _state(self) -> BrowserState:
         """The browser as LangSmith reports it; only its own 404 means it is gone."""

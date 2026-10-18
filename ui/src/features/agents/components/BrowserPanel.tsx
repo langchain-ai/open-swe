@@ -1,28 +1,80 @@
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
-import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { Text } from "@langchain/macaw-components/Text"
 import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 
-import {
-  useAgentThreadBrowser,
-  useSetThreadBrowserController,
-} from "@/features/agents/lib/queries"
+import { useAgentThreadBrowser } from "@/features/agents/lib/queries"
 
 const SCOPE_LABELS = {
   user: "Your browser",
   workspace: "Workspace browser",
 } as const
 
+/** What LangSmith's window page posts to the page that frames it. */
+type WindowMessage =
+  | { type: "connection"; connected: boolean }
+  | { type: "control"; controller: "agent" | "user"; reason: string }
+
+function windowMessage(data: unknown): WindowMessage | null {
+  if (typeof data !== "object" || data === null) return null
+  const message = data as Record<string, unknown>
+  if (message.source !== "langsmith-browser-window") return null
+  if (message.type === "connection" && typeof message.connected === "boolean")
+    return { type: "connection", connected: message.connected }
+  if (
+    message.type === "control" &&
+    (message.controller === "agent" || message.controller === "user")
+  )
+    return {
+      type: "control",
+      controller: message.controller,
+      reason: typeof message.reason === "string" ? message.reason : "",
+    }
+  return null
+}
+
 /**
- * The browser window a thread's agent opened, shown through LangSmith's own
- * page for it. Anyone who can prompt the thread can watch it, take it over to
- * click and type (to sign in, say), and hand it back to the agent.
+ * The browser window a thread's agent opened, framed from LangSmith's own page
+ * for it, zoomed in to follow the pointer in the narrow panel. The page has
+ * the Take control and Hand back buttons; it tells this panel who is in
+ * control, and why the agent asked for a person.
  */
 export function BrowserPanel({ threadId }: { threadId: string }) {
   const browser = useAgentThreadBrowser(threadId, true)
-  const setController = useSetThreadBrowserController(threadId)
+  const frameRef = useRef<HTMLIFrameElement>(null)
+  const [connected, setConnected] = useState(false)
+  const [control, setControl] = useState<{
+    controller: "agent" | "user"
+    reason: string
+  } | null>(null)
+
+  const actUrl = browser.data?.act_url
+  const frame = useMemo(() => {
+    if (!actUrl) return null
+    const url = new URL(actUrl)
+    url.searchParams.set("fit", "follow")
+    url.searchParams.set("zoom", "1")
+    return { src: url.toString(), origin: url.origin }
+  }, [actUrl])
+
+  useEffect(() => {
+    if (!frame) return
+    const onMessage = (event: MessageEvent) => {
+      if (
+        event.origin !== frame.origin ||
+        event.source !== frameRef.current?.contentWindow
+      )
+        return
+      const message = windowMessage(event.data)
+      if (message?.type === "connection") setConnected(message.connected)
+      if (message?.type === "control")
+        setControl({ controller: message.controller, reason: message.reason })
+    }
+    window.addEventListener("message", onMessage)
+    return () => window.removeEventListener("message", onMessage)
+  }, [frame])
 
   if (browser.isPending) {
     return (
@@ -31,7 +83,7 @@ export function BrowserPanel({ threadId }: { threadId: string }) {
       </div>
     )
   }
-  if (!browser.data) {
+  if (!browser.data || !frame) {
     return (
       <div className="flex flex-1 items-center justify-center p-space-5">
         <EmptyState
@@ -47,8 +99,12 @@ export function BrowserPanel({ threadId }: { threadId: string }) {
     )
   }
 
-  const isHuman = browser.data.controller === "user"
   const tab = browser.data.tabs.at(-1)
+  const status = !connected
+    ? "Connecting…"
+    : control?.controller === "user"
+      ? "You're in control"
+      : "The agent is in control"
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -61,42 +117,23 @@ export function BrowserPanel({ threadId }: { threadId: string }) {
           {tab?.title || tab?.url || SCOPE_LABELS[browser.data.scope]}
         </Text>
         <Text variant="xs" color="tertiary" className="shrink-0">
-          {SCOPE_LABELS[browser.data.scope]}
+          {SCOPE_LABELS[browser.data.scope]} · {status}
         </Text>
-        <Button
-          size="xs"
-          color={isHuman ? "primary" : "secondary"}
-          variant={isHuman ? "normal" : "outlined"}
-          disabled={setController.isPending}
-          onClick={() => setController.mutate(isHuman ? "agent" : "user")}
-        >
-          {isHuman ? "Hand back" : "Take control"}
-        </Button>
       </div>
-      {browser.data.reason && !isHuman ? (
+      {control?.controller === "agent" && control.reason ? (
         <div className="px-space-3 pt-space-2">
           <Banner intent="info" title="The agent needs you">
-            {browser.data.reason}
+            {control.reason}
           </Banner>
         </div>
       ) : null}
-      {browser.data.act_url ? (
-        <iframe
-          title="Browser window"
-          src={browser.data.act_url}
-          allow="clipboard-read; clipboard-write"
-          className="min-h-0 w-full flex-1 border-0 bg-surface-level-2"
-        />
-      ) : (
-        <div className="flex flex-1 items-center justify-center p-space-5">
-          <EmptyState
-            size="sm"
-            icon={GlobeIcon}
-            title="No link to the window"
-            description="LangSmith returned no act link for this browser window."
-          />
-        </div>
-      )}
+      <iframe
+        ref={frameRef}
+        title="Browser window"
+        src={frame.src}
+        allow="clipboard-read; clipboard-write"
+        className="min-h-0 w-full flex-1 border-0 bg-surface-level-2"
+      />
     </div>
   )
 }

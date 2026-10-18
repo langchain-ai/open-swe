@@ -17,9 +17,7 @@ import { agentsApi } from "./api"
 import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
-  BrowserController,
   ScheduleUpdateRequest,
-  ThreadBrowser,
   ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
@@ -902,33 +900,26 @@ export function useAgentThreadQueuedMessages(threadId: string) {
   })
 }
 
+// Each read mints a new act link and reloads the framed page, so a link is kept
+// until shortly before it expires rather than refetched on every focus.
+const BROWSER_LINK_REFRESH_MARGIN_MS = 5 * 60_000
+
 export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
   return useQuery({
     queryKey: agentThreadKeys.browser(threadId),
     queryFn: () => agentsApi.getThreadBrowser(threadId),
     enabled: enabled && Boolean(threadId),
     retry: false,
+    staleTime: (query) => {
+      const expiresAt = query.state.data?.expires_at
+      return expiresAt
+        ? Math.max(
+            Date.parse(expiresAt) - Date.now() - BROWSER_LINK_REFRESH_MARGIN_MS,
+            0
+          )
+        : 0
+    },
     meta: { invalidatedBy: [invalidationTopic("thread-browsers", threadId)] },
-  })
-}
-
-/** Takes the thread's browser window over from its agent, or hands it back. */
-export function useSetThreadBrowserController(threadId: string) {
-  const queryClient = useQueryClient()
-  const queryKey = agentThreadKeys.browser(threadId)
-  return useMutation({
-    mutationFn: (controller: BrowserController) =>
-      agentsApi.setThreadBrowserController(threadId, controller),
-    meta: { errorTitle: "Couldn't change who controls the browser" },
-    onMutate: async (controller) => ({
-      undo: await optimisticUpdate<ThreadBrowser>(
-        queryClient,
-        queryKey,
-        (browser) => ({ ...browser, controller })
-      ),
-    }),
-    onError: (_error, _controller, context) => context?.undo(),
-    onSuccess: (browser) => queryClient.setQueryData(queryKey, browser),
   })
 }
 
