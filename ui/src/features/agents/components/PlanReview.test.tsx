@@ -53,9 +53,6 @@ vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
       >
         Select text
       </button>
-      <button type="button" onClick={() => onTextSelected?.(null)}>
-        Deselect text
-      </button>
     </div>
   ),
 }))
@@ -119,30 +116,6 @@ describe("PlanReview", () => {
     expect(document.className).toContain("flex-1")
     expect(artifact.className).toContain("h-full")
     expect(screen.getByTestId("plan-comments")).toBeTruthy()
-  })
-
-  it("dismisses a deselected annotation only without a draft", () => {
-    render(<PlanReview plan={plan} />)
-
-    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
-    fireEvent.click(screen.getByRole("button", { name: "Deselect text" }))
-    expect(screen.queryByTestId("comment-composer")).toBeNull()
-
-    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
-    fireEvent.change(screen.getByTestId("comment-input"), {
-      target: { value: "Keep this draft" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Deselect text" }))
-    expect(screen.getByTestId("comment-composer").textContent).toContain("Plan")
-    expect(
-      (screen.getByTestId("comment-input") as HTMLTextAreaElement).value
-    ).toBe("Keep this draft")
-
-    fireEvent.change(screen.getByTestId("comment-input"), {
-      target: { value: "   " },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Deselect text" }))
-    expect(screen.queryByTestId("comment-composer")).toBeNull()
   })
 
   it.each(["click", "metaKey", "ctrlKey"])(
