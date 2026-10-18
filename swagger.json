@@ -6915,6 +6915,87 @@
         "title": "SlackTrigger",
         "type": "object"
       },
+      "Slacklet": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/SlackletCommand"
+            },
+            "title": "Commands",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "pull_request_key": {
+            "title": "Pull Request Key",
+            "type": "string"
+          },
+          "pull_request_url": {
+            "title": "Pull Request Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "pull_request_url",
+          "pull_request_key",
+          "blocks",
+          "commands"
+        ],
+        "title": "Slacklet",
+        "type": "object"
+      },
+      "SlackletCommand": {
+        "properties": {
+          "command": {
+            "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "op",
+          "summary",
+          "command",
+          "created_at"
+        ],
+        "title": "SlackletCommand",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -18046,6 +18127,56 @@
         "tags": [
           "dashboard",
           "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slacklets/{slacklet_id}": {
+      "get": {
+        "description": "A slacklet in a thread the session may read: the blocks Slack shows, then every command.",
+        "operationId": "api_slacklet_dashboard_api_slacklets__slacklet_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slacklet_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Slacklet Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Slacklet"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Slacklet",
+        "tags": [
+          "dashboard",
+          "slacklets"
         ]
       }
     },

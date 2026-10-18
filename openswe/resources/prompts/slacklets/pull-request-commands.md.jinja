@@ -1,0 +1,6 @@
+Note from Open SWE, not written by anyone in this thread: the pull request slacklet for {{ url }} applied {{ "command" if entries | length == 1 else "commands" }} {% for entry in entries %}#{{ entry.seq }}{{ ", " if not loop.last }}{% endfor %}. Commands are permanent and are its only changes; the slacklet message shows the state after the latest.
+
+{% for entry in entries -%}
+#{{ entry.seq }} {{ entry.command }}
+{% endfor %}
+State after #{{ entries[-1].seq }}: {{ state }}

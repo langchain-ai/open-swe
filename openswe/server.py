@@ -255,6 +255,7 @@ from openswe.tools import (
     slack_read_thread_messages,
     slack_reply,
     slack_start_review_channel,
+    start_pr_slacklet,
     start_thread,
     submit_thread_feedback,
     suggest_task,
@@ -358,6 +359,7 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
         "slack_attach_html",
         "slack_move_thread",
         "slack_start_review_channel",
+        "start_pr_slacklet",
     }
 )
 SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_breakout_thread"})
@@ -590,6 +592,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_post_message",
         "slack_breakout_thread",
         "slack_start_review_channel",
+        "start_pr_slacklet",
         "publish_workspace",
         "refresh_workspace_start",
         "configure_repository",
@@ -1766,6 +1769,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_reply,
         slack_breakout_thread,
         slack_start_review_channel,
+        start_pr_slacklet,
     ]
     static_tools = [
         http_request,
@@ -1830,6 +1834,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_reply,
         slack_breakout_thread,
         slack_start_review_channel,
+        start_pr_slacklet,
         submit_thread_feedback,
         suggest_task,
         submit_review_assessment_feedback,

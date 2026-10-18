@@ -10,7 +10,7 @@ interface ReplyCardProps {
   chunk: ToolExecutionChunk
 }
 
-function SlackIcon() {
+export function SlackIcon() {
   return (
     <svg viewBox="0 0 122.8 122.8" width={12} height={12} aria-hidden>
       <path
@@ -168,10 +168,39 @@ function SlackButtons({ buttons }: { buttons: Array<SlackButton> }) {
   )
 }
 
+function SlackText({ text }: { text: SlackTextObject }) {
+  return text.type === "mrkdwn" ? (
+    <SlackMrkdwn text={text.text ?? ""} />
+  ) : (
+    <>{text.text}</>
+  )
+}
+
+/** The Block Kit blocks Open SWE sends, drawn as Slack draws them. */
+export function SlackBlocks({ blocks }: { blocks: Array<object> }) {
+  return isSlackBlockArray(blocks) ? renderSlackBlocks(blocks) : null
+}
+
 function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
   return (
     <div className="flex flex-col gap-space-2">
       {blocks.map((block, index) => {
+        if (block.type === "context" && Array.isArray(block.elements)) {
+          return (
+            <div
+              key={index}
+              className="flex flex-wrap gap-space-2 text-xxs text-secondary"
+            >
+              {(block.elements as Array<unknown>)
+                .filter(isSlackTextObject)
+                .map((text, i) => (
+                  <span key={i} className="[overflow-wrap:anywhere]">
+                    <SlackText text={text} />
+                  </span>
+                ))}
+            </div>
+          )
+        }
         if (
           (block.type === "section" || block.type === "context") &&
           isSlackTextObject(block.text)

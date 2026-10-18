@@ -39,7 +39,7 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
-async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None:
+async def repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None:
     """Why this caller may not act on the pull request's repository, judged by its own GitHub access."""
     repo = f"{pr_ref.owner}/{pr_ref.repo}"
     if caller := cfg.mcp_caller:
@@ -78,7 +78,7 @@ async def request_human_review(
             "inline_summary is required: one or two sentences on what the change does and why."
         )
     cfg = RunConfig.from_config(get_config())
-    if refusal := await _repository_refusal(pr_ref, cfg):
+    if refusal := await repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     if caller := cfg.mcp_caller:
         return await _request_for_mcp_caller(pr_ref, caller, inline_summary, channel)
@@ -152,7 +152,7 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
     if request is None:
         return _failure("This pull request has no open review request to dismiss.")
     cfg = RunConfig.from_config(get_config())
-    if refusal := await _repository_refusal(pr_ref, cfg):
+    if refusal := await repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     by = "Open SWE"
     if caller := cfg.mcp_caller:
@@ -200,7 +200,7 @@ async def assign_human_reviewer(
     # Unprompted picks come only from the thread woken to make one.
     elif not await request.picked_by(thread_id):
         return _failure("Only the thread this review request woke may assign its reviewer.")
-    if refusal := await _repository_refusal(pr_ref, cfg):
+    if refusal := await repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     result = await assign(request, login, reason, replace=named_by_person)
     if not result.success:
@@ -250,7 +250,7 @@ async def get_human_review_status(pr_url: str) -> dict[str, Any]:
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
-    if refusal := await _repository_refusal(pr_ref, RunConfig.from_config(get_config())):
+    if refusal := await repository_refusal(pr_ref, RunConfig.from_config(get_config())):
         return _failure(refusal)
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None or request.kind == "expedited":
@@ -269,7 +269,7 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None or request.kind == "expedited":
         return _failure("This pull request has no open review request to assign a reviewer to.")
-    if refusal := await _repository_refusal(pr_ref, RunConfig.from_config(get_config())):
+    if refusal := await repository_refusal(pr_ref, RunConfig.from_config(get_config())):
         return _failure(refusal)
     started = await start_auto_assign(request, asked=True)
     if started.status == "failed":

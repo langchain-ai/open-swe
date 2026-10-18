@@ -1029,6 +1029,35 @@ export interface ReviewListPayload {
   has_more: boolean
 }
 
+/** A Block Kit text object, as Slack defines it. */
+export interface SlackTextObject {
+  type: "plain_text" | "mrkdwn"
+  text: string
+}
+
+/** The Block Kit blocks a slacklet uses; anything else is not rendered. */
+export type SlackletBlock =
+  | { type: "section"; text: SlackTextObject }
+  | { type: "context"; elements: Array<SlackTextObject> }
+  | { type: "divider" }
+
+export interface SlackletCommand {
+  seq: number
+  op: string
+  summary: string
+  command: Record<string, unknown>
+  created_at: string | null
+}
+
+/** A pull request slacklet: the message as Slack shows it, then every command applied to it. */
+export interface Slacklet {
+  id: string
+  pull_request_url: string
+  pull_request_key: string
+  blocks: Array<SlackletBlock>
+  commands: Array<SlackletCommand>
+}
+
 export interface OpenPullRequest {
   detailsLoading?: boolean
   detailsError?: boolean
@@ -1456,6 +1485,8 @@ export const api = {
       body: JSON.stringify({ page_name }),
     }),
   me: () => request<SessionUser>("/me"),
+  slacklet: (id: string) =>
+    request<Slacklet>(`/slacklets/${encodeURIComponent(id)}`),
   /** Model list and defaults for one workspace; model defaults are per workspace. */
   options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
     request<OptionsPayload>(
