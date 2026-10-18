@@ -1,0 +1,13 @@
+Comments on the artifact:
+{% for comment in comments %}
+{% if not loop.first %}
+
+---
+{% endif %}
+{% if comment.quote %}
+
+> {{ comment.quote.strip().split("\n") | join("\n> ") }}
+{% endif %}
+
+{{ comment.body }}
+{% endfor %}

@@ -52,7 +52,6 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const [draft, setDraft] = useState("")
   const [posting, setPosting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
   const [focusComment, setFocusComment] = useState<{
     id: string
     key: number
@@ -114,7 +113,6 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       setComments((current) =>
         current.map((comment) => (comment.id === id ? created : comment))
       )
-      setSubmitted(false)
       setAnchor(null)
       setGeneralComment(false)
       setDraft("")
@@ -141,15 +139,29 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const submitComments = useCallback(async () => {
     setSubmitting(true)
     setError(null)
+    commentMutation.current += 1
+    const previous = comments
+    setComments((current) =>
+      current.filter((comment) => comment.author_login !== plan.user.login)
+    )
     try {
-      await submitPlanComments(plan.threadId)
-      setSubmitted(true)
+      const { comment_ids } = await submitPlanComments(plan.threadId)
+      const sent = new Set(comment_ids)
+      setComments((current) => [
+        ...current,
+        ...previous.filter(
+          (comment) =>
+            comment.author_login === plan.user.login && !sent.has(comment.id)
+        ),
+      ])
     } catch (submitError) {
-      setError((submitError as Error).message)
+      setComments(previous)
+      reportError({ title: "Couldn't submit comments", error: submitError })
     } finally {
+      commentMutation.current += 1
       setSubmitting(false)
     }
-  }, [plan.threadId])
+  }, [comments, plan.threadId, plan.user.login])
 
   const removeComment = useCallback(
     async (id: string) => {
@@ -157,7 +169,6 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       try {
         await deletePlanComment(plan.threadId, id)
         setComments((current) => current.filter((comment) => comment.id !== id))
-        setSubmitted(false)
       } catch (deleteError) {
         reportError({ title: "Couldn't delete comment", error: deleteError })
       }
@@ -376,14 +387,10 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                     <div className="border-t border-default p-space-3">
                       <Button
                         className="w-full"
-                        disabled={submitting || posting || submitted}
+                        disabled={submitting || posting}
                         onClick={() => void submitComments()}
                       >
-                        {submitting
-                          ? "Submitting…"
-                          : submitted
-                            ? "Comments submitted"
-                            : "Submit comments"}
+                        {submitting ? "Submitting…" : "Submit comments"}
                       </Button>
                     </div>
                   )}

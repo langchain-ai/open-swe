@@ -104,7 +104,10 @@ beforeEach(() => {
   mocks.getPlanComments.mockResolvedValue([])
   mocks.addPlanComment.mockResolvedValue(comment)
   mocks.deletePlanComment.mockResolvedValue({ ok: true })
-  mocks.submitPlanComments.mockResolvedValue({ status: "submitted" })
+  mocks.submitPlanComments.mockResolvedValue({
+    status: "submitted",
+    comment_ids: [comment.id],
+  })
 })
 
 afterEach(() => {
@@ -265,7 +268,7 @@ describe("PlanReview", () => {
     })
   })
 
-  it("submits comments once and allows another submission after new feedback", async () => {
+  it("moves submitted comments out of the artifact and accepts new feedback", async () => {
     render(<PlanReview plan={plan} />)
     expect(screen.queryByRole("button", { name: "Submit comments" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Select text" }))
@@ -279,13 +282,8 @@ describe("PlanReview", () => {
     await waitFor(() =>
       expect(mocks.submitPlanComments).toHaveBeenCalledWith("thread-1")
     )
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Comments submitted",
-        }) as HTMLButtonElement
-      ).disabled
-    ).toBe(true)
+    await waitFor(() => expect(screen.queryByTestId("plan-comment")).toBeNull())
+    expect(screen.queryByRole("button", { name: "Submit comments" })).toBeNull()
     mocks.addPlanComment.mockResolvedValueOnce({ ...comment, id: "comment-2" })
     fireEvent.click(screen.getByRole("button", { name: "Select text" }))
     fireEvent.change(screen.getByTestId("comment-input"), {

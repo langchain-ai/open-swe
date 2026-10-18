@@ -14,7 +14,7 @@ from openswe.threads.access import _ensure_dashboard_github_token
 from openswe.threads.plan_store import (
     PLAN_STATUS_SHARED,
     add_plan_comment,
-    delete_plan_comment,
+    delete_plan_comments,
     dismiss_plan,
     get_plan_content,
     list_plan_comments,
@@ -190,25 +190,38 @@ async def post_plan_comment(
 @audit_endpoint
 async def submit_plan_comments(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
-) -> dict[str, str]:
+) -> dict[str, object]:
+    """Send the caller's comments to the agent as one message, then drop them from the artifact."""
     metadata = await fetch_thread_metadata(thread_id)
     login = session["sub"]
     _assert_thread_postable(metadata, login, session.get("email"))
-    comments = await list_plan_comments(thread_id, raise_on_error=True)
-    if not any(comment.get("author_login") == login for comment in comments):
+    comments = [
+        comment
+        for comment in await list_plan_comments(thread_id, raise_on_error=True)
+        if comment.get("author_login") == login
+    ]
+    if not comments:
         raise HTTPException(422, "no comments to submit")
     await _ensure_dashboard_github_token(login)
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     await dispatch_agent_run(
         thread_id,
-        prompt("threads/submit-artifact-comments"),
+        prompt(
+            "threads/submit-artifact-comments",
+            comments=[
+                {"quote": (comment.get("anchor") or {}).get("exact"), "body": comment["body"]}
+                for comment in comments
+            ],
+        ),
         configurable,
         source="dashboard",
         thread_title=None,
         client=langgraph_client(),
         multitask_strategy="enqueue",
     )
-    return {"status": "submitted"}
+    comment_ids = [comment["id"] for comment in comments]
+    await delete_plan_comments(thread_id, comment_ids)
+    return {"status": "submitted", "comment_ids": comment_ids}
 
 
 @plan_router.delete("/{thread_id}/comments/{comment_id}")
@@ -225,5 +238,5 @@ async def remove_plan_comment(
     login = session["sub"]
     if target.get("author_login") != login:
         raise HTTPException(403, "only the comment author can delete a comment")
-    await delete_plan_comment(thread_id, comment_id)
+    await delete_plan_comments(thread_id, [comment_id])
     return {"ok": True}
