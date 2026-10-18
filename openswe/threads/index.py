@@ -49,7 +49,7 @@ END)"""
 
 def _values(path: str) -> str:
     """The values at a JSON path as plain text, so quotes and backslashes match unescaped."""
-    return f"(SELECT string_agg(value #>> '{{}}', ' ') FROM jsonb_path_query(metadata, '{path}'))"
+    return f"(SELECT string_agg(v #>> '{{}}', ' ') FROM jsonb_path_query(metadata, '{path}') AS v)"
 
 
 # Every metadata field the dashboard's thread search reads, lowercased. It may
