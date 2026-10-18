@@ -3,6 +3,7 @@ import { Text } from "@langchain/macaw-components/Text"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect } from "react"
 
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -53,6 +54,10 @@ function ReviewsPage() {
   const filters = Route.useSearch()
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
+  const clearTrafficLights =
+    useSidebarCollapsed() &&
+    typeof window !== "undefined" &&
+    Boolean(window.openSweDesktop)
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
     if ("repo" in changes) storeRepos(changes.repo)
     void navigate({
@@ -85,7 +90,14 @@ function ReviewsPage() {
             !selection && "max-w-6xl"
           )}
         >
-          <div className="flex items-center gap-space-3">
+          <div
+            className={cn(
+              "flex items-center gap-space-3",
+              clearTrafficLights && "relative -top-4",
+              clearTrafficLights &&
+                (selection ? "pl-28" : "pl-[clamp(0px,708px-50vw,112px)]")
+            )}
+          >
             <Text as="h1" variant="h3" weight="medium" color="primary">
               Pull Requests
             </Text>

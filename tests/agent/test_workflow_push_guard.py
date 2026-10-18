@@ -69,7 +69,7 @@ class _Backend:
             return _Response("git@github.com:langchain-ai/open-swe.git\n")
         if "rev-parse --abbrev-ref HEAD" in command:
             return _Response("feature\n")
-        if "rev-parse HEAD" in command or "rev-parse feature" in command:
+        if any(f"rev-parse {ref}" in command for ref in ("HEAD", "feature", "refs/heads/feature")):
             return _Response(f"{self.head}\n")
         return _Response("")
 
@@ -125,6 +125,21 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
     assert guard._parse_git_push("git push origin feature; git push origin evil:feature") is None
 
 
+@pytest.mark.parametrize(
+    "options",
+    [
+        "--force",
+        "--force-with-lease=",
+        "--force-with-lease=../feature",
+        "--force-with-lease=feature:not-a-sha",
+        "--force-with-lease --force-with-lease",
+        "--force-with-lease --mirror",
+    ],
+)
+def test_parse_git_push_rejects_unsafe_options(options: str) -> None:
+    assert guard._parse_git_push(f"git -C /repo push {options} origin feature") is None
+
+
 async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     backend = _Backend()
     change = await guard._workflow_change_for_push(
@@ -147,6 +162,18 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
         == "git -C /repo push origin aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:refs/heads/feature"
     )
     assert len(change.fingerprint) == 64
+    lease_change = await guard._workflow_change_for_push(
+        backend,
+        guard.ParsedGitPush(
+            repo_dir="/repo",
+            remote="origin",
+            local_ref="feature",
+            remote_ref="feature",
+            force_with_lease="--force-with-lease",
+        ),
+    )
+    assert lease_change is not None
+    assert lease_change.fingerprint != change.fingerprint
 
 
 async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
@@ -232,8 +259,20 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
 
 
 @pytest.mark.parametrize("tool_name", ["execute", "background_execute"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -C /repo push origin feature",
+        "git -C /repo push --force-with-lease origin feature",
+        "git -C /repo push origin --force-with-lease feature",
+        "git -C /repo push -u origin feature --force-with-lease",
+        f"git -C /repo push --force-with-lease=refs/heads/feature:{'b' * 40} origin feature",
+        "git -C /repo push --force-with-lease origin HEAD:refs/heads/feature",
+        "git -C /repo push --force-with-lease origin refs/heads/feature:refs/heads/feature",
+    ],
+)
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
-    monkeypatch: pytest.MonkeyPatch, tool_name: str
+    monkeypatch: pytest.MonkeyPatch, tool_name: str, command: str
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
@@ -281,7 +320,7 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
     result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
-        cast(ToolCallRequest, _Request(name=tool_name)), handler
+        cast(ToolCallRequest, _Request(command, name=tool_name)), handler
     )
 
     assert called is False
@@ -304,8 +343,21 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     assert posted["blocks"][1]["elements"][0]["value"]
 
 
+@pytest.mark.parametrize(
+    "lease",
+    [
+        "",
+        "--force-with-lease",
+        "--force-with-lease=feature",
+        "--force-with-lease=refs/heads/feature:",
+        f"--force-with-lease=refs/heads/feature:{'b' * 40}",
+    ],
+)
+@pytest.mark.parametrize(
+    "refspec", ["feature", "HEAD:refs/heads/feature", "refs/heads/feature:refs/heads/feature"]
+)
 async def test_approved_workflow_push_runs_fixed_command(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, lease: str, refspec: str
 ) -> None:
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
@@ -324,18 +376,23 @@ async def test_approved_workflow_push_runs_fixed_command(
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
     result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
-        cast(ToolCallRequest, _Request()), handler
+        cast(ToolCallRequest, _Request(f"git -C /repo push -u origin {refspec} {lease}")),
+        handler,
     )
 
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
-    assert (
-        pushed_command
-        == "git -C /repo push origin aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:refs/heads/feature"
-    )
+    options = f"--set-upstream {lease} ".replace("  ", " ")
+    assert pushed_command == (f"git -C /repo push {options}origin {'a' * 40}:refs/heads/feature")
 
 
-async def test_non_workflow_push_runs_without_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "command",
+    ["git -C /repo push origin feature", "git -C /repo push --force-with-lease origin feature"],
+)
+async def test_non_workflow_push_runs_without_approval(
+    monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend(workflow_files="")), thread_id="thread-1"
     )
@@ -346,18 +403,42 @@ async def test_non_workflow_push_runs_without_approval(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(guard, "workflow_push_approved", fail_approval)
 
-    async def handler(_request: Any) -> ToolMessage:
+    async def handler(request: ToolCallRequest) -> ToolMessage:
         nonlocal called
         called = True
+        assert request.tool_call["args"]["command"] == command
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
     result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
-        cast(ToolCallRequest, _Request()), handler
+        cast(ToolCallRequest, _Request(command)), handler
     )
 
     assert called is True
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
+
+
+@pytest.mark.parametrize(
+    ("refspec", "inspectable"),
+    [("evil:feature", True), ("feature:other", True), ("feature", False)],
+)
+async def test_uninspectable_lease_push_is_blocked(refspec: str, inspectable: bool) -> None:
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, _Backend(workflow_files="", inspectable=inspectable)),
+        thread_id="thread-1",
+    )
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        raise AssertionError("uninspectable lease push must not execute")
+
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request(f"git -C /repo push --force-with-lease origin {refspec}")),
+        handler,
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert json.loads(str(result.content))["error_type"] == "WorkflowPushInspectionError"
 
 
 @pytest.mark.parametrize(

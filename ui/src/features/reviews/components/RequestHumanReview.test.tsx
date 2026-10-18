@@ -12,6 +12,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { afterEach, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { api, type OpenPullRequest } from "@/lib/api"
@@ -71,17 +72,18 @@ it.each([
       permalink: "",
       blockers: [],
     })
-    const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
-      success: true,
-      reused: true,
-      permalink,
-      error: "",
-      request_id: "request",
-      channel: "C0123456789",
-    })
+    const result =
+      Promise.withResolvers<
+        Awaited<ReturnType<typeof api.requestHumanReview>>
+      >()
+    const request = vi
+      .spyOn(api, "requestHumanReview")
+      .mockReturnValue(result.promise)
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <RequestHumanReview pr={pr} />
+        <TooltipProvider>
+          <RequestHumanReview pr={pr} />
+        </TooltipProvider>
       </QueryClientProvider>
     )
     await screen.findByRole("button", { name: "Choose channel" })
@@ -91,7 +93,26 @@ it.each([
     expect(button.hasAttribute("disabled")).toBe(true)
     fireEvent.click(screen.getByRole("button", { name: "Choose channel" }))
     fireEvent.click(button)
-    await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
+    const requesting = await screen.findByRole("button", {
+      name: "Requesting…",
+    })
+    expect(requesting.hasAttribute("disabled")).toBe(true)
+    fireEvent.click(requesting)
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(request).toHaveBeenCalledWith(pr, "C0123456789")
+    expect(
+      screen.queryByRole("button", { name: "Review requested" })
+    ).toBeNull()
+    await act(async () =>
+      result.resolve({
+        success: true,
+        reused: true,
+        permalink,
+        error: "",
+        request_id: "request",
+        channel: "C0123456789",
+      })
+    )
     const requested = await screen.findByRole("button", {
       name: "Review requested",
     })
@@ -131,7 +152,9 @@ it.each([
     })
     const content = (
       <QueryClientProvider client={client}>
-        <RequestHumanReview pr={pr} />
+        <TooltipProvider>
+          <RequestHumanReview pr={pr} />
+        </TooltipProvider>
       </QueryClientProvider>
     )
     const view = render(content)
@@ -170,3 +193,29 @@ it.each([
     expect(availability).toHaveBeenCalledTimes(1)
   }
 )
+
+it("explains the disabled button while availability is loading", async () => {
+  vi.spyOn(api, "humanReviewAvailability").mockReturnValue(
+    new Promise(() => {})
+  )
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(
+    screen
+      .getByRole("button", { name: "Request review in Slack" })
+      .hasAttribute("disabled")
+  ).toBe(true)
+  fireEvent.click(
+    screen.getByRole("button", { name: "Why a review can't be requested" })
+  )
+  expect(
+    await screen.findByText(
+      "Checking whether this pull request can be reviewed…"
+    )
+  ).toBeTruthy()
+})

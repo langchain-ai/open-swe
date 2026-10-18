@@ -129,7 +129,7 @@ export function walkthroughFileDiff(
 ): FileDiffMetadata | null {
   if (lines.added.length === 0 && lines.deleted.length === 0) return null
   if (!file.patch) return null
-  // Reusing the object keeps its hydrated contents across re-renders and order switches.
+  // Reusing the object keeps its highlighting cache across re-renders and order switches.
   const key = JSON.stringify([lines.added, lines.deleted])
   const cache = slices.get(file) ?? new Map<string, FileDiffMetadata | null>()
   slices.set(file, cache)
@@ -163,5 +163,7 @@ function sliceFileDiff(
   const sliced = getSingularPatch(slice)
   // Hydration keys its highlight cache on this; without it a slice reuses the whole file's rows.
   sliced.cacheKey = `${file.path}:slice:${hashFileContents(slice)}`
+  // The changes left out make the full files disagree with these hunks.
+  sliced.disableHydration = true
   return sliced
 }

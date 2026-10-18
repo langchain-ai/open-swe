@@ -610,7 +610,7 @@ async def _queued_message_count(thread_id: str) -> int:
         logger.warning(
             "Could not count queued messages",
             exc_info=True,
-            extra={"thread": {"thread_id": thread_id}},
+            extra={"thread_id": thread_id},
         )
         return 0
 

@@ -148,7 +148,9 @@ export function SubmitReviewPopover({
               : "Review changes"
           }
         >
-          Review<span className="max-sm:hidden"> changes</span>
+          <Text as="span" variant="sm" weight="normal">
+            Review<span className="max-sm:hidden"> changes</span>
+          </Text>
         </Button>
       </PopoverTrigger>
       <PopoverContent

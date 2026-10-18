@@ -23,6 +23,8 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
+from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
+from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
@@ -33,9 +35,7 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
-from openswe.threads.index import index_kept
-from openswe.threads.index_import import import_agent_server_threads, mark_index_stale
-from openswe.threads.router import THREAD_SYNC_JOB, sync_thread
+from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
@@ -90,6 +90,15 @@ def _sandbox_work(
 async def _background_tasks(job: Job) -> dict[str, JsonValue] | None:
     thread_id = _text(job, "thread_id")
     return None if thread_id is None else await monitor_background_tasks(thread_id)
+
+
+@_sandbox_work(MONITOR_POLL)
+async def _monitors(job: Job) -> bool:
+    thread_id = _text(job, "thread_id")
+    polling = thread_id is not None and await poll_monitors(thread_id)
+    if not polling:
+        await job.stop()
+    return polling
 
 
 @_sandbox_work(WATCH_JOB_KIND)
@@ -165,25 +174,15 @@ async def _wake_thread(job: Job) -> None:
     logger.info("Thread woken", extra={"job_id": str(job.id), "run_id": run_id})
 
 
-@WORKER.register(THREAD_SYNC_JOB)
-async def _thread_index_sync(job: Job) -> None:
-    thread_id = _text(job, "thread_id")
-    if thread_id is not None:
-        await sync_thread(thread_id)
-
-
 async def start_jobs() -> None:
     """Startup work: move old scheduler crons over, and keep the standing jobs in place."""
-    steps: list[Callable[[], Awaitable[object]]] = [import_agent_server_crons]
-    if index_kept():
-        steps += [
-            import_agent_server_threads,
-            lambda: queue.schedule(
-                THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
-            ),
-        ]
-    else:
-        steps += [mark_index_stale, lambda: queue.cancel_key(THREAD_STATUS_RECONCILE)]
+    steps: list[Callable[[], Awaitable[object]]] = [
+        import_agent_server_crons,
+        import_agent_server_threads,
+        lambda: queue.schedule(
+            THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
+        ),
+    ]
     for step in steps:
         try:
             await step()

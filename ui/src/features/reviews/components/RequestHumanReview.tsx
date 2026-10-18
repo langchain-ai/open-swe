@@ -31,9 +31,6 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const needsChannel =
     availability.isSuccess && !availability.data.available && !active
   const blockers = availability.data?.blockers ?? []
-  const reason = blockers.length
-    ? `A review can't be requested yet: ${blockers.join("; ")}.`
-    : null
   const requestReview = useMutation({
     mutationFn: () =>
       api.requestHumanReview(pr, needsChannel ? (channel ?? "") : ""),
@@ -83,8 +80,20 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         onClick={() => void availability.refetch()}
       />
     )
-  const label =
-    requestReview.isPending || active
+  const disabledReason = blockers.length
+    ? `A review can't be requested yet: ${blockers.join("; ")}.`
+    : availability.isPending
+      ? "Checking whether this pull request can be reviewed…"
+      : requestReview.isPending
+        ? "Posting the review request in Slack…"
+        : needsChannel && !channel
+          ? "This repository has no review channel (reviewChannel in .open-swe/settings.json). Choose one to post the request in."
+          : active && !permalink
+            ? "A review is already requested, but its Slack message link is unavailable."
+            : null
+  const label = requestReview.isPending
+    ? "Requesting…"
+    : active
       ? "Review requested"
       : requestReview.isError
         ? "Retry review request"
@@ -93,9 +102,9 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     <span
       className="inline-flex items-center gap-space-2"
       onClick={(event) => event.stopPropagation()}
-      title={reason ?? undefined}
+      title={disabledReason ?? undefined}
     >
-      {needsChannel && !reason && !requestReview.isSuccess && (
+      {needsChannel && !blockers.length && !requestReview.isSuccess && (
         <SlackChannelCombobox
           value={channel}
           onValueChange={setChannel}
@@ -107,13 +116,8 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       )}
       <PullRequestActionButton
         label={label}
-        disabled={
-          reason !== null ||
-          availability.isPending ||
-          (needsChannel && !channel) ||
-          requestReview.isPending ||
-          (active && !permalink)
-        }
+        loading={requestReview.isPending || availability.isPending}
+        disabled={disabledReason !== null}
         onClick={() => {
           if (active) {
             if (permalink)
@@ -123,7 +127,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           }
         }}
       />
-      {reason && (
+      {disabledReason && (
         <Popover>
           <PopoverTrigger asChild>
             <IconButton
@@ -132,11 +136,11 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
               size="xs"
               color="secondary"
               variant="plain"
-              tooltipProps={{ title: reason }}
+              tooltipProps={{ title: disabledReason }}
             />
           </PopoverTrigger>
           <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)]">
-            <Text variant="xs">{reason}</Text>
+            <Text variant="xs">{disabledReason}</Text>
           </PopoverContent>
         </Popover>
       )}
