@@ -81,7 +81,9 @@ After deployment, look for `Analytics database initialized` in startup logs. A s
 
 Create a [LangSmith](https://smith.langchain.com/) API key under **Settings → API Keys** and save it as `LANGSMITH_API_KEY`. LangGraph Platform injects it into the deployment for you, along with `LANGSMITH_TRACING` and `LANGSMITH_PROJECT`; standalone deployments set it themselves.
 
-The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override). Sandboxes boot from LangSmith's root snapshot, which ships `git`, `gh`, Python, `uv`, and Node, so there is nothing to configure; when your repositories need more, admins capture a sandbox image for a workspace from the **Workspaces** page later (see step 6). Other sandbox providers are covered in [CUSTOMIZATION.md](CUSTOMIZATION.md).
+The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override).
+
+Runs trace into a LangSmith project, named by `LANGSMITH_PROJECT` (the default, and what LangGraph Platform sets to the deployment name). Alternatively, set `LANGSMITH_AGENT_ID` and `LANGSMITH_AGENT_ENVIRONMENT` (`local`, `development`, `staging` or `production`) to trace into an agent environment instead. Agent addressing is in beta and enabled per workspace: a workspace without it rejects the runs, so the traces are lost rather than falling back to a project. Set both variables or neither. When both are set they take precedence over `LANGSMITH_PROJECT`, which the SDK then ignores with a warning, so unset it. The agent is created when its first run is ingested, so trace links, costs, and feedback appear once that run has landed. Both options use the same API key. Sandboxes boot from LangSmith's root snapshot, which ships `git`, `gh`, Python, `uv`, and Node, so there is nothing to configure; when your repositories need more, admins capture a sandbox image for a workspace from the **Workspaces** page later (see step 6). Other sandbox providers are covered in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 ## 3. Create a GitHub App
 
@@ -250,6 +252,8 @@ Slack verifies the events Request URL the first time it can reach it; if the bac
 LANGGRAPH_URL="<URL>"                 # the deployment's own URL
 LANGSMITH_API_KEY=""                  # step 2; injected by LangGraph Platform
 LANGSMITH_TRACING="true"              # injected by LangGraph Platform
+#LANGSMITH_AGENT_ID=""                # beta; trace into an agent instead of the project, with LANGSMITH_AGENT_ENVIRONMENT
+#LANGSMITH_AGENT_ENVIRONMENT=""
 ANTHROPIC_API_KEY=""                  # step 4: any provider key, or LANGSMITH_GATEWAY_API_KEY
 
 GITHUB_APP_ID=""                      # step 3
