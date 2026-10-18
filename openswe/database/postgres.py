@@ -9,6 +9,7 @@ from time import perf_counter
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from alembic.util import CommandError
 from sqlalchemy import (
     Connection,
     ExceptionContext,
@@ -269,6 +270,12 @@ def drop_stale_revisions(
     current = set(context.get_current_heads())
     unknown = current - {script.revision for script in migrations.walk_revisions()}
     known = current - unknown
+    if unknown and not known:
+        # An empty alembic_version would replay every migration over the existing schema.
+        raise CommandError(
+            f"Every stamped revision is unknown ({', '.join(sorted(unknown))}); "
+            "stamp a known revision before migrating"
+        )
     superseded = known & {
         script.revision
         for head in known
