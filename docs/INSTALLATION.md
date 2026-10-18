@@ -81,7 +81,7 @@ After deployment, look for `Analytics database initialized` in startup logs. A s
 
 Create a [LangSmith](https://smith.langchain.com/) API key under **Settings → API Keys** and save it as `LANGSMITH_API_KEY`. LangGraph Platform injects it into the deployment for you, along with `LANGSMITH_TRACING` and `LANGSMITH_PROJECT`; standalone deployments set it themselves.
 
-The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override).
+The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override). Sandboxes boot from LangSmith's root snapshot, which ships `git`, `gh`, Python, `uv`, and Node, so there is nothing to configure; when your repositories need more, admins capture a sandbox image for a workspace from the **Workspaces** page later (see step 6). Other sandbox providers are covered in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 Runs trace into the LangSmith project named by `LANGSMITH_PROJECT`, which LangGraph Platform sets to the deployment name. Alternatively, set `LANGSMITH_AGENT_ID` and `LANGSMITH_AGENT_ENVIRONMENT` (`local`, `development`, `staging` or `production`) to trace into an agent environment; agent addressing is in beta and enabled per workspace. Use one option or the other, not both.
 
