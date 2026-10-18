@@ -48,6 +48,7 @@ from rt.middleware import (
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
+    SubagentModelFallbackMiddleware,
 )
 from rt.models import RunModels, build_model
 from rt.sandbox_tools import SandboxToolsMiddleware
@@ -201,6 +202,10 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 *box_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
+                SubagentModelFallbackMiddleware(
+                    models.subagent_fallback if models is not None else None,
+                    use_gateway=models.use_gateway if models is not None else False,
+                ),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ],
         }

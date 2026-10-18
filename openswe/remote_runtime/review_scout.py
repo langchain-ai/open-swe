@@ -10,6 +10,7 @@ from openswe.remote_runtime.runs import ModelSpec, RunModels
 from openswe.review_scout.graph import build_review_scout, scout_models
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ModelChoice, ToolSurface
+from openswe.server import fallback_model_choice
 
 ASSISTANT_ID: Final = "review-scout"
 
@@ -26,9 +27,11 @@ def _model_spec(choice: ModelChoice) -> ModelSpec:
 
 async def run_models(cfg: RunConfig) -> RunModels:
     models = await scout_models(cfg)
+    fallback = fallback_model_choice(models.subagent.model_id)
     return RunModels(
         model=_model_spec(models.main),
         subagent_model=_model_spec(models.subagent),
+        subagent_fallback=None if fallback is None else _model_spec(fallback),
         use_gateway=models.use_gateway,
     )
 

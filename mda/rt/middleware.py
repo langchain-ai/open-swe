@@ -399,6 +399,31 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             await self._trace.reconcile(metadata)
 
 
+class SubagentModelFallbackMiddleware(AgentMiddleware):
+    """Try the subagent's configured fallback once when its model call fails."""
+
+    def __init__(self, fallback: ModelSpec | None, *, use_gateway: bool) -> None:
+        self._fallback = fallback
+        self._use_gateway = use_gateway
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        try:
+            return await handler(request)
+        except Exception:
+            if self._fallback is None:
+                raise
+            logger.warning(
+                "Subagent model call failed; retrying on the fallback model", exc_info=True
+            )
+            return await handler(
+                request.override(model=build_model(self._fallback, use_gateway=self._use_gateway))
+            )
+
+
 class ReportRepliesMiddleware(AgentMiddleware):
     """Hand each reply to the backend, where the graph's transcript and usage middleware see it."""
 
