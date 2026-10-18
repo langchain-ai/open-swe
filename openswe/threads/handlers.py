@@ -109,7 +109,7 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
     )
 
 
-async def get_promptable_thread_metadata(thread_id: str, login: str) -> dict[str, Any]:
+async def get_promptable_thread_metadata(thread_id: str, login: str) -> Mapping[str, object]:
     """The metadata of a thread ``login`` may prompt, for opening its live capabilities.
 
     A shell or a browser is a live capability into the owner's sandbox, so admins
@@ -471,7 +471,7 @@ async def share_thread_with_workspace(
     for status in ("pending", "running"):
         if await client.runs.list(thread_id, status=status, limit=1):
             raise HTTPException(409, "stop the run before sharing this thread")
-    metadata_update: dict[str, Any] = {
+    metadata_update: dict[str, object] = {
         "visibility": "public",
         "admin_thread": False,
         "unlisted": False,

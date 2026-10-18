@@ -4,7 +4,7 @@ Kept apart from the LangSmith provider so the dashboard can call the API without
 importing the agent stack the provider's sandbox backend pulls in.
 """
 
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
 import httpx2
 
@@ -48,7 +48,7 @@ class SandboxAPI:
         method: Literal["GET", "POST", "PATCH", "DELETE"],
         path: str,
         *,
-        json: dict[str, Any] | None = None,
+        json: dict[str, object] | None = None,
         timeout: float,
     ) -> httpx2.Response:
         """Call the sandbox API at ``path`` (under ``/v2/sandboxes``)."""

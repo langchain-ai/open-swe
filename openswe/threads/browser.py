@@ -6,7 +6,7 @@ LangSmith mints for it, and switches who controls the window through LangSmith.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
@@ -80,7 +80,7 @@ def _langsmith_errors() -> Iterator[None]:
 
 @router.get("/threads/{thread_id}/browser")
 async def api_thread_browser(
-    thread_id: str, response: Response, session: dict[str, Any] = SESSION_DEP
+    thread_id: str, response: Response, session: dict[str, str] = SESSION_DEP
 ) -> ThreadBrowser:
     record = await _thread_window(thread_id, session["sub"])
     with _langsmith_errors():
@@ -95,7 +95,7 @@ async def api_thread_browser_controller(
     thread_id: str,
     body: BrowserControllerUpdate,
     response: Response,
-    session: dict[str, Any] = SESSION_DEP,
+    session: dict[str, str] = SESSION_DEP,
 ) -> ThreadBrowser:
     """Take the window over from the agent, or hand it back."""
     record = await _thread_window(thread_id, session["sub"])
