@@ -10,7 +10,8 @@ from openswe.remote_runtime.runs import ModelSpec, RunModels
 from openswe.review.diff import compute_diff_line_set
 from openswe.reviewer import ReviewerModelChoice, build_reviewer_agent, resolve_reviewer_models
 from openswe.run_config import RunConfig
-from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.sandboxes.tool_runtime import ModelChoice, ToolSurface
+from openswe.server import fallback_model_choice
 
 ASSISTANT_ID: Final = "reviewer"
 
@@ -28,15 +29,17 @@ def _restore(state: dict[str, object]) -> None:
         state["diff_line_set"] = compute_diff_line_set(diff_text)
 
 
-def _model_spec(choice: ReviewerModelChoice) -> ModelSpec:
+def _model_spec(choice: ReviewerModelChoice | ModelChoice) -> ModelSpec:
     return ModelSpec(model_id=choice.model_id, kwargs=_json.validate_python(dict(choice.kwargs)))
 
 
 async def run_models(cfg: RunConfig) -> RunModels:
     models = await resolve_reviewer_models(cfg)
+    fallback = fallback_model_choice(models.subagent.model_id)
     return RunModels(
         model=_model_spec(models.main),
         subagent_model=_model_spec(models.subagent),
+        subagent_fallback=None if fallback is None else _model_spec(fallback),
         use_gateway=models.use_gateway,
     )
 
