@@ -33,6 +33,8 @@
       .msg.bot .avatar { background: #111827; color: #fff; }
       .who { font-size: 14px; font-weight: 800; }
       .text { margin-top: 3px; white-space: pre-wrap; line-height: 1.45; font-size: 14px; }
+      .section { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; font-size: 14px; }
+      .section code { border: 1px solid #e0e0e0; border-radius: 3px; padding: 0 3px; background: #f6f6f6; color: #c01343; font-size: 12px; }
       .context { color: #616061; font-size: 12px; margin-top: 5px; }
       .block-image { display: block; max-width: 100%; margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px; }
       .actions button { margin: 8px 6px 0 0; border: 1px solid #bbb; border-radius: 5px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
@@ -102,6 +104,31 @@
         await poll();
       }
 
+      // Section text is mrkdwn: links, *bold* and `code`, as Slack draws them.
+      function appendMrkdwn(parent, value) {
+        const pattern = /<(https?:\/\/[^|>]+)\|([^>]+)>|\*([^*\n]+)\*|`([^`\n]+)`/g;
+        let cursor = 0;
+        for (const match of value.matchAll(pattern)) {
+          parent.append(document.createTextNode(value.slice(cursor, match.index)));
+          if (match[1]) {
+            const link = document.createElement("a");
+            link.href = match[1];
+            link.textContent = match[2];
+            parent.appendChild(link);
+          } else if (match[3]) {
+            const strong = document.createElement("strong");
+            appendMrkdwn(strong, match[3]);
+            parent.appendChild(strong);
+          } else {
+            const code = document.createElement("code");
+            code.textContent = match[4];
+            parent.appendChild(code);
+          }
+          cursor = match.index + match[0].length;
+        }
+        parent.append(document.createTextNode(value.slice(cursor)));
+      }
+
       function renderMessages(messages) {
         const thread = $("thread");
         thread.replaceChildren();
@@ -152,7 +179,7 @@
             if (block.type === "section" && block.text?.text) {
               const element = document.createElement("div");
               element.className = "section";
-              element.textContent = block.text.text;
+              appendMrkdwn(element, block.text.text);
               body.appendChild(element);
             }
             if (block.type === "context") {

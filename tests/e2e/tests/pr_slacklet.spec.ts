@@ -11,13 +11,12 @@ import { SAME_USER, loginAs } from "./helpers/dashboard";
 // boundaries faked:
 //
 //   someone asks Open SWE in mock Slack to follow a draft PR ->
-//   the agent calls the real `start_pr_slacklet`, which posts one message and
-//   logs command #1 `attach` beneath it ->
+//   the agent calls the real `start_slacklet` for a `pull_request`, which posts
+//   one message and logs command #1 `attach` ->
 //   GitHub changes and says so through signed webhooks; each delivery makes the
-//   backend re-read the PR and append only the commands that changed it: every
-//   command lands once as an immutable thread reply while the slacklet message
-//   is edited in place ->
-//   the web UI shows the same blocks and the same command log ->
+//   backend re-read the PR and append only the commands that changed it, while
+//   the slacklet message is edited in place and the log stays out of Slack ->
+//   the web UI shows the same blocks and the command log ->
 //   a follow-up in the thread wakes the agent, which answers from the commands
 //   queued for it, not from the edited message.
 
@@ -58,13 +57,6 @@ async function github(
 
 function slacklet(page: Page) {
   return page.locator(".msg.bot").filter({ hasText: "Pull request slacklet" });
-}
-
-function logReply(page: Page, seq: number, op: string) {
-  return page
-    .locator(".msg.bot")
-    .filter({ hasText: `#${seq} ${op}` })
-    .filter({ hasNotText: "Pull request slacklet" });
 }
 
 test.describe("Pull request slacklet", () => {
@@ -117,18 +109,15 @@ test.describe("Pull request slacklet", () => {
     await expect(slacklet(page)).toContainText("Add a greeting helper");
     await expect(slacklet(page)).toContainText("Draft");
     await expect(slacklet(page)).toContainText("CI running");
-    await expect(logReply(page, 1, "attach")).toBeVisible();
+    await expect(slacklet(page)).toContainText("state after #1 attach");
 
     // 2. The author marks it ready for review.
     await github(request, number, { draft: false }, "pull_request", {
       action: "ready_for_review",
       pull_request: pullRequest,
     });
-    await expect(logReply(page, 2, "set_status")).toContainText(
-      "Open for review",
-    );
-    await expect(slacklet(page)).toContainText("Open");
     await expect(slacklet(page)).toContainText("state after #2 set_status");
+    await expect(slacklet(page)).toContainText("Open");
 
     // 3. CI finishes green on the first head.
     await github(
@@ -156,7 +145,7 @@ test.describe("Pull request slacklet", () => {
         },
       },
     );
-    await expect(logReply(page, 3, "set_ci")).toContainText("CI passing");
+    await expect(slacklet(page)).toContainText("state after #3 set_ci");
     await expect(slacklet(page)).toContainText("CI passing");
 
     // 4. Bob asks for changes.
@@ -185,9 +174,7 @@ test.describe("Pull request slacklet", () => {
         pull_request: pullRequest,
       },
     );
-    await expect(logReply(page, 4, "set_review")).toContainText(
-      "bob requested changes",
-    );
+    await expect(slacklet(page)).toContainText("state after #4 set_review");
     await expect(slacklet(page)).toContainText("Reviews: 🔁 bob");
 
     // 5. Alice pushes a fix: a new head, and CI starts over.
@@ -210,9 +197,7 @@ test.describe("Pull request slacklet", () => {
       "pull_request",
       { action: "synchronize", pull_request: pullRequest },
     );
-    await expect(logReply(page, 5, "set_head")).toContainText(
-      `New head ${newHead.slice(0, 7)}`,
-    );
+    await expect(slacklet(page)).toContainText("state after #5 set_head");
     await expect(slacklet(page)).toContainText("CI running");
 
     // 6. The same delivery again, as GitHub retries: nothing changed, so no command.
@@ -248,33 +233,16 @@ test.describe("Pull request slacklet", () => {
         },
       },
     );
-    await expect(logReply(page, 6, "set_ci")).toContainText(
-      "CI failing on fffffff: lint",
-    );
+    await expect(slacklet(page)).toContainText("state after #6 set_ci");
     await expect(slacklet(page)).toContainText("CI failing: lint");
 
-    // The log is append-only: one reply per command, in order, never edited.
-    const replies = (await (
+    // The command log stays out of Slack: the thread holds the request and the one slacklet.
+    const thread = (await (
       await request.get(
         `/mock/slack/messages?thread_ts=${encodeURIComponent(threadTs)}`,
       )
-    ).json()) as Array<{ text: string; is_bot: boolean }>;
-    const log = replies
-      .filter((message) => message.is_bot && /^`#\d+ /.test(message.text))
-      .map((message) =>
-        message.text
-          .match(/^`#(\d+) (\w+)`/)
-          ?.slice(1, 3)
-          .join(" "),
-      );
-    expect(log).toEqual([
-      "1 attach",
-      "2 set_status",
-      "3 set_ci",
-      "4 set_review",
-      "5 set_head",
-      "6 set_ci",
-    ]);
+    ).json()) as Array<{ is_bot: boolean }>;
+    expect(thread.filter((message) => message.is_bot)).toHaveLength(1);
     await expect(slacklet(page)).toHaveCount(1);
 
     // 8. The web UI shows the same message and the same command log.

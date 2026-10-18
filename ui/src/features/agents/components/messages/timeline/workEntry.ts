@@ -244,7 +244,7 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
     case "managed-tools":
       return "Offering connection"
     case "slacklet":
-      return active ? "Attaching slacklet" : "Attached slacklet"
+      return active ? "Starting slacklet" : "Started slacklet"
     case "other":
       return describeWorkEntry(chunk).heading
   }

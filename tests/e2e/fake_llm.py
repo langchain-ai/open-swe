@@ -513,7 +513,7 @@ def _expedite_merge_step(messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "merge_expedited_pr",
-                "args": {"pr_url": url},
+                "args": {"kind": "pull_request", "subject": url},
                 "id": f"call-expedite-merge-{len(messages)}",
             }
         ],
@@ -575,7 +575,13 @@ def _slacklet_attach_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_in(_text(humans[0].content)) if humans else ""
     return AIMessage(
         content="Attaching a live slacklet for the pull request.",
-        tool_calls=[{"name": "start_pr_slacklet", "args": {"pr_url": url}, "id": "call-slacklet"}],
+        tool_calls=[
+            {
+                "name": "start_slacklet",
+                "args": {"kind": "pull_request", "subject": url},
+                "id": "call-slacklet",
+            }
+        ],
     )
 
 

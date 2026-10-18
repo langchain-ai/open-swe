@@ -3,10 +3,8 @@ import { useQuery } from "@tanstack/react-query"
 
 import { SlackBlocks, SlackIcon } from "./ReplyCard"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
-import { pullRequestTopic } from "@/features/reviews/lib/cache"
 import { api } from "@/lib/api"
-
-const PR_URL = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/
+import { invalidationTopic } from "@/lib/invalidations/topics"
 
 function slackletId(output: string | undefined): string | null {
   if (!output) return null
@@ -22,15 +20,9 @@ function slackletId(output: string | undefined): string | null {
   }
 }
 
-function pullRequestOf(chunk: ToolExecutionChunk) {
-  const url = chunk.input?.pr_url
-  const match = typeof url === "string" ? PR_URL.exec(url) : null
-  return match ? { repo: match[1] ?? "", number: Number(match[2]) } : null
-}
-
 /**
- * The live pull request slacklet a `start_pr_slacklet` call attached: the
- * message exactly as Slack shows it, then the immutable commands that built it.
+ * The live slacklet a `start_slacklet` call started, of any kind: the message
+ * exactly as Slack shows it, then the immutable commands that built it.
  */
 export const SlackletCard = memo(function SlackletCard({
   chunk,
@@ -38,26 +30,25 @@ export const SlackletCard = memo(function SlackletCard({
   chunk: ToolExecutionChunk
 }) {
   const id = slackletId(chunk.output)
-  const pullRequest = pullRequestOf(chunk)
   const { data, error } = useQuery({
     queryKey: ["slacklet", id],
     queryFn: () => api.slacklet(id ?? ""),
     enabled: id !== null,
     meta: {
-      invalidatedBy: pullRequest ? [pullRequestTopic(pullRequest)] : [],
+      invalidatedBy: id ? [invalidationTopic("slacklets", id)] : [],
     },
   })
   if (chunk.status === "pending" || chunk.status === "in_progress") {
     return (
       <div className="px-space-1 text-xxs text-secondary">
-        Attaching slacklet…
+        Starting slacklet…
       </div>
     )
   }
   if (id === null) {
     return (
       <div className="px-space-1 text-xxs text-error-secondary">
-        Could not attach the slacklet
+        Could not start the slacklet
       </div>
     )
   }

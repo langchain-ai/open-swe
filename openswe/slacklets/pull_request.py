@@ -1,21 +1,37 @@
-"""A pull request slacklet's state and the typed commands that transform it.
+"""The pull request slacklet kind: a message kept in step with one pull request.
 
-State changes only by applying commands, in order: replaying a slacklet's
-commands from the first rebuilds its state exactly. GitHub events never become
-commands directly; they prompt a fresh read of the pull request, and
-:meth:`PullRequestView.commands_to` turns the difference into commands.
+GitHub events never become commands directly. They prompt a fresh read of the
+pull request, and :meth:`PullRequestView.commands_to` turns the difference from
+the stored state into commands, so a late, repeated or missed delivery cannot
+leave a slacklet wrong.
 """
 
+import asyncio
+import logging
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+import httpx2
+from pydantic import Field, TypeAdapter
 
+from openswe.database import postgres
 from openswe.github.ci import FAILING_CONCLUSIONS, CommitChecks
 from openswe.github.comments import derive_pr_state
+from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_key import PullRequestKey
-from openswe.github.pull_request_status import PullRequestReviewer
+from openswe.github.pull_request_status import PullRequestClient, PullRequestReviewer
+from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, context, escape, section
-from openswe.slack.client import GitHubPrRef
+from openswe.slack.client import GitHubPrRef, parse_github_pr_url
+from openswe.slacklets.kind import (
+    Frozen,
+    SlackletCommand,
+    SlackletRefused,
+    SlackletState,
+)
+from openswe.slacklets.store import Slacklet, SlackletKind
+from openswe.utils.json_types import JsonObject
+
+logger = logging.getLogger(__name__)
 
 PullRequestStatus = Literal["draft", "open", "merged", "closed"]
 CiStatus = Literal["none", "pending", "passing", "failing"]
@@ -28,11 +44,7 @@ class StaleCommand(ValueError):
     """A command addressed to a head commit the slacklet has moved past."""
 
 
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class Ci(_Frozen):
+class Ci(Frozen):
     sha: str
     status: CiStatus
     failed: tuple[str, ...] = ()
@@ -62,7 +74,7 @@ class Ci(_Frozen):
         return cls(sha=sha, status="pending" if running else "passing")
 
 
-class PullRequestView(_Frozen):
+class PullRequestView(SlackletState):
     """What a pull request slacklet shows, and what a read of GitHub observed."""
 
     url: str
@@ -77,6 +89,9 @@ class PullRequestView(_Frozen):
     def key(self) -> PullRequestKey:
         owner, repo = self.repo.split("/", 1)
         return PullRequestKey.of(owner, repo, self.number)
+
+    def describe(self) -> str:
+        return f"the pull request slacklet for {self.url}"
 
     @classmethod
     def observe(
@@ -123,7 +138,11 @@ class PullRequestView(_Frozen):
                 commands.append(SetReview(reviewer=reviewer, verdict=verdict))
         return commands
 
-    def blocks(self, *, seq: int, last: Command) -> list[Block]:
+    def commands_from(self, stored: PullRequestView) -> list[Command]:
+        """The commands that take ``stored`` to this observation."""
+        return stored.commands_to(self)
+
+    def blocks(self, *, seq: int, op: str) -> list[Block]:
         """The slacklet message for this state, reached by command ``seq``."""
         ci = _CI_LABELS[self.ci.status]
         if self.ci.failed:
@@ -142,7 +161,7 @@ class PullRequestView(_Frozen):
             )
         return [
             section("\n".join(lines)),
-            context(f"Pull request slacklet · state after #{seq} {last.op}"),
+            context(f"Pull request slacklet · state after #{seq} {op}"),
         ]
 
     def fallback_text(self) -> str:
@@ -172,7 +191,7 @@ _VERDICT_ICONS: dict[Verdict, str] = {
 }
 
 
-class Attach(_Frozen):
+class Attach(SlackletCommand):
     """Start tracking: the whole pull request as first read."""
 
     op: Literal["attach"] = "attach"
@@ -187,7 +206,7 @@ class Attach(_Frozen):
         return f"Tracking {self.view.repo}#{self.view.number}: “{self.view.title}”"
 
 
-class SetTitle(_Frozen):
+class SetTitle(SlackletCommand):
     op: Literal["set_title"] = "set_title"
     title: str
 
@@ -206,7 +225,7 @@ _STATUS_SUMMARIES: dict[PullRequestStatus, str] = {
 }
 
 
-class SetStatus(_Frozen):
+class SetStatus(SlackletCommand):
     op: Literal["set_status"] = "set_status"
     status: PullRequestStatus
 
@@ -217,7 +236,7 @@ class SetStatus(_Frozen):
         return _STATUS_SUMMARIES[self.status]
 
 
-class SetHead(_Frozen):
+class SetHead(SlackletCommand):
     """New commits: CI starts over on the new head."""
 
     op: Literal["set_head"] = "set_head"
@@ -238,7 +257,7 @@ _CI_SUMMARIES: dict[CiStatus, str] = {
 }
 
 
-class SetCi(_Frozen):
+class SetCi(SlackletCommand):
     op: Literal["set_ci"] = "set_ci"
     sha: str
     status: CiStatus
@@ -264,7 +283,7 @@ _VERDICT_SUMMARIES: dict[Verdict, str] = {
 }
 
 
-class SetReview(_Frozen):
+class SetReview(SlackletCommand):
     op: Literal["set_review"] = "set_review"
     reviewer: str
     verdict: Verdict
@@ -289,3 +308,98 @@ def apply(view: PullRequestView | None, command: Command) -> PullRequestView:
     if view is None:
         raise ValueError(f"{command.op} needs an attached slacklet")
     return command.apply(view)
+
+
+async def observe(ref: GitHubPrRef) -> PullRequestView:
+    """Read the pull request from GitHub as the Open SWE app's installation sees it."""
+    async with PullRequestClient.as_app(ref.owner, ref.repo, ref.number) as pull_request:
+        pull = await pull_request.pull()
+        head = pull.get("head")
+        sha = str(head.get("sha") or "") if isinstance(head, dict) else ""
+        checks, reviewers = await asyncio.gather(
+            CommitChecks.read(pull_request.repo, sha), pull_request.reviewers()
+        )
+    return PullRequestView.observe(ref, pull=pull, checks=checks, reviewers=reviewers)
+
+
+async def start(subject: str, cfg: RunConfig) -> tuple[str, Command]:
+    """Follow the pull request at URL ``subject``, if this run may read its repository."""
+    # Imported on use: the tool module imports the graph's tool registry.
+    from openswe.tools.request_human_review import repository_refusal
+
+    ref = parse_github_pr_url(subject)
+    if ref is None:
+        raise SlackletRefused("A pull_request slacklet's subject must be a GitHub pull request URL")
+    if refusal := await repository_refusal(ref, cfg):
+        raise SlackletRefused(refusal)
+    try:
+        view = await observe(ref)
+    except GitHubAppUnavailable, httpx2.HTTPError:
+        raise SlackletRefused(f"Open SWE cannot read {ref.owner}/{ref.repo}") from None
+    return str(view.key), Attach(view=view)
+
+
+PULL_REQUEST = SlackletKind(
+    name="pull_request", state=PullRequestView, commands=COMMAND, apply=apply, start=start
+)
+
+GITHUB_EVENTS = frozenset(
+    {"pull_request", "pull_request_review", "check_run", "check_suite", "workflow_run", "status"}
+)
+
+
+async def _watching(owner: str, repo: str, number: int | None, sha: str) -> list[Slacklet]:
+    """Slacklets on PR ``number`` of ``owner/repo``, or whose head commit there is ``sha``."""
+    if number is not None:
+        return await Slacklet.of_kind(
+            PULL_REQUEST, Slacklet.subject == str(PullRequestKey.of(owner, repo, number))
+        )
+    if not sha:
+        return []
+    return await Slacklet.of_kind(
+        PULL_REQUEST,
+        Slacklet.subject.startswith(f"{owner}/{repo}/".lower(), autoescape=True),
+        Slacklet.state["ci"]["sha"].astext == sha,
+    )
+
+
+def _event_target(event_type: str, payload: JsonObject) -> tuple[int | None, str]:
+    """The pull request number an event names, else the commit it is about."""
+    if event_type in {"pull_request", "pull_request_review"}:
+        pull = payload.get("pull_request")
+        number = pull.get("number") if isinstance(pull, dict) else None
+        return (number if isinstance(number, int) else None), ""
+    if event_type == "status":
+        return None, str(payload.get("sha") or "")
+    subject = payload.get(event_type)
+    return None, str(subject.get("head_sha") or "") if isinstance(subject, dict) else ""
+
+
+async def refresh_from_github(event_type: str, payload: JsonObject) -> None:
+    """Bring every pull request slacklet the event concerns up to date with a fresh read."""
+    repository = payload.get("repository")
+    owner = repository.get("owner") if isinstance(repository, dict) else None
+    owner_login = str(owner.get("login") or "") if isinstance(owner, dict) else ""
+    repo = str(repository.get("name") or "") if isinstance(repository, dict) else ""
+    if not (owner_login and repo) or not postgres.configured():
+        return
+    number, sha = _event_target(event_type, payload)
+    by_subject: dict[str, list[Slacklet]] = {}
+    for slacklet in await _watching(owner_login, repo, number, sha):
+        by_subject.setdefault(slacklet.subject, []).append(slacklet)
+    for watching in by_subject.values():
+        url = PULL_REQUEST.state.model_validate(watching[0].state).url
+        ref = parse_github_pr_url(url)
+        if ref is None:
+            continue
+        try:
+            observed = await observe(ref)
+        except Exception:
+            logger.warning(
+                "Reading a slacklet's pull request failed",
+                extra={"pr_url": url, "github_event": event_type},
+                exc_info=True,
+            )
+            continue
+        for slacklet in watching:
+            await slacklet.advance(PULL_REQUEST, observed.commands_from)

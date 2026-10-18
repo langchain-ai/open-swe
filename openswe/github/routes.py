@@ -6,7 +6,8 @@ from openswe.github import webhook as service
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
-from openswe.slacklets.store import SLACKLET_EVENTS, refresh_from_github
+from openswe.slacklets.pull_request import GITHUB_EVENTS as SLACKLET_EVENTS
+from openswe.slacklets.pull_request import refresh_from_github
 from openswe.ui_invalidations import Topic
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs

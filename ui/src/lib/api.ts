@@ -1047,11 +1047,11 @@ export interface SlackletCommand {
   created_at: string | null
 }
 
-/** A pull request slacklet: the message as Slack shows it, then every command applied to it. */
+/** A slacklet of any kind: the message as Slack shows it, then every command applied to it. */
 export interface Slacklet {
   id: string
-  pull_request_url: string
-  pull_request_key: string
+  kind: string
+  subject: string
   blocks: Array<SlackletBlock>
   commands: Array<SlackletCommand>
 }

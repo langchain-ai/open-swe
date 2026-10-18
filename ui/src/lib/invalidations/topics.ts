@@ -11,6 +11,7 @@ type KeyedTopic =
   | "incidents"
   | "pull-requests"
   | "thread-queues"
+  | "slacklets"
 
 export type InvalidationTopic = string
 

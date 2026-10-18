@@ -103,6 +103,9 @@ class Topic(BaseTopic):
     THREAD_QUEUES: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
 
+    SLACKLETS: ClassVar[KeyedTopic[str]]
+    """Keyed by slacklet id: its state and command log."""
+
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
@@ -210,10 +213,30 @@ async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
     return readable
 
 
+async def _readable_slacklets(session: Session, slacklet_ids: set[str]) -> set[str]:
+    # Slacklets invalidate through this module.
+    from uuid import UUID
+
+    from fastapi import HTTPException
+
+    from openswe.slacklets.routes import readable_slacklet
+
+    readable: set[str] = set()
+    for key in slacklet_ids:
+        try:
+            await readable_slacklet(UUID(key), session["sub"], session.get("email"))
+        except ValueError, HTTPException:
+            logger.debug("Slacklet invalidation not audible", extra={"slacklet_key": key})
+            continue
+        readable.add(key)
+    return readable
+
+
 Topic.WORKSPACES = Topic("workspaces")
 Topic.REVIEW_STYLES = KeyedTopic("review-styles")
 Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
+Topic.SLACKLETS = KeyedTopic("slacklets", authorize_keys=_readable_slacklets)
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
