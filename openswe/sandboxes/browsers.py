@@ -36,7 +36,7 @@ _BROWSER_START_TIMEOUT_SECONDS = 180.0
 _BROWSER_REQUEST_TIMEOUT_SECONDS = 30.0
 _GONE_STATUSES = frozenset({"failed", "deleting"})
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
-_THREAD_METADATA_KEY = "browser_window"
+BROWSER_WINDOW_METADATA_KEY = "browser_window"
 
 logger = logging.getLogger(__name__)
 
@@ -160,10 +160,29 @@ class LangSmithBrowser:
             raise BrowserGoneError(f"browser {self.name} is {state.status}")
         return state
 
+    async def detach(self, window_id: str) -> None:
+        """Close a window, which also removes its sandbox's link to the browser."""
+        try:
+            await _browser_request(
+                "DELETE",
+                f"/browsers/{self.name}/attachments/{window_id}",
+                timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS,
+            )
+        except httpx2.HTTPStatusError as exc:
+            # The window, or the whole browser, is already gone.
+            if exc.response.status_code != 404:
+                raise
+
     async def _state(self) -> BrowserState:
-        response = await _browser_request(
-            "GET", f"/browsers/{self.name}", timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS
-        )
+        """The browser as LangSmith reports it; only its own 404 means it is gone."""
+        try:
+            response = await _browser_request(
+                "GET", f"/browsers/{self.name}", timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS
+            )
+        except httpx2.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise BrowserGoneError(f"browser {self.name} no longer exists") from exc
+            raise
         return BrowserState.model_validate(response.json())
 
 
@@ -176,7 +195,7 @@ class ThreadBrowserWindow(BaseModel):
 
     @classmethod
     def of(cls, metadata: Mapping[str, object]) -> Self | None:
-        raw = metadata.get(_THREAD_METADATA_KEY)
+        raw = metadata.get(BROWSER_WINDOW_METADATA_KEY)
         if raw is None:
             return None
         try:
@@ -189,15 +208,19 @@ class ThreadBrowserWindow(BaseModel):
     def langsmith(self) -> LangSmithBrowser:
         return LangSmithBrowser(self.browser)
 
+    async def close(self) -> None:
+        """Close the window, cutting the thread's sandbox off from the browser."""
+        await self.langsmith.detach(self.window)
+
     async def save(self, thread_id: str) -> None:
         await langgraph_client().threads.update(
-            thread_id=thread_id, metadata={_THREAD_METADATA_KEY: self.model_dump()}
+            thread_id=thread_id, metadata={BROWSER_WINDOW_METADATA_KEY: self.model_dump()}
         )
         await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
 
 
 async def _browser_request(
-    method: Literal["GET", "POST"],
+    method: Literal["GET", "POST", "DELETE"],
     path: str,
     *,
     json: dict[str, object] | None = None,
@@ -210,8 +233,6 @@ async def _browser_request(
             raise BrowserUnavailableError(
                 "LangSmith's browser beta is not enabled for this deployment's workspace"
             ) from exc
-        if exc.response.status_code == 404 and path.startswith(("/browsers/", "/boxes/")):
-            raise BrowserGoneError(str(exc)) from exc
         raise
 
 
@@ -286,6 +307,11 @@ class BrowserOwner:
             if row is not None and row.langsmith_browser != replacing:
                 return LangSmithBrowser(row.langsmith_browser)
             created = await LangSmithBrowser.create()
+            if replacing is not None:
+                logger.warning(
+                    "Replaced a LangSmith browser that no longer exists or can run",
+                    extra={"replaced_browser": replacing, "langsmith_browser": created.name},
+                )
             await self._record(session, row, created.name)
             return created
 

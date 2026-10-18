@@ -22,6 +22,7 @@ from openswe.sandboxes.browsers import (
     ThreadBrowserWindow,
 )
 from openswe.threads.handlers import get_promptable_thread_metadata
+from openswe.threads.summary import thread_is_owner
 from openswe.ui_invalidations.topics import Topic
 
 router = APIRouter(tags=["threads"])
@@ -54,9 +55,16 @@ class BrowserControllerUpdate(BaseModel):
 
 
 async def _thread_window(thread_id: str, login: str) -> ThreadBrowserWindow:
-    record = ThreadBrowserWindow.of(await get_promptable_thread_metadata(thread_id, login))
+    metadata = await get_promptable_thread_metadata(thread_id, login)
+    record = ThreadBrowserWindow.of(metadata)
     if record is None:
         raise HTTPException(404, "this thread has not opened a browser")
+    # The owner's own browser holds their logins, so only they reach it, and
+    # only while the thread is still private.
+    if record.scope == "user" and (
+        metadata.get("visibility") != "private" or not thread_is_owner(metadata, login)
+    ):
+        raise HTTPException(403, "only the thread owner can use their own browser")
     return record
 
 
