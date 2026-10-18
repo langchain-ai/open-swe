@@ -61,6 +61,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const commentRefs = useRef(new Map<string, HTMLElement>())
   const commentMutation = useRef(0)
   const pendingComment = useRef<string | null>(null)
+  const pendingSubmission = useRef(false)
   const format = plan.html.trim() ? "html" : "markdown"
   const content = format === "html" ? plan.html : plan.markdown
   const canComment = format === "html"
@@ -74,6 +75,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         if (
           !cancelled &&
           !pendingComment.current &&
+          !pendingSubmission.current &&
           mutation === commentMutation.current
         )
           setComments(next)
@@ -137,6 +139,8 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   )
 
   const submitComments = useCallback(async () => {
+    if (pendingSubmission.current) return
+    pendingSubmission.current = true
     setSubmitting(true)
     setError(null)
     commentMutation.current += 1
@@ -159,6 +163,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       reportError({ title: "Couldn't submit comments", error: submitError })
     } finally {
       commentMutation.current += 1
+      pendingSubmission.current = false
       setSubmitting(false)
     }
   }, [comments, plan.threadId, plan.user.login])
