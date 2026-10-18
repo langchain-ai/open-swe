@@ -12,7 +12,7 @@ from urllib.parse import unquote, urlsplit
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
 from langsmith.address import EnvAddressError, address_from_env
-from langsmith.utils import LangSmithNotFoundError, get_host_url
+from langsmith.utils import LangSmithNotFoundError, get_host_url, get_tracer_project
 
 from openswe.config import ENV
 from openswe.utils.tracing import tracing_project
@@ -169,6 +169,10 @@ async def _resolve_tracing_project_id() -> str | None:
         return None
     if address is None:
         return await _resolve_project_id_by_name(tracing_project())
+    if get_tracer_project(return_default_value=False):
+        # The SDK leaves runs untraced then, so the agent's project would hold none.
+        logger.warning("A project and LANGSMITH_AGENT_* are both set; set only one")
+        return None
     cache_key = (_workspace_key(), f"{address['id']}:{address['environment']}")
     if cache_key in _PROJECT_ID_CACHE:
         return _PROJECT_ID_CACHE[cache_key] or None

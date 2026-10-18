@@ -13,7 +13,6 @@ import httpx
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
-from langsmith.address import env_values
 from langsmith.utils import get_tracer_project
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
@@ -25,6 +24,7 @@ from openswe.remote_runtime.client import (
     remote_run_context,
 )
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
+from openswe.utils.tracing import traces_to_agent
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class MdaRuntime:
             # Context replaces configurable on the server, so the stream marker rides in it.
             context[_V3_STREAMING_KEY] = True
         rewritten = {**payload, "assistant_id": MDA_GRAPH_ID, "context": context}
-        if not payload.get("langsmith_tracer") and not any(env_values().values()):
+        if not payload.get("langsmith_tracer") and not traces_to_agent():
             # Traced into this deployment's project, beside its in-process runs.
             rewritten["langsmith_tracer"] = {"project_name": get_tracer_project()}
         if config:
