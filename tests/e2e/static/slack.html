@@ -33,10 +33,7 @@
       .msg.bot .avatar { background: #111827; color: #fff; }
       .who { font-size: 14px; font-weight: 800; }
       .text { margin-top: 3px; white-space: pre-wrap; line-height: 1.45; font-size: 14px; }
-      .text code { border: 1px solid #e0e0e0; border-radius: 3px; padding: 0 3px; background: #f6f6f6; color: #c01343; font-size: 12px; }
-      .section { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; font-size: 14px; }
       .context { color: #616061; font-size: 12px; margin-top: 5px; }
-      .section code, .context code { border: 1px solid #e0e0e0; border-radius: 3px; padding: 0 3px; background: #f6f6f6; color: #c01343; font-size: 12px; }
       .block-image { display: block; max-width: 100%; margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px; }
       .actions button { margin: 8px 6px 0 0; border: 1px solid #bbb; border-radius: 5px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
       .actions button.primary { background: #007a5a; color: #fff; border-color: #007a5a; }
@@ -105,40 +102,6 @@
         await poll();
       }
 
-      const linkPattern = /<(https?:\/\/[^|>]+)\|([^>]+)>/g;
-
-      function appendLinked(parent, value) {
-        let cursor = 0;
-        for (const match of value.matchAll(linkPattern)) {
-          parent.append(document.createTextNode(value.slice(cursor, match.index)));
-          const link = document.createElement("a");
-          link.href = match[1];
-          link.textContent = match[2];
-          parent.appendChild(link);
-          cursor = match.index + match[0].length;
-        }
-        parent.append(document.createTextNode(value.slice(cursor)));
-      }
-
-      // Message and block text is mrkdwn: links, *bold* and `code`, as Slack draws them.
-      function appendMrkdwn(parent, value) {
-        const pattern = /(<https?:\/\/[^|>]+\|[^>]+>)|\*([^*\n]+)\*|`([^`\n]+)`/g;
-        let cursor = 0;
-        for (const match of value.matchAll(pattern)) {
-          parent.append(document.createTextNode(value.slice(cursor, match.index)));
-          if (match[1]) {
-            appendLinked(parent, match[1]);
-          } else {
-            const element = document.createElement(match[2] ? "strong" : "code");
-            if (match[2]) appendMrkdwn(element, match[2]);
-            else element.textContent = match[3];
-            parent.appendChild(element);
-          }
-          cursor = match.index + match[0].length;
-        }
-        parent.append(document.createTextNode(value.slice(cursor)));
-      }
-
       function renderMessages(messages) {
         const thread = $("thread");
         thread.replaceChildren();
@@ -163,7 +126,17 @@
           who.textContent = message.is_bot ? "Open SWE" : userNames[message.user] || message.user;
           const text = document.createElement("div");
           text.className = "text";
-          appendMrkdwn(text, message.text);
+          const linkPattern = /<(https?:\/\/[^|>]+)\|([^>]+)>/g;
+          let cursor = 0;
+          for (const match of message.text.matchAll(linkPattern)) {
+            text.append(document.createTextNode(message.text.slice(cursor, match.index)));
+            const link = document.createElement("a");
+            link.href = match[1];
+            link.textContent = match[2];
+            text.appendChild(link);
+            cursor = match.index + match[0].length;
+          }
+          text.append(document.createTextNode(message.text.slice(cursor)));
           body.append(who, text);
           for (const block of message.blocks || []) {
             // Slack renders an uploaded file inline. Without this the
@@ -179,7 +152,7 @@
             if (block.type === "section" && block.text?.text) {
               const element = document.createElement("div");
               element.className = "section";
-              appendMrkdwn(element, block.text.text);
+              element.textContent = block.text.text;
               body.appendChild(element);
             }
             if (block.type === "context") {
@@ -187,7 +160,7 @@
                 if (!["plain_text", "mrkdwn"].includes(context.type) || !context.text) continue;
                 const element = document.createElement("div");
                 element.className = "context";
-                appendMrkdwn(element, context.text);
+                element.textContent = context.text;
                 body.appendChild(element);
               }
             }
