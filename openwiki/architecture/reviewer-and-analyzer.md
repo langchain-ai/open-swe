@@ -3,9 +3,6 @@ type: architecture
 title: Reviewer Graph and Code Review
 description: Architecture of the isolated reviewer deep-agent graph, including repository preparation, durable finding reconciliation and publication, input safety, and differential code review.
 tags: [reviewer, code-review, findings, langgraph, sandbox, github, deep-agent]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
@@ -27,6 +24,9 @@ sources:
     resource: repo://openswe/tools/publish_review.py
   - id: openwiki-source-065c69ba95cc740a2282dd3c
     resource: repo://tests/reviewer/test_factory_config_isolation.py
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-18T12:31:08.965Z
 generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
 ---
 

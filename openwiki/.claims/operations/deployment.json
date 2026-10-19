@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:eaa54af34e9aaf481e8ad66983c59711ddca4328fac3d8706fdb6dc8abfa881b",
+  "pageVersion": "sha256:bc883967913fb2bbc7539197b667d7b7e55836d12e21137225730f419e91519b",
   "claims": [
     {
       "id": "claim_0e227b88b5d94fd5924bb5c89a53831e",
@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
+          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
         }
       ]
     },
@@ -18,7 +18,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         }
       ]
     },
@@ -28,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         }
       ]
     },
@@ -38,13 +38,13 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         }
       ]
     },
     {
       "id": "claim_7c0acef30b314001ba9760696f5b0434",
-      "statement": "The local dev server's langgraph constraints are set to langgraph-api>=0.15.0rc1,<0.16 and langgraph-runtime-inmem>=0.35.0rc1,<0.36 in pyproject.toml, while langgraph.json declares api_version >~=0.15.0rc1; the standalone Docker image uses langchain/langgraph-api:0.15.1-py3.14 base with environment variable registrations for graphs and checkpointer instead of manifest declarations.",
+      "statement": "The local dev server's LangGraph constraints are set to langgraph-api>=0.16.0,<0.17 and langgraph-runtime-inmem>=0.36.0,<0.37 in pyproject.toml, while langgraph.json declares api_version >~=0.15.0rc1; the standalone Docker image uses langchain/langgraph-api:0.15.1-py3.14 base with environment variable registrations for graphs and checkpointer instead of manifest declarations.",
       "evidence": [
         {
           "resource": "repo://Dockerfile",
@@ -52,39 +52,21 @@
         },
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
+          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
         },
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:8a2101170b57c538db79fc8e83f44e3634a00001e8a2ab5164dc5dfea26418f8"
-        }
-      ]
-    },
-    {
-      "id": "claim_23f87a37794f43989803b0b0870d1bb3",
-      "statement": "langgraph.desktop.json is a separate trimmed deployment manifest (Python 3.14, API version 0.13.3) that exposes only the agent graph, disables the built-in UI, configures a local auth handler (openswe.local_auth:auth) with Studio auth disabled, and uses a local checkpointer for a private loopback LangGraph server.",
-      "evidence": [
-        {
-          "resource": "repo://langgraph.desktop.json",
-          "version": "repo-file-v1:sha256:1007977e57174788470def688d00b0bac1b0b54d51f96eba1164e07d352d27c6"
+          "version": "repo-file-v1:sha256:19b637013503a8c003f126cbf4b5c4a47a10fef49a2d4e8de2850d723e5939af"
         }
       ]
     },
     {
       "id": "claim_03a80335729849e0b9f03b173c47a3db",
-      "statement": "The pnpm workspace comprises five packages: bridge-client (bridge protocol), ui (dashboard), desktop (Electron app), cli (command-line tool), and tests/e2e, and Turborepo orchestrates per-package dev, build, typecheck, test, and check tasks, with root lint (oxlint) and format/format:check (oxfmt) scripts running directly.",
+      "statement": "The desktop app connects to a shared backend; langgraph.desktop.json is no longer used. Local development uses the standard LangGraph manifest to serve the agent and other graphs for desktop clients that connect via the bridge protocol on the same backend that web clients reach.",
       "evidence": [
         {
-          "resource": "repo://package.json",
-          "version": "repo-file-v1:sha256:448c10173e8cd0d561069c0a53fe7eadce7d9b8d42c9b1402a131764bba7dc26"
-        },
-        {
-          "resource": "repo://pnpm-workspace.yaml",
-          "version": "repo-file-v1:sha256:6f6cdef520b3a7f7ff4d28e713b455085a40d4352aebc9d5568173eae8b757c0"
-        },
-        {
-          "resource": "repo://turbo.json",
-          "version": "repo-file-v1:sha256:2f24f96b09df8df4352f90dbaa8726133d11c02a0e41357b38ed9f2a522986bc"
+          "resource": "repo://desktop/README.md",
+          "version": "repo-file-v1:sha256:ac2c0161f4a07fdb56e3c355050bf0480bda92f369cc3e8c6fa4c54960beec17"
         }
       ]
     },
@@ -94,7 +76,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         },
         {
           "resource": "repo://package.json",
@@ -128,11 +110,11 @@
     },
     {
       "id": "claim_c10336cf8d2e42079a8f26648e875c1d",
-      "statement": "The experimental Electron desktop app bundles the compiled dashboard UI and a local backend, connects cloud features to a selected backend, and supports local-agent work through a private loopback LangGraph server; packaged builds ask for and store a backend URL rather than defaulting to a hosted deployment.",
+      "statement": "The experimental Electron desktop app bundles the compiled dashboard UI and a local backend connection; it connects to a selected cloud backend URL for cloud-connected threads and supports local-agent work on This Mac through a shared loopback LangGraph server; packaged builds ask for and store a backend URL rather than defaulting to a hosted deployment.",
       "evidence": [
         {
           "resource": "repo://desktop/README.md",
-          "version": "repo-file-v1:sha256:1f868e9b5bae59c99c9710aa63f934dc4933f923f47bb7d4b2d0bdfcb1d49690"
+          "version": "repo-file-v1:sha256:ac2c0161f4a07fdb56e3c355050bf0480bda92f369cc3e8c6fa4c54960beec17"
         }
       ]
     },
@@ -142,17 +124,17 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         }
       ]
     },
     {
       "id": "claim_27f2634dceb746c99039ce3570a58ea2",
-      "statement": "scripts/install_desktop.sh is macOS-only, verifies node, ditto, uv, and a pnpm/corepack launcher are present, packs the desktop app with `pnpm --dir desktop run pack`, and atomically swaps it into /Applications or ~/Applications when /Applications is not writable.",
+      "statement": "scripts/install_desktop.sh is macOS-only, verifies node, ditto, bun, and a pnpm/corepack launcher are present, packs the desktop app with `pnpm --dir desktop run pack`, and atomically swaps it into /Applications or ~/Applications when /Applications is not writable.",
       "evidence": [
         {
           "resource": "repo://scripts/install_desktop.sh",
-          "version": "repo-file-v1:sha256:208cd5b22fd8e3daa05183e6badb42c5c98a75c239f62e739fb22d8a378add3b"
+          "version": "repo-file-v1:sha256:cac7c344b5c2042281b213d86a7ee72d6d27903a34371b92aeb01f18b16f8a75"
         }
       ]
     },
@@ -168,7 +150,7 @@
     },
     {
       "id": "claim_14ff348c01614028a95b8353f76f7d72",
-      "statement": "scripts/purge_wakeup_crons.py is a one-time backfill that deletes expired one-shot thread_wakeup crons from a deployment, resolving the deployment URL from --url/LANGGRAPH_URL/LANGGRAPH_URL_PROD and the API key from LANGGRAPH_API_KEY/LANGSMITH_API_KEY/LANGSMITH_API_KEY_PROD.",
+      "statement": "scripts/purge_wakeup_crons.py is a one-time backfill that deletes expired one-shot thread_wakeup crons from a deployment, resolving the deployment URL from --url/LANGGRAPH_URL and the API key from LANGGRAPH_API_KEY/LANGSMITH_API_KEY.",
       "evidence": [
         {
           "resource": "repo://scripts/purge_wakeup_crons.py",
@@ -192,7 +174,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:f3159a127f4241557cd9d26a0011be2338e7318f4213cf92e3bc91b13acc88d9"
+          "version": "repo-file-v1:sha256:6cd680724ead93b6cd57db31da0bae0a5f88862572bacaf9f16d21d62a6c9745"
         }
       ]
     },
@@ -222,7 +204,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:f3159a127f4241557cd9d26a0011be2338e7318f4213cf92e3bc91b13acc88d9"
+          "version": "repo-file-v1:sha256:6cd680724ead93b6cd57db31da0bae0a5f88862572bacaf9f16d21d62a6c9745"
         }
       ]
     },
@@ -252,11 +234,11 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         },
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
+          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
         },
         {
           "resource": "repo://ui/vite.config.ts",
@@ -270,7 +252,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         },
         {
           "resource": "repo://examples/ngrok/webhooks-only.yml",
@@ -288,7 +270,7 @@
         },
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
+          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
         }
       ]
     },
@@ -298,7 +280,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:f3159a127f4241557cd9d26a0011be2338e7318f4213cf92e3bc91b13acc88d9"
+          "version": "repo-file-v1:sha256:6cd680724ead93b6cd57db31da0bae0a5f88862572bacaf9f16d21d62a6c9745"
         }
       ]
     },
@@ -307,8 +289,8 @@
       "statement": "The FastAPI lifespan startup sequence validates configuration, pins an event loop, acquires a database advisory lock, creates the open_swe schema and runs alembic migrations, imports workspace data from the LangGraph Store into Postgres (idempotent steps), deletes legacy analyzer crons, syncs admin flags, starts an analytics worker, starts transcript/bridge/UI-invalidation/notification listeners, warms the agent build, and opens LangGraph graphs; import/analytics/listener failures log warnings but do not prevent startup.",
       "evidence": [
         {
-          "resource": "repo://openswe/api/app.py#L46-L179",
-          "version": "repo-lines-v1:sha256:7f0ce0f1dd78f57fbc15eabe32ce3027b6b8af7457b4b049a5e806cae5776bd4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTM0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4N2NmZjNmMTc4NDJkZWM2ZTdlOTFjM2UzYjhmY2UwYTgyMmZjMzExMjczODFiMDBmNDRhOWYxMzMzMzAzYTJlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI4YzU4MzAzNmU0OTBjMWI3ZDYyNzI2MDRiZDdiNzdkMmE3OTBlYjhhZjBmYTNhMGU0NzE4MmQ3OTA3YmU4ZTk0IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI3ZTZlMzhmYjQzNTY3ZjFjNDczYTU4NDE4MWU2N2JjYjRjMjgyZDc0MDUzNzRhYTEyZDlmODJjNDY1OTVjNDhiIn0"
+          "resource": "repo://openswe/api/app.py#L46-L126",
+          "version": "repo-lines-v1:sha256:6eda72eb1ca6f3c834dda89659488bc1a25d9e9044a6e8c38aa3732b4452e77a:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4NmQ2Mzg2NTgwOTVjNWNhNzhjMTFjNDE4NDFiZTZiMzYyOTc2NmRkYjNmYTY3ZDA0MWRjZjcxZWQ0YTI2YTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlNmUzOGZiNDM1NjdmMWM0NzNhNTg0MTgxZTY3YmNiNGMyODJkNzQwNTM3NGFhMTJkOWY4MmM0NjU5NWM0OGIifQ"
         },
         {
           "resource": "repo://openswe/database/postgres.py#L212-L225",
@@ -322,7 +304,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         }
       ]
     },
@@ -332,7 +314,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:71e6fe384562d3f6f2981bb99b0b3ffdd31d96ff411cf116d192cb3b0c9f2ad3"
+          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
         }
       ]
     },
@@ -352,7 +334,7 @@
       "evidence": [
         {
           "resource": "repo://desktop/README.md",
-          "version": "repo-file-v1:sha256:1f868e9b5bae59c99c9710aa63f934dc4933f923f47bb7d4b2d0bdfcb1d49690"
+          "version": "repo-file-v1:sha256:ac2c0161f4a07fdb56e3c355050bf0480bda92f369cc3e8c6fa4c54960beec17"
         }
       ]
     },
@@ -376,7 +358,7 @@
         },
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:9cc3f0d4c64492cb336a085a27d153db2577d86d69624c47689ca3b869f63a9a"
+          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
         }
       ]
     },
@@ -395,14 +377,14 @@
       "statement": "Multiple replicas share Postgres for state and Redis for workers; cross-replica communication includes transcript listener (Store writes), sandbox-bridge listener (file I/O), analytics worker (Store-to-Postgres), UI invalidation hub (dashboard updates), and database notification listener (PostgreSQL NOTIFY), with listener startup failures logged as warnings that allow the replica to continue with degraded feature support.",
       "evidence": [
         {
-          "resource": "repo://openswe/api/app.py#L138-L176",
-          "version": "repo-lines-v1:sha256:012770b36aad64d4e1cacf4377bf1a9fac957b235636c7fd5883211f5b300bfb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkYTVjNjZlMTdiMTQ1Mzk3ODM0YjhjODU0ZGM0MTkzZTIxMjUxODBhODk5NmExNGMzMTg4MzMyNmIyZWZiY2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YzNiYTUyY2IxOGYxYmVjNmFlY2IyYTljNjRjOTY3M2VhYjg5NmQyMjM3YmU3NzMwYmEzMGQ1OTM3MDhkMjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhmZjNiNmQzNmVlNzdiYmI4NTQ0MWUxNTc1ZmY0OWY3NTE5YjQ3M2ZlYmE3MjY1NTEwMjUyOTBjMThlNmM3ZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE0OGVhOWU3NTc3ZDg4ZDhjMzA5MjJmMTM3ZTgxY2RkYjdmNWJmYjI4ZDczYTA2MmNmMWQzZjc4MzQwNGM5MjkifQ"
+          "resource": "repo://openswe/api/app.py#L46-L126",
+          "version": "repo-lines-v1:sha256:6eda72eb1ca6f3c834dda89659488bc1a25d9e9044a6e8c38aa3732b4452e77a:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4NmQ2Mzg2NTgwOTVjNWNhNzhjMTFjNDE4NDFiZTZiMzYyOTc2NmRkYjNmYTY3ZDA0MWRjZjcxZWQ0YTI2YTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlNmUzOGZiNDM1NjdmMWM0NzNhNTg0MTgxZTY3YmNiNGMyODJkNzQwNTM3NGFhMTJkOWY4MmM0NjU5NWM0OGIifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-15T13:12:32.024Z"
+    "at": "2026-10-18T12:31:08.965Z"
   }
 }

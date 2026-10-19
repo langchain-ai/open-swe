@@ -3,6 +3,9 @@ type: operations reference
 title: Configuration and Environment
 description: Explains Open SWE's lazy environment registry, persisted team and workspace settings, model and sandbox selection, secrets, and the boot-time validation that determines whether a server starts.
 tags: [configuration, operations, environment-variables, startup-validation, sandbox, models, security, workspace-settings]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-18T12:31:08.965Z
 sources:
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
@@ -26,14 +29,13 @@ sources:
     resource: repo://openswe/sandboxes/providers/langsmith.py
   - id: openwiki-source-a4c632cb1c0a9a7a637ab9fe
     resource: repo://openswe/sandboxes/providers/registry.py
+  - id: openwiki-source-919e16feae379651f2cbc1c9
+    resource: repo://openswe/server.py
   - id: openwiki-source-cbab46b11893a9efc599e687
     resource: repo://openswe/utils/gateway.py
   - id: openwiki-source-4cc74089c0207ec1e5a6ca3b
     resource: repo://openswe/utils/model.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 ---
 
 # Configuration and Environment
@@ -57,7 +59,7 @@ The canonical name wins over aliases. Deprecated names and aliases are registere
 
 ## Startup lifecycle and validation
 
-The FastAPI entrypoint is `openswe.api.app:create_app`. It pins the process to a single event loop before background workers are constructed, and pins again in the lifespan startup phase. The lifespan then runs four mandatory checks in order, aborting startup if any fail, before executing non-blocking migrations and yielding to serve routes. On shutdown it closes the database and stops workers.
+The FastAPI entrypoint is `openswe.api.app:create_app`. It pins the process to a single event loop before background workers are constructed, and pins again in the lifespan startup phase. The lifespan then runs four mandatory checks in order, aborting startup if any fail. After validation, it initializes background workers and services before yielding to serve routes. On shutdown it closes the database and stops workers.
 
 <!-- openwiki: mermaid parse failed and this diagram was converted to a text fence so it does not break rendering. Fix the diagram source and restore the mermaid fence. Parser error: Heuristic: an unescaped angle bracket inside a label breaks rendering; rephrase the label. -->
 ```text
@@ -73,8 +75,8 @@ flowchart TD
     CheckSandbox -->|fail| Stop
     CheckSandbox -->|pass| CheckModel["Validate localhost model credentials"]
     CheckModel -->|fail| Stop
-    CheckModel -->|pass| Migrate["Run non-blocking migrations"]
-    Migrate --> Serve["Serve routes and runs"]
+    CheckModel -->|pass| Workers["Initialize background workers"]
+    Workers --> Serve["Serve routes and runs"]
     Serve --> Close["Close database and stop workers"]
 ```
 
@@ -166,7 +168,7 @@ Run completion/failure replies require `RUN_COMPLETE_WEBHOOK_SECRET` and a usabl
 
 Dispatch attaches a completion webhook only when the secret is set and `COMPLETION_WEBHOOK_URL` is absolute (not relative) and non-loopback (not localhost or 127.0.0.1). A relative or loopback URL is logged as a warning and omitted (not a run failure) so invalid URLs cannot poison run creation. The dispatch URL carries the token as a query parameter for constant-time verification.
 
-## Operaton and extension
+## Operation and extension
 
 **Adding an environment variable**: Declare it in `openswe/config.py` with a description, defaults, secret status, and any aliases or deprecated names. Consume through `ENV.NAME` or `ENV["NAME"]`, never through direct `os.environ` reads, so late hydration and key rotation are observed.
 

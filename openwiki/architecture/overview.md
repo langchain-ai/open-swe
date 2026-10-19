@@ -4,8 +4,6 @@ title: Runtime and Product Architecture
 description: LangGraph deployment, graph entrypoints, FastAPI ingress, durable dispatch, sandbox ownership, and the dashboard and desktop product surfaces.
 tags: [architecture, langgraph, fastapi, dashboard, runtime]
 sources:
-  - id: openwiki-source-b76f79b6cfae139d1784a43a
-    resource: repo://langgraph.desktop.json
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
   - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
@@ -16,8 +14,6 @@ sources:
     resource: repo://openswe/dashboard/__init__.py
   - id: openwiki-source-7fc33e4789861923a6f12e78
     resource: repo://openswe/dashboard/routes.py
-  - id: openwiki-source-3e4d955c2e907c017e3302d0
-    resource: repo://openswe/desktop.py
   - id: openwiki-source-1685d34aae8025be9332f45a
     resource: repo://openswe/dispatch.py
   - id: openwiki-source-d0edf7555209b3e6418b5c5f
@@ -48,10 +44,10 @@ sources:
     resource: repo://ui/src/router.tsx
   - id: openwiki-source-c7a3ad58e4b4017484c1e326
     resource: repo://ui/src/routes/agents.tsx
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Runtime and Product Architecture
@@ -82,8 +78,7 @@ It also operates as a reviewer (runs on-demand or automatic reviews, publishes f
 | `chat` | `openswe.graphs.chat:traced_chat_agent` | Read-only discussion of one PR, without a sandbox. |
 | `scheduler` | `openswe.graphs.scheduler:get_scheduler` | A cron-tick dispatcher for maintenance and scheduled work. |
 
-<!-- openwiki: mermaid parse failed and this diagram was converted to a text fence so it does not break rendering. Fix the diagram source and restore the mermaid fence. Parser error: Heuristic: an unescaped angle bracket inside a label breaks rendering; rephrase the label. -->
-```text
+```
 flowchart TD
   Slack["Slack"] --> Webhooks["Webhook routers<br/>(GitHub, Linear, Slack)"]
   Linear["Linear"] --> Webhooks
@@ -111,7 +106,7 @@ This shows the principal paths. `dispatch_agent_run` is the shared creation boun
 
 ## Graph and execution boundaries
 
-`openswe.server:get_agent` (wrapped as `_get_agent`) produces a fresh deep-agent graph for an executable thread. It uses the thread ID to acquire a cached or reconnected backend (or a desktop `LocalShellBackend`), starts it, resolves thread/team/profile model settings, persists normalized thread settings when needed, and assembles a composite backend, tools, skills, subagents, and middleware. If no thread ID is supplied or the graph is being loaded rather than executed, it returns a deliberately empty deep agent without provisioning a backend. This is important for graph discovery and other non-execution loads. See [Agent Graph & get_agent Factory](./agent-graph.md) and [Middleware Stack](./middleware-stack.md) for its detailed composition.
+`openswe.server:build_agent` (wrapped as `_get_agent`) produces a fresh deep-agent graph for an executable thread. It uses the thread ID to acquire a cached or reconnected backend (or a desktop `LocalShellBackend`), starts it, resolves thread/team/profile model settings, persists normalized thread settings when needed, and assembles a composite backend, tools, skills, subagents, and middleware. If no thread ID is supplied or the graph is being loaded rather than executed, it returns a deliberately empty deep agent without provisioning a backend. This is important for graph discovery and other non-execution loads. See [Agent Graph & get_agent Factory](./agent-graph.md) and [Middleware Stack](./middleware-stack.md) for its detailed composition.
 
 The reviewer follows the sandbox lifecycle but deliberately has a review-only toolset: `add_finding`, `update_finding`, `list_findings`, and `publish_review`; it does not receive commit, push, or PR-opening tools. Its preparation computes an in-diff line set so finding validation occurs when a finding is created, rather than failing only during GitHub publication. The review-scout graph uses the same sandbox and authenticated `gh` access but is designed for capability inspection and review-tool discovery. See [Reviewer Graph](./reviewer-and-analyzer.md).
 
@@ -144,8 +139,6 @@ A graph factory is ephemeral, but thread execution context is durable: LangGraph
 ## Cloud and desktop product surfaces
 
 The cloud manifest currently pins Python 3.14 and LangGraph API version >~=0.15.0rc1. Its checkpointer TTL uses `delete`, sweeps every 60 minutes, and defaults to 43,200 minutes. The Dockerfile instructions attempt to build and install the dashboard static assets but allow a backend-only deployment if that build fails.
-
-`langgraph.desktop.json` intentionally registers only the main agent graph, uses `openswe.local_auth:auth` with Studio authentication disabled, and disables the bundled UI. A desktop run is identified by `configurable.source == "desktop"`. Its requested `local_project_path` must resolve to an existing directory that is either in `OPEN_SWE_LOCAL_PROJECTS_FILE` or beneath `OPEN_SWE_LOCAL_WORKTREES_DIR`; otherwise it is rejected. The local backend inherits only a small shell environment allowlist (`HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `TMPDIR`). Desktop scratch routes put large tool results and conversation history outside the project so they are not swept into `git add -A`.
 
 The `ui/` application is a TanStack Router React client with routes for agent sessions and threads, local sessions, plans, automations, skills, reviews and styles, administration, integrations, usage, settings, environments, instructions, and sandbox views. The `/agents` layout requires a session except for enabled desktop-local routes and selects `cloud` or `local` streaming transport from the active route. Router `basepath` follows Vite's build base, allowing the bundle to run below a configured mount prefix.
 

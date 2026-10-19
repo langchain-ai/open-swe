@@ -3,6 +3,9 @@ type: workflow
 title: Scheduling, Background Work, and CI Monitoring
 description: How the model-free scheduler routes cron and delayed work into recurring automations, reconciliation, cost refreshes, background-task monitoring, and opt-in pull-request CI recovery.
 tags: [scheduler, cron, baby-sit, ci-monitoring, background-tasks, thread-wakeup, reconciliation, cost-refresh]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-18T12:31:08.965Z
 sources:
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
@@ -18,8 +21,6 @@ sources:
     resource: repo://openswe/completion.py
   - id: openwiki-source-d0edf7555209b3e6418b5c5f
     resource: repo://openswe/github/routes.py
-  - id: openwiki-source-6b99105488d7c23beda1e5ad
-    resource: repo://openswe/graphs/scheduler.py
   - id: openwiki-source-34d496899c8a38f20f349e4f
     resource: repo://openswe/reconcile.py
   - id: openwiki-source-685dc33e7199aa1f6e402f7a
@@ -46,10 +47,7 @@ sources:
     resource: repo://tests/reviewer/test_reconcile_sweep.py
   - id: openwiki-source-7416596e0d9fc9b802355ff6
     resource: repo://tests/tools/test_schedule_thread_wakeup.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-08T15:19:10.971Z" }
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 ---
 
 # Scheduling, Background Work, and CI Monitoring
@@ -60,7 +58,7 @@ The principal consumers are dashboard schedules, stale-run reconciliation, defer
 
 ## Scheduler dispatch
 
-`openswe/scheduler.py` compiles a one-node `StateGraph` (`START → launch → END`), exposed as `scheduler` through `langgraph.json`. `_launch` reads `task` from the state first and then `config.configurable`, invoking exactly one handler deterministically:
+`openswe/scheduler.py` compiles a one-node `StateGraph` (`START → launch → END`), exposed as `scheduler` through `langgraph.json`. The `_launch` node reads `task` from the state first and then `config.configurable`, invoking exactly one handler deterministically. No LLM is called during routing.
 
 ```mermaid
 flowchart TD
@@ -70,37 +68,41 @@ flowchart TD
   Launch -->|background_tasks| Background["monitor_background_tasks"]
   Launch -->|session_cost| SessionCost["run_session_cost_refresh"]
   Launch -->|agent_cost| AgentCost["run_agent_cost_refresh"]
-  Launch -->|thread_feedback| Feedback["run_feedback_prompt"]
-  Launch -->|other tasks| Other["workspace refresh, expedited review, human review deadline"]
+  Launch -->|thread_feedback| Feedback["run_feedback_prompt (skipped)"]
+  Launch -->|announcements| Announce["deliver_announcement"]
+  Launch -->|human_review| Review["run_deadline"]
+  Launch -->|workspace_refresh| Refresh["run_workspace_refresh_tick"]
   Launch -->|no task| Schedule["launch_scheduled_agent_run"]
 ```
 
 Diagram: one scheduler tick selects one deterministic maintenance or dispatch handler.
 
-The recognized task values route to their handlers: `reconcile` → `reconcile_stale_runs`, `baby_sit` → `evaluate_watch`, `background_tasks` → `monitor_background_tasks`, `session_cost` → `run_session_cost_refresh`, `agent_cost` → `run_agent_cost_refresh`, `thread_feedback` → `run_feedback_prompt`. Additional tasks like workspace refresh (both full and incremental), expedited-review cleanup, and human-review deadlines are also routed. An unrecognized or absent task is the dashboard-schedule path that falls through to `launch_scheduled_agent_run(schedule_id)`. The keyed branches return `missing_watch_key`, `missing_thread_id`, or `missing_schedule_id` rather than raising if their required routing key is absent. This makes malformed ticks observable no-ops instead of cron-wide failures.
+The recognized task values route to their handlers: `reconcile` → `reconcile_stale_runs`, `baby_sit` → `evaluate_watch`, `background_tasks` → `monitor_background_tasks`, `session_cost` → `run_session_cost_refresh`, `agent_cost` → `run_agent_cost_refresh`, `thread_feedback` → `run_feedback_prompt` (currently a no-op). Additional tasks include announcements, human-review deadlines, and workspace refresh (both full and incremental). An unrecognized or absent task is the dashboard-schedule path that falls through to `launch_scheduled_agent_run(schedule_id)`. 
+
+When a scheduler tick is missing its required routing key (`watch_key`, `thread_id`, `schedule_id`, or other expected field for a given task), `_launch` returns a `missing_*` status result instead of raising an error. This makes malformed ticks observable no-ops instead of cron-wide failures, so one bad tick does not break the scheduled-work system.
 
 A producer owns creation, tagging, and removal of its cron or delayed run. In particular, watches use `kind=baby_sit_watch`, background monitors use `kind=background_tasks`, and cost refreshes are one-shot delayed scheduler runs with `on_completion="delete"`. This ownership is important: the scheduler is a router, not a generic cron garbage collector.
 
 ### Dashboard recurring runs
 
-`openswe/schedules/store.py` owns user-defined recurring agent automations. It normalizes and validates a five-field cron expression before storage, accepting numeric values, `*`, ranges, steps, and lists within field-specific bounds. A dashboard tick has no recognized task, so it falls through to `launch_scheduled_agent_run(schedule_id)`.
+`openswe/schedules/store.py` owns user-defined recurring agent automations. It normalizes and validates a five-field cron expression before storage with `normalize_cron_schedule()`, accepting numeric values, `*`, ranges, steps, and lists within field-specific bounds (minute 0–59, hour 0–23, day-of-month 1–31, month 1–12, day-of-week 0–6). A dashboard tick has no recognized task, so it falls through to `launch_scheduled_agent_run(schedule_id)`.
 
 The launch path loads the schedule record, creates a fresh `agent` thread/run with system/automation input context, and stores scheduling results separately from the definition. Its run-state namespace retains `last_thread_id`, `last_run_id`, and `last_triggered_at`, or error information. Keeping run state separate allows schedule configuration and operational status to evolve independently.
 
 ### Stale-run reconciliation
 
-Normal durable dispatch relies on the completion webhook to release a run. `reconcile_stale_runs()` is the recovery sweep when a completion is lost: it paginates `busy` threads, lists each thread's `pending` runs, and interrupts runs older than `max_age_seconds` (1,800 seconds by default). It skips malformed timestamps, isolates errors per thread, and returns counts for checked threads, stale runs, and cancellations. Thus a damaged or unavailable thread does not prevent other blocked threads from recovering.
+Normal durable dispatch relies on the completion webhook to release a run. `reconcile_stale_runs()` is the recovery sweep when a completion is lost: it paginates every `busy` thread (limit 100 per page), lists each thread's `pending` runs, and interrupts runs older than `max_age_seconds` (1,800 seconds by default). It skips malformed timestamps, isolates errors per thread with try/except, and returns counts for checked threads, stale runs, and cancellations. Thus a damaged or unavailable thread does not prevent other blocked threads from recovering.
 
 ### Deferred cost enrichment
 
 Costs can lag run completion in LangSmith, so both cost mechanisms use a bounded, stateless delayed-run chain rather than a permanent poller:
 
 - **Session cost** updates the mapped Slack response footer. On a successful agent completion, the completion handler schedules a `session_cost` attempt only when it has a Slack thread, message correlation, and a `prepare_run_id`; it records scheduled run IDs in thread metadata to avoid scheduling the same run twice. A refresh verifies the mapped Slack message and waits for a fresh LangSmith aggregate. A `pending` result schedules the next delay in `(15, 30, 60, 120, 240)` seconds; an update, unavailable prerequisite, or exhausted final attempt stops the chain.
-- **Agent usage cost** writes one run's cost to the dashboard usage record. `agent_cost` uses the same five-delay budget, asks LangSmith for `run_only=True` cost, and persists it with `record_agent_run_cost`. Configuration/unavailability ends without retries where appropriate; unavailable data or persistence/lookup failure otherwise advances only until the fixed retry budget is exhausted.
+- **Agent usage cost** writes one run's cost to the dashboard usage record. `agent_cost` uses the same five-delay budget, asks LangSmith for `run_only=True` cost, and persists it with `record_agent_invocation_cost`. Configuration/unavailability ends without retries where appropriate; unavailable data or persistence/lookup failure otherwise advances only until the fixed retry budget is exhausted.
 
 ## Background-task monitoring
 
-Long-running sandbox commands are monitored without an LLM. `ensure_background_task_cron(thread_id)` idempotently keeps one every-minute `background_tasks` cron for a thread (and removes duplicate cron rows). The scheduler calls `monitor_background_tasks(thread_id)`, which loads the thread's sandbox and lists task state.
+Long-running sandbox commands are monitored without an LLM. `ensure_background_task_polling(thread_id)` idempotently keeps one every-minute `background_tasks` cron for a thread (and removes duplicate cron rows). The scheduler calls `monitor_background_tasks(thread_id)`, which loads the thread's sandbox and lists task state.
 
 For each unreported terminal task (`completed`, `failed`, `timed_out`, `stopped`, or `lost`), the monitor atomically claims a per-task sandbox directory before dispatching a completion message back to the originating thread with `multitask_strategy="enqueue"`. The message treats command output as untrusted and directs the agent to retrieve bounded output only if needed. It marks delivery only after dispatch succeeds; on failure it releases the claim for a later tick. If no task is running and no terminal notification remains pending, a sandbox monitor lock triggers a fresh recheck before all of that thread's monitor crons are deleted. Missing sandbox metadata also removes them. These checks prevent duplicate notifications and avoid deleting a monitor while a concurrent task transition is being discovered.
 
@@ -154,7 +156,7 @@ stateDiagram-v2
 
 Diagram: baby-sit watch runs from start through failure/success evaluation and repair to terminal outcome.
 
-A `BabySitWatch` is stored under the lower-cased `owner/repo#pr_number` key in `baby_sit_watches`. It binds a PR's head SHA/ref, GitHub App installation, originating agent thread, selected run configuration, and `SourceContext`; its durable fields also hold retries, failure-dispatch keys, webhook deliveries, alerts, evaluation errors, and cron ID.
+A `BabySitWatch` is stored under the lower-cased `owner/repo#pr_number` key in the `baby_sit_watches` store (persisted in `pull_request.task_state["baby_sit"]`). It binds a PR's head SHA/ref, GitHub App installation, originating agent thread, selected run configuration, and `SourceContext`; its durable fields also hold retries, failure-dispatch keys, webhook deliveries, alerts, evaluation errors, and cron ID.
 
 Only one active originating thread may watch a PR. Starting from another thread is rejected. Restarting the same PR on the same head retains retry and dedupe state; a different head starts that state over. Start saves the watch then ensures one `*/10 * * * *` UTC scheduler cron, reusing a matching cron and deleting duplicates. For a new watch, a cron-creation failure rolls back its row and any partial cron. Stopping normally removes its cron and row; if cron deletion fails, the row is retained but marked inactive so it cannot evaluate again.
 
@@ -182,13 +184,13 @@ sequenceDiagram
 
 Diagram: immediate signed CI events and the polling fallback converge on one serialized watch evaluation.
 
-The GitHub route verifies `X-Hub-Signature-256` before accepting a request. CI events (`check_run`, `check_suite`, `workflow_run`, and `status`) are processed in the background. `handle_ci_webhook` ignores non-failing payloads, selects active watches in the repository whose stored SHA or branch matches, updates a supplied installation ID, and records a delivery ID before evaluating; repeated deliveries do not cause a second evaluation.
+The GitHub route verifies `X-Hub-Signature-256` HMAC before accepting a request. CI events (`check_run`, `check_suite`, `workflow_run`, and `status`) are processed in the background. `handle_ci_webhook` ignores non-failing payloads, selects active watches in the repository whose stored SHA or branch matches, updates a supplied installation ID, and records a delivery ID before evaluating; repeated deliveries (deduplicated by delivery_id) do not cause a second evaluation.
 
 The ten-minute cron is the deterministic fallback for lost or delayed webhooks. `evaluate_watch` obtains a five-minute per-watch lock implemented as a short-lived LangGraph thread. A concurrent trigger returns `busy`; otherwise it fetches the PR and current check/status sets. Pending and duplicate states return without dispatching an agent run, so unchanged cron polling consumes no model tokens.
 
 ### Evaluation, dispatch, and terminal results
 
-Evaluation first stops a closed or merged PR. A head-SHA change resets retries, failure-dispatch keys, and alert keys. The aggregate is `failure` when a completed failing check or failing/error commit status exists; `pending` while checks are incomplete or absent; `blocked` for completed, non-successful states that are not rerunnable failures; and `success` only for a nonempty all-successful/neutral/skipped set.
+Evaluation first stops a closed or merged PR. A head-SHA change resets retries, failure-dispatch keys, and alert keys. The aggregate is `failure` when a completed failing check or failing/error commit status exists; `pending` while checks are incomplete or absent; `blocked` for completed, non-successful states that are not rerunnable failures; and `success` only when all checks are completed and all check runs and statuses report successful/neutral/skipped states.
 
 On a success state with all required checks reported stable (no unreported required checks pending), the watch immediately dispatches a ready notification to the originating thread, which decides on next steps (merge or continue diagnosis). A new failing state is deduplicated by a SHA-and-retry-count fingerprint. If not already dispatched, the service resumes the originating thread with `/baby-sit --continue`, an explicit warning that failures and fetched logs are untrusted, and instructions to verify the head and complete check set before confidence-gated diagnosis. If dispatch itself fails, the fingerprint is removed so a future trigger can retry.
 
@@ -202,4 +204,13 @@ The agent may rerun only evidence-backed flaky GitHub Actions failures. After a 
 
 ## Focused verification
 
-Tests verify key behavioral contracts: scheduler routing determinism and task routing completeness; baby-sit watch lifecycle, concurrent webhook/cron triggers, deduplication, success detection, failure dispatch, and rerun capping; signed GitHub webhook routing; stale-run pagination and per-thread error isolation; bounded session-cost and agent-cost refresh with retry limits; and thread-wakeup budget, correlation, persistence, and cleanup.
+Tests verify:
+- Scheduler routing: task dispatch to correct handler and missing-key fallback
+- Baby-sit lifecycle: watch start, evaluation state transitions, retry capping
+- Baby-sit concurrency: webhook and cron trigger serialization under per-key lock; webhook deduplication by delivery_id
+- Baby-sit failure dispatch: dedupe by SHA/retry fingerprint; removal on dispatch failure
+- Signed CI webhook: X-Hub-Signature-256 verification, payload filtering
+- Stale-run pagination: per-thread isolation, skip malformed timestamps, counts accuracy
+- Cost refresh: bounded attempt limits, persistence and retrieval failure handling
+- Thread wakeups: budget enforcement per human message, lock-free purge of expired crons
+- Scheduling: cron validation (five-field expression, field ranges)

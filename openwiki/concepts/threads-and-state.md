@@ -22,16 +22,14 @@ sources:
     resource: repo://openswe/run_config.py
   - id: openwiki-source-1b32e9f41fa7e64702b380f6
     resource: repo://openswe/sandboxes/lifecycle.py
-  - id: openwiki-source-49cd80b1b712410f02d313d6
-    resource: repo://openswe/slack/client.py
   - id: openwiki-source-7f665eda03d736dd3db8c67c
     resource: repo://openswe/slack/code_channels.py
+  - id: openwiki-source-495c786db57f684c1095e1a4
+    resource: repo://openswe/slack/records.py
   - id: openwiki-source-5cbe93451d362668e53e314b
     resource: repo://openswe/slack/tools/manage_code_channel.py
   - id: openwiki-source-76820c5856f1479d850c1ab9
     resource: repo://openswe/source_context.py
-  - id: openwiki-source-c5e061972b62c56ca429a531
-    resource: repo://openswe/store.py
   - id: openwiki-source-53ea9aa9c1bc2a186e16ba04
     resource: repo://openswe/thread_ids.py
   - id: openwiki-source-5e89303bbff1b32492ae2b1c
@@ -40,10 +38,10 @@ sources:
     resource: repo://openswe/utils/thread_participants.py
   - id: openwiki-source-1962e84a7cbf37fcca83381c
     resource: repo://openswe/utils/thread_settings.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Threads, Durable Runs, and State
@@ -90,11 +88,11 @@ Thread identity lets independently triggered work converge on the correct durabl
 
 ### Slack mappings support moves and retirement
 
-Slack has a Store-backed mapping in a per-channel namespace, keyed by the Slack thread timestamp. `resolve_slack_thread_id` first checks an explicit stored mapping, then searches thread metadata for matching `source_context`, rejects multiple matches, and falls back to deriving a deterministic fallback ID or using an existing nonce. Binding validates the Slack location, refuses a conflicting existing mapping by raising, then verifies the write persisted; thus one Slack location cannot be assigned to two Open SWE threads.
+Slack thread identity resolution and binding happen in `openswe/slack/records.py`. `resolve_slack_thread_id` first checks an explicit stored database mapping, then searches thread metadata for matching `source_context`, rejects multiple matches, and falls back to deriving a deterministic fallback ID or using an existing nonce. Binding validates the Slack location, refuses a conflicting existing mapping by raising, then verifies the write persisted; thus one Slack location cannot be assigned to two Open SWE threads.
 
 Deleting associations does not simply erase the map: `delete_slack_thread_associations` writes a fresh nonce at that location. With no mapped ID, a future resolution derives a different fallback ID, avoiding collision with the retired conversation. This is used by moves such as creating a code channel.
 
-A code channel is one session for the whole channel, keyed by `CODE_CHANNEL_SESSION_TS = "0"`, not a Slack reply thread. `manage_code_channel` binds the existing agent thread to `(channel_id, "0")` and updates its `source_context`. The sentinel selects `conversations.history` (fetching the whole channel with no thread-timestamp parameter); ordinary Slack conversations use `conversations.replies` keyed by thread timestamp. Slack's `processing`, `active`, `suspended`, and `closed` session statuses are Slack UI lifecycle state, distinct from LangGraph thread status.
+A code channel is one session for the whole channel, keyed by `CODE_CHANNEL_SESSION_TS = "0"`, not a Slack reply thread. `manage_code_channel` rebinds the existing agent thread to `(channel_id, "0")` via `rebind_slack_thread` and updates its `source_context`. The sentinel selects `conversations.history` (fetching the whole channel with no thread-timestamp parameter); ordinary Slack conversations use `conversations.replies` keyed by thread timestamp. Slack's `processing`, `active`, `suspended`, and `closed` session statuses are Slack UI lifecycle state, distinct from LangGraph thread status.
 
 ## State ownership and metadata
 
@@ -104,7 +102,7 @@ Participant logins and emails use key-per-person maps such as `{"octocat": true}
 
 Thread-level settings are a separate metadata snapshot under `agent_settings`. On the first run, model, effort, subagent model/effort, and repository instructions are chosen for the thread; sender identity, personal instructions, and PR preferences remain per-message. Later profile edits do not change the snapshot unless a caller explicitly stores a replacement, such as a model override. Reads cache for five minutes and reads/writes fail soft, so settings storage cannot prevent a run. Strict normalization drops invalid or obsolete settings rather than retaining arbitrary profile data.
 
-The LangGraph Store is not thread metadata. `openswe/store.py` is the sanctioned wrapper for namespaced key/value access: a missing item returns `None`, whereas other HTTP failures propagate. This makes an outage observably different from an empty record. `TypedStore` validates records through a Pydantic model; `get` fails for an unreadable requested record, while listings log and skip malformed records so one old record does not take down a listing.
+The LangGraph Store in a LangGraph deployment holds separately namespaced application records distinct from thread metadata. Store access is typically through LangGraph SDK methods. Records in the Store follow similar patterns to thread metadata: malformed or missing records are handled gracefully to prevent cascading failures.
 
 ## Follow-up input and run configuration
 

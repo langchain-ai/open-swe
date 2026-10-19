@@ -12,6 +12,8 @@ sources:
     resource: repo://openswe/api/tracing.py
   - id: openwiki-source-8e86bc5c07d70c0696441776
     resource: repo://openswe/mcp/instance.py
+  - id: openwiki-source-67faae85e3ecd320e29f3e28
+    resource: repo://openswe/mcp/records.py
   - id: openwiki-source-573a0cf072c076b2dd72dbbd
     resource: repo://openswe/mcp/runtime.py
   - id: openwiki-source-75b8c8788feef409fe98f64c
@@ -34,10 +36,10 @@ sources:
     resource: repo://openswe/utils/errors.py
   - id: openwiki-source-78aaabb479325754c1118320
     resource: repo://openswe/utils/langsmith.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Observability, Tracing, and MCP
@@ -118,7 +120,7 @@ The system tracks model-call errors in thread metadata for observability and ups
 
 MCP connections are organized in a three-tier hierarchy: **instance** (globally managed by deployment admins), **workspace** (managed by workspace admins per slug), and **user** (personal connections owned by an individual GitHub login). When loading tools for a run, all three tiers are consulted in order; a later tier's connection with the same name replaces the earlier one.
 
-- **Instance tier** (`openswe/mcp/instance.py`): Connections stored in `["instance_mcps"]` that every run can access. The tier adopts and migrates pre-workspace records from the flat `["workspace_mcps"]` namespace on first read, ensuring backward compatibility.
+- **Instance tier** (`openswe/mcp/instance.py`): Connections stored at the instance level that every run can access. The tier functions as the global deployment layer for connections all workspaces inherit.
 - **Workspace tier** (`openswe/mcp/workspace.py`): Connections stored under `["workspace_mcps", <slug>]`, where `<slug>` is the lowercase workspace identifier. Each workspace has its own set of connections.
 - **User tier** (`openswe/mcp/user.py`): Personal connections stored under `["user_mcps", <login>]`, scoped to a GitHub login and visible only in runs where that login is the triggering user. Authorization checks that the connection lookup is made only for private threads whose owner is the current login.
 

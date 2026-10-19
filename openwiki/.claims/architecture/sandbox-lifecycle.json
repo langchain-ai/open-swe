@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:31817a442de51fad70f454352a990e776394b58e321337419859b7d47f84a9b5",
+  "pageVersion": "sha256:d63ae5a42fe3dfec8ac519a5d8190904627cfd2c1aecfcd9a141952282e5d540",
   "claims": [
     {
       "id": "claim_b84ca73fa9ca440eaddd035980a5842f",
@@ -177,16 +177,6 @@
       ]
     },
     {
-      "id": "claim_423c3250245044ac9b6efbf9fbdcc516",
-      "statement": "Desktop runs bypass the remote thread-sandbox lifecycle and use a local backend only for an allowlisted project or desktop-created worktree; desktop artifact routes keep internal files outside the project.",
-      "evidence": [
-        {
-          "resource": "repo://openswe/desktop.py#L17-L97",
-          "version": "repo-lines-v1:sha256:1924a2959f25a4adcb80b0a4163de54d4416f13a890bd84fd7b99a010fec81fc:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzNjc2Yjc4NmZlNTc1YWZiMDA1ZTE3MzJkMGRhODU0MDcxYzBjMWZkMmVmMGQ5ZGYyNTdlZThhNjYxZGRiY2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5NDAxM2VmZGU4YTQ4MDFiYmRiM2RlNTViMDE0M2EzNzgzYTBhYzU4MjcxZmNhMWM2MDA0NjQ0ODEzMWI2MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDY4YWJhYjE0MDhkOGJhNWMzNDk3MDFmMzRiZTUyZjg2ZmZiYWUzYTJkOWUwODE4N2MwZjFhM2IyMjc1MzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        }
-      ]
-    },
-    {
       "id": "claim_84e083e089524009ba006de6b62e637a",
       "statement": "The local provider runs without isolation, scopes global Git configuration to `.gitconfig-sandbox`, and omits model and provider API keys from the child environment.",
       "evidence": [
@@ -229,6 +219,6 @@
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-15T13:12:32.024Z"
+    "at": "2026-10-18T12:31:08.965Z"
   }
 }

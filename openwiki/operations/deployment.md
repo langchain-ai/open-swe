@@ -3,9 +3,6 @@ type: operations-guide
 title: Development, Deployment, and Serving
 description: Deploy Open SWE as a single LangGraph service across multiple topologies — local development with Docker PostgreSQL, standalone Docker, LangGraph Platform, Electron desktop, and multiple replicas. Covers environment setup, dashboard mounting, webhook exposure, authentication modes, checkpointer durability, and health checks.
 tags: [deployment, development, docker, langgraph, dashboard, webhooks, desktop, postgresql, operations, migrations, checkpointer]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-2f66613e587b7c57d9be522e
     resource: repo://desktop/README.md
@@ -15,8 +12,6 @@ sources:
     resource: repo://docs/INSTALLATION.md
   - id: openwiki-source-2d11873424257deb506bd9cd
     resource: repo://examples/ngrok/webhooks-only.yml
-  - id: openwiki-source-b76f79b6cfae139d1784a43a
-    resource: repo://langgraph.desktop.json
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
   - id: openwiki-source-012f2c78e3b1446dfc35803f
@@ -31,8 +26,6 @@ sources:
     resource: repo://openswe/utils/dashboard_ui.py
   - id: openwiki-source-5b54a58d1b51cd490b0e7162
     resource: repo://package.json
-  - id: openwiki-source-40275cb92c3610938f16ade3
-    resource: repo://pnpm-workspace.yaml
   - id: openwiki-source-05ccef8d4cf1698187f20464
     resource: repo://pyproject.toml
   - id: openwiki-source-abd87505fae29e34eafc785d
@@ -50,6 +43,9 @@ sources:
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
 generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Development, Deployment, and Serving

@@ -3,9 +3,6 @@ type: tool catalog and authorization model
 title: Tools and Tool Access
 description: How tools are defined, registered, dynamically loaded, and exposed to agents; tool categories (sandbox, integration, review, etc.), authorization policies, and mode-specific controls.
 tags: [tools, agent, authorization, integrations, dynamic-tools, automation, reviewer, access-control, mcp]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-70b814b26d317c2b15c4a4fb
     resource: repo://openswe/chat.py
@@ -29,7 +26,10 @@ sources:
     resource: repo://openswe/tools/automations.py
   - id: openwiki-source-1a477779016142ec6f3dc601
     resource: repo://openswe/tools/read_user_settings.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Tools and Tool Access
@@ -75,10 +75,10 @@ Deep Agents separately supplies filesystem and delegation tools: `read_file`, `w
 - **Event operations** (`listen_events`, `list_event_types`)
 - **Optional Notion integrations** (`comment_on_notion_task`, design tools)
 - **SQL query** (`read_only_sql`)
-- **Store operations** (`read_store_item`)
 - **Sandbox downloads** (`output_iframe`, `create_sandbox_file_download_url`, `expose_port`, when enabled)
 - **Design and review tools** (`propose_review_comment`, `propose_pr_review`)
 - **Feature flags and review policy** (`manage_feature_flags`, `manage_review_approval_mode`, `manage_review_repos`)
+- **Miscellaneous** (`manage_baby_sit`, `switch_to_performance_model`, optional `connect_managed_tools`)
 
 Tool inclusion depends on **runtime context**:
 
@@ -89,7 +89,7 @@ Tool inclusion depends on **runtime context**:
 - **Personal user-settings tools** are removed when no credential login is verified.
 - **Human review tools** are removed when Slack bot context is unavailable. Expedited review tools are removed when disabled or when Slack bot context is unavailable.
 - **Incident-session tools** are added if an incident is in scope; automatic incident sweeps additionally exclude mutations.
-- **Subagents** receive the applicable static list except `save_user_settings` and sandbox-only tools. Separately compiled subagent graphs receive the parent's dynamic integration middleware but do not inherit parent middleware exclusions.
+- **Subagents** receive the applicable static list except `save_user_settings` and tools that require the parent agent context (Slack thread-bound operations, background operations, notion tasks, thread/event listeners, etc.). Separately compiled subagent graphs receive the parent's dynamic integration middleware but do not inherit parent middleware exclusions.
 
 ## Deferred integration tool loading
 

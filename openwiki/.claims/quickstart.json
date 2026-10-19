@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:d78cde73ec7c03ca578c34fb06057025fe7e826922c33972e4f7615bccb4b8d2",
+  "pageVersion": "sha256:d82235395d0cb6350a2aa5c876efd42d5faede4121a89304a1fa03e06f0a3c8c",
   "claims": [
     {
       "id": "claim_f5eda20b1e88414b97bbf051c97e27cf",
@@ -49,8 +49,8 @@
       "statement": "openswe.webapp:app is a compatibility shim that re-exports the FastAPI app built in openswe/api/app.py, which at startup validates sandbox and local-development LLM configuration, mounts the dashboard router plus health, plan, workflow-approval, Linear, Slack, GitHub, and Notion webhook routers, and closes cached models at shutdown.",
       "evidence": [
         {
-          "resource": "repo://openswe/api/app.py#L46-L73",
-          "version": "repo-lines-v1:sha256:6c63266445ddf1bf37b7bea7ac539b5904499a0e4b09dd82fff5c1f950b97e32:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3Y2ZmM2YxNzg0MmRlYzZlN2U5MWMzZTNiOGZjZTBhODIyZmMzMTEyNzM4MWIwMGY0NGE5ZjEzMzMzMDNhMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVkZjZkMmQyYTllZjg4MWVhMjhkYWJmZjJmMzk0MDQxZGZlZTE4Nzk1Zjg5ZTQyMDI2Mjg3M2UzOTI1MmY1ZTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjNTgzMDM2ZTQ5MGMxYjdkNjI3MjYwNGJkN2I3N2QyYTc5MGViOGFmMGZhM2EwZTQ3MTgyZDc5MDdiZThlOTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdkNzVhNjY4Y2QxMjRiMmRkZjBhYjcyOWE4NmU4ODQyYTljNTI3MDJkMWI1OWJjMTc3ZmI1M2FkNzg5OWMyY2MifQ"
+          "resource": "repo://openswe/api/app.py#L48-L125",
+          "version": "repo-lines-v1:sha256:2f71f14330bc1be3e2849d6ef0ee3df0366ea7ec5c8c5ca0a9dc4dfa96931a6d:eyJzZWxlY3RlZExpbmVDb3VudCI6NzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3Y2ZmM2YxNzg0MmRlYzZlN2U5MWMzZTNiOGZjZTBhODIyZmMzMTEyNzM4MWIwMGY0NGE5ZjEzMzMzMDNhMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM0ZGEyNDVjNjU3N2QzYTA0ZWM3MGJhZTEwN2E1NDZiODJlYmQ4ZmNmMTFkOTE4OTk0NzJiMDJjNTM1OTczNTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjNTgzMDM2ZTQ5MGMxYjdkNjI3MjYwNGJkN2I3N2QyYTc5MGViOGFmMGZhM2EwZTQ3MTgyZDc5MDdiZThlOTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNjOTE0MzczNzBiMmM4NGJmYjBjYjhhZTk1ZGIwODgwMDZlYWQzZjQyMGYxZGM0YmIxZmE4M2EwNWZhZWY1MDkifQ"
         },
         {
           "resource": "repo://openswe/webapp.py#L1-L5",
@@ -127,8 +127,12 @@
       "statement": "The FastAPI lifespan pins a single event loop, validates sandbox and local-development LLM configuration before serving, and configures credentialed CORS for dashboard origins only, rejecting a wildcard origin.",
       "evidence": [
         {
-          "resource": "repo://openswe/api/app.py#L69-L72",
-          "version": "repo-lines-v1:sha256:7f57bbab1a8cafffa76d8d65dedcb5fb99c435c27f867537268aced63ab0ad16:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDFhNGJhMWUwYTE3MjQ1YTIzYzNiNDkxNjVhYWU3ZGRiY2NlMjhmYWEwYzhhZjJmNzY4ZTQzMDNmYmJlNGJjMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjYwMjg0OWZlM2I0MTFmM2NjYTY5NzMzMmEzZThmMjc5ZWYxM2NlY2I4M2EyNzc5NDQ3MjYwZDI4OWE4ZDFjZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYWNjMDAwZDkwMmUzNzFjYTFkZjQyNzAzYjliMDIzY2RkNDU3MmM4ZTFhNjAwMGNmM2EyNzA1YjhhOTc2NzA2MiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjU1NGEwZDVjYmFkYTFkZjZlMGFlZDNhYjc5NDI3YzU0OWIxNmM5YTE5Y2U0YjZjYTBlNjQ1MzViMzFhYjRhNCJ9"
+          "resource": "repo://openswe/api/app.py#L140-L143",
+          "version": "repo-lines-v1:sha256:28358ca3572de4e79cfe331d848975cb85c8bca06d759e705c8a4c2f3893363d:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmE2MjI1MzFkNWY4NDM3M2Y2OGJlY2Y4NmFjOTAzYmIxZDEwNjY4Y2E1N2QxOTU0NzEyYTEyMGRlYWY0NTc4YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNTkwOWE1M2E2MThkMDI4ZTFkMzAwMGMwYTdhYmNlZWNiZTVmYjM3ZjRlNTExZWZlNDY2NDNmYWQ2ZTY2ODcyZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDgyODM3ZjJhOGM2ZDhmOTRiYmU5MzBiMDIxYThkMzlmNjBmNTMwYmM5NTM0MGFjYzQyNDYzZmU0MjlmNDBjOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMWY3YWQwMzg3YzU1YzFiYTZmZWRjNzQzZTRjZGRiYmExMTY1N2Y0NTc1YzFjMDQzNDhhMWQ2MTA2MmYyMDRjYSJ9"
+        },
+        {
+          "resource": "repo://openswe/api/app.py#L66-L69",
+          "version": "repo-lines-v1:sha256:7f57bbab1a8cafffa76d8d65dedcb5fb99c435c27f867537268aced63ab0ad16:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDFhNGJhMWUwYTE3MjQ1YTIzYzNiNDkxNjVhYWU3ZGRiY2NlMjhmYWEwYzhhZjJmNzY4ZTQzMDNmYmJlNGJjMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjYwMjg0OWZlM2I0MTFmM2NjYTY5NzMzMmEzZThmMjc5ZWYxM2NlY2I4M2EyNzc5NDQ3MjYwZDI4OWE4ZDFjZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMWY4NTM3NzY0MjY1MmNhOTEzNmZiNzYyZDc0OWQ1ZjJmZTNhMjYzZmQ4Y2Y0MjhkYzZmMmU2N2NlY2IzMDc3OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjU1NGEwZDVjYmFkYTFkZjZlMGFlZDNhYjc5NDI3YzU0OWIxNmM5YTE5Y2U0YjZjYTBlNjQ1MzViMzFhYjRhNCJ9"
         }
       ]
     },
@@ -158,11 +162,11 @@
     },
     {
       "id": "claim_20e1690afd5b4dafba2bc02f581603c7",
-      "statement": "The scheduler graph has one launch node that routes cron state to reconciliation, baby-sit watch evaluation, background-task monitoring, session-cost or agent-cost refresh, or a scheduled agent run, and reports missing required identifiers as result statuses.",
+      "statement": "The scheduler graph has one launch node that routes cron state to reconciliation, baby-sit watch evaluation, expedited-review deletion, background-task monitoring, workspace/session/agent-cost refresh, announcements, human-review deadlines, or scheduled agent runs, and reports missing required identifiers as result statuses.",
       "evidence": [
         {
-          "resource": "repo://openswe/scheduler.py#L59-L98",
-          "version": "repo-lines-v1:sha256:1ca3577e5b4616715b5a29a9bef99feae4439da2b1b78de3fdfa1b2b0ce8e371:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyMTc1NWE0NzlkNzgxYTY2NDkzYTBkMTI3Y2IyYmU5MzE4YTk5ZjZlZWQ3ZmY3MGMyYmE0NTU2MTk4OTk2YTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiYWIxNjJkMGM5NmZmMWM0NmM0MDk5NWE2ZDFkNWQxZDg4M2YxMjgxMjAzOGYwMjU0YThkNDBiZTg1ZjY4NDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQzNjEzNWZiNWRmMDMzNjRkN2FlNjMzNGMxZGMzMWVjMjVkMTY5MjQ1MTU3Y2UxMjk3NGY2NDRjMDQ0ZjViNmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhM2I3ZDNlZDZmMTMyMDIwNTgwNzQzMzk4NDY2YWMxMWVhYzNkMzAyOGZjMTcyZmI3ZGQ4ZGE3YWUxOTZjMDAifQ"
+          "resource": "repo://openswe/scheduler.py#L61-L104",
+          "version": "repo-lines-v1:sha256:78397c197be6ef897100d78d902b7c9aeced41ddc60655426a93cb3a1ac8725d:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyMTc1NWE0NzlkNzgxYTY2NDkzYTBkMTI3Y2IyYmU5MzE4YTk5ZjZlZWQ3ZmY3MGMyYmE0NTU2MTk4OTk2YTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiYWIxNjJkMGM5NmZmMWM0NmM0MDk5NWE2ZDFkNWQxZDg4M2YxMjgxMjAzOGYwMjU0YThkNDBiZTg1ZjY4NDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQzNjEzNWZiNWRmMDMzNjRkN2FlNjMzNGMxZGMzMWVjMjVkMTY5MjQ1MTU3Y2UxMjk3NGY2NDRjMDQ0ZjViNmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhM2I3ZDNlZDZmMTMyMDIwNTgwNzQzMzk4NDY2YWMxMWVhYzNkMzAyOGZjMTcyZmI3ZGQ4ZGE3YWUxOTZjMDAifQ"
         }
       ]
     },
@@ -245,6 +249,6 @@
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-15T13:12:32.024Z"
+    "at": "2026-10-18T12:31:08.965Z"
   }
 }

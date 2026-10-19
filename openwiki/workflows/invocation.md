@@ -6,10 +6,10 @@ tags: [invocation, webhooks, dashboard, slack, linear, github, durable-runs, aut
 sources:
   - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
     resource: repo://openswe/api/app.py
+  - id: openwiki-source-6d39d9926d1a43e773b42f66
+    resource: repo://openswe/bridge/store.py
   - id: openwiki-source-913527bc7b548b4bf81f6a35
     resource: repo://openswe/completion.py
-  - id: openwiki-source-3e4d955c2e907c017e3302d0
-    resource: repo://openswe/desktop.py
   - id: openwiki-source-1685d34aae8025be9332f45a
     resource: repo://openswe/dispatch.py
   - id: openwiki-source-d0edf7555209b3e6418b5c5f
@@ -36,10 +36,10 @@ sources:
     resource: repo://openswe/threads/proxy.py
   - id: openwiki-source-5c84530a3d0edb1fb15187f1
     resource: repo://openswe/threads/runs.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Inbound Invocation to Durable Run
@@ -70,7 +70,7 @@ sequenceDiagram
 
 This shows the shared path: integration routes acknowledge after inexpensive admission checks, while dashboard commands proxy directly after enrichment. Webhook routes return `202 Accepted` immediately and process the event in the background; dashboard commands are synchronous proxies that return the response from LangGraph.
 
-`create_app` composes dashboard, plan, and workflow-approval routers with Linear, Slack, GitHub, Notion, and health/completion routers. It rejects a wildcard dashboard CORS origin when credentials are enabled, and its lifespan validates sandbox and local-development model configuration before serving. This makes route composition and startup validation part of the invocation boundary rather than responsibility of each webhook.
+`create_app` composes dashboard, plan, and workflow-approval routers with Linear, Slack, GitHub, Notion, and health/completion routers. It validates its CORS middleware configuration to reject wildcard origins when credentials are enabled, and its lifespan startup validates sandbox provider and local-development LLM model configuration before serving. This makes route composition and startup validation part of the invocation boundary rather than responsibility of each webhook.
 
 ## Admission and asynchronous webhook work
 
@@ -108,11 +108,11 @@ A coding PR-comment run recovers an Open SWE-created branch's embedded UUID; oth
 
 The dashboard proxies `run.start` commands to LangGraph after validating JSON, access, and thread state. A missing thread is allowed only for `run.start`, which lazily creates and stamps it as an interactive dashboard thread. It attributes the command to the authenticated GitHub user, resolves model/effort from team, profile, and request overrides, normalizes repository configuration, records participants and metadata, and replaces caller-provided raw messages with typed web input. Image input has strict type, count, size, and model-capability checks.
 
-The desktop client uses this dashboard invocation path with `source="desktop"`; downstream desktop execution permits only an allowlisted local project or a worktree under its configured worktree root. Desktop runs specify a `local_project_path` that the agent backend validates against the allowlist and worktrees directory before opening a shell backend.
+The desktop client uses this dashboard invocation path; downstream execution happens through a bridge (sandbox) that is bound to a thread. A thread can be moved to a machine running the desktop CLI via worktree handoff, after which desktop-specific validation ensures only allowlisted local projects or worktrees under the configured root are accessed during shell execution.
 
 A dashboard follow-up to an active thread is persisted in the message queue, not immediately started as another dashboard run. Stop cancels every pending/running run on the thread rather than trusting cached latest-run metadata; if messages were queued, it starts a new empty-input durable run to drain them. Interactive posting is denied on admin or automation threads to non-admins, while surfaced-source threads are readable to authenticated organization members.
 
-Schedules are workspace records backed by LangGraph crons targeting the `scheduler` assistant. The scheduler graph fans a schedule tick into task-specific work: `launch_scheduled_agent_run` for agent automation, `baby_sit` for watch evaluation, `reconcile` for stale-run recovery, and `workspace_refresh` for membership/configuration sync. Each scheduled agent execution creates a **fresh UUID thread**, obtains schedule/automation metadata, and rechecks the creator's repository access before creating the run. A schedule may establish a Slack root message/thread for status replies; failure to create that message prevents the run, rather than losing the intended notification context.
+Schedules are workspace records backed by LangGraph crons targeting the `scheduler` assistant. The scheduler graph fans a schedule tick into task-specific work: `launch_scheduled_agent_run` for agent automation, `baby_sit` for watch evaluation, `reconcile` for stale-run recovery, and `workspace_refresh` for membership/configuration sync. Each scheduled agent execution creates a **fresh UUID thread**, obtains schedule/automation metadata, rechecks the creator's repository access, and establishes a Slack root message/thread for status replies when the schedule is configured for Slack notifications. Failure to create the notification channel message prevents the run to preserve intended context.
 
 ## Thread identity and structured input
 

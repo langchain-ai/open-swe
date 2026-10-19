@@ -4,8 +4,6 @@ title: Dashboard and Desktop Clients
 description: The dashboard's FastAPI API, React/TanStack Start serving and proxy boundary, authenticated product capabilities, and the Electron client's supervised local-project execution model.
 tags: [dashboard, fastapi, oauth, threads, authorization, tanstack-start, electron, langgraph]
 sources:
-  - id: openwiki-source-f94f5d5d16b6aac2f4bc309c
-    resource: repo://desktop/src/backend-supervisor.cjs
   - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
     resource: repo://openswe/api/app.py
   - id: openwiki-source-e4bce0ee35cec33ca72293f7
@@ -18,8 +16,6 @@ sources:
     resource: repo://openswe/dashboard/oauth.py
   - id: openwiki-source-7fc33e4789861923a6f12e78
     resource: repo://openswe/dashboard/routes.py
-  - id: openwiki-source-3e4d955c2e907c017e3302d0
-    resource: repo://openswe/desktop.py
   - id: openwiki-source-d4133df2d22c7f7c9b56d1fc
     resource: repo://openswe/review/routes.py
   - id: openwiki-source-7ee154e2a5d8a9f6403ac301
@@ -51,7 +47,7 @@ sources:
 generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Dashboard and Desktop Clients
