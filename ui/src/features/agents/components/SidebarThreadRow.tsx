@@ -604,7 +604,7 @@ export function SidebarThreadRow({
     }),
     detailed && [
       "focus-visible:outline-brand h-auto items-start border p-space-4 focus-visible:outline-2",
-      conversation ? "py-space-3" : "min-h-48",
+      conversation && "py-space-3",
       rowIsActive ? "border-brand" : "border-subtle bg-surface-level-1",
     ]
   )
