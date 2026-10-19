@@ -66,6 +66,7 @@ _TOOL_MODULES = {
     "send_announcement": ".send_announcement",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
+    "slack_ask_whether_to_reply": "openswe.slack.tools.ask_whether_to_reply",
     "slack_attach_html": "openswe.slack.tools.attach_html",
     "slack_list_channel_members": "openswe.slack.tools.channels",
     "slack_list_channels": "openswe.slack.tools.channels",
@@ -149,6 +150,7 @@ __all__ = [
     "send_announcement",
     "start_thread",
     "slack_add_reaction",
+    "slack_ask_whether_to_reply",
     "slack_attach_html",
     "slack_list_channel_members",
     "slack_list_channels",
@@ -171,6 +173,7 @@ __all__ = [
 if TYPE_CHECKING:
     from openswe.incidents.tools import manage_incident
     from openswe.slack.tools.add_reaction import slack_add_reaction
+    from openswe.slack.tools.ask_whether_to_reply import slack_ask_whether_to_reply
     from openswe.slack.tools.attach_html import slack_attach_html
     from openswe.slack.tools.channels import (
         slack_list_channel_members,

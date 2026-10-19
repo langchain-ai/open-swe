@@ -67,3 +67,48 @@ async def test_accepting_a_suggestion_asks_the_slack_threads_agent_once(
     assert request.text == "Get https://github.com/lc/repo/pull/7 reviewed."
     assert "<@U1>" in request.turn_context
     respond.assert_awaited_once()
+
+
+async def test_asking_whether_to_reply_asks_the_messages_sender_privately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.slack.tools import ask_whether_to_reply as tool
+
+    messages = {
+        "1.1": {"ts": "1.1", "user": "U_SENDER", "text": "why'd it tag you?"},
+        "1.2": {"ts": "1.2", "bot_id": "B1", "text": "a bot"},
+    }
+
+    async def fetch(channel_id: str, thread_ts: str, message_ts: str) -> dict[str, str] | None:
+        return messages.get(message_ts)
+
+    post = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "slack_thread": {
+                    "channel_id": "C1",
+                    "thread_ts": "1.0",
+                    "triggering_event_ts": "1.3",
+                    "triggering_user_id": "U_OTHER",
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(tool, "langgraph_client", lambda: None)
+    monkeypatch.setattr(
+        tool, "get_active_slack_thread", AsyncMock(side_effect=lambda _c, _t, fallback: fallback)
+    )
+    monkeypatch.setattr(tool, "fetch_slack_thread_message_by_ts", fetch)
+    monkeypatch.setattr(suggested_actions, "post_slack_ephemeral_message", post)
+
+    assert (await tool.slack_ask_whether_to_reply("1.2"))["success"] is False
+    assert (await tool.slack_ask_whether_to_reply("1.1"))["success"] is True
+
+    post.assert_awaited_once()
+    channel_id, user_id, _text, thread_ts = post.await_args.args
+    assert (channel_id, user_id, thread_ts) == ("C1", "U_SENDER", "1.0")
+    reply = json.loads(post.await_args.kwargs["blocks"][1]["elements"][0]["value"])
+    assert (reply["kind"], reply["subject"]) == (suggested_actions.REPLY.kind, "1.1")

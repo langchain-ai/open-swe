@@ -66,10 +66,10 @@ class SuggestedAction:
         *,
         thread_ts: str,
         reply_thread_ts: str,
-    ) -> None:
+    ) -> bool:
         """Show the suggestion to one person, in the Slack thread it would act in."""
         text = self.question.format(subject=subject)
-        await post_slack_ephemeral_message(
+        return await post_slack_ephemeral_message(
             channel_id,
             slack_user_id,
             text,
@@ -101,6 +101,20 @@ def register(action: SuggestedAction) -> SuggestedAction:
     """Make ``action``'s buttons answerable; call once at import."""
     _ACTIONS[action.kind] = action
     return action
+
+
+# Registered here rather than with the agent tool that offers it, which the
+# process answering Slack buttons never imports.
+REPLY = register(
+    SuggestedAction(
+        kind="reply",
+        question="Open SWE wasn't sure this was meant for it. Want it to reply?",
+        accept_label="Reply",
+        accepted="Asked Open SWE to reply.",
+        request="Reply to my message.",
+        prompt_name="runs/suggested-reply",
+    )
+)
 
 
 async def handle_button(

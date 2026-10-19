@@ -242,6 +242,7 @@ from openswe.tools import (
     search_pull_requests,
     send_announcement,
     slack_add_reaction,
+    slack_ask_whether_to_reply,
     slack_attach_html,
     slack_breakout_thread,
     slack_list_channel_members,
@@ -353,6 +354,7 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
         "manage_code_channel",
         "manage_incident",
         "slack_add_reaction",
+        "slack_ask_whether_to_reply",
         "slack_attach_html",
         "slack_move_thread",
         "slack_start_review_channel",
@@ -559,6 +561,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "manage_code_channel",
         "manage_incident",
         "slack_add_reaction",
+        "slack_ask_whether_to_reply",
         "slack_attach_html",
         "slack_reply",
         "task",
@@ -601,8 +604,9 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 
 # A reaction signals "seen, working on it" to a room. A DM is a two-person
 # conversation where the reply itself is that signal, so reacting there is only
-# clutter on every message the person sends.
-DM_EXCLUDED_TOOLS: frozenset[str] = frozenset({"slack_add_reaction"})
+# clutter on every message the person sends. Every DM message is meant for the
+# bot, so there is nobody to ask whether to reply either.
+DM_EXCLUDED_TOOLS: frozenset[str] = frozenset({"slack_add_reaction", "slack_ask_whether_to_reply"})
 
 
 def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
@@ -1726,6 +1730,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         code_channel_set_view,
         manage_incident,
         slack_add_reaction,
+        slack_ask_whether_to_reply,
         slack_attach_html,
         slack_list_channel_members,
         slack_list_channels,
@@ -1789,6 +1794,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         code_channel_set_view,
         manage_incident,
         slack_add_reaction,
+        slack_ask_whether_to_reply,
         slack_attach_html,
         slack_list_channel_members,
         slack_list_channels,
