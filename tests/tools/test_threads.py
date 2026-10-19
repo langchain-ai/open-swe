@@ -29,11 +29,12 @@ def _actor(*, login: str = "octocat", admin: bool = False) -> object:
     ("sender", "context_id", "context_login", "stored_login", "lookup_fails", "expected"),
     [
         ("github:123", "github:123", "reviewer", None, False, "reviewer"),
-        ("github:123", "github:456", "other", None, False, "thread-owner"),
+        ("github:123", "github:456", "other", None, False, None),
         ("github:123", "github:123", None, "reviewer", False, "reviewer"),
-        ("github:123", "github:123", None, None, False, "thread-owner"),
-        ("github:123", "github:123", None, None, True, "thread-owner"),
+        ("github:123", "github:123", None, None, False, None),
+        ("github:123", "github:123", None, None, True, None),
         ("github:reviewer", "github:456", "other", None, False, "reviewer"),
+        ("slack:U123", "github:123", "reviewer", None, False, "thread-owner"),
     ],
 )
 async def test_actor_uses_latest_resolvable_github_sender(
@@ -43,7 +44,7 @@ async def test_actor_uses_latest_resolvable_github_sender(
     context_login: str | None,
     stored_login: str | None,
     lookup_fails: bool,
-    expected: str,
+    expected: str | None,
 ) -> None:
     monkeypatch.setattr(
         threads_tool,
@@ -65,7 +66,7 @@ async def test_actor_uses_latest_resolvable_github_sender(
     )
 
     async def gate(login: str) -> None:
-        if login != expected:
+        if login not in {"thread-owner", expected}:
             raise HTTPException(403, "not authorized")
 
     monkeypatch.setattr(threads_tool, "enforce_github_login_gate", gate)
@@ -87,6 +88,9 @@ async def test_actor_uses_latest_resolvable_github_sender(
 
     actor = await threads_tool.resolve_thread_actor(state)
 
+    if expected is None:
+        assert actor is None
+        return
     assert actor == threads_tool._Actor(
         login=expected,
         email="owner@example.com" if expected == "thread-owner" else None,
@@ -94,20 +98,38 @@ async def test_actor_uses_latest_resolvable_github_sender(
     )
 
 
-@pytest.mark.parametrize("allowed", [True, False])
+@pytest.mark.parametrize("identity", ["context", "store", "login", "unknown", "lookup-fails"])
+@pytest.mark.parametrize("authorized", [True, False])
 async def test_github_sender_can_use_thread_tools_only_when_authorized(
-    monkeypatch: pytest.MonkeyPatch, allowed: bool
+    monkeypatch: pytest.MonkeyPatch, identity: str, authorized: bool
 ) -> None:
-    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "reviewer" if allowed else "someone-else")
+    allowed = authorized and identity in {"context", "store", "login"}
+    monkeypatch.setenv(
+        "ALLOWED_GITHUB_USERS", "thread-owner,reviewer" if authorized else "thread-owner"
+    )
+    monkeypatch.setattr(
+        threads_tool.User,
+        "for_identity",
+        AsyncMock(
+            return_value=SimpleNamespace(github_login="reviewer") if identity == "store" else None,
+            side_effect=RuntimeError("store unavailable") if identity == "lookup-fails" else None,
+        ),
+    )
     monkeypatch.setattr(
         threads_tool, "get_config", lambda: {"configurable": {"github_login": "thread-owner"}}
     )
     state = {
         "messages": [
-            person_introduction({"id": "github:123", "github_login": "reviewer"}),
+            person_introduction(
+                {"id": "github:123", "github_login": "reviewer" if identity == "context" else ""}
+            ),
             human_input(
                 "Send the author a confirmation",
-                {"sender_id": "github:123", "surface": "github", "kind": "human"},
+                {
+                    "sender_id": "github:reviewer" if identity == "login" else "github:123",
+                    "surface": "github",
+                    "kind": "human",
+                },
             ),
         ]
     }
