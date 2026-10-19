@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException, Path, Response
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.sandboxes.providers.langsmith import create_workspace_service_url
 from openswe.threads.handlers import get_dashboard_live_sandbox
 from openswe.utils.dashboard_links import dashboard_embed_origins
 
@@ -31,6 +30,8 @@ async def api_thread_port_service_url(
     sandbox_id, _ = await get_dashboard_live_sandbox(
         thread_id, session["sub"], email=session.get("email")
     )
+    from openswe.sandboxes.providers.langsmith import create_workspace_service_url
+
     try:
         url = await create_workspace_service_url(
             sandbox_id, port, embed_origins=dashboard_embed_origins()
