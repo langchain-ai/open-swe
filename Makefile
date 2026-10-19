@@ -124,6 +124,7 @@ format-check:
 
 typecheck:
 	uv run ty check openswe tests
+	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py
 
 # The MDA reviewer resolves imports against its own environment alone, so one
 # reaching for the backend (`openswe`) or a database driver fails here.
@@ -143,7 +144,7 @@ help:
 	@echo 'migration m="..."            - create the next database migration'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
-	@echo 'run                          - run webhook server'
+	@echo 'run                          - run the FastAPI app alone on :8000'
 	@echo 'swagger                      - regenerate swagger.json from the backend routes'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'

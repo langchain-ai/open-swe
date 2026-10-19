@@ -106,6 +106,9 @@ class Topic(BaseTopic):
     THREAD_QUEUES: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
 
+    THREAD_BACKGROUND_WORK: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: the sandbox commands and monitors running for that thread."""
+
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
@@ -220,4 +223,7 @@ Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.THREADS = KeyedTopic("threads", authorize_keys=_readable_threads)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
+Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
+    "thread-background-work", authorize_keys=_readable_threads
+)
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")

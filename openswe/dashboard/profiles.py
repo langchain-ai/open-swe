@@ -29,6 +29,7 @@ from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users import User, UserPreferences, UserPreferencesPatch
 from openswe.users.records import UserRecords
+from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
 from openswe.utils.time import now_iso
 
@@ -52,6 +53,11 @@ class ProfileRecords(UserRecords):
         profile = await self.get(login) or {}
         return profile.get("auto_human_review_enabled", True) is not False
 
+    @staticmethod
+    def cache_key(login: str) -> str:
+        """Where agent runs keep this person's profile for a few seconds."""
+        return f"profile:{login}"
+
     async def put(self, login: str, value: JsonObject, key: str = "") -> None:
         await super().put(
             login,
@@ -62,6 +68,8 @@ class ProfileRecords(UserRecords):
             },
             key,
         )
+        # A setting someone just changed applies to their next run, not 30s later.
+        ttl_cache.invalidate(self.cache_key(login))
 
 
 PROFILES = ProfileRecords("profile")
@@ -92,6 +100,9 @@ class ProfileUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_mcp_ptc: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_monitor: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_act_as_approval: bool | None = None
@@ -163,6 +174,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
             else existing.get("experimental_background_callbacks")
+        ),
+        "experimental_monitor": (
+            update.experimental_monitor
+            if update.experimental_monitor is not None
+            else existing.get("experimental_monitor")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed

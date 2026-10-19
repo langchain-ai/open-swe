@@ -12,6 +12,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { afterEach, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { api, type OpenPullRequest } from "@/lib/api"
@@ -80,7 +81,9 @@ it.each([
       .mockReturnValue(result.promise)
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <RequestHumanReview pr={pr} />
+        <TooltipProvider>
+          <RequestHumanReview pr={pr} />
+        </TooltipProvider>
       </QueryClientProvider>
     )
     await screen.findByRole("button", { name: "Choose channel" })
@@ -149,7 +152,9 @@ it.each([
     })
     const content = (
       <QueryClientProvider client={client}>
-        <RequestHumanReview pr={pr} />
+        <TooltipProvider>
+          <RequestHumanReview pr={pr} />
+        </TooltipProvider>
       </QueryClientProvider>
     )
     const view = render(content)
@@ -188,3 +193,29 @@ it.each([
     expect(availability).toHaveBeenCalledTimes(1)
   }
 )
+
+it("explains the disabled button while availability is loading", async () => {
+  vi.spyOn(api, "humanReviewAvailability").mockReturnValue(
+    new Promise(() => {})
+  )
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(
+    screen
+      .getByRole("button", { name: "Request review in Slack" })
+      .hasAttribute("disabled")
+  ).toBe(true)
+  fireEvent.click(
+    screen.getByRole("button", { name: "Why a review can't be requested" })
+  )
+  expect(
+    await screen.findByText(
+      "Checking whether this pull request can be reviewed…"
+    )
+  ).toBeTruthy()
+})
