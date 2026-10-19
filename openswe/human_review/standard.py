@@ -815,21 +815,24 @@ async def _set_detail(request: HumanReviewRequest, detail: str) -> HumanReviewRe
 
 
 def merge_wait(
-    reviewers: list[str], requested_at: datetime | None, states: dict[str, str], now: datetime
+    reviewers: list[HumanReviewParticipant],
+    requested_at: datetime | None,
+    states: dict[str, str],
+    now: datetime,
 ) -> str | None:
-    """What approvals the merge still waits for, or ``None`` when they are enough.
+    """What approvals the merge still waits for as mrkdwn, or ``None`` when they are enough.
 
     ``states`` maps each GitHub login to its latest review state.
     """
     approvers = {login.lower() for login, state in states.items() if state == "APPROVED"}
     if not approvers:
         return "an approval on GitHub"
-    pending = [login for login in reviewers if login.lower() not in approvers]
+    pending = [r for r in reviewers if r.github_login.lower() not in approvers]
     deadline_passed = requested_at is not None and now >= requested_at + timedelta(
         hours=AUTO_MERGE_AFTER_HOURS
     )
     if pending and not deadline_passed:
-        return "approval from " + ", ".join(f"@{login}" for login in pending)
+        return "approval from " + ", ".join(r.slack_mention for r in pending)
     return None
 
 
@@ -982,16 +985,10 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
                 await _schedule(
                     request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
                 )
-    waiting = merge_wait(
-        [reviewer.github_login for reviewer in request.reviewers],
-        request.created_at,
-        states,
-        datetime.now(UTC),
-    )
-    if waiting is None and readiness.blockers:
-        waiting = "; ".join(readiness.blockers)
-    if waiting is not None:
-        await ReviewCard(await _set_detail(request, waiting)).refresh()
+    waiting = merge_wait(request.reviewers, request.created_at, states, datetime.now(UTC))
+    if waiting is not None or readiness.blockers:
+        blockers = "" if waiting is not None else "; ".join(readiness.blockers)
+        await ReviewCard(await _set_detail(request, blockers)).refresh()
         return True
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":

@@ -404,24 +404,38 @@ async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expecte
         assert await run_deadline(str(request.id), "unclaimed") == {"status": expected}
 
 
+def _reviewer(login: str) -> HumanReviewParticipant:
+    user = User(
+        identities=[
+            UserIdentity(provider="github", external_id=login, login=login),
+            UserIdentity(provider="slack", external_id=f"U_{login}"),
+        ]
+    )
+    reviewer = HumanReviewParticipant(user_id=user.id, decision="review")
+    reviewer.user = user
+    return reviewer
+
+
 def test_nothing_merges_without_an_approval() -> None:
     long_ago = _NOW - timedelta(days=1)
+    grace = _reviewer("grace")
     assert merge_wait([], long_ago, {}, _NOW) == "an approval on GitHub"
-    assert merge_wait(["grace"], long_ago, {"grace": "CHANGES_REQUESTED"}, _NOW) is not None
+    assert merge_wait([grace], long_ago, {"grace": "CHANGES_REQUESTED"}, _NOW) is not None
 
 
 def test_every_reviewer_approving_merges_before_the_deadline() -> None:
     states = {"grace": "APPROVED", "Linus": "APPROVED"}
-    assert merge_wait(["grace", "linus"], _NOW, states, _NOW) is None
+    assert merge_wait([_reviewer("grace"), _reviewer("linus")], _NOW, states, _NOW) is None
 
 
 def test_one_approval_waits_for_the_other_reviewers_until_the_deadline() -> None:
     states = {"grace": "APPROVED"}
     early = _NOW - timedelta(hours=1)
     late = _NOW - timedelta(hours=2)
+    reviewers = [_reviewer("grace"), _reviewer("linus")]
 
-    assert merge_wait(["grace", "linus"], early, states, _NOW) == "approval from @linus"
-    assert merge_wait(["grace", "linus"], late, states, _NOW) is None
+    assert merge_wait(reviewers, early, states, _NOW) == "approval from <@U_linus>"
+    assert merge_wait(reviewers, late, states, _NOW) is None
 
 
 def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
@@ -438,16 +452,7 @@ async def test_merged_card_names_only_actual_approvers(
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
-    for login in ("grace", "linus"):
-        user = User(
-            identities=[
-                UserIdentity(provider="github", external_id=login, login=login),
-                UserIdentity(provider="slack", external_id=f"U_{login}"),
-            ]
-        )
-        participant = HumanReviewParticipant(user_id=user.id, decision="review")
-        participant.user = user
-        request.participants.append(participant)
+    request.participants.extend([_reviewer("grace"), _reviewer("linus")])
     hopper = User(
         identities=[
             UserIdentity(provider="github", external_id="hopper", login="hopper"),
@@ -477,29 +482,6 @@ async def test_merged_card_names_only_actual_approvers(
         else:
             assert "approved by" not in message
         assert "linus" not in message
-
-
-def test_waiting_on_names_reviewers_by_slack_mention() -> None:
-    from openswe.human_review.card import open_card
-
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
-    request = HumanReviewRequest(
-        pull_request_id=pr.id, head_sha="abc", kind="standard", detail="approval from @Linus <x>"
-    )
-    request.pull_request = pr
-    user = User(
-        identities=[
-            UserIdentity(provider="github", external_id="linus", login="linus"),
-            UserIdentity(provider="slack", external_id="U_linus"),
-        ]
-    )
-    participant = HumanReviewParticipant(user_id=user.id, decision="review")
-    participant.user = user
-    request.participants.append(participant)
-    _, blocks = open_card(
-        request, title="t", author="@ada", requester=None, review_states={}, approvers=""
-    )
-    assert "Waiting on: approval from <@U_linus> &lt;x&gt;." in str(block_payload(blocks))
 
 
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:

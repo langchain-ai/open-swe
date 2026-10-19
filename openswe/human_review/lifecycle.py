@@ -310,16 +310,8 @@ class ReviewCard:
             )
         from openswe.human_review.standard import merge_wait
 
-        if (
-            "CHANGES_REQUESTED" not in states.values()
-            and merge_wait(
-                [reviewer.github_login for reviewer in request.reviewers],
-                request.created_at,
-                states,
-                datetime.now(UTC),
-            )
-            is None
-        ):
+        waiting = merge_wait(request.reviewers, request.created_at, states, datetime.now(UTC))
+        if "CHANGES_REQUESTED" not in states.values() and waiting is None:
             return standard_card.closed_card(
                 request,
                 title=pr.title,
@@ -335,6 +327,7 @@ class ReviewCard:
             requester=standard_card.mention(requester) if requester is not None else None,
             review_states=states,
             approvers=approvers,
+            waiting=waiting,
         )
 
     async def render(

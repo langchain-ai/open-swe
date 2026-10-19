@@ -5,7 +5,6 @@ signed up to review it on GitHub and where each of them stands.
 """
 
 import json
-import re
 
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
 from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
@@ -59,15 +58,6 @@ def _heading(request: HumanReviewRequest, states: dict[str, str], approvers: str
     if "CHANGES_REQUESTED" in states.values() or "APPROVED" not in states.values():
         return f":mag: *Review requested*  {link}"
     return f":white_check_mark: *Approved by {approvers}*  {link}"
-
-
-def _detail(request: HumanReviewRequest) -> str:
-    """The escaped detail, with each reviewer's ``@login`` turned into their Slack mention."""
-    text = escape(request.detail)
-    for reviewer in request.reviewers:
-        handle = re.compile(rf"@{re.escape(reviewer.github_login)}(?![\w-])", re.IGNORECASE)
-        text = handle.sub(lambda _, mention=reviewer.slack_mention: mention, text)
-    return text
 
 
 def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> str:
@@ -145,11 +135,12 @@ def open_card(
     requester: str | None,
     review_states: dict[str, str],
     approvers: str,
+    waiting: str | None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for an open request.
 
-    ``author`` and ``requester`` are Slack mentions; ``review_states`` maps each
-    GitHub login to its latest review state.
+    ``author``, ``requester``, ``approvers`` and ``waiting`` are our own mrkdwn;
+    ``review_states`` maps each GitHub login to its latest review state.
     """
     blocks: list[Block] = [
         section(f"{_heading(request, review_states, approvers)}\n*{escape(title)}*")
@@ -158,8 +149,8 @@ def open_card(
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
     blocks.extend(_reviewers(request, review_states))
-    if request.detail:
-        blocks.append(context(f"Waiting on: {_detail(request)}."))
+    if waiting := waiting or escape(request.detail):
+        blocks.append(context(f"Waiting on: {waiting}."))
     blocks.append(actions(*_buttons(request)))
     return f"Review requested for {_label(request)}: {title}", blocks
 
