@@ -254,6 +254,14 @@ async def test_a_run_the_issue_intake_declines_starts_nothing(prepared: AsyncMoc
     channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]
 
 
+async def test_a_call_without_mentions_is_refused(prepared: AsyncMock) -> None:
+    call = _event("issues.opened", _issue_payload())
+    del call["event"]["mentions"]
+
+    assert (await _post(call)).status_code == 422
+    prepared.assert_not_awaited()
+
+
 async def test_the_payload_must_be_the_events(prepared: AsyncMock) -> None:
     response = await _post(_event("issues.reopened", _issue_payload()))
 

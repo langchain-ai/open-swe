@@ -15,14 +15,15 @@ from typing import Any, Final, Literal, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from managed_deepagents import EndpointAnswer, EndpointRequest, GitHubEndpointEvent
+from managed_deepagents import EndpointAnswer, EndpointThread, GitHubEndpointEvent
 from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue
+from typing_extensions import TypedDict
 
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
 from openswe.github.comments import OPEN_SWE_TAGS
-from openswe.mda_channels.auth import MdaChannelRoute, require_mda_channel
+from openswe.mda_channels.auth import require_mda_channel
 from openswe.threads.router import adopt_channel_run
 from openswe.threads.runtimes import RUNTIMES
 from openswe.webhooks import common
@@ -44,11 +45,19 @@ IssueEventKey = Literal[
 _ISSUE_EVENT_KEYS: frozenset[str] = frozenset(get_args(IssueEventKey))
 
 
-router = APIRouter(
-    prefix="/github/channel",
-    dependencies=[Depends(require_mda_channel)],
-    route_class=MdaChannelRoute,
-)
+router = APIRouter(prefix="/github/channel", dependencies=[Depends(require_mda_channel)])
+
+
+class GitHubChannelCall(TypedDict):
+    """What MDA's GitHub channel POSTs: the event, the handles it mentions, and its thread.
+
+    MDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a
+    generic TypedDict's type arguments to a subclass, and the API schema gets a
+    name of its own.
+    """
+
+    event: GitHubEndpointEvent[str, dict[str, Any]]
+    thread: EndpointThread
 
 
 async def trigger_rejection(
@@ -123,7 +132,7 @@ async def _prepare_run(
 
 @router.post("/events")
 async def github_channel_event(
-    call: EndpointRequest[GitHubEndpointEvent[str, dict[str, Any]]],
+    call: GitHubChannelCall,
 ) -> EndpointAnswer | None:
     """The run an @openswe mention on an issue starts on the channel's thread, or ``None``.
 

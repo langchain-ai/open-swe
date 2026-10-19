@@ -1854,40 +1854,6 @@
         "title": "EndpointEvent",
         "type": "object"
       },
-      "EndpointRequest_EndpointEvent_str__dict_str__JsonValue___": {
-        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "EndpointRequest",
-        "type": "object"
-      },
-      "EndpointRequest_GitHubEndpointEvent_str__dict_str__Any___": {
-        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/GitHubEndpointEvent_str_dict_str__Any__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "EndpointRequest",
-        "type": "object"
-      },
       "EndpointThread": {
         "description": "The conversation's thread an endpoint request is about.",
         "properties": {
@@ -2244,6 +2210,23 @@
           "ready"
         ],
         "title": "GatewayStatus",
+        "type": "object"
+      },
+      "GitHubChannelCall": {
+        "description": "What MDA's GitHub channel POSTs: the event, the handles it mentions, and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/GitHubEndpointEvent_str_dict_str__Any__"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "GitHubChannelCall",
         "type": "object"
       },
       "GitHubEndpointEvent_str_dict_str__Any__": {
@@ -2689,6 +2672,23 @@
           "body"
         ],
         "title": "LineComment",
+        "type": "object"
+      },
+      "LinearChannelCall": {
+        "description": "What MDA's Linear channel POSTs: the event it validated and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "LinearChannelCall",
         "type": "object"
       },
       "LinearTrigger": {
@@ -21717,7 +21717,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EndpointRequest_GitHubEndpointEvent_str__dict_str__Any___"
+                "$ref": "#/components/schemas/GitHubChannelCall"
               }
             }
           },
@@ -21786,7 +21786,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EndpointRequest_EndpointEvent_str__dict_str__JsonValue___"
+                "$ref": "#/components/schemas/LinearChannelCall"
               }
             }
           },
