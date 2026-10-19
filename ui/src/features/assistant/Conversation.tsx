@@ -66,7 +66,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
       >
         <header
           className={cn(
-            "flex shrink-0 items-center gap-space-3 border-b border-default px-space-4 py-space-3",
+            "flex h-11 shrink-0 items-center gap-space-3 border-b border-default px-space-4",
             sidebarCollapsed && (isDesktop ? "pl-32" : "pl-space-8"),
             thread && panelCollapsed && "pr-space-8"
           )}

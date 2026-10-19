@@ -232,6 +232,20 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
     expect(panelBox).not.toBeNull();
     expect(titleBox!.x).toBeGreaterThan(sidebarBox!.x + sidebarBox!.width);
     expect(filesBox!.x + filesBox!.width).toBeLessThan(panelBox!.x);
+    expect(
+      Math.abs(
+        titleBox!.y +
+          titleBox!.height / 2 -
+          (sidebarBox!.y + sidebarBox!.height / 2),
+      ),
+    ).toBeLessThan(1);
+    expect(
+      Math.abs(
+        filesBox!.y +
+          filesBox!.height / 2 -
+          (panelBox!.y + panelBox!.height / 2),
+      ),
+    ).toBeLessThan(1);
   }).toPass();
   await expandSidebar.click();
   await expect(sidebar).toBeVisible();
