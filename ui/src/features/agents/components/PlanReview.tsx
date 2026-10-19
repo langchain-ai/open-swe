@@ -49,6 +49,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const [comments, setComments] = useState<Array<PlanComment>>([])
   const [anchor, setAnchor] = useState<PlanTextAnchor | null>(null)
   const [generalComment, setGeneralComment] = useState(false)
+  const [replyTo, setReplyTo] = useState<PlanComment | null>(null)
   const [draft, setDraft] = useState("")
   const [posting, setPosting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -90,9 +91,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     }
   }, [plan.threadId])
 
+  const replyParentMissing =
+    replyTo !== null && !comments.some((comment) => comment.id === replyTo.id)
+
   const submitComment = useCallback(async () => {
     const body = draft.trim()
-    if (!body || pendingComment.current) return
+    if (!body || pendingComment.current || replyParentMissing) return
     const id = crypto.randomUUID()
     pendingComment.current = id
     setPosting(true)
@@ -103,22 +107,26 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       {
         id,
         body,
-        anchor,
+        anchor: replyTo ? null : anchor,
+        parent_id: replyTo?.id,
         author: plan.user.name,
         author_login: plan.user.login,
         created_at: new Date().toISOString(),
       },
     ])
     try {
-      const created = await addPlanComment(plan.threadId, body, anchor)
+      const created = replyTo
+        ? await addPlanComment(plan.threadId, body, null, replyTo.id)
+        : await addPlanComment(plan.threadId, body, anchor)
       setComments((current) =>
         current.map((comment) => (comment.id === id ? created : comment))
       )
       setSubmitted(false)
       setAnchor(null)
       setGeneralComment(false)
+      setReplyTo(null)
       setDraft("")
-      setFocusComment({ id: created.id, key: Date.now() })
+      setFocusComment({ id: replyTo?.id ?? created.id, key: Date.now() })
     } catch (commentError) {
       setComments((current) => current.filter((comment) => comment.id !== id))
       reportError({ title: "Couldn't add comment", error: commentError })
@@ -127,7 +135,15 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       commentMutation.current += 1
       setPosting(false)
     }
-  }, [anchor, draft, plan.threadId, plan.user.name, plan.user.login])
+  }, [
+    anchor,
+    draft,
+    replyTo,
+    replyParentMissing,
+    plan.threadId,
+    plan.user.name,
+    plan.user.login,
+  ])
 
   const handleCommentKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -156,7 +172,15 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       commentMutation.current += 1
       try {
         await deletePlanComment(plan.threadId, id)
-        setComments((current) => current.filter((comment) => comment.id !== id))
+        setComments((current) =>
+          current
+            .filter((comment) => comment.id !== id)
+            .map((comment) =>
+              comment.parent_id === id
+                ? { ...comment, parent_id: null }
+                : comment
+            )
+        )
         setSubmitted(false)
       } catch (deleteError) {
         reportError({ title: "Couldn't delete comment", error: deleteError })
@@ -181,6 +205,74 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       setError(`Couldn't copy the artifact ${format} to the clipboard.`)
     }
   }, [content, format])
+
+  const rootComments = comments.filter((comment) => !comment.parent_id)
+  const composer = (anchor || generalComment || replyTo) && (
+    <div
+      data-testid="comment-composer"
+      className="border-b border-default bg-surface-level-2/30 p-space-3"
+    >
+      {replyTo && (
+        <p className="text-xs text-secondary">Reply to {replyTo.author}</p>
+      )}
+      {replyParentMissing && (
+        <p role="status" className="mt-space-2 text-xs text-secondary">
+          The original comment was deleted. Your draft is preserved. Use Add
+          comment to post it as a general comment, or cancel.
+        </p>
+      )}
+      {anchor && (
+        <blockquote className="line-clamp-3 border-l-2 border-brand pl-space-2 text-xs text-secondary">
+          {anchor.exact}
+        </blockquote>
+      )}
+      <Textarea
+        data-testid="comment-input"
+        size="md"
+        value={draft}
+        disabled={posting}
+        onChange={setDraft}
+        onKeyDown={handleCommentKeyDown}
+        placeholder={replyTo ? "Write a reply" : "Leave a comment"}
+        rows={3}
+        resize="none"
+        autoFocus
+        className="mt-space-3"
+        inputClassName="text-sm"
+      />
+      <div className="mt-space-2 flex justify-end gap-space-2">
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          disabled={posting}
+          onClick={() => {
+            setAnchor(null)
+            setGeneralComment(false)
+            setReplyTo(null)
+            setDraft("")
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          data-testid="comment-submit"
+          aria-keyshortcuts="Meta+Enter Control+Enter"
+          aria-label={posting ? "Posting…" : replyTo ? "Reply" : "Comment"}
+          size="xs"
+          disabled={posting || replyParentMissing || !draft.trim()}
+          onClick={() => void submitComment()}
+        >
+          {posting ? "Posting…" : replyTo ? "Reply" : "Comment"}
+          {!posting && (
+            <Kbd variant="inherit" aria-hidden="true" className="opacity-80">
+              ⌘ ↵
+            </Kbd>
+          )}
+        </Button>
+      </div>
+    </div>
+  )
 
   return (
     <main
@@ -224,9 +316,14 @@ export function PlanReview({ plan }: { plan: PlanData }) {
               <div className="flex min-h-0 min-w-0 flex-1 flex-col @3xl:flex-row">
                 <PlanArtifactFrame
                   html={content}
-                  comments={comments}
+                  comments={rootComments}
                   onTextSelected={
-                    canComment && !posting ? setAnchor : undefined
+                    canComment && !posting
+                      ? (selection) => {
+                          setReplyTo(null)
+                          setAnchor(selection)
+                        }
+                      : undefined
                   }
                   onCommentSelected={openComment}
                   focusCommentId={focusComment?.id ?? null}
@@ -249,6 +346,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                         disabled={posting}
                         onClick={() => {
                           setAnchor(null)
+                          setReplyTo(null)
                           setGeneralComment(true)
                         }}
                       >
@@ -259,72 +357,13 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                       Add a general comment or highlight text to annotate.
                     </p>
                   </div>
-                  {(anchor || generalComment) && (
-                    <div
-                      data-testid="comment-composer"
-                      className="border-b border-default bg-surface-level-2/30 p-space-3"
-                    >
-                      {anchor && (
-                        <blockquote className="line-clamp-3 border-l-2 border-brand pl-space-2 text-xs text-secondary">
-                          {anchor.exact}
-                        </blockquote>
-                      )}
-                      <Textarea
-                        data-testid="comment-input"
-                        size="md"
-                        value={draft}
-                        disabled={posting}
-                        onChange={setDraft}
-                        onKeyDown={handleCommentKeyDown}
-                        placeholder="Leave a comment"
-                        rows={3}
-                        resize="none"
-                        autoFocus
-                        className="mt-space-3"
-                        inputClassName="text-sm"
-                      />
-                      <div className="mt-space-2 flex justify-end gap-space-2">
-                        <Button
-                          color="secondary"
-                          variant="plain"
-                          size="xs"
-                          disabled={posting}
-                          onClick={() => {
-                            setAnchor(null)
-                            setGeneralComment(false)
-                            setDraft("")
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          data-testid="comment-submit"
-                          aria-keyshortcuts="Meta+Enter Control+Enter"
-                          aria-label={posting ? "Posting…" : "Comment"}
-                          size="xs"
-                          disabled={posting || !draft.trim()}
-                          onClick={() => void submitComment()}
-                        >
-                          {posting ? "Posting…" : "Comment"}
-                          {!posting && (
-                            <Kbd
-                              variant="inherit"
-                              aria-hidden="true"
-                              className="opacity-80"
-                            >
-                              ⌘ ↵
-                            </Kbd>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                  {(!replyTo || replyParentMissing) && composer}
                   <div className="min-h-0 flex-1 overflow-y-auto p-space-3">
                     {comments.length === 0 ? (
                       <p className="text-xs text-secondary">No comments yet.</p>
                     ) : (
                       <div className="space-y-space-2">
-                        {comments.map((comment, index) => (
+                        {rootComments.map((comment, index) => (
                           <article
                             key={comment.id}
                             ref={(element) => {
@@ -352,19 +391,66 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                                 {comment.body}
                               </span>
                             </button>
-                            {comment.author_login === plan.user.login &&
-                              !posting && (
-                                <Button
-                                  data-testid="comment-delete"
-                                  size="xs"
-                                  variant="plain"
-                                  color="secondary"
-                                  className="mt-space-2"
-                                  onClick={() => void removeComment(comment.id)}
+                            <div className="mt-space-2 flex gap-space-2">
+                              <Button
+                                size="xs"
+                                variant="plain"
+                                color="secondary"
+                                disabled={posting}
+                                onClick={() => {
+                                  setAnchor(null)
+                                  setGeneralComment(false)
+                                  setReplyTo(comment)
+                                }}
+                              >
+                                Reply
+                              </Button>
+                              {comment.author_login === plan.user.login &&
+                                !posting && (
+                                  <Button
+                                    data-testid="comment-delete"
+                                    size="xs"
+                                    variant="plain"
+                                    color="secondary"
+                                    onClick={() =>
+                                      void removeComment(comment.id)
+                                    }
+                                  >
+                                    Delete
+                                  </Button>
+                                )}
+                            </div>
+                            {comments
+                              .filter((reply) => reply.parent_id === comment.id)
+                              .map((reply) => (
+                                <div
+                                  key={reply.id}
+                                  data-testid="plan-reply"
+                                  className="mt-space-3 border-l border-default pl-space-3"
                                 >
-                                  Delete
-                                </Button>
-                              )}
+                                  <span className="text-xs font-semibold">
+                                    {reply.author}
+                                  </span>
+                                  <p className="mt-space-2 text-sm whitespace-pre-wrap">
+                                    {reply.body}
+                                  </p>
+                                  {reply.author_login === plan.user.login &&
+                                    !posting && (
+                                      <Button
+                                        size="xs"
+                                        variant="plain"
+                                        color="secondary"
+                                        className="mt-space-2"
+                                        onClick={() =>
+                                          void removeComment(reply.id)
+                                        }
+                                      >
+                                        Delete
+                                      </Button>
+                                    )}
+                                </div>
+                              ))}
+                            {replyTo?.id === comment.id && composer}
                           </article>
                         ))}
                       </div>
