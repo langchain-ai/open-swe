@@ -11,15 +11,15 @@ and the signed run token the run calls back with.
 
 import logging
 import re
-from typing import Any, Final, Literal, NotRequired, TypedDict, cast
+from typing import Any, Final, Literal, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from managed_deepagents import EndpointAnswer, EndpointRequest
+from pydantic import JsonValue
 
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
-from openswe.input_messages import RunInput
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.threads.router import adopt_channel_run
 from openswe.threads.runtimes import RUNTIMES
@@ -44,6 +44,7 @@ IssueEventKey = Literal[
     "issue_comment.created",
     "issue_comment.edited",
 ]
+_ISSUE_EVENT_KEYS: frozenset[str] = frozenset(get_args(IssueEventKey))
 
 
 def _limit_size(request: Request) -> None:
@@ -57,47 +58,6 @@ router = APIRouter(
     prefix="/github/channel",
     dependencies=[Depends(require_mda_channel), Depends(_limit_size)],
 )
-
-
-class GitHubEvent(BaseModel):
-    """An issue event MDA's GitHub channel verified."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    key: IssueEventKey
-    delivery_id: str = Field(alias="deliveryId", min_length=1, max_length=200)
-    payload: dict[str, Any]
-
-
-class ChannelThread(BaseModel):
-    """The conversation's thread: the run starts on it, or it waits on an interrupt."""
-
-    id: UUID
-    interrupted: bool = False
-    """The thread waits on an interrupt, so nothing starts: only whether Open SWE acts."""
-
-
-class ChannelEvent(BaseModel):
-    """What the channel sends its endpoint: the event, and the thread it belongs to."""
-
-    event: GitHubEvent
-    thread: ChannelThread
-
-
-class PreparedRun(TypedDict):
-    """What the channel starts the run with."""
-
-    input: RunInput
-    context: dict[str, JsonValue]
-    metadata: dict[str, JsonValue]
-    webhook: NotRequired[str]
-    """Where the Agent Server POSTs the finished run: the run-complete webhook."""
-
-
-class ActsWhileInterrupted(TypedDict):
-    """Open SWE would act, so the channel tells the issue the thread waits; nothing starts."""
-
-    input: str
 
 
 async def trigger_rejection(payload: dict[str, Any], event_type: str) -> str | None:
@@ -147,8 +107,10 @@ def _run_metadata(metadata: dict[str, Any]) -> dict[str, JsonValue]:
     }
 
 
-async def _prepare_run(event: GitHubEvent, thread_id: str, event_type: str) -> PreparedRun | None:
-    prepared = await service.prepare_github_issue_run(event.payload, event_type, thread_id)
+async def _prepare_run(
+    payload: dict[str, Any], delivery_id: str, thread_id: str, event_type: str
+) -> EndpointAnswer | None:
+    prepared = await service.prepare_github_issue_run(payload, event_type, thread_id)
     if prepared is None:
         return None
     await adopt_channel_run(thread_id, CHANNEL)
@@ -158,15 +120,15 @@ async def _prepare_run(event: GitHubEvent, thread_id: str, event_type: str) -> P
         {
             **common.AGENT_VERSION_METADATA,
             CHANNEL_METADATA_KEY: CHANNEL,
-            "github_delivery": event.delivery_id,
+            "github_delivery": delivery_id,
         },
         source="github_issue",
     )
     rewritten = await RUNTIMES.mda_runtime.run_payload(
         thread_id, {"assistant_id": "agent", "config": cast(JsonValue, run_config)}
     )
-    run: PreparedRun = {
-        "input": prepared.input,
+    run: EndpointAnswer = {
+        "input": cast(JsonValue, prepared.input),
         "context": cast(dict[str, JsonValue], rewritten["context"]),
         "metadata": _run_metadata(run_config["metadata"]),
     }
@@ -176,24 +138,33 @@ async def _prepare_run(event: GitHubEvent, thread_id: str, event_type: str) -> P
 
 
 @router.post("/events")
-async def github_channel_event(call: ChannelEvent) -> PreparedRun | ActsWhileInterrupted | None:
+async def github_channel_event(
+    call: EndpointRequest[dict[str, Any]],
+) -> EndpointAnswer | None:
     """The run an @openswe mention on an issue starts on the channel's thread, or ``None``.
 
     While the thread waits on an interrupt nothing starts: a non-null answer only
     tells the channel Open SWE would act, so it points the issue to the decision.
     """
-    event = call.event
-    event_type, _, action = event.key.partition(".")
-    if event.payload.get("action") != action:
+    event, thread = call["event"], call["thread"]
+    key, payload, delivery_id = event["key"], event["payload"], event["deliveryId"]
+    if key not in _ISSUE_EVENT_KEYS or not delivery_id:
+        raise HTTPException(status_code=422, detail="Unsupported GitHub event")
+    try:
+        thread_id = str(UUID(thread["id"]))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="Invalid thread") from error
+    event_type, _, action = key.partition(".")
+    if payload.get("action") != action:
         raise HTTPException(status_code=422, detail="The payload's action is not the event's")
-    reason = await trigger_rejection(event.payload, event_type)
+    reason = await trigger_rejection(payload, event_type)
     if reason is not None:
         logger.info(
             "MDA's GitHub channel event starts no run",
-            extra={"github_event": event.key, "github_delivery": event.delivery_id},
+            extra={"github_event": key, "github_delivery": delivery_id},
         )
         return None
-    if call.thread.interrupted:
+    if thread.get("interrupted"):
         # Nothing starts while the thread waits; no reaction or metadata either.
         return {"input": _ACTS_WHILE_INTERRUPTED}
-    return await _prepare_run(event, str(call.thread.id), event_type)
+    return await _prepare_run(payload, delivery_id, thread_id, event_type)

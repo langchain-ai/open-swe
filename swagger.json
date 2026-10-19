@@ -1737,6 +1737,31 @@
         "title": "EndpointAnswer",
         "type": "object"
       },
+      "EndpointEvent_dict_str__Any__": {
+        "description": "The event a channel sends its endpoint, as the provider sent it.",
+        "properties": {
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "EndpointEvent",
+        "type": "object"
+      },
       "EndpointEvent_dict_str__JsonValue__": {
         "description": "The event a channel sends its endpoint, as the provider sent it.",
         "properties": {
@@ -1762,6 +1787,23 @@
           "payload"
         ],
         "title": "EndpointEvent",
+        "type": "object"
+      },
+      "EndpointRequest_dict_str__Any__": {
+        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, with the payload\ntype of the event key it handles, such as\n``TypeAdapter(EndpointRequest[LinearSessionCreatedPayload])``.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EndpointEvent_dict_str__Any__"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "EndpointRequest",
         "type": "object"
       },
       "EndpointRequest_dict_str__JsonValue__": {
@@ -21239,6 +21281,53 @@
           "dashboard",
           "settings"
         ]
+      }
+    },
+    "/github/channel/events": {
+      "post": {
+        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
+        "operationId": "github_channel_event_github_channel_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointRequest_dict_str__Any__"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/EndpointAnswer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Github Channel Event Github Channel Events Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Github Channel Event"
       }
     },
     "/health": {
