@@ -46,6 +46,12 @@ def dashboard_is_same_origin() -> bool:
     return frontend is not None and frontend == _origin(dashboard_api_base_url())
 
 
+def dashboard_embed_origins() -> list[str]:
+    """Origins that may frame a sandbox app, so the dashboard can show it beside its thread."""
+    origin = _origin(dashboard_base_url())
+    return [origin] if origin else []
+
+
 def dashboard_thread_url(thread_id: str) -> str | None:
     """Build the dashboard thread URL for a given thread id."""
     base_url = dashboard_base_url()
@@ -81,9 +87,12 @@ def dashboard_thread_id(locator: str) -> str | None:
     ):
         return None
     segments = parsed.path.split("/")
-    if len(segments) not in {3, 4} or segments[:2] != ["", "agents"]:
+    if len(segments) < 3 or segments[:2] != ["", "agents"]:
         return None
-    if len(segments) == 4 and segments[3] != "plan":
+    subpage = segments[3:]
+    if subpage not in ([], ["plan"]) and not (
+        len(subpage) == 2 and subpage[0] == "preview" and subpage[1].isdecimal()
+    ):
         return None
     try:
         thread_id = unquote(segments[2], errors="strict")
@@ -100,6 +109,14 @@ def dashboard_plan_url(thread_id: str) -> str | None:
     if not base_url or not thread_id:
         return None
     return f"{base_url}/agents/{quote(thread_id, safe='')}/plan"
+
+
+def dashboard_app_preview_url(thread_id: str, port: int) -> str | None:
+    """Build the dashboard page showing a sandbox port's app beside the thread's chat."""
+    thread_url = dashboard_thread_url(thread_id)
+    if not thread_url:
+        return None
+    return f"{thread_url}/preview/{port}"
 
 
 def dashboard_workflow_approval_url(thread_id: str, fingerprint: str) -> str | None:

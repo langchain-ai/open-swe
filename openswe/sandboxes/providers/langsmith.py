@@ -6,6 +6,7 @@ import json
 import logging
 import shlex
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx2
@@ -466,7 +467,9 @@ class WorkspaceServiceURL(BaseModel):
     access: Literal["workspace"]
 
 
-async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
+async def create_workspace_service_url(
+    sandbox_id: str, port: int, *, embed_origins: Sequence[str]
+) -> str:
     """Share ``port`` of a sandbox with the workspace and return its URL.
 
     The URL carries no token and never expires, so the same link keeps working
@@ -474,6 +477,10 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
     LangSmith session. LangSmith refuses it while an unexpired service token
     exists for the same port, and while the tenant's
     ``sandbox_service_url_langsmith_login`` flag is off.
+
+    ``embed_origins`` are the only sites allowed to frame the URL. LangSmith
+    replaces them on every call, so every caller sharing a port must pass the
+    same ones.
     """
     api_key = _get_langsmith_api_key()
     if not api_key:
@@ -485,7 +492,7 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
     ) as client:
         response = await client.post(
             url,
-            json={"port": port, "access": "workspace"},
+            json={"port": port, "access": "workspace", "embed_origins": list(embed_origins)},
             headers={"X-API-Key": api_key},
         )
         try:

@@ -47,7 +47,7 @@ async def test_terminal_connection_requires_owner_before_issuing_ticket(monkeypa
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-with-at-least-32-bytes")
     monkeypatch.setenv("LANGGRAPH_URL", "https://agent.example")
     get_sandbox = AsyncMock(return_value=("sandbox-1", "repo"))
-    monkeypatch.setattr(terminal, "get_dashboard_terminal_sandbox", get_sandbox)
+    monkeypatch.setattr(terminal, "get_dashboard_live_sandbox", get_sandbox)
     response = Response()
 
     connection = await terminal.api_thread_terminal_connection(

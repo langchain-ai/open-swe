@@ -20,7 +20,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, list[tuple[st
     async def get_backend(_thread_id: str) -> _Backend:
         return backend
 
-    async def create_url(sandbox_id: str, port: int) -> str:
+    async def create_url(sandbox_id: str, port: int, *, embed_origins: list[str]) -> str:
         calls.append((sandbox_id, port))
         return "https://l-abc123.sandbox.example/"
 
@@ -38,6 +38,22 @@ async def test_expose_port_shares_the_port_with_the_workspace(
     result = await service_tool.expose_port(3000)
 
     assert result == {"url": "https://l-abc123.sandbox.example/", "port": 3000}
+    assert calls == [("sandbox-1", 3000)]
+
+
+async def test_preview_port_links_the_dashboard_preview_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, calls = _configure(monkeypatch)
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example/")
+
+    result = await service_tool.preview_port(3000)
+
+    assert result == {
+        "url": "https://openswe.example/agents/thread-1/preview/3000",
+        "app_url": "https://l-abc123.sandbox.example/",
+        "port": 3000,
+    }
     assert calls == [("sandbox-1", 3000)]
 
 

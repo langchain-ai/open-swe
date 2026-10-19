@@ -199,7 +199,9 @@ async def test_service_url_asks_for_a_workspace_grant(
     monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-key")
     _serve(monkeypatch, handler)
 
-    service_url = await create_workspace_service_url("sandbox-1", 3000)
+    service_url = await create_workspace_service_url(
+        "sandbox-1", 3000, embed_origins=["https://openswe.example"]
+    )
 
     assert service_url == "https://l-abc.sandbox.example/"
     request = requests[0]
@@ -207,4 +209,8 @@ async def test_service_url_asks_for_a_workspace_grant(
         "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-1/service-url"
     )
     assert request.headers["X-API-Key"] == "lsv2-key"
-    assert json.loads(request.content) == {"port": 3000, "access": "workspace"}
+    assert json.loads(request.content) == {
+        "port": 3000,
+        "access": "workspace",
+        "embed_origins": ["https://openswe.example"],
+    }

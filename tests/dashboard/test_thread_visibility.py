@@ -86,7 +86,7 @@ def test_review_chat_is_hidden_without_hiding_normal_pr_threads():
     "operation",
     [
         handlers.get_dashboard_thread_state,
-        handlers.get_dashboard_terminal_sandbox,
+        handlers.get_dashboard_live_sandbox,
         handlers.delete_dashboard_thread,
         handlers.cancel_dashboard_thread,
     ],
@@ -105,9 +105,9 @@ async def test_admin_can_view_but_not_open_terminal(private_thread):
     thread["metadata"]["sandbox_id"] = "sbx"
     assert await access._readable_thread_metadata("private-thread", login="admin") is not None
     with pytest.raises(HTTPException) as exc:
-        await handlers.get_dashboard_terminal_sandbox("private-thread", "admin")
+        await handlers.get_dashboard_live_sandbox("private-thread", "admin")
     assert exc.value.status_code == 404
-    assert await handlers.get_dashboard_terminal_sandbox("private-thread", "alice") == ("sbx", None)
+    assert await handlers.get_dashboard_live_sandbox("private-thread", "alice") == ("sbx", None)
 
 
 async def test_admin_can_read_artifact_but_not_mutate(private_thread, monkeypatch):

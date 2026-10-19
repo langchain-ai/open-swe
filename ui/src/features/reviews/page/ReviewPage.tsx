@@ -7,7 +7,10 @@ import { useIsHydrated } from "@/lib/hydration"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { pageTitle } from "@/lib/pageTitle"
 import { SideSheet } from "@/components/SideSheet"
-import { useSidebarControls } from "@/components/sidebar-layout"
+import {
+  useCollapseSidebarForPage,
+  useSidebarToggleInset,
+} from "@/components/sidebar-layout"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
 import { markReviewViewed } from "@/features/agents/lib/queries"
@@ -70,15 +73,9 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
       markReviewViewed(queryClient, pr, chatThreadId)
   }, [queryClient, pr, chatThreadId, detailLoaded, walkthroughSha])
 
-  useCollapseAppSidebar(pr)
-  const sidebar = useSidebarControls()
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const leftInset = sidebar?.collapsed
-    ? isDesktop
-      ? "pl-32"
-      : "pl-space-8"
-    : "pl-space-3"
+  // Keep the nav for someone who opened the review from it.
+  useCollapseSidebarForPage(reviewOpenedFromSidebar(pr))
+  const leftInset = useSidebarToggleInset()
 
   const navigatorInline = navigatorOpen && roomForNavigator
 
@@ -186,20 +183,4 @@ function PullRequestUnavailable({
       </div>
     </div>
   )
-}
-
-/** Collapse the app's nav for room, unless the person came from it; restore it on the way out. */
-function useCollapseAppSidebar(pr: PullRequestRef) {
-  const sidebar = useSidebarControls()
-  const sidebarRef = useRef(sidebar)
-  const fromSidebar = useRef(reviewOpenedFromSidebar(pr))
-  useEffect(() => {
-    sidebarRef.current = sidebar
-  }, [sidebar])
-  useLayoutEffect(() => {
-    const controls = sidebarRef.current
-    if (!controls || controls.collapsed || fromSidebar.current) return
-    controls.setCollapsedForPage(true)
-    return () => controls.setCollapsedForPage(false)
-  }, [])
 }

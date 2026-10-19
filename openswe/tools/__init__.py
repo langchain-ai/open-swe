@@ -39,6 +39,7 @@ _TOOL_MODULES = {
     "merge_expedited_pr": ".merge_expedited_pr",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
+    "preview_port": ".expose_port",
     "publish_review": ".publish_review",
     "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
@@ -122,6 +123,7 @@ __all__ = [
     "merge_expedited_pr",
     "open_pull_request",
     "output_iframe",
+    "preview_port",
     "publish_review",
     "write_database_rows",
     "read_only_sql",
@@ -200,7 +202,7 @@ if TYPE_CHECKING:
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
-    from openswe.tools.expose_port import expose_port
+    from openswe.tools.expose_port import expose_port, preview_port
     from openswe.tools.fetch_review_diff import fetch_review_diff
     from openswe.tools.fetch_url import fetch_url
     from openswe.tools.http_request import http_request

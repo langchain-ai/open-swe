@@ -107,7 +107,7 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
     )
 
 
-async def get_dashboard_terminal_sandbox(
+async def get_dashboard_live_sandbox(
     thread_id: str, login: str, *, email: str | None = None
 ) -> tuple[str, str | None]:
     client = langgraph_client()
@@ -116,8 +116,8 @@ async def get_dashboard_terminal_sandbox(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    # A shell is a live capability into the owner's sandbox, so admins who may
-    # view a private thread still cannot open one.
+    # A shell or a shared port is a live capability into the owner's sandbox, so
+    # admins who may view a private thread still cannot open one.
     _assert_thread_promptable(metadata, login)
     sandbox_id = metadata.get("sandbox_id")
     if (

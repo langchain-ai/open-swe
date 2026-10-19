@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react"
@@ -106,6 +107,31 @@ export function useSidebarCollapsed(): boolean {
 // e.g. the review detail page collapsing it by default. Null outside the provider.
 export function useSidebarControls(): SidebarLayout | null {
   return useContext(SidebarLayoutContext)
+}
+
+/** Collapse the app's nav for a page that wants the room, unless `keep`; restore it on the way out. */
+export function useCollapseSidebarForPage(keep = false) {
+  const sidebar = useSidebarControls()
+  const sidebarRef = useRef(sidebar)
+  const keepRef = useRef(keep)
+  useEffect(() => {
+    sidebarRef.current = sidebar
+  }, [sidebar])
+  useLayoutEffect(() => {
+    const controls = sidebarRef.current
+    if (!controls || controls.collapsed || keepRef.current) return
+    controls.setCollapsedForPage(true)
+    return () => controls.setCollapsedForPage(false)
+  }, [])
+}
+
+/** Left padding that keeps a page header clear of the floating expand-sidebar toggle. */
+export function useSidebarToggleInset(): string {
+  const collapsed = useSidebarCollapsed()
+  if (!collapsed) return "pl-space-3"
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  return isDesktop ? "pl-32" : "pl-space-8"
 }
 
 interface SidebarFrameProps {

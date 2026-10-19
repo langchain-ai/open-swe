@@ -60,7 +60,7 @@ async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypat
     _, client = bot_thread
     session = {"sub": login}
     operations = [
-        lambda: handlers.get_dashboard_terminal_sandbox("bot-thread", login),
+        lambda: handlers.get_dashboard_live_sandbox("bot-thread", login),
         lambda: handlers.delete_dashboard_thread("bot-thread", login),
         lambda: plan_api.post_plan_comment(
             "bot-thread", plan_api.CommentBody(body="comment"), session

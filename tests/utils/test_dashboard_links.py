@@ -17,6 +17,7 @@ from openswe.utils.dashboard_links import dashboard_thread_id
             "thread-1",
         ),
         ("https://openswe.example/agents/thread%20one/plan?comment=1#section", "thread one"),
+        ("https://openswe.example/agents/thread-1/preview/3000", "thread-1"),
     ],
 )
 def test_dashboard_thread_id_accepts_ids_and_dashboard_urls(
@@ -34,6 +35,8 @@ def test_dashboard_thread_id_accepts_ids_and_dashboard_urls(
         "/agents/thread-1",
         "https://openswe.example/agents",
         "https://openswe.example/agents/thread-1/extra",
+        "https://openswe.example/agents/thread-1/preview",
+        "https://openswe.example/agents/thread-1/preview/port",
         "https://openswe.example/agents/reviews/org/repo/1",
         "https://user@example.com/agents/thread-1",
         "ftp://openswe.example/agents/thread-1",
