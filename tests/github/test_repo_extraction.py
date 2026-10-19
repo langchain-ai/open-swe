@@ -27,6 +27,8 @@ class TestLinearSessionRepository:
             {
                 "type": "AgentSessionEvent",
                 "action": "created",
+                "organizationId": "org-1",
+                "webhookTimestamp": 1_700_000_000_000,
                 "agentSession": {
                     "id": "session-1",
                     "issue": {"id": "issue-456", "identifier": "ENG-1", "title": "Test issue"},

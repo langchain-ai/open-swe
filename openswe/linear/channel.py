@@ -10,13 +10,14 @@ may call it.
 """
 
 import json
-from typing import Literal, Self
+from typing import Any, Literal, cast, get_args
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from managed_deepagents import EndpointAnswer, EndpointRequest
+from pydantic import JsonValue
 
-from openswe.linear.session import LinearSessionTurn, PreparedRun
+from openswe.linear.session import LinearSessionTurn
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -31,72 +32,52 @@ LinearEventKey = Literal[
     "AgentSessionEvent.created",
     "AgentSessionEvent.prompted",
 ]
+_EVENT_KEYS: frozenset[str] = frozenset(get_args(LinearEventKey))
 _AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
 
 router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 
 
-class LinearEvent(BaseModel):
-    """A Linear event the channel received and verified."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    key: LinearEventKey
-    delivery_id: str = Field(alias="deliveryId", min_length=1, max_length=200)
-    payload: dict[str, JsonValue]
-
-
-class ChannelThread(BaseModel):
-    """The conversation's thread, the issue's or an agent session's."""
-
-    id: UUID
-
-
-class LinearChannelEvent(BaseModel):
-    """What the channel sends its endpoint: the event, and the thread it belongs to."""
-
-    event: LinearEvent
-    thread: ChannelThread
-
-    @model_validator(mode="after")
-    def _bounded(self) -> Self:
-        if len(self.body()) > _MAX_PAYLOAD_CHARS:
-            raise ValueError("payload is too large")
-        return self
-
-    def body(self) -> bytes:
-        """The payload as JSON, as the event log keeps deliveries."""
-        return json.dumps(self.event.payload).encode()
-
-    async def record(self, request: Request) -> None:
-        """Log the event and wake the threads that listen for Linear events."""
-        body = self.body()
-        await EventLog.record(
-            request,
-            body,
-            "linear",
-            event_type=str(self.event.payload.get("type") or ""),
-            delivery_id=self.event.delivery_id,
-            refs=EventRefs.linear(body),
-        )
+async def _record(request: Request, payload: dict[str, JsonValue], delivery_id: str) -> None:
+    """Log the event and wake the threads that listen for Linear events."""
+    body = json.dumps(payload).encode()
+    await EventLog.record(
+        request,
+        body,
+        "linear",
+        event_type=str(payload.get("type") or ""),
+        delivery_id=delivery_id,
+        refs=EventRefs.linear(body),
+    )
 
 
 @router.post("/events")
 async def linear_channel_event(
-    request: Request, call: LinearChannelEvent, background_tasks: BackgroundTasks
-) -> PreparedRun | None:
+    request: Request,
+    call: EndpointRequest[dict[str, JsonValue]],
+    background_tasks: BackgroundTasks,
+) -> EndpointAnswer | None:
     """The run a Linear event starts, or ``None`` to start nothing.
 
     An agent session turn starts the run it prepares; ``None`` there declines, and
     the channel tells the session. Issue events run Linear automations.
     """
-    await call.record(request)
-    event = call.event
-    turn = LinearSessionTurn.parse(event.key, event.payload)
+    event = call["event"]
+    key, payload, delivery_id = event["key"], event["payload"], event["deliveryId"]
+    if key not in _EVENT_KEYS:
+        raise HTTPException(status_code=422, detail="Unsupported Linear event")
+    try:
+        thread_id = str(UUID(call["thread"]["id"]))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="Invalid thread") from error
+    if not delivery_id or len(json.dumps(payload)) > _MAX_PAYLOAD_CHARS:
+        raise HTTPException(status_code=422, detail="Invalid Linear event")
+    await _record(request, payload, delivery_id)
+    turn = LinearSessionTurn.parse(key, cast(Any, payload))
     if turn is not None:
-        return await turn.prepare_run(str(call.thread.id))
-    if event.key in _AUTOMATION_KEYS:
-        background_tasks.add_task(_launch_automations, event.payload, event.delivery_id)
+        return await turn.prepare_run(thread_id)
+    if key in _AUTOMATION_KEYS:
+        background_tasks.add_task(_launch_automations, payload, delivery_id)
     return None
 
 

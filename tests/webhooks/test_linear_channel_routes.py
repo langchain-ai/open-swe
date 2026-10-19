@@ -119,6 +119,8 @@ async def test_a_session_turn_starts_the_run_prepared_on_the_sessions_thread(
     payload = {
         "type": "AgentSessionEvent",
         "action": "created",
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
         "agentSession": {
             "id": "session-1",
             "issue": {"id": "issue-1", "identifier": "ENG-1", "title": "Bug"},
@@ -144,6 +146,8 @@ async def test_a_session_turn_the_backend_declines_starts_nothing(
     payload = {
         "type": "AgentSessionEvent",
         "action": "created",
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
         "agentSession": {"id": "session-1", "issue": {"id": "issue-1"}},
     }
     response = await _post(app, _call("AgentSessionEvent.created", payload))
