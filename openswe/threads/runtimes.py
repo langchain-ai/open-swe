@@ -147,7 +147,7 @@ class MdaRuntime:
         if streaming:
             # Context replaces configurable on the server, so the stream marker rides in it.
             context[_V3_STREAMING_KEY] = True
-        rewritten = {**payload, "assistant_id": MDA_GRAPH_ID, "context": context}
+        rewritten: dict[str, object] = {**payload, "assistant_id": MDA_GRAPH_ID, "context": context}
         if not payload.get("langsmith_tracer"):
             # Traced where this deployment's in-process runs are.
             rewritten["langsmith_tracer"] = run_tracer()
