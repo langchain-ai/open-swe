@@ -220,6 +220,14 @@ class User(Base):
         return (user.github_login or None) if user is not None else None
 
     @classmethod
+    async def slack_mention_for_login(cls, login: str) -> str:
+        """A Slack mention for whoever has this GitHub login, or ``@login`` when Slack is not linked."""
+        user = await cls.for_login("github", login.strip()) if login.strip() else None
+        if user is not None and user.slack_user_id:
+            return f"<@{user.slack_user_id}>"
+        return f"@{login}"
+
+    @classmethod
     async def login_for_email(cls, email: str | None) -> str | None:
         """GitHub login of the person reachable at ``email``, if they are known."""
         if not email or not email.strip():

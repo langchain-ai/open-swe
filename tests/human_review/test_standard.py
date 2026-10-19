@@ -479,6 +479,29 @@ async def test_merged_card_names_only_actual_approvers(
         assert "linus" not in message
 
 
+def test_waiting_on_names_reviewers_by_slack_mention() -> None:
+    from openswe.human_review.card import open_card
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", detail="approval from @Linus <x>"
+    )
+    request.pull_request = pr
+    user = User(
+        identities=[
+            UserIdentity(provider="github", external_id="linus", login="linus"),
+            UserIdentity(provider="slack", external_id="U_linus"),
+        ]
+    )
+    participant = HumanReviewParticipant(user_id=user.id, decision="review")
+    participant.user = user
+    request.participants.append(participant)
+    _, blocks = open_card(
+        request, title="t", author="@ada", requester=None, review_states={}, approvers=""
+    )
+    assert "Waiting on: approval from <@U_linus> &lt;x&gt;." in str(block_payload(blocks))
+
+
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:
     assert summary_line("<!-- template -->\nFixes the\nretry loop.\n") == "Fixes the retry loop."
 

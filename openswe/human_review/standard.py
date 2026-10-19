@@ -51,7 +51,12 @@ from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.requests import (
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+    slack_mention,
+)
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -662,7 +667,7 @@ async def assign(
     ):
         await ReviewPicks(request).drop(
             others,
-            f"Open SWE asked @{github_login} to review {label} *{escape(pr.title)}* instead, "
+            f"Open SWE asked {slack_mention(user, github_login)} to review {label} *{escape(pr.title)}* instead, "
             "so you no longer need to.",
         )
         request = await HumanReviewRequest.get(request.id) or request
@@ -828,6 +833,11 @@ def merge_wait(
     return None
 
 
+async def _approved_it(approvers: list[str]) -> str:
+    mentions = [await User.slack_mention_for_login(login) for login in approvers]
+    return ", ".join(mentions) + " approved it"
+
+
 async def _settle_posted(
     request: HumanReviewRequest,
     pull: PullRequestClient,
@@ -858,9 +868,7 @@ async def _settle_posted(
             )
     if approved:
         await ReviewCard(request).mark_approved()
-        await ReviewPicks(request).release(
-            ", ".join(f"@{login}" for login in sorted(approvers)) + " approved it"
-        )
+        await ReviewPicks(request).release(await _approved_it(sorted(approvers)))
         return
     await _pick_remaining_owners(request, sorted(approvers))
     async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -968,9 +976,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
             await _pick_remaining_owners(request, approvers)
         else:
             picked = len(request.reviewers) + len(request.picks)
-            request = await ReviewPicks(request).release(
-                ", ".join(f"@{login}" for login in approvers) + " approved it"
-            )
+            request = await ReviewPicks(request).release(await _approved_it(approvers))
             # The unclaimed deadline already fired, so only a fresh one can pick again if the approval goes.
             if request.kind == "standard" and len(request.reviewers) + len(request.picks) < picked:
                 await _schedule(

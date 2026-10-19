@@ -41,7 +41,6 @@ from openswe.human_review.requests import (
     HumanReviewParticipant,
     HumanReviewRequest,
     RequestState,
-    slack_mention,
 )
 from openswe.prompts import prompt
 from openswe.slack.blocks import Block, block_payload, context, escape, section
@@ -286,14 +285,14 @@ class ReviewCard:
             return {}
 
     async def _approvers(self, states: dict[str, str]) -> str:
-        reviewers = {r.github_login.lower(): r.user for r in self.request.reviewers}
-        mentions: list[str] = []
-        for login, state in states.items():
-            if state != "APPROVED":
-                continue
-            user = reviewers.get(login.lower()) or await User.for_login("github", login)
-            mentions.append(slack_mention(user, login))
-        return ", ".join(mentions)
+        reviewers = {r.github_login.lower(): r.slack_mention for r in self.request.reviewers}
+        return ", ".join(
+            [
+                reviewers.get(login.lower()) or await User.slack_mention_for_login(login)
+                for login, state in states.items()
+                if state == "APPROVED"
+            ]
+        )
 
     async def _render_standard(self, outcome: str | None) -> tuple[str, list[Block]]:
         request = self.request
