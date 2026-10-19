@@ -2,8 +2,8 @@
 
 Dispatch signs one per run and stamps it on the run's configurable. The remote
 runtime sends it as a bearer token on every tool server call, and the tool server
-reads the thread and run configuration from the verified claims, never from tool
-arguments the model controls.
+reads the thread and run configuration and metadata from the verified claims, never
+from tool arguments the model controls.
 """
 
 import time
@@ -36,6 +36,7 @@ class RemoteRun(BaseModel):
     thread_id: str
     assistant_id: str
     configurable: dict[str, JsonValue]
+    metadata: dict[str, JsonValue] = {}
 
 
 def _signing_keys() -> list[str]:
@@ -60,6 +61,7 @@ def sign_runtime_token(run: RemoteRun, *, now: int | None = None) -> str:
         "sub": run.thread_id,
         "assistant_id": run.assistant_id,
         "cfg": run.configurable,
+        "md": run.metadata,
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)
 
@@ -94,6 +96,7 @@ def verify_runtime_token(token: str) -> RemoteRun:
                 "thread_id": claims.get("sub"),
                 "assistant_id": claims.get("assistant_id"),
                 "configurable": claims.get("cfg"),
+                "metadata": claims.get("md", {}),
             }
         )
     except ValidationError as exc:
