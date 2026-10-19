@@ -57,6 +57,25 @@ async def test_concierge_status_does_not_create_slack_threads(slack_api: SlackAP
     assert slack_api.calls == []
 
 
+async def test_thread_status_uses_agent_session_and_falls_back_without_agent_view(slack_api):
+    slack_api.respond({"ok": True})
+    slack_api.respond({"ok": False, "error": "not_allowed"})
+    assert await slack_utils.set_slack_thread_status("C1", "1.0", "Thinking…")
+    assert await slack_utils.set_slack_thread_status("C1", "1.0", "")
+    assert slack_api.calls == [
+        (method, {"channel_id": "C1", "thread_ts": "1.0", "status": status})
+        for method, status in [
+            ("agents.sessions.setStatus", "processing"),
+            ("agents.sessions.setStatus", "active"),
+            ("assistant.threads.setStatus", ""),
+        ]
+    ]
+    slack_api.calls.clear()
+    slack_api.respond({"ok": False, "error": "internal_error"})
+    assert not await slack_utils.set_slack_thread_status("C1", "1.0", "")
+    assert [method for method, _ in slack_api.calls] == ["agents.sessions.setStatus"]
+
+
 async def test_slack_stream_rate_limit_preserves_retry_after(slack_api):
     slack_api.respond({"ok": False}, status=429, headers={"Retry-After": "30"})
     with pytest.raises(slack_utils.SlackStreamError) as raised:

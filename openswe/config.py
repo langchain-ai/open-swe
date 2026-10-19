@@ -370,8 +370,8 @@ ENV.var(
 )
 ENV.var(
     "OPENSWE_ENV",
-    "Deployment environment; `preview` lets startup drop superseded migration revisions and "
-    "turns off reviewer auto-assignment.",
+    "Agent prompt deployment environment (production, staging, preview, or local); "
+    "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
 ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
@@ -383,9 +383,11 @@ ENV.var(
     "Log application queries at or above this duration in milliseconds; 0 disables.",
     default="1000",
 )
-ENV.var("ANALYTICS_POOL_SIZE", "Analytics PostgreSQL connection pool size.", default="5")
-ENV.var("ANALYTICS_POOL_OVERFLOW", "Analytics PostgreSQL pool overflow.", default="5")
-ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "Analytics pool checkout timeout.", default="5")
+ENV.var("ANALYTICS_POOL_SIZE", "PostgreSQL connection pool size per process.", default="20")
+ENV.var(
+    "ANALYTICS_POOL_OVERFLOW", "PostgreSQL connections allowed beyond the pool size.", default="20"
+)
+ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "PostgreSQL pool checkout timeout.", default="5")
 ENV.var("ANALYTICS_HEALTH_TIMEOUT_SECONDS", "Analytics readiness timeout.", default="3")
 ENV.var("ANALYTICS_OUTBOX_MAX_ATTEMPTS", "Delivery attempts before dead-lettering.", default="10")
 ENV.var("ANALYTICS_RAW_EVENT_MONTHS", "Online raw-event retention.", default="25")

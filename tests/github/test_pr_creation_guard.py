@@ -11,10 +11,10 @@ from openswe.middleware.pr_creation_guard import (
 
 
 class _Request:
-    def __init__(self, command: str, name: str = "execute") -> None:
+    def __init__(self, command: str, name: str = "execute", **args: str) -> None:
         self.tool_call = {
             "name": name,
-            "args": {"command": command},
+            "args": {"command": command, **args},
             "id": "call-1",
         }
 
@@ -86,6 +86,17 @@ async def test_middleware_blocks_execute_pr_creation_fallbacks() -> None:
 async def test_middleware_blocks_background_pr_creation_fallback() -> None:
     result = await PullRequestCreationGuardMiddleware().awrap_tool_call(
         cast(ToolCallRequest, _Request("gh pr create --draft", "background_execute")), _handler
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+
+
+async def test_middleware_blocks_pr_creation_hidden_in_a_monitor_filter() -> None:
+    request = _Request("true", "monitor", action="start", filter="gh pr create --draft")
+
+    result = await PullRequestCreationGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, request), _handler
     )
 
     assert isinstance(result, ToolMessage)

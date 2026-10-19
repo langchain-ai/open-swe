@@ -141,7 +141,7 @@ export interface ChatComposerProps {
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
-  /** The run target is a staged move that takes effect with the next message. */
+  /** The thread is still moving to the run target, checkout and all. */
   runTargetPending?: boolean
   localRepos?: Array<DesktopProject>
   selectedLocalRepoPath?: string | null

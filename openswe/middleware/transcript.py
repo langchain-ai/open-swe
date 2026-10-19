@@ -22,7 +22,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from uuid import UUID
@@ -32,7 +32,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.callbacks.manager import AsyncCallbackManager, CallbackManager
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolCall, ToolMessage
 from langgraph.config import get_config
-from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command as GraphCommand
 from langgraph_sdk import get_client
@@ -197,6 +197,70 @@ class RunState:
             return
         for command in commands:
             self.queue.put_nowait(command)
+
+    def start_tool(
+        self,
+        tool_call: ToolCall,
+        tool_call_id: str,
+        messages: object,
+        namespace: list[str],
+    ) -> None:
+        name = tool_call.get("name") or "tool"
+        try:
+            self.enqueue(
+                Command(
+                    command_id=f"tool:{tool_call_id}:started",
+                    event=ToolStarted(
+                        type="tool.started",
+                        turn_id=self.turn_id,
+                        tool_call_id=tool_call_id,
+                        message_id=_issuing_message_id(self, messages, tool_call_id),
+                        name=name,
+                        input=_json_object(tool_call.get("args")),
+                        namespace=namespace,
+                    ),
+                    actor_kind="agent",
+                    run_id=self.run_id,
+                    turn_id=self.turn_id,
+                )
+            )
+        except Exception:
+            logger.warning("Transcript tool start failed", exc_info=True, extra={"tool_name": name})
+
+    def complete_tool(
+        self,
+        tool_call_id: str,
+        namespace: list[str],
+        status: Literal["completed", "error"],
+        text: str,
+        truncated: bool,
+    ) -> None:
+        try:
+            self.enqueue(
+                Command(
+                    command_id=f"tool:{tool_call_id}:completed",
+                    event=ToolCompleted(
+                        type="tool.completed",
+                        turn_id=self.turn_id,
+                        tool_call_id=tool_call_id,
+                        status=status,
+                        output_preview=text[:TOOL_OUTPUT_PREVIEW_CHARS] or None,
+                        output_truncated=truncated,
+                        has_output=bool(text),
+                        namespace=namespace,
+                    ),
+                    actor_kind="agent",
+                    run_id=self.run_id,
+                    turn_id=self.turn_id,
+                    tool_output=text,
+                )
+            )
+        except Exception:
+            logger.warning(
+                "Transcript tool completion failed",
+                exc_info=True,
+                extra={"transcript_tool_call_id": tool_call_id},
+            )
 
 
 _runs: dict[str, RunState] = {}
@@ -528,6 +592,64 @@ class _DeltaHandler(AsyncCallbackHandler):
                 "Transcript delta capture failed",
                 exc_info=True,
                 extra={"transcript_message_id": self.message_id},
+            )
+
+
+class _NestedToolHandler(AsyncCallbackHandler):
+    """Records the tools a tool call runs itself, such as those code calls from ``eval``.
+
+    Those calls never pass through the tools node, so ``awrap_tool_call`` cannot
+    see them; their tool callbacks are the only place they surface. They are
+    recorded under the call that ran them, which the reader shows them inside.
+    """
+
+    run_inline = True
+
+    def __init__(self, state: RunState, namespace: list[str]) -> None:
+        self._state = state
+        self._namespace = namespace
+        self._calls: dict[UUID, str] = {}
+
+    async def on_tool_start(
+        self,
+        serialized: dict[str, object],
+        input_str: str,
+        *,
+        run_id: UUID,
+        inputs: dict[str, object] | None = None,
+        **kwargs: object,
+    ) -> None:
+        given = kwargs.get("tool_call_id")
+        tool_call_id = given if isinstance(given, str) and given else str(run_id)
+        name = serialized.get("name") if serialized else None
+        args = {k: v for k, v in (inputs or {}).items() if not isinstance(v, ToolRuntime)}
+        self._calls[run_id] = tool_call_id
+        self._state.start_tool(
+            ToolCall(name=name if isinstance(name, str) else "tool", args=args, id=tool_call_id),
+            tool_call_id,
+            None,
+            self._namespace,
+        )
+
+    async def on_tool_end(self, output: object, *, run_id: UUID, **kwargs: object) -> None:
+        tool_call_id = self._calls.pop(run_id, None)
+        if tool_call_id is None:
+            return
+        if isinstance(output, ToolMessage):
+            self._state.complete_tool(
+                tool_call_id, self._namespace, *_result_output(output, tool_call_id)
+            )
+            return
+        self._state.complete_tool(tool_call_id, self._namespace, "completed", *_tool_output(output))
+
+    async def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: object) -> None:
+        tool_call_id = self._calls.pop(run_id, None)
+        if tool_call_id is not None:
+            self._state.complete_tool(
+                tool_call_id,
+                self._namespace,
+                "error",
+                *_tool_output(f"{type(error).__name__}: {error}"),
             )
 
 
@@ -1038,10 +1160,12 @@ class TranscriptMiddleware(OpenSWEMiddleware):
 
         namespace = current_namespace()
         messages = request.state.get("messages") if isinstance(request.state, Mapping) else None
-        self._start_tool(state, tool_call, tool_call_id, messages, namespace)
+        state.start_tool(tool_call, tool_call_id, messages, namespace)
         token = _namespace.set((*_namespace.get(), tool_call_id))
         try:
-            result = await handler(request)
+            result = await handler(
+                _observing_nested_tools(request, state, [*namespace, tool_call_id])
+            )
         except asyncio.CancelledError:
             # A stopped tool never finished, and it did not fail either: leaving
             # it open is what keeps the reader showing the work the run was in
@@ -1054,8 +1178,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 await self._interrupt_turn(state)
             raise
         except Exception as exc:
-            self._complete_tool(
-                state,
+            state.complete_tool(
                 tool_call_id,
                 namespace,
                 "error",
@@ -1064,7 +1187,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             raise
         finally:
             _namespace.reset(token)
-        self._complete_tool(state, tool_call_id, namespace, *_result_output(result, tool_call_id))
+        state.complete_tool(tool_call_id, namespace, *_result_output(result, tool_call_id))
         return result
 
     async def atool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
@@ -1072,83 +1195,16 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         state = _lookup_state()
         tool_call_id = tool_call.get("id")
         if state.enabled and tool_call_id:
-            self._start_tool(state, tool_call, tool_call_id, messages, current_namespace())
+            state.start_tool(tool_call, tool_call_id, messages, current_namespace())
 
     async def atool_finished(self, result: ToolMessage) -> None:
         """Record how a tool call ``atool_started`` recorded ended."""
         state = _lookup_state()
         if state.enabled:
-            self._complete_tool(
-                state,
+            state.complete_tool(
                 result.tool_call_id,
                 current_namespace(),
                 *_result_output(result, result.tool_call_id),
-            )
-
-    def _start_tool(
-        self,
-        state: RunState,
-        tool_call: ToolCall,
-        tool_call_id: str,
-        messages: object,
-        namespace: list[str],
-    ) -> None:
-        name = tool_call.get("name") or "tool"
-        try:
-            state.enqueue(
-                Command(
-                    command_id=f"tool:{tool_call_id}:started",
-                    event=ToolStarted(
-                        type="tool.started",
-                        turn_id=state.turn_id,
-                        tool_call_id=tool_call_id,
-                        message_id=_issuing_message_id(state, messages, tool_call_id),
-                        name=name,
-                        input=_json_object(tool_call.get("args")),
-                        namespace=namespace,
-                    ),
-                    actor_kind="agent",
-                    run_id=state.run_id,
-                    turn_id=state.turn_id,
-                )
-            )
-        except Exception:
-            logger.warning("Transcript tool start failed", exc_info=True, extra={"tool_name": name})
-
-    def _complete_tool(
-        self,
-        state: RunState,
-        tool_call_id: str,
-        namespace: list[str],
-        status: Literal["completed", "error"],
-        text: str,
-        truncated: bool,
-    ) -> None:
-        try:
-            state.enqueue(
-                Command(
-                    command_id=f"tool:{tool_call_id}:completed",
-                    event=ToolCompleted(
-                        type="tool.completed",
-                        turn_id=state.turn_id,
-                        tool_call_id=tool_call_id,
-                        status=status,
-                        output_preview=text[:TOOL_OUTPUT_PREVIEW_CHARS] or None,
-                        output_truncated=truncated,
-                        has_output=bool(text),
-                        namespace=namespace,
-                    ),
-                    actor_kind="agent",
-                    run_id=state.run_id,
-                    turn_id=state.turn_id,
-                    tool_output=text,
-                )
-            )
-        except Exception:
-            logger.warning(
-                "Transcript tool completion failed",
-                exc_info=True,
-                extra={"transcript_tool_call_id": tool_call_id},
             )
 
     async def _interrupt_turn(self, state: RunState) -> None:
@@ -1327,6 +1383,26 @@ def _result_output(
         return "completed", "", False
     status: Literal["completed", "error"] = "error" if message.status == "error" else "completed"
     return status, *_tool_output(message.content)
+
+
+def _observing_nested_tools(
+    request: ToolCallRequest, state: RunState, namespace: list[str]
+) -> ToolCallRequest:
+    """``request`` with a runtime whose callbacks record the tools the call runs itself.
+
+    The handler is not inherited, so a subagent the call runs keeps recording its
+    own tool calls through this middleware rather than here.
+    """
+    runtime: ToolRuntime | None = request.runtime
+    if runtime is None:
+        return request
+    config = runtime.config
+    callbacks = config.get("callbacks")
+    if not isinstance(callbacks, (CallbackManager, AsyncCallbackManager)):
+        return request
+    observed = callbacks.copy()
+    observed.add_handler(_NestedToolHandler(state, namespace), inherit=False)
+    return request.override(runtime=replace(runtime, config={**config, "callbacks": observed}))
 
 
 def _attach(handler: AsyncCallbackHandler) -> CallbackManager | AsyncCallbackManager | None:

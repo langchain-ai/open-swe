@@ -61,7 +61,7 @@ echo "  Slack/GitHub are mocked. Open two browser profiles to be"
 echo "  two users (Alice owns the plan; Bob can comment + request changes)."
 echo
 
-# Agent and reviewer threads run on the Managed Deep Agents server beside it.
+# Every Open SWE thread runs on the Managed Deep Agents server beside it.
 E2E_REAL_LLM="${REAL_LLM}" tests/e2e/mda-dev.sh &
 MDA=$!
 E2E_REAL_LLM="${REAL_LLM}" uv run langgraph dev --config tests/e2e/langgraph.e2e.json \

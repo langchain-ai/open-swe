@@ -174,12 +174,6 @@ interface ModelRowProps {
   description: string
   modelField: StringSettingField
   effortField: StringSettingField
-  /**
-   * Label of the picker's "unset" option on the instance, for roles that fall
-   * back to another role there. On a workspace the same option only clears the
-   * override, so it reads as inheritance instead: the instance may set a model.
-   */
-  inheritLabel?: string
 }
 
 function ModelRow({
@@ -189,7 +183,6 @@ function ModelRow({
   description,
   modelField,
   effortField,
-  inheritLabel,
 }: ModelRowProps) {
   const patch = (model: string | null, effort: string | null) => {
     const next: Partial<WorkspaceSettings> = {}
@@ -218,19 +211,6 @@ function ModelRow({
           parentModel={
             modelField === "default_agent_subagent_model"
               ? settings.data?.default_agent_model
-              : undefined
-          }
-          inheritLabel={
-            inheritLabel && settings.scope.kind === "workspace"
-              ? "Inherit instance setting"
-              : inheritLabel
-          }
-          onInherit={
-            inheritLabel
-              ? () =>
-                  settings.scope.kind === "instance"
-                    ? settings.save(patch(null, null))
-                    : settings.reset(modelField, effortField)
               : undefined
           }
         />
@@ -338,19 +318,6 @@ export function ModelDefaultsSection({
           description="Model used by delegated reviewer tasks."
           modelField="default_reviewer_subagent_model"
           effortField="default_reviewer_subagent_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Open SWE Review Chat"
-          description={`Model used by the 'chat with this PR' assistant on the review page. ${
-            scoped
-              ? "Unset here it follows the instance setting, and only falls back to the Agent default when the instance leaves it unset too."
-              : "Falls back to the Agent default when unset."
-          }`}
-          modelField="default_chat_model"
-          effortField="default_chat_reasoning_effort"
-          inheritLabel="Agent default"
         />
       </div>
     </SettingsSection>
