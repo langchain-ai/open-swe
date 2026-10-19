@@ -21,6 +21,7 @@ dev: $(if $(POSTGRES_URI),,postgres)
 
 # The Managed Deep Agents runtime `make dev` sends every agent run to (mda/README.md).
 dev-mda:
+	scripts/mda_cli.sh
 	cd mda && uv run --locked mda dev --port 2025 --no-browser
 
 postgres:

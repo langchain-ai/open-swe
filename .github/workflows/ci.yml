@@ -79,6 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: ./.github/actions/mda-runtime
+        with:
+          token: ${{ secrets.MDA_SDK_SOURCE_TOKEN }}
       - name: Check the MDA project imports nothing from the backend
         run: make mda-boundary
 
@@ -317,9 +320,11 @@ jobs:
         timeout-minutes: 5
         run: uv sync --locked
       - name: Install Python deps (Managed Deep Agents runtime)
-        timeout-minutes: 5
-        working-directory: mda
-        run: uv sync --locked
+        timeout-minutes: 15
+        uses: ./.github/actions/mda-runtime
+        with:
+          token: ${{ secrets.MDA_SDK_SOURCE_TOKEN }}
+          cli: "true"
       - run: corepack enable
       # Chromium and the dashboard build are identical across the three shards
       # and change only with their own inputs, so all three restore them rather
@@ -363,7 +368,8 @@ jobs:
     needs: e2e-changes
     if: ${{ needs.e2e-changes.outputs.desktop == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A cold build of a pinned SDK commit's mda CLI takes several minutes.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
@@ -388,9 +394,11 @@ jobs:
         timeout-minutes: 5
         run: uv sync --locked
       - name: Install Python deps (Managed Deep Agents runtime)
-        timeout-minutes: 5
-        working-directory: mda
-        run: uv sync --locked
+        timeout-minutes: 15
+        uses: ./.github/actions/mda-runtime
+        with:
+          token: ${{ secrets.MDA_SDK_SOURCE_TOKEN }}
+          cli: "true"
       - run: corepack enable
       - name: Install workspace dependencies
         timeout-minutes: 5

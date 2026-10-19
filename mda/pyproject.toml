@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 # Named sandboxes, create fields and an unmanaged proxy (langchain-ai/managed-deepagents-sdk
-# branch ramon/open-swe-sandboxes, on 0.9.3); the preview deploys it once approved (README).
+# branch ramon-langchain/open-swe-sandboxes, on 0.9.3); the preview deploys it once approved (README).
 [tool.uv.sources]
 managed-deepagents = { git = "https://github.com/langchain-ai/managed-deepagents-sdk", rev = "6fa736de672fb327f4917efcfa06220fad49a158", subdirectory = "packages/pypi" }
 
