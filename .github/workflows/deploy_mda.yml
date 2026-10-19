@@ -90,7 +90,12 @@ jobs:
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
           # Shared with this environment's backend: the Linear channel presents it when it hands events over.
-          MDA_SERVICE_SECRET: ${{ secrets[format('MDA_SERVICE_SECRET_{0}', matrix.environment)] }}
+          # Each secret is named statically, so the runner gets only these, not every secret.
+          MDA_SERVICE_SECRET: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_SERVICE_SECRET_PROD
+            || matrix.environment == 'staging' && secrets.MDA_SERVICE_SECRET_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_SERVICE_SECRET_PREVIEW
+            || '' }}
         run: |
           case "$ENVIRONMENT" in
             preview) backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" ;;
