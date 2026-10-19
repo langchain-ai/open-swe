@@ -771,6 +771,8 @@ class ReviewCard:
     async def mark_merged(self) -> None:
         updated = await self.retire("merged", "merged")
         if updated is not None:
+            if updated.kind == "posted":
+                await self._react("merged", "twisted_rightwards_arrows")
             await ReviewPicks(updated).release("it was merged")
 
     async def mark_closed(self) -> None:

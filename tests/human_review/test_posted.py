@@ -156,7 +156,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     snapshot.check_state = "failure"
     snapshot.merged = True
     snapshot.state = "closed"
-    await settle_with_reactions(set())
+    await settle_with_reactions({"merged"})
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.state == "merged"
 
