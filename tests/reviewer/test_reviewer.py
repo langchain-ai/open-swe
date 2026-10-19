@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -281,10 +282,7 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
-    """The reviewer must fetch the PR's unified diff via the GitHub API and
-    populate ``configurable['diff_line_set']`` + ``diff_text`` so
-    ``add_finding`` can reject anchors not in the PR diff at creation time.
-    Without this, bad anchors only fail at publish_review with a 422."""
+    """Prepare finding anchors without storing the full diff in graph state."""
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -293,8 +291,8 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             "repo": {"owner": "acme", "name": "repo"},
             "pr_number": 42,
             "pr_url": "https://github.com/acme/repo/pull/42",
-            "base_sha": "base",
-            "head_sha": "head",
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
         },
         "metadata": {},
     }
@@ -344,6 +342,11 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             new_callable=AsyncMock,
             return_value=pr_diff,
         ) as mock_fetch_diff,
+        patch(
+            "openswe.reviewer.materialize_review_diff",
+            new_callable=AsyncMock,
+            return_value=SimpleNamespace(path="/workspace/review.patch", diff_text=pr_diff),
+        ),
         patch("openswe.reviewer.make_model", return_value=MagicMock()),
         patch("openswe.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
@@ -356,5 +359,6 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
     mock_fetch_diff.assert_awaited_once_with(
         owner="acme", repo="repo", pr_number=42, token="gh-token"
     )
-    assert updates["diff_text"] == pr_diff
-    assert updates["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}
+    assert updates["diff_path"] == "/workspace/review.patch"
+    assert "diff_text" not in updates
+    assert updates["diff_line_set"] == {"in_diff.py": {"RIGHT": [10], "LEFT": [1]}}

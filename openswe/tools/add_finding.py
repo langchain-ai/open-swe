@@ -23,6 +23,7 @@ from openswe.review.findings import (
     thread_missing_tool_result,
 )
 from openswe.run_config import RunConfig
+from openswe.runtime import get_cached_sandbox_backend
 
 
 async def add_finding(
@@ -131,6 +132,13 @@ async def _resolve_diff_context(
         state_line_set = state.get("diff_line_set")
         state_diff_text = state.get("diff_text")
         if isinstance(state_line_set, dict):
+            diff_path = state.get("diff_path")
+            if isinstance(diff_path, str) and diff_path and cfg.thread_id:
+                backend = get_cached_sandbox_backend(cfg.thread_id)
+                downloads = await backend.adownload_files([diff_path])
+                if not downloads or downloads[0].error or downloads[0].content is None:
+                    raise RuntimeError("Failed to read review diff for finding context")
+                state_diff_text = downloads[0].content.decode()
             return state_line_set, state_diff_text if isinstance(state_diff_text, str) else ""
     if cfg.diff_line_set is not None:
         return cfg.diff_line_set, cfg.diff_text or ""

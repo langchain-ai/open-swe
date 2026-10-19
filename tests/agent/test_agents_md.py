@@ -69,14 +69,24 @@ async def test_scoped_docs_read_base_tree_not_head(tmp_path: Path) -> None:
 
     backend = MagicMock()
     backend.aexecute = execute
+
+    async def upload(files: list[tuple[str, bytes]]) -> list[SimpleNamespace]:
+        for path, content in files:
+            Path(path).write_bytes(content)
+        return [SimpleNamespace(error=None) for _ in files]
+
+    backend.aupload_files = upload
     result = await agents_md.fetch_scoped_agents_md(backend, str(tmp_path), base, ["ui/app.py"])
     assert result == {"ui/AGENTS.md": "trusted"}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", [TimeoutError("sandbox timed out"), "git warning\n{}"])
-async def test_scoped_docs_failures_are_best_effort(failure: Exception | str) -> None:
+async def test_scoped_docs_failures_are_best_effort(
+    failure: Exception | str, caplog: pytest.LogCaptureFixture
+) -> None:
     backend = MagicMock()
+    backend.aupload_files = AsyncMock(return_value=[SimpleNamespace(error=None)])
     backend.aexecute = (
         AsyncMock(side_effect=failure)
         if isinstance(failure, Exception)
@@ -84,3 +94,4 @@ async def test_scoped_docs_failures_are_best_effort(failure: Exception | str) ->
     )
     result = await agents_md.fetch_scoped_agents_md(backend, "/repo", "base", ["ui/app.py"])
     assert result == {}
+    assert "Failed to load scoped agent docs" in caplog.text

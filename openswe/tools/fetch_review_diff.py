@@ -24,14 +24,16 @@ async def fetch_review_diff() -> dict[str, Any]:
         return {"success": False, "error": "review repository unavailable"}
 
     try:
-        base_ref, head_ref, merge_base = review_diff_range(
+        sandbox_backend = get_cached_sandbox_backend(thread_id)
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+        base_ref, head_ref, merge_base = await review_diff_range(
+            sandbox_backend,
+            work_dir=f"{work_dir}/{repo_name}",
             base_sha=cfg.base_sha or "",
             head_sha=cfg.head_sha or "",
             last_reviewed_sha=cfg.last_reviewed_sha or "",
             re_review=bool(cfg.re_review),
         )
-        sandbox_backend = get_cached_sandbox_backend(thread_id)
-        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         materialized = await materialize_review_diff(
             sandbox_backend,
             work_dir=f"{work_dir}/{repo_name}",
