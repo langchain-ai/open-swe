@@ -1,6 +1,8 @@
 """Where runs are traced: the LangSmith SDK's own project setting."""
 
 from langsmith.address import EnvAddressError, resolve_destination
+from langsmith.utils import get_tracer_project
+from pydantic import JsonValue
 
 from openswe.config import ENV
 
@@ -17,9 +19,22 @@ def tracing_project() -> str:
     return ENV.LANGSMITH_PROJECT.get()
 
 
-def traces_to_agent() -> bool:
-    """Whether the SDK traces into an agent environment, by the LANGSMITH_AGENT_* variables."""
+def run_tracer() -> dict[str, JsonValue]:
+    """The ``langsmith_tracer`` a run sent to MDA carries, so it traces where in-process runs do.
+
+    The agent address when the environment names one, else the project. A broken
+    environment leaves the SDK's own runs untraced, so it falls back to the project name.
+    """
     try:
-        return resolve_destination()[1] is not None
+        project, address = resolve_destination()
     except EnvAddressError:
-        return False
+        return {"project_name": get_tracer_project()}
+    if address:
+        return {
+            "address": {
+                "kind": address["kind"],
+                "id": address["id"],
+                "environment": address["environment"],
+            }
+        }
+    return {"project_name": project or get_tracer_project()}
