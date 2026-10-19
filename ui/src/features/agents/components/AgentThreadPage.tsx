@@ -23,6 +23,7 @@ export function AgentThreadPage(props: {
   composerDraft?: { key: number; text: string }
   /** False when the thread is embedded in a page that names the tab itself. */
   ownsTitle?: boolean
+  embedded?: boolean
 }) {
   return (
     <CatchBoundary
@@ -47,12 +48,14 @@ function AgentThreadContent({
   subagentId,
   composerDraft,
   ownsTitle = true,
+  embedded = false,
 }: {
   threadId: string
   active?: boolean
   subagentId?: string
   composerDraft?: { key: number; text: string }
   ownsTitle?: boolean
+  embedded?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)
   const transcript = threadQuery.data?.transcript === "v2"
@@ -116,6 +119,7 @@ function AgentThreadContent({
           <AgentThreadView
             thread={threadQuery.data}
             composerDraft={composerDraft}
+            embedded={embedded}
           />
         )}
       </ThreadSourceProvider>
