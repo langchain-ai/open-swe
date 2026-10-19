@@ -20,7 +20,7 @@ from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient, PullRequestReviewer
 from openswe.run_config import RunConfig
-from openswe.slack.blocks import Block, context, escape, section
+from openswe.slack.blocks import Block, escape, section
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
 from openswe.slacklets.kind import (
     Frozen,
@@ -142,8 +142,8 @@ class PullRequestView(SlackletState):
         """The commands that take ``stored`` to this observation."""
         return stored.commands_to(self)
 
-    def blocks(self, *, seq: int, op: str) -> list[Block]:
-        """The slacklet message for this state, reached by command ``seq``."""
+    def blocks(self) -> list[Block]:
+        """The slacklet message for this state."""
         ci = _CI_LABELS[self.ci.status]
         if self.ci.failed:
             ci = f"{ci}: {escape(', '.join(self.ci.failed))}"
@@ -159,10 +159,7 @@ class PullRequestView(SlackletState):
                     for reviewer, verdict in sorted(self.reviews.items())
                 )
             )
-        return [
-            section("\n".join(lines)),
-            context(f"Pull request slacklet · state after #{seq} {op}"),
-        ]
+        return [section("\n".join(lines))]
 
     def fallback_text(self) -> str:
         return (

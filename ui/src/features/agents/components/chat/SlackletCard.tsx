@@ -73,13 +73,14 @@ export const SlackletCard = memo(function SlackletCard({
           >
             <SlackBlocks blocks={data.blocks} />
           </div>
-          <details open className="mt-space-3">
-            <summary className="cursor-pointer text-xxs text-secondary">
-              Command log · {data.commands.length}
+          <details data-testid="slacklet-log" className="mt-space-2">
+            <summary className="w-fit cursor-pointer text-xxs text-tertiary hover:text-secondary">
+              {data.commands.length}{" "}
+              {data.commands.length === 1 ? "command" : "commands"}
             </summary>
             <ol
               data-testid="slacklet-commands"
-              className="mt-space-2 flex flex-col gap-space-1 font-mono text-xxs"
+              className="mt-space-1 flex flex-col gap-0.5 font-mono text-xxs text-secondary"
             >
               {data.commands.map((command) => (
                 <li
@@ -87,10 +88,10 @@ export const SlackletCard = memo(function SlackletCard({
                   className="flex gap-space-2"
                   title={JSON.stringify(command.command)}
                 >
-                  <span className="shrink-0 text-secondary">
+                  <span className="shrink-0">
                     #{command.seq} {command.op}
                   </span>
-                  <span className="min-w-0 [overflow-wrap:anywhere] text-primary">
+                  <span className="min-w-0 [overflow-wrap:anywhere]">
                     {command.summary}
                   </span>
                 </li>

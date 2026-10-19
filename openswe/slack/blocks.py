@@ -168,9 +168,32 @@ class InputBlock(TypedDict):
     optional: NotRequired[bool]
 
 
+class HeaderBlock(TypedDict):
+    type: Literal["header"]
+    text: PlainText
+
+
+type ContainerChild = SectionBlock | ContextBlock | DividerBlock | HeaderBlock
+
+
+class ContainerBlock(TypedDict):
+    """Groups up to 10 child blocks under a title; collapsible when ``is_collapsible``."""
+
+    type: Literal["container"]
+    title: PlainText
+    child_blocks: list[ContainerChild]
+    subtitle: NotRequired[TextObject]
+    width: NotRequired[Literal["narrow", "standard", "wide", "full"]]
+    is_collapsible: NotRequired[bool]
+    default_collapsed: NotRequired[bool]
+    has_header_divider: NotRequired[bool]
+
+
 type Block = (
     SectionBlock
     | MarkdownBlock
+    | HeaderBlock
+    | ContainerBlock
     | ContextBlock
     | DividerBlock
     | ImageBlock

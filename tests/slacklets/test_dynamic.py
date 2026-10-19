@@ -54,5 +54,5 @@ def test_programs_get_no_clock_randomness_io_or_unbounded_time(body: str) -> Non
 def test_render_may_only_use_blocks_every_surface_draws() -> None:
     source = _CHECKLIST.replace('type: "section", text:', 'type: "actions", elements: [], text:')
 
-    with pytest.raises(SlackletProgramError, match="section, context and divider"):
+    with pytest.raises(SlackletProgramError, match="section, context, divider"):
         _kind(source).apply(None, ProgramCommand(op="init", params={"items": []}))

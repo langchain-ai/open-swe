@@ -25,8 +25,8 @@ class SlackletState(Frozen):
         """Which slacklet this is, for the agent, e.g. "the pull request slacklet for <url>"."""
 
     @abstractmethod
-    def blocks(self, *, seq: int, op: str) -> list[Block]:
-        """The slacklet message for this state, reached by command ``seq``, an ``op``."""
+    def blocks(self) -> list[Block]:
+        """The slacklet message for this state."""
 
     @abstractmethod
     def fallback_text(self) -> str:

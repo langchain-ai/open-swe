@@ -86,6 +86,13 @@ type SlackBlock = {
   type?: string
   text?: SlackTextObject
   elements?: Array<SlackElement>
+  /** Container blocks: a titled group of child blocks, optionally collapsible. */
+  title?: SlackTextObject
+  subtitle?: SlackTextObject
+  child_blocks?: Array<SlackBlock>
+  is_collapsible?: boolean
+  default_collapsed?: boolean
+  has_header_divider?: boolean
 }
 type SlackButton = { label: string; answer?: string }
 
@@ -181,6 +188,57 @@ export function SlackBlocks({ blocks }: { blocks: Array<object> }) {
   return isSlackBlockArray(blocks) ? renderSlackBlocks(blocks) : null
 }
 
+function SlackContainer({ block }: { block: SlackBlock }) {
+  const heading = (
+    <span className="flex min-w-0 flex-col">
+      <span className="font-semibold [overflow-wrap:anywhere]">
+        {block.title?.text}
+      </span>
+      {isSlackTextObject(block.subtitle) && (
+        <span className="text-xxs [overflow-wrap:anywhere] text-secondary">
+          <SlackText text={block.subtitle} />
+        </span>
+      )}
+    </span>
+  )
+  const children = renderSlackBlocks(block.child_blocks ?? [])
+  if (block.is_collapsible) {
+    return (
+      <details
+        data-testid="slack-container"
+        open={!block.default_collapsed}
+        className="group rounded-md border border-default px-space-3 py-space-2"
+      >
+        <summary className="flex cursor-pointer list-none items-start gap-space-2 [&::-webkit-details-marker]:hidden">
+          <span
+            aria-hidden
+            className="mt-0.5 text-xxs text-secondary transition-transform group-open:rotate-90"
+          >
+            ▶
+          </span>
+          {heading}
+        </summary>
+        <div className="mt-space-2">{children}</div>
+      </details>
+    )
+  }
+  return (
+    <section
+      data-testid="slack-container"
+      className="flex flex-col gap-space-2 rounded-md border border-default px-space-3 py-space-2"
+    >
+      <div
+        className={
+          block.has_header_divider ? "border-b border-subtle pb-space-2" : ""
+        }
+      >
+        {heading}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
   return (
     <div className="flex flex-col gap-space-2">
@@ -228,6 +286,23 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
         }
         if (block.type === "divider") {
           return <div key={index} className="border-t border-subtle" />
+        }
+        if (block.type === "header" && isSlackTextObject(block.text)) {
+          return (
+            <div
+              key={index}
+              className="text-sm font-semibold [overflow-wrap:anywhere]"
+            >
+              {block.text.text}
+            </div>
+          )
+        }
+        if (
+          block.type === "container" &&
+          isSlackTextObject(block.title) &&
+          isSlackBlockArray(block.child_blocks)
+        ) {
+          return <SlackContainer key={index} block={block} />
         }
         return null
       })}

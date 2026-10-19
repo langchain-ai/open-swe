@@ -56,7 +56,10 @@ async function github(
 }
 
 function slacklet(page: Page) {
-  return page.locator(".msg.bot").filter({ hasText: "Pull request slacklet" });
+  return page
+    .locator(".msg.bot")
+    .filter({ hasText: "Add a greeting helper" })
+    .filter({ hasNotText: "The slacklet sent me" });
 }
 
 test.describe("Pull request slacklet", () => {
@@ -109,15 +112,13 @@ test.describe("Pull request slacklet", () => {
     await expect(slacklet(page)).toContainText("Add a greeting helper");
     await expect(slacklet(page)).toContainText("Draft");
     await expect(slacklet(page)).toContainText("CI running");
-    await expect(slacklet(page)).toContainText("state after #1 attach");
 
     // 2. The author marks it ready for review.
     await github(request, number, { draft: false }, "pull_request", {
       action: "ready_for_review",
       pull_request: pullRequest,
     });
-    await expect(slacklet(page)).toContainText("state after #2 set_status");
-    await expect(slacklet(page)).toContainText("Open");
+    await expect(slacklet(page)).toContainText("🟢 Open");
 
     // 3. CI finishes green on the first head.
     await github(
@@ -145,7 +146,6 @@ test.describe("Pull request slacklet", () => {
         },
       },
     );
-    await expect(slacklet(page)).toContainText("state after #3 set_ci");
     await expect(slacklet(page)).toContainText("CI passing");
 
     // 4. Bob asks for changes.
@@ -174,7 +174,6 @@ test.describe("Pull request slacklet", () => {
         pull_request: pullRequest,
       },
     );
-    await expect(slacklet(page)).toContainText("state after #4 set_review");
     await expect(slacklet(page)).toContainText("Reviews: 🔁 bob");
 
     // 5. Alice pushes a fix: a new head, and CI starts over.
@@ -197,7 +196,7 @@ test.describe("Pull request slacklet", () => {
       "pull_request",
       { action: "synchronize", pull_request: pullRequest },
     );
-    await expect(slacklet(page)).toContainText("state after #5 set_head");
+    await expect(slacklet(page)).toContainText(`head ${newHead.slice(0, 7)}`);
     await expect(slacklet(page)).toContainText("CI running");
 
     // 6. The same delivery again, as GitHub retries: nothing changed, so no command.
@@ -233,7 +232,6 @@ test.describe("Pull request slacklet", () => {
         },
       },
     );
-    await expect(slacklet(page)).toContainText("state after #6 set_ci");
     await expect(slacklet(page)).toContainText("CI failing: lint");
 
     // The command log stays out of Slack: the thread holds the request and the one slacklet.
@@ -256,6 +254,7 @@ test.describe("Pull request slacklet", () => {
     await expect(page.getByTestId("slacklet-message")).toContainText(
       "CI failing: lint",
     );
+    await page.getByTestId("slacklet-log").locator("summary").click();
     await expect(
       page.getByTestId("slacklet-commands").locator("li"),
     ).toHaveText([

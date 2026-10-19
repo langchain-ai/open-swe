@@ -14,7 +14,10 @@ import { SAME_USER, loginAs } from "./helpers/dashboard";
 //   the web UI shows the same message and the command log.
 
 function slacklet(page: Page) {
-  return page.locator(".msg.bot").filter({ hasText: "Release checklist ·" });
+  return page
+    .locator(".msg.bot")
+    .filter({ hasText: "Release v1.2.0" })
+    .filter({ hasNotText: "Checklist is live" });
 }
 
 test.describe("Agent-defined slacklet", () => {
@@ -56,9 +59,14 @@ test.describe("Agent-defined slacklet", () => {
     await expect(slacklet(page)).toContainText("✅ Tag v1.2.0");
     await expect(slacklet(page)).toContainText("⬜ Publish notes");
     await expect(slacklet(page)).toContainText("1 of 3 done");
-    await expect(slacklet(page)).toContainText(
-      "Release checklist · state after #2 check",
-    );
+    await expect(slacklet(page)).not.toContainText("#2 check");
+
+    // The checklist sits in a collapsible container, open until someone folds it.
+    const box = slacklet(page).locator("details.container");
+    await expect(box).toHaveAttribute("open", "");
+    await box.locator("summary").click();
+    await expect(box).not.toHaveAttribute("open", "");
+    await expect(box.getByText("⬜ Publish notes")).toBeHidden();
 
     await loginAs(page, SAME_USER);
     await page.goto(`/agents/${threadId}`);
@@ -66,6 +74,16 @@ test.describe("Agent-defined slacklet", () => {
       "✅ Tag v1.2.0",
       { timeout: 30_000 },
     );
+    const container = page.getByTestId("slack-container");
+    await expect(container).toContainText("1 of 3 done");
+    await container.locator("summary").click();
+    await expect(container.getByText("⬜ Publish notes")).toBeHidden();
+
+    // The command log is a small closed disclosure under the message.
+    const log = page.getByTestId("slacklet-log");
+    await expect(log.locator("summary")).toHaveText("2 commands");
+    await expect(page.getByTestId("slacklet-commands")).toBeHidden();
+    await log.locator("summary").click();
     await expect(
       page.getByTestId("slacklet-commands").locator("li"),
     ).toHaveText([/#1 init/, /#2 check\s*Tagged v1\.2\.0/]);

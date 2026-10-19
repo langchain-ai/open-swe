@@ -36,6 +36,13 @@
       .section { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; font-size: 14px; }
       .section code { border: 1px solid #e0e0e0; border-radius: 3px; padding: 0 3px; background: #f6f6f6; color: #c01343; font-size: 12px; }
       .context { color: #616061; font-size: 12px; margin-top: 5px; }
+      .header { margin-top: 8px; font-size: 16px; font-weight: 800; }
+      .divider { border: 0; border-top: 1px solid #e0e0e0; margin: 8px 0; }
+      .container { margin-top: 8px; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; max-width: 640px; }
+      .container-title { font-weight: 800; font-size: 14px; cursor: default; }
+      details.container > .container-title { cursor: pointer; }
+      .container-title.divided { border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; }
+      .container-subtitle { color: #616061; font-size: 12px; font-weight: 400; margin-top: 2px; }
       .block-image { display: block; max-width: 100%; margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px; }
       .actions button { margin: 8px 6px 0 0; border: 1px solid #bbb; border-radius: 5px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
       .actions button.primary { background: #007a5a; color: #fff; border-color: #007a5a; }
@@ -129,6 +136,84 @@
         parent.append(document.createTextNode(value.slice(cursor)));
       }
 
+      // Container blocks keep their open/closed state across the 700ms re-render.
+      const openContainers = new Map();
+
+      function renderBlocks(message, blocks, parent, key) {
+        blocks.forEach((block, index) => {
+          // Slack renders an uploaded file inline. Without this the
+          // expedited-review card's diff PNG is invisible to the suite and a
+          // silent fall back to its text diff would go unnoticed.
+          if (block.type === "image") {
+            const img = document.createElement("img");
+            img.className = "block-image";
+            img.src = block.image_url || `/mock/slack/files/${block.slack_file?.id}`;
+            img.alt = block.alt_text || "";
+            parent.appendChild(img);
+          }
+          if (block.type === "section" && block.text?.text) {
+            const element = document.createElement("div");
+            element.className = "section";
+            appendMrkdwn(element, block.text.text);
+            parent.appendChild(element);
+          }
+          if (block.type === "context") {
+            for (const context of block.elements || []) {
+              if (!["plain_text", "mrkdwn"].includes(context.type) || !context.text) continue;
+              const element = document.createElement("div");
+              element.className = "context";
+              element.textContent = context.text;
+              parent.appendChild(element);
+            }
+          }
+          if (block.type === "actions") {
+            const actions = document.createElement("div");
+            actions.className = "actions";
+            for (const action of block.elements || []) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = action.text?.text || "Choose";
+              if (action.style === "primary") button.classList.add("primary");
+              button.addEventListener("click", () => sendAction(message, action, button));
+              actions.appendChild(button);
+            }
+            parent.appendChild(actions);
+          }
+          if (block.type === "divider") {
+            const rule = document.createElement("hr");
+            rule.className = "divider";
+            parent.appendChild(rule);
+          }
+          if (block.type === "header" && block.text?.text) {
+            const header = document.createElement("div");
+            header.className = "header";
+            header.textContent = block.text.text;
+            parent.appendChild(header);
+          }
+          if (block.type === "container") {
+            const id = `${key}/${index}`;
+            const box = document.createElement(block.is_collapsible ? "details" : "section");
+            box.className = "container";
+            const heading = document.createElement(block.is_collapsible ? "summary" : "div");
+            heading.className = `container-title${block.has_header_divider && !block.is_collapsible ? " divided" : ""}`;
+            heading.textContent = block.title?.text || "";
+            if (block.subtitle?.text) {
+              const subtitle = document.createElement("div");
+              subtitle.className = "container-subtitle";
+              appendMrkdwn(subtitle, block.subtitle.text);
+              heading.appendChild(subtitle);
+            }
+            box.appendChild(heading);
+            if (block.is_collapsible) {
+              box.open = openContainers.has(id) ? openContainers.get(id) : !block.default_collapsed;
+              box.addEventListener("toggle", () => openContainers.set(id, box.open));
+            }
+            renderBlocks(message, block.child_blocks || [], box, id);
+            parent.appendChild(box);
+          }
+        });
+      }
+
       function renderMessages(messages) {
         const thread = $("thread");
         thread.replaceChildren();
@@ -165,46 +250,7 @@
           }
           text.append(document.createTextNode(message.text.slice(cursor)));
           body.append(who, text);
-          for (const block of message.blocks || []) {
-            // Slack renders an uploaded file inline. Without this the
-            // expedited-review card's diff PNG is invisible to the suite and a
-            // silent fall back to its text diff would go unnoticed.
-            if (block.type === "image") {
-              const img = document.createElement("img");
-              img.className = "block-image";
-              img.src = block.image_url || `/mock/slack/files/${block.slack_file?.id}`;
-              img.alt = block.alt_text || "";
-              body.appendChild(img);
-            }
-            if (block.type === "section" && block.text?.text) {
-              const element = document.createElement("div");
-              element.className = "section";
-              appendMrkdwn(element, block.text.text);
-              body.appendChild(element);
-            }
-            if (block.type === "context") {
-              for (const context of block.elements || []) {
-                if (!["plain_text", "mrkdwn"].includes(context.type) || !context.text) continue;
-                const element = document.createElement("div");
-                element.className = "context";
-                element.textContent = context.text;
-                body.appendChild(element);
-              }
-            }
-            if (block.type === "actions") {
-              const actions = document.createElement("div");
-              actions.className = "actions";
-              for (const action of block.elements || []) {
-                const button = document.createElement("button");
-                button.type = "button";
-                button.textContent = action.text?.text || "Choose";
-                if (action.style === "primary") button.classList.add("primary");
-                button.addEventListener("click", () => sendAction(message, action, button));
-                actions.appendChild(button);
-              }
-              body.appendChild(actions);
-            }
-          }
+          renderBlocks(message, message.blocks || [], body, message.ts);
           item.append(avatar, body);
           thread.appendChild(item);
         }

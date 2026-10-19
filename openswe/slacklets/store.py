@@ -128,7 +128,7 @@ class Slacklet(Base):
             channel_id,
             thread_ts,
             state.fallback_text(),
-            blocks=block_payload(state.blocks(seq=entry.seq, op=first.op)),
+            blocks=block_payload(state.blocks()),
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -258,7 +258,7 @@ class Slacklet(Base):
                 channel_id,
                 self.message_ts,
                 last.state.fallback_text(),
-                blocks=block_payload(last.state.blocks(seq=last.seq, op=last.command.op)),
+                blocks=block_payload(last.state.blocks()),
                 unfurl_links=False,
                 unfurl_media=False,
             )

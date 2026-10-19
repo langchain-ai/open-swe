@@ -21,7 +21,15 @@ from typing import Annotated, Literal, Self
 from uuid import UUID, uuid7
 
 import quickjs_rs
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 from sqlalchemy import ForeignKey, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,10 +39,12 @@ from openswe.database.orm import NOW, Base
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import (
     Block,
+    ContainerBlock,
+    ContainerChild,
     ContextBlock,
+    HeaderBlock,
     SectionBlock,
     TextObject,
-    context,
     divider,
     mrkdwn,
     plain_text,
@@ -61,40 +71,74 @@ class SlackletProgramError(ValueError):
     """The agent's program failed, refused a command, or returned something unusable."""
 
 
-class _Text(BaseModel):
+class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+
+class _Text(_Strict):
     type: Literal["mrkdwn", "plain_text"]
     text: str = Field(min_length=1, max_length=3000)
 
 
-class _Section(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class _PlainText(_Strict):
+    type: Literal["plain_text"]
+    text: str = Field(min_length=1, max_length=150)
 
+
+class _ShortText(_Text):
+    text: str = Field(min_length=1, max_length=150)
+
+
+class _Section(_Strict):
     type: Literal["section"]
     text: _Text
 
 
-class _Context(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class _Context(_Strict):
     type: Literal["context"]
     elements: list[_Text] = Field(min_length=1, max_length=10)
 
 
-class _Divider(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class _Divider(_Strict):
     type: Literal["divider"]
 
 
-class _Rendered(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class _Header(_Strict):
+    type: Literal["header"]
+    text: _PlainText
 
+
+type _Child = Annotated[_Section | _Context | _Divider | _Header, Field(discriminator="type")]
+
+
+class _Container(_Strict):
+    """Slack's container block: up to 10 children under a title, optionally collapsible."""
+
+    type: Literal["container"]
+    title: _PlainText
+    child_blocks: list[_Child] = Field(min_length=1, max_length=10)
+    subtitle: _ShortText | None = None
+    width: Literal["narrow", "standard", "wide", "full"] | None = None
+    is_collapsible: bool = False
+    default_collapsed: bool = False
+    has_header_divider: bool = False
+
+
+type _Top = Annotated[
+    _Section | _Context | _Divider | _Header | _Container, Field(discriminator="type")
+]
+
+
+class _Rendered(_Strict):
     text: str = Field(min_length=1, max_length=3000)
-    blocks: list[Annotated[_Section | _Context | _Divider, Field(discriminator="type")]] = Field(
-        min_length=1, max_length=_MAX_BLOCKS
-    )
+    blocks: list[_Top] = Field(min_length=1, max_length=_MAX_BLOCKS)
+
+    @model_validator(mode="after")
+    def _fits_one_message(self) -> Self:
+        nested = sum(len(b.child_blocks) for b in self.blocks if isinstance(b, _Container))
+        if len(self.blocks) + nested > _MAX_BLOCKS:
+            raise ValueError(f"at most {_MAX_BLOCKS} blocks, counting a container's children")
+        return self
 
 
 _RENDERED = TypeAdapter(_Rendered)
@@ -140,8 +184,8 @@ class SlackletProgram:
             return _RENDERED.validate_python(self._call("render", data))
         except ValidationError as exc:
             raise SlackletProgramError(
-                f"render must return {{text, blocks}} using only section, context and "
-                f"divider blocks: {exc.errors(include_url=False)}"
+                f"render must return {{text, blocks}} using only section, context, divider, "
+                f"header and container blocks: {exc.errors(include_url=False)}"
             ) from None
 
 
@@ -209,7 +253,7 @@ class SlackletDefinition(Base):
                 name=name,
                 data=data,
                 text=rendered.text,
-                rendered=[block.model_dump() for block in rendered.blocks],
+                rendered=[block.model_dump(exclude_none=True) for block in rendered.blocks],
             )
 
         async def start(subject: str, cfg: RunConfig) -> tuple[str, ProgramCommand]:  # noqa: ARG001
@@ -238,12 +282,9 @@ class ProgramState(SlackletState):
     def describe(self) -> str:
         return f"the agent-defined slacklet “{self.name}”"
 
-    def blocks(self, *, seq: int, op: str) -> list[Block]:
+    def blocks(self) -> list[Block]:
         rendered = _RENDERED.validate_python({"text": self.text, "blocks": self.rendered})
-        return [
-            *(_block(block) for block in rendered.blocks),
-            context(f"{self.name} · state after #{seq} {op}"),
-        ]
+        return [_block(block) for block in rendered.blocks]
 
     def fallback_text(self) -> str:
         return self.text
@@ -253,14 +294,35 @@ def _text(text: _Text) -> TextObject:
     return mrkdwn(text.text) if text.type == "mrkdwn" else plain_text(text.text, emoji=True)
 
 
-def _block(block: _Section | _Context | _Divider) -> Block:
+def _child(block: _Section | _Context | _Divider | _Header) -> ContainerChild:
     if isinstance(block, _Section):
         built: SectionBlock = {"type": "section", "text": _text(block.text)}
         return built
     if isinstance(block, _Context):
         listed: ContextBlock = {"type": "context", "elements": [_text(t) for t in block.elements]}
         return listed
+    if isinstance(block, _Header):
+        titled: HeaderBlock = {"type": "header", "text": plain_text(block.text.text)}
+        return titled
     return divider()
+
+
+def _block(block: _Top) -> Block:
+    if not isinstance(block, _Container):
+        return _child(block)
+    built: ContainerBlock = {
+        "type": "container",
+        "title": plain_text(block.title.text),
+        "child_blocks": [_child(child) for child in block.child_blocks],
+        "is_collapsible": block.is_collapsible,
+        "default_collapsed": block.default_collapsed,
+        "has_header_divider": block.has_header_divider,
+    }
+    if block.subtitle is not None:
+        built["subtitle"] = _text(block.subtitle)
+    if block.width is not None:
+        built["width"] = block.width
+    return built
 
 
 class ProgramCommand(SlackletCommand):
@@ -271,9 +333,7 @@ class ProgramCommand(SlackletCommand):
     note: str = Field(default="", max_length=200)
 
     def summary(self) -> str:
-        return self.note or (
-            f"{self.op} {json.dumps(self.params, sort_keys=True)}" if self.params else self.op
-        )
+        return self.note or (json.dumps(self.params, sort_keys=True) if self.params else "")
 
 
 PROGRAM_COMMAND = TypeAdapter(ProgramCommand)

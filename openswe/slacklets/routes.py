@@ -58,7 +58,7 @@ async def api_slacklet(slacklet_id: UUID, session: dict[str, str] = SESSION_DEP)
         id=slacklet.id,
         kind=slacklet.kind,
         subject=slacklet.subject,
-        blocks=block_payload(last.state.blocks(seq=last.seq, op=last.command.op)),
+        blocks=block_payload(last.state.blocks()),
         commands=[
             SlackletCommandOut(
                 seq=entry.seq,

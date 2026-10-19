@@ -621,16 +621,24 @@ function apply(state, command) {
   return { ...state, done: [...state.done, command.params.item] };
 }
 function render(state) {
-  const lines = state.items.map((item) => (state.done.includes(item) ? "✅ " : "⬜ ") + item);
+  const rows = state.items.map((item) => ({
+    type: "section",
+    text: { type: "mrkdwn", text: (state.done.includes(item) ? "✅ " : "⬜ ") + item },
+  }));
   return {
     text: state.title + ": " + state.done.length + "/" + state.items.length + " done",
     blocks: [
-      { type: "section", text: { type: "mrkdwn", text: "*" + state.title + "*" } },
-      { type: "section", text: { type: "mrkdwn", text: lines.join("\\n") } },
-      { type: "divider" },
-      { type: "context", elements: [
-        { type: "mrkdwn", text: state.done.length + " of " + state.items.length + " done" },
-      ] },
+      { type: "header", text: { type: "plain_text", text: state.title } },
+      {
+        type: "container",
+        title: { type: "plain_text", text: "Checklist" },
+        subtitle: {
+          type: "mrkdwn",
+          text: state.done.length + " of " + state.items.length + " done",
+        },
+        is_collapsible: true,
+        child_blocks: rows,
+      },
     ],
   };
 }

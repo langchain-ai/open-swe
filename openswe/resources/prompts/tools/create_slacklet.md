@@ -28,8 +28,13 @@ Rules:
 - `state` and every return value must be plain JSON. There is no `Date`, `Math.random`, network,
   filesystem or timer, and each call has 0.5s and 16 MB: replaying the commands must always
   rebuild the same state, so pass times and other outside facts in `command.params`.
-- `render` may only use `section`, `context` and `divider` blocks with `mrkdwn` or `plain_text`
-  text: they render the same in Slack and the web UI. At most 40 blocks; text up to 3000 characters.
+- `render` may only use blocks that look the same in Slack and the web UI: `section`, `context`,
+  `divider`, `header` (`plain_text`, up to 150 characters) and `container`. Text objects are
+  `mrkdwn` or `plain_text`, up to 3000 characters. A `container` groups up to 10 `section`,
+  `context`, `divider` or `header` blocks under a `plain_text` `title`, with an optional
+  `subtitle`, `width` (`narrow`, `standard`, `wide`, `full`), `has_header_divider`, and
+  `is_collapsible` plus `default_collapsed` to let people fold it; containers do not nest. Use one
+  for detail people only sometimes need. At most 40 blocks, counting a container's children.
 - `params` is passed to `init`. `create_slacklet` runs `init` and `render` before posting, and
   returns the error instead when the program fails.
 
