@@ -4,7 +4,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 from starlette.requests import Request
 
 from openswe.slack import events as slack_events
@@ -228,25 +228,57 @@ async def test_external_channel_refuses_without_starting_a_run(
     resolve_thread.assert_not_awaited()
 
 
-async def test_unverified_channel_fails_closed_without_reply_or_run(
+@pytest.mark.parametrize(
+    "context",
+    [SlackChannelContext(), SlackChannelContext(is_ext_shared=False)],
+)
+async def test_unverified_channel_retries_without_reply_or_run(
     monkeypatch: pytest.MonkeyPatch,
+    context: SlackChannelContext,
+    _patch_slack_webhook: _FakeClaims,
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
     post_reply = AsyncMock(return_value=True)
     resolve_thread = cast(AsyncMock, webhook_common.resolve_slack_thread_id)
+    resolve_context = AsyncMock(return_value=context)
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", resolve_context)
+    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=True))
+    payload = _channel_message_payload()
+    payload["event"]["text"] = "open a feature request"
+
+    with pytest.raises(HTTPException) as error:
+        await _post(payload, background_tasks)
+
+    assert error.value.status_code == 503
+    assert error.value.headers == {"Retry-After": "60"}
+    assert background_tasks.tasks == []
+    assert _patch_slack_webhook.held == set()
+    post_reply.assert_not_awaited()
+    resolve_thread.assert_not_awaited()
+
+    resolve_context.return_value = SlackChannelContext(
+        is_ext_shared=False, is_pending_ext_shared=False
+    )
+    response = await _post(payload, background_tasks, {"X-Slack-Retry-Num": "1"})
+    assert response["status"] == "accepted"
+    assert len(background_tasks.tasks) == 1
+
+
+async def test_pending_external_channel_is_not_retried_or_dispatched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    background_tasks = _FakeBackgroundTasks()
     monkeypatch.setattr(
         webhook_common,
         "resolve_slack_channel_context",
-        AsyncMock(return_value=SlackChannelContext(is_ext_shared=None)),
+        AsyncMock(return_value=SlackChannelContext(is_pending_ext_shared=True)),
     )
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
 
-    response = await _post(_mention_payload(), background_tasks)
+    response = await _post(_channel_message_payload(), background_tasks)
 
     assert response == {"status": "ignored", "reason": "Slack channel is not eligible"}
     assert background_tasks.tasks == []
-    post_reply.assert_not_awaited()
-    resolve_thread.assert_not_awaited()
 
 
 async def test_preprocessing_failure_replies_and_does_not_claim_event(

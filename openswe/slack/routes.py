@@ -6,7 +6,7 @@ import re
 from time import time_ns
 from typing import Literal, TypedDict, cast
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, HTTPException, Response
 
 from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
@@ -353,6 +353,16 @@ async def slack_webhook(
         channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
         if not channel_context.allows_operations:
             is_external = channel_context.is_ext_shared is True
+            if not is_external and channel_context.is_pending_ext_shared is not True:
+                common.logger.warning(
+                    "Slack channel verification unavailable; requesting event redelivery",
+                    extra={"slack_channel_id": channel_id, "slack_event_id": event_id},
+                )
+                raise HTTPException(
+                    503,
+                    "Slack channel verification is temporarily unavailable.",
+                    headers={"Retry-After": "60"},
+                )
             event_ts = event.event_ts or event.ts
             thread_ts = event.thread_ts or event.ts
             if (
