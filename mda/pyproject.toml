@@ -16,10 +16,10 @@ dependencies = [
     "pydantic>=2.11",
 ]
 
-# Named sandboxes, create fields and an unmanaged proxy (langchain-ai/managed-deepagents-sdk
-# branch ramon-langchain/open-swe-sandboxes, on 0.9.3); the preview deploys it once approved (README).
+# Vendored, with the `mda` CLI `make mda-cli` builds into it (vendor/README.md).
+# Editable, so that CLI is read from the source tree.
 [tool.uv.sources]
-managed-deepagents = { git = "https://github.com/langchain-ai/managed-deepagents-sdk", rev = "6fa736de672fb327f4917efcfa06220fad49a158", subdirectory = "packages/pypi" }
+managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", editable = true }
 
 [tool.mda]
 # bsdiff4 (via langchain-quickjs) has no 3.14 wheels and MDA build images have no compiler: langchain-ai/deepagents#6878.
