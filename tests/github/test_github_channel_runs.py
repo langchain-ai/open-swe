@@ -85,6 +85,7 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         input={"messages": [{"role": "user", "content": "Fix the crash"}]},
         configurable={"source": "github", "github_login": "ada", "repo": {"owner": "acme"}},
     )
+
     async def adopt_then_prepare(*_args: object, adopt: Any = None) -> object:
         # The real one adopts the thread before it writes the thread's metadata.
         if adopt is not None and prepare.return_value is not None:
