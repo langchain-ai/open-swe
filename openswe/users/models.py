@@ -87,6 +87,10 @@ class User(Base):
         return self._identity_field("slack", "external_id")
 
     @property
+    def slack_team_id(self) -> str:
+        return self._identity_field("slack", "team_id")
+
+    @property
     def email(self) -> str:
         """The address to reach this person, work address first.
 
@@ -101,7 +105,7 @@ class User(Base):
         )
 
     def _identity_field(
-        self, provider: Provider, field: Literal["login", "email", "external_id"]
+        self, provider: Provider, field: Literal["login", "email", "external_id", "team_id"]
     ) -> str:
         return next(
             (

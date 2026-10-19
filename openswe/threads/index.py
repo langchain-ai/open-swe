@@ -7,7 +7,7 @@ to the thread's runtimes. Runs, checkpoints and streams stay with the runtime.
 
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final, Literal, Self, get_args
 from uuid import uuid7
 
@@ -35,6 +35,46 @@ INDEXED_FIELDS: Final[list[ThreadSelectField]] = [
     "updated_at",
 ]
 _COLUMNS: Final = "thread_id, runtime, metadata, status, created_at, updated_at"
+# The thread's sidebar title, derived as ``summary.metadata_title`` does.
+_TITLE: Final = """(CASE
+    WHEN jsonb_typeof(metadata->'title') = 'string' AND btrim(metadata->>'title') <> ''
+        THEN metadata->>'title'
+    WHEN metadata->>'kind' = 'reviewer' THEN coalesce('Review: ' || nullif(concat_ws(' ',
+        CASE WHEN jsonb_typeof(metadata->'pr'->'number') = 'number'
+            THEN '#' || (metadata->'pr'->>'number') END,
+        nullif(btrim(metadata->'pr'->>'title'), '')), ''), 'Review: pending')
+    ELSE 'Untitled agent'
+END)"""
+
+
+def _values(path: str) -> str:
+    """The values at a JSON path as plain text, so quotes and backslashes match unescaped."""
+    return f"(SELECT string_agg(v #>> '{{}}', ' ') FROM jsonb_path_query(metadata, '{path}') AS v)"
+
+
+# Every metadata field the dashboard's thread search reads, lowercased. It may
+# hold more than the dashboard matches, never less, since the dashboard checks
+# each thread it gets back again.
+_SEARCHABLE: Final = f"""lower(concat_ws(' ',
+    {_TITLE},
+    metadata->>'repo_owner', metadata->>'repo_name',
+    (metadata->>'repo_owner') || '/' || (metadata->>'repo_name'),
+    (metadata->'repo'->>'owner') || '/' || (metadata->'repo'->>'name'),
+    metadata->>'branch_name', metadata->>'base_branch',
+    metadata->>'pr_url', metadata->>'pr_number',
+    {_values("lax $.repo.*")}, {_values("lax $.pr.*")}, {_values("lax $.pull_requests[*].*")}))"""
+# A title match outranks a match elsewhere at any age (3 x the floor > 1); within
+# each, recent activity counts most, its weight halving every half-life down to
+# the floor, so an old thread stays findable.
+_RECENCY_HALF_LIFE: Final = timedelta(days=7)
+_RECENCY_FLOOR: Final = 0.4
+_RANK: Final = f"""CAST((CASE
+        WHEN starts_with(lower({_TITLE}), :text) THEN 4
+        WHEN strpos(lower({_TITLE}), :text) > 0 THEN 3
+        ELSE 1
+    END) * ({_RECENCY_FLOOR} + {1 - _RECENCY_FLOOR} * power(0.5, least(
+        extract(epoch FROM clock_timestamp() - updated_at)
+        / {_RECENCY_HALF_LIFE.total_seconds()}, 64))) AS float8)"""
 
 
 _status = TypeAdapter(ThreadStatus)
@@ -68,6 +108,8 @@ class IndexedThread(BaseModel):
     status: ThreadStatus
     created_at: datetime
     updated_at: datetime
+    # How well the thread matched a text search, higher first; ``None`` outside one.
+    rank: float | None = None
 
     @classmethod
     def from_row(cls, row: RowMapping) -> Self:
@@ -104,11 +146,19 @@ class IndexedThread(BaseModel):
             "config": {},
             "error": None,
         }
-        return thread if not select else {key: thread[key] for key in select if key in thread}
+        if select:
+            thread = {key: thread[key] for key in select if key in thread}
+        if self.rank is not None:
+            thread["search_rank"] = self.rank
+        return thread
 
 
 class ThreadSearch(BaseModel):
-    """The Agent Server's ``POST /threads/search`` body, as far as Open SWE uses it."""
+    """The Agent Server's ``POST /threads/search`` body, as far as Open SWE uses it.
+
+    ``text`` is Open SWE's own: it keeps threads whose searchable metadata holds
+    it and ranks them by :data:`_RANK` ahead of ``sort_by``.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
@@ -120,10 +170,14 @@ class ThreadSearch(BaseModel):
     limit: int = Field(default=10, ge=0)
     offset: int = Field(default=0, ge=0)
     select: list[SelectField] | None = None
+    text: str | None = None
 
     def _where(self) -> tuple[str, dict[str, object]]:
         clauses = ["metadata @> CAST(:filter AS jsonb)"]
         params: dict[str, object] = {"filter": json.dumps(self.metadata)}
+        if self.text:
+            clauses.append(f"strpos({_SEARCHABLE}, :text) > 0")
+            params["text"] = self.text.lower()
         if self.ids is not None:
             clauses.append("thread_id = ANY(:ids)")
             params["ids"] = self.ids
@@ -135,12 +189,15 @@ class ThreadSearch(BaseModel):
     async def run(self) -> list[IndexedThread]:
         where, params = self._where()
         order = "ASC" if self.sort_order == "asc" else "DESC"
+        columns, ranking = _COLUMNS, ""
+        if self.text:
+            columns, ranking = f"{_COLUMNS}, {_RANK} AS rank", "rank DESC, "
         async with transaction() as conn:
             rows = (
                 await conn.execute(
                     text(
-                        f"SELECT {_COLUMNS} FROM thread_index WHERE {where} "
-                        f"ORDER BY {self.sort_by} {order}, thread_id {order} "
+                        f"SELECT {columns} FROM thread_index WHERE {where} "
+                        f"ORDER BY {ranking}{self.sort_by} {order}, thread_id {order} "
                         "LIMIT :limit OFFSET :offset"
                     ),
                     {**params, "limit": self.limit, "offset": self.offset},
