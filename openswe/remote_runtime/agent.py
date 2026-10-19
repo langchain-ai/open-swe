@@ -12,6 +12,7 @@ from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
 from openswe.sandboxes.tool_access import tools_base_url
 from openswe.sandboxes.tool_runtime import ToolSurface, save_tool_context
+from openswe.server import fallback_model_choice
 from openswe.utils.model import provider_model_kwargs
 
 ASSISTANT_ID: Final = "agent"
@@ -36,9 +37,15 @@ async def run_models(cfg: RunConfig) -> RunModels:
     """The models a run's graph is built with until its catalog names the factory's."""
     settings = await cached_workspace_settings(cfg.workspace_slug)
     (model_id, effort), (subagent_id, subagent_effort) = settings.default_model_pair("agent")
+    fallback = fallback_model_choice(subagent_id)
     return RunModels(
         model=_spec(model_id, effort),
         subagent_model=_spec(subagent_id, subagent_effort),
+        subagent_fallback=None
+        if fallback is None
+        else ModelSpec.model_validate(
+            {"model_id": fallback.model_id, "kwargs": dict(fallback.kwargs)}
+        ),
         use_gateway=settings.effective_gateway_enabled,
     )
 

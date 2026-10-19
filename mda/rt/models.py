@@ -34,6 +34,7 @@ class ModelSpec(BaseModel):
 class RunModels(BaseModel):
     model: ModelSpec
     subagent_model: ModelSpec
+    subagent_fallback: ModelSpec | None = None
     use_gateway: bool
 
 

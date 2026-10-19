@@ -14,7 +14,6 @@ from typing import Final, Literal
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
-    ModelRetryMiddleware,
 )
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
@@ -31,6 +30,8 @@ from rt.middleware import (
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
+    SubagentFallbackMiddleware,
+    model_retries,
 )
 from rt.models import RunModels, build_model
 from rt.tools import backend_tool
@@ -148,7 +149,11 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 "middleware": [
                     *_backend_reports(backend, by_name.keys()),
                     ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
-                    ModelRetryMiddleware(retry_on=(TimeoutError,)),
+                    SubagentFallbackMiddleware(
+                        models.subagent_fallback if models is not None else None,
+                        use_gateway=models.use_gateway if models is not None else False,
+                    ),
+                    model_retries(),
                 ],
             }
             for subagent in catalog.subagents
@@ -159,6 +164,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             ServedToolsMiddleware(offered, excluded | code_only),
             *_code_mode(context.graph, from_code, catalog.described),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            model_retries(),
         ],
     )

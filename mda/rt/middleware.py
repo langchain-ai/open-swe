@@ -17,6 +17,10 @@ import logging
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping, Sequence
 from typing import Annotated, Final, NotRequired
 
+import anthropic
+import httpx
+import openai
+from langchain.agents.middleware import ModelRetryMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
@@ -28,6 +32,7 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import SystemMessage, ToolMessage, messages_from_dict
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
+from langgraph.errors import GraphBubbleUp
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
@@ -211,6 +216,55 @@ class DescribedToolsMiddleware(AgentMiddleware):
         return await handler(request.override(tool_call={**call, "args": args}))
 
 
+def _transient_model_error(exc: Exception) -> bool:
+    if isinstance(exc, openai.APIStatusError):
+        return exc.status_code >= 500 or exc.status_code in {408, 429}
+    return isinstance(
+        exc,
+        (
+            TimeoutError,
+            openai.APIError,
+            anthropic.OverloadedError,
+            anthropic.InternalServerError,
+            httpx.TransportError,
+        ),
+    )
+
+
+def model_retries() -> ModelRetryMiddleware:
+    """Bound transient retries and propagate exhaustion to fallback or the tool boundary."""
+    return ModelRetryMiddleware(
+        retry_on=_transient_model_error,
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=2.0,
+        on_failure="error",
+    )
+
+
+class SubagentFallbackMiddleware(AgentMiddleware):
+    """Try the configured fallback once after transient primary-model failures."""
+
+    def __init__(self, fallback: ModelSpec | None, *, use_gateway: bool) -> None:
+        self._fallback = fallback
+        self._use_gateway = use_gateway
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        try:
+            return await handler(request)
+        except Exception as exc:
+            if self._fallback is None or not _transient_model_error(exc):
+                raise
+            logger.warning("Subagent model call failed; trying fallback", exc_info=True)
+            return await handler(
+                request.override(model=build_model(self._fallback, use_gateway=self._use_gateway))
+            )
+
+
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Run the Open SWE graph's own middleware on the backend, phase by phase."""
 
@@ -342,11 +396,19 @@ class RuntimeToolsMiddleware(AgentMiddleware):
         except asyncio.CancelledError:
             # A stopped call stays open, as it does in-process.
             raise
+        except GraphBubbleUp:
+            raise
         except Exception as exc:
+            logger.warning("Runtime tool call failed", extra={"tool_name": name}, exc_info=True)
             failure = ToolMessage(
-                content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
+                content=f"{type(exc).__name__}: Tool execution failed. Try again or use another approach.",
+                tool_call_id=tool_call_id,
+                name=name,
+                status="error",
             )
             await self._report(self._backend.tool_result(body, failure))
+            if name == "task":
+                return failure
             raise
         await self._report(self._backend.tool_result(body, _tool_message(result, tool_call_id)))
         return result
