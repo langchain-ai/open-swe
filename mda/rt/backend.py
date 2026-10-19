@@ -211,7 +211,6 @@ class OpenSweBackend:
         body: Mapping[str, JsonValue] | None = None,
         *,
         seconds: float | None = None,
-        retry_gateway: bool = False,
     ) -> dict[str, JsonValue]:
         if self._run_token is None:
             raise BackendCallError(
@@ -219,7 +218,7 @@ class OpenSweBackend:
             )
         if seconds is None:
             seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
-        for attempt in range(4 if retry_gateway else 3):
+        for attempt in range(3):
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}/remote-runtime/hooks/{hook}",
@@ -240,13 +239,6 @@ class OpenSweBackend:
                 gateway_failure = isinstance(
                     exc, httpx2.HTTPStatusError
                 ) and exc.response.status_code in {502, 503, 504}
-                if retry_gateway and gateway_failure and attempt < 3:
-                    logger.warning(
-                        "Backend gateway failed; retrying",
-                        extra={"hook": hook, "attempt": attempt + 1},
-                    )
-                    await asyncio.sleep((1, 3, 9)[attempt])
-                    continue
                 if isinstance(exc, httpx2.HTTPStatusError) and (
                     failure := _hook_failure(exc.response)
                 ):
@@ -264,13 +256,7 @@ class OpenSweBackend:
         return Catalog.model_validate(await self.call("catalog", {"run_id": run_id}))
 
     async def phase(self, hook: Hook, body: Mapping[str, JsonValue]) -> PhaseReply:
-        return PhaseReply.model_validate(
-            await self.call(
-                hook,
-                body,
-                retry_gateway=hook in {"before_model", "after_model", "prepare", "after_agent"},
-            )
-        )
+        return PhaseReply.model_validate(await self.call(hook, body))
 
     async def tool(self, body: Mapping[str, JsonValue]) -> ToolReply:
         arguments = body.get("arguments")

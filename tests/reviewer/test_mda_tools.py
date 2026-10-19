@@ -92,12 +92,10 @@ async def test_backend_connection_failures(
         ("after_agent", 503),
     ],
 )
-@pytest.mark.parametrize("failures", [3, 4])
-async def test_phase_gateway_retries(
+async def test_phase_gateway_failure_is_not_replayed(
     monkeypatch: pytest.MonkeyPatch,
     hook: Literal["prepare", "before_model", "after_model", "after_agent"],
     status: int,
-    failures: int,
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     sleep = AsyncMock()
@@ -105,20 +103,16 @@ async def test_phase_gateway_retries(
     request = httpx2.Request("POST", "https://backend.invalid")
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(
-        side_effect=[httpx2.Response(status, request=request)] * failures
+        side_effect=[httpx2.Response(status, request=request)]
         + [httpx2.Response(200, request=request, json={"update": {"recovered": True}})]
     )
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
 
-    backend = OpenSweBackend("secret-token")
-    if failures == 4:
-        with pytest.raises(BackendUnavailableError):
-            await backend.phase(hook, {})
-    else:
-        reply = await backend.phase(hook, {})
-        assert reply.update == {"recovered": True}
-    assert client.post.await_count == 4
-    assert [call.args[0] for call in sleep.await_args_list] == [1, 3, 9]
+    with pytest.raises(BackendUnavailableError):
+        await OpenSweBackend("secret-token").phase(hook, {})
+
+    assert client.post.await_count == 1
+    sleep.assert_not_awaited()
 
 
 @pytest.mark.parametrize("hook", ["prepare", "before_model", "after_model"])
