@@ -694,7 +694,9 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
     )
 
 
-@pytest.mark.parametrize("outcome", ["disconnect", "cancel", "success", "unknown", "failure"])
+@pytest.mark.parametrize(
+    "outcome", ["disconnect", "disconnect_cancel", "cancel", "success", "unknown", "failure"]
+)
 async def test_hook_lifetime_follows_the_connected_request(
     monkeypatch: pytest.MonkeyPatch, outcome: str
 ) -> None:
@@ -706,6 +708,8 @@ async def test_hook_lifetime_follows_the_connected_request(
     from openswe.remote_runtime import server
 
     started = asyncio.Event()
+    cleaning_up = asyncio.Event()
+    allow_cleanup = asyncio.Event()
     cleaned_up = asyncio.Event()
     messages: asyncio.Queue[Message] = asyncio.Queue()
     messages.put_nowait({"type": "http.request", "body": b"{}", "more_body": False})
@@ -714,7 +718,7 @@ async def test_hook_lifetime_follows_the_connected_request(
     async def hook(run: RemoteRun, name: str, body: Mapping[str, JsonValue]) -> JsonValue:
         try:
             started.set()
-            if outcome in ("disconnect", "cancel"):
+            if outcome in ("disconnect", "disconnect_cancel", "cancel"):
                 await asyncio.Event().wait()
             if outcome == "unknown":
                 raise server.UnknownHookError(name)
@@ -722,6 +726,9 @@ async def test_hook_lifetime_follows_the_connected_request(
                 raise RuntimeError("checkout failed")
             return {"prepared": True}
         finally:
+            cleaning_up.set()
+            if outcome == "disconnect_cancel":
+                await allow_cleanup.wait()
             await asyncio.sleep(0)
             cleaned_up.set()
 
@@ -739,16 +746,23 @@ async def test_hook_lifetime_follows_the_connected_request(
     }
     task = asyncio.create_task(server.hook_endpoint(scope, messages.get, send))
     await asyncio.wait_for(started.wait(), 5)
-    if outcome == "disconnect":
+    if outcome in ("disconnect", "disconnect_cancel"):
         messages.put_nowait({"type": "http.disconnect"})
-    if outcome == "cancel":
+    if outcome == "disconnect_cancel":
+        await asyncio.wait_for(cleaning_up.wait(), 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert not task.done()
+        allow_cleanup.set()
+    if outcome in ("cancel", "disconnect_cancel"):
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, 5)
     else:
         await asyncio.wait_for(task, 5)
     assert cleaned_up.is_set()
-    if outcome in ("disconnect", "cancel"):
+    if outcome in ("disconnect", "disconnect_cancel", "cancel"):
         assert sent == []
     else:
         assert sent[0]["status"] == {"success": 200, "unknown": 404, "failure": 500}[outcome]

@@ -10,7 +10,9 @@ from openswe.sandboxes.repo_prep import ReviewRepoPreparationError
 @pytest.mark.parametrize(
     ("failures", "heads", "expected"),
     [
-        (1, ["head", "head"], "complete"),
+        (1, ["head", "head"], "planned"),
+        (0, ["head"], "complete"),
+        (1, ["head", "new"], "stale"),
         (2, ["head", "head"], "error"),
         (1, ["new"], "stale"),
         (2, ["head", "new"], "stale"),
@@ -44,9 +46,11 @@ async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checko
     monkeypatch.setattr(graph.asyncio, "sleep", sleep)
     workspace = AsyncMock(
         side_effect=graph.PlanMovedError("newer head") if expected == "moved" else None,
-        return_value=MagicMock(complete=True),
+        return_value=MagicMock(complete=expected != "planned"),
     )
     monkeypatch.setattr(graph, "_workspace", workspace)
+    monkeypatch.setattr(graph, "prompt", lambda *args, **kwargs: "scout instructions")
+    monkeypatch.setattr(graph.SteeringHistory, "load", AsyncMock(return_value=None))
     middleware = graph.PrepareReviewScoutRunMiddleware(
         thread_id="scout",
         config={
@@ -66,8 +70,12 @@ async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checko
         assert len(str(error.value).removeprefix(prefix)) == 2000
     else:
         result = await middleware._prepare({"messages": []}, Runtime())
-        assert result["scout_nothing_to_plan"] is True
-        assert checkout.pin.await_count == (1 if expected in ("complete", "moved") else 0)
-        assert workspace.await_count == (1 if expected in ("complete", "moved") else 0)
+        assert result["scout_nothing_to_plan"] is (expected != "planned")
+        if expected == "planned":
+            assert result["rendered_system_prompt"] == "scout instructions"
+        assert checkout.pin.await_count == (
+            1 if expected in ("planned", "complete", "moved") else 0
+        )
+        assert workspace.await_count == (1 if expected in ("planned", "complete", "moved") else 0)
     assert prepare.await_count == len(heads)
     assert sleep.await_args_list == ([] if len(heads) == 1 else [((3,), {})])

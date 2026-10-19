@@ -128,7 +128,14 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             for task in (hook_task, disconnect_task):
                 if not task.done():
                     task.cancel()
-            results = await asyncio.gather(hook_task, disconnect_task, return_exceptions=True)
+            cleanup = asyncio.gather(hook_task, disconnect_task, return_exceptions=True)
+            cancelled: asyncio.CancelledError | None = None
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError as exc:
+                    cancelled = exc
+            results = cleanup.result()
             for task_result in results:
                 if isinstance(task_result, Exception) and (
                     hook_task not in done or disconnect_task in done
@@ -138,6 +145,8 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
                         exc_info=task_result,
                         extra={"hook": hook, "thread_id": run.thread_id},
                     )
+            if cancelled is not None:
+                raise cancelled
     except UnknownHookError:
         await JSONResponse({"detail": f"Unknown hook {hook}"}, status_code=404)(
             scope, receive, send
