@@ -498,7 +498,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.21"
+version = "0.7.28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -509,9 +509,9 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/59/6a/1dcd74589ece546a16280c33646c45439666aa40755f6e6c7bbb13ca86db/deepagents-0.7.21.tar.gz", hash = "sha256:49a594e9727c82e2354ed33bb4e656f94ec30715d1803de886792e8a6e2854e6", size = 313698, upload-time = "2026-09-30T19:28:11.383Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/36/4f436696ea891078843d9451faade5b24df728e99a2be9fe1167a883df6b/deepagents-0.7.28.tar.gz", hash = "sha256:7479791ebd60989dbfff4a0704dfa2e6d85a8a7a37314ab933c05b9f8215deac", size = 338147, upload-time = "2026-10-16T20:21:10.381Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/8d/5ad6f7271abe3d3b584c05661bc2fb0e75be7847581659e5de83c44f4592/deepagents-0.7.21-py3-none-any.whl", hash = "sha256:c8e6a89c75c62c232f6197a21af5f1298fda7eb7f1bfbc321bbabf1fa70eefed", size = 341937, upload-time = "2026-09-30T19:28:10.09Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/69/d7df283b3919c9515369e5a1221f352c0c535c33be9880b2d8ab2b271740/deepagents-0.7.28-py3-none-any.whl", hash = "sha256:3e2492475d9e6c728262df22a324edd9abb9a0d8d1cb3d4c2593088f63ab89a5", size = 368067, upload-time = "2026-10-16T20:21:09.178Z" },
 ]
 
 [[package]]
@@ -1047,7 +1047,7 @@ wheels = [
 
 [[package]]
 name = "langchain-core"
-version = "1.6.10"
+version = "1.6.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1061,9 +1061,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid-utils" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f7/00/0a95f74a79908e7bc844a82fca35c1afc55689f55aaed086e95745946db8/langchain_core-1.6.10.tar.gz", hash = "sha256:3ad7a64eab150c1fea9f8a748b1c076aa1a960c5cf7c28d81a841a2f2dbffad1", size = 1010280, upload-time = "2026-10-12T14:13:51.184Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/12/c2/9779d64322d4e270f6d5392bc86b30f735581a87b5eefd6ad15a0828a169/langchain_core-1.6.12.tar.gz", hash = "sha256:dc6b2a965c351b4cc94df1c80220bcf3c5472e14437d2186c8290ea22f4d0219", size = 1015639, upload-time = "2026-10-16T19:28:31.055Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/2c/6ed698c6b451af0ed0efdbe94a703c18aea768d925347d8d1efd5645ae8c/langchain_core-1.6.10-py3-none-any.whl", hash = "sha256:14341bdd8b42d0dd9a53dbbcd8b0599ab47b0c718c7caa12e3eb5c50b32cffcb", size = 573253, upload-time = "2026-10-12T14:13:49.616Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/7b/49de1d4d6b9ff62e7c40a6fceb6aeecd8c190ac5f49dd7a99948c6650c16/langchain_core-1.6.12-py3-none-any.whl", hash = "sha256:39b07aed976baac14c47b7a21e3c7d4073362bccf06cf8799c585dcc9548547d", size = 573838, upload-time = "2026-10-16T19:28:29.466Z" },
 ]
 
 [[package]]
@@ -1083,7 +1083,7 @@ wheels = [
 
 [[package]]
 name = "langchain-openai"
-version = "1.7.1"
+version = "1.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -1091,9 +1091,9 @@ dependencies = [
     { name = "openai" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/20/2a19ea06055498711ee68c9675bc57125080916c001fae510646bc468ebb/langchain_openai-1.7.1.tar.gz", hash = "sha256:f9fa064c576911ff8d7c6566003bffb7eb5682c43d48407310d9de6b955f5496", size = 3405463, upload-time = "2026-10-12T14:32:52.655Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/ca/b64799a9f2ee688aa6c238f5230b20d150b19cc5892bdcb6faf2b59866f1/langchain_openai-1.7.2.tar.gz", hash = "sha256:e1fcbc7a96f7c8c94679d61639a979bba88f27889c0a68dfa225b8057345328d", size = 3405949, upload-time = "2026-10-14T13:50:59.956Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/58/9a71963cb11bf9ddee997fda9d05ef6ee3645de39a65ac6fb46423a56dda/langchain_openai-1.7.1-py3-none-any.whl", hash = "sha256:e65f2da39199a8e155fb6ae732e0aea208a01da2710a5da701d5e1a116195fcf", size = 146099, upload-time = "2026-10-12T14:32:51.057Z" },
+    { url = "https://files.pythonhosted.org/packages/39/5d/8c4888a21087e4cd1c32965613a1a17cfc8e90e41ba5205c3dad302f3410/langchain_openai-1.7.2-py3-none-any.whl", hash = "sha256:9be7980edf355ca2dd595b795a5125836ccf04515ef9377228913246156e59f5", size = 146367, upload-time = "2026-10-14T13:50:58.697Z" },
 ]
 
 [[package]]
@@ -1110,7 +1110,7 @@ wheels = [
 
 [[package]]
 name = "langchain-quickjs"
-version = "0.3.8"
+version = "0.3.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bsdiff4" },
@@ -1120,9 +1120,9 @@ dependencies = [
     { name = "langgraph" },
     { name = "quickjs-rs" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/d6/569f5b53ceeea8950d48695abaf5b3244b17d07520ee9bc9242d20f1fe2c/langchain_quickjs-0.3.8.tar.gz", hash = "sha256:902545321527d2707efa429d3127c2920a0728548fe09a4bb734bf4d1d45cf0b", size = 237585, upload-time = "2026-09-29T15:41:16.624Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/bc/d2a65809cf69a1c0e75fa9394a3e8b6d33d1d75c1e370f5c347beb5ba549/langchain_quickjs-0.3.9.tar.gz", hash = "sha256:cf7f0c35e52a92c19f6e6e0caedf6c75fbbb98f8daf6da1aae5f6328bbd11476", size = 238515, upload-time = "2026-10-13T21:56:01.584Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/83/7d15053b70a4411ac0eaf23626a228e87fc21554b0a8ab3210d8d7361ef8/langchain_quickjs-0.3.8-py3-none-any.whl", hash = "sha256:370b05afd19ee54a8a739df1f013572664e151572836fe935b3b57a5c18b0e79", size = 48643, upload-time = "2026-09-29T15:41:15.399Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/4f/7c846cf88b12071414a3a2e0378caf7266bb7660299e62ca2222832a735c/langchain_quickjs-0.3.9-py3-none-any.whl", hash = "sha256:2445f259eb7ae9dce6a937a01b635d101e74e899b9e4dfcfa60c38f74cd764f6", size = 49044, upload-time = "2026-10-13T21:56:00.243Z" },
 ]
 
 [[package]]
@@ -1186,7 +1186,7 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.14.8"
+version = "0.14.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1204,14 +1204,14 @@ dependencies = [
     { name = "xxhash" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/3a/d34ed0164451df7c2effd79ef119c90db7ec7a315731b391d3a57874829d/langsmith-0.14.8.tar.gz", hash = "sha256:667d0e69efb64b3ed3a9e1686e5246e4f9f46aacfba8c644d41e7e74bcd4eb37", size = 5002526, upload-time = "2026-10-13T00:42:26.107Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/c3/a9a98d7adf573fdd5ea5c92cadbc26d7c597ab36f4dc31c093eb19507808/langsmith-0.14.11.tar.gz", hash = "sha256:d9e7ffe587e12ce51573cab654d02e84feb924d3b1f582274c4b1412ebeabf4c", size = 5020659, upload-time = "2026-10-16T07:16:56.865Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/a8/5bfbcf7704f48331372ec36212a1e0e6bcb83eb967829d760fbdbf386616/langsmith-0.14.8-py3-none-any.whl", hash = "sha256:bda7ec3d74bc5af3244c90920e924efcf99a700638860bf87d0231bfdb4f4ce4", size = 862391, upload-time = "2026-10-13T00:42:23.53Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/1d/b683b3d8777e625e021efeaaf72dc04f709be59e6a5f2d65725cebaedcfb/langsmith-0.14.11-py3-none-any.whl", hash = "sha256:9ecca7633df228ef2c44563f7187e426b8a79e7c5c2351c5dd8c9074c61512e7", size = 869018, upload-time = "2026-10-16T07:16:54.634Z" },
 ]
 
 [[package]]
 name = "managed-deepagents"
-version = "0.10.0.dev13"
+version = "0.10.0.dev15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "deepagents" },
@@ -1225,12 +1225,12 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/51/2a573ed5819cf7c4701e206f87b5a5f8c56e39977ce67fbd3699750690a3/managed_deepagents-0.10.0.dev13-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:fb58b06d3a9db7e6cbc85b226d28f63b018b3570d224ef43129ad6ac55c426ed", size = 2810183, upload-time = "2026-10-19T16:33:11.294Z" },
-    { url = "https://files.pythonhosted.org/packages/83/5a/8c14f52e8a2e4aa9127c9258a66dc535bdba60ec9b9b9f9ced22be271c11/managed_deepagents-0.10.0.dev13-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a868bdf543d89f0501cf5aedcd4f3b8545c9425aa484f312b3e78430bad8d8d1", size = 2589473, upload-time = "2026-10-19T16:33:14.117Z" },
-    { url = "https://files.pythonhosted.org/packages/de/5d/b23da9cbd2cdcd22666c245aae899fa6c147b37fdc9c75dd2f519da3ffd1/managed_deepagents-0.10.0.dev13-py3-none-manylinux2014_aarch64.whl", hash = "sha256:eaf5aebd68096ee693c3d494cb251ebf0684fc8b51efcb0d35bffa934ff10389", size = 2884938, upload-time = "2026-10-19T16:33:18.177Z" },
-    { url = "https://files.pythonhosted.org/packages/7e/e2/cc8d51822eef1714aa4a74444b5feccfed634ca8216f8841a3212d161dab/managed_deepagents-0.10.0.dev13-py3-none-manylinux2014_x86_64.whl", hash = "sha256:25a37cfc2a7d8726c39453ecde70d17799697d0d06be0e48d6c81a9409e7f31c", size = 3148895, upload-time = "2026-10-19T16:33:20.125Z" },
-    { url = "https://files.pythonhosted.org/packages/70/39/6df6a29b09da3d8628426ab1d0bcfeb9949d19db7274491de76e9c229ae6/managed_deepagents-0.10.0.dev13-py3-none-win_amd64.whl", hash = "sha256:258775ab7c2d664f61a6a926cd7ef5a945605e65b5d21141a1d152ff131a593b", size = 2582219, upload-time = "2026-10-19T16:33:21.967Z" },
-    { url = "https://files.pythonhosted.org/packages/66/0a/eb0df433421431a9b01bf65e5c3edae5bcaeb9d822a139abfe1593c7d6c7/managed_deepagents-0.10.0.dev13-py3-none-win_arm64.whl", hash = "sha256:6193247de7d7d0bfd65614e23bf2eb74b5b0eec5c93df4bd0765da79ada09110", size = 2455462, upload-time = "2026-10-19T16:33:23.973Z" },
+    { url = "https://files.pythonhosted.org/packages/46/8b/fffaede52eb7591069293a7ed25dd4c2c488dddb3e8e4975867a3b8035c2/managed_deepagents-0.10.0.dev15-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:07c62f01915b82ff1fd8da042392cd1d17ae60a624b1f64dd31d3169973c1693", size = 2826881, upload-time = "2026-10-19T21:08:42.117Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/7e/e0b76e785f7b2ee94b45633ea648586a6222e62ded796e884d2c2e271cca/managed_deepagents-0.10.0.dev15-py3-none-macosx_11_0_arm64.whl", hash = "sha256:8af63b68f80caafb63ae2175f93574693812033e3798a92eff3ece89a1a0705b", size = 2608170, upload-time = "2026-10-19T21:08:44.308Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/e1/cd999b8d0b4d243bb83d02953868818db1c1d50aeb251c15a586e30f2403/managed_deepagents-0.10.0.dev15-py3-none-manylinux2014_aarch64.whl", hash = "sha256:9da943f5b948d2bc0ec37c060ecee73c45a5a7a3c2669bb9ee905e984e779c90", size = 2900727, upload-time = "2026-10-19T21:08:46.052Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/2c/b09889f14daf54a5b8362e54d4c5a4757028771dc9da04b812c338c54074/managed_deepagents-0.10.0.dev15-py3-none-manylinux2014_x86_64.whl", hash = "sha256:fa9c4a6954536e0d63a1707bbdd70fe1ab1e6a614749d7db5c24bd1ef03634c1", size = 3165974, upload-time = "2026-10-19T21:08:47.637Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/e0/cca0da88689a0b2a6c6be2ece112e1dac82976ed3a6564d6d9f4f21529c5/managed_deepagents-0.10.0.dev15-py3-none-win_amd64.whl", hash = "sha256:52cc30a38927d65e6f75a42546b125f18a36fa8c6c317eda165c376550c4acdf", size = 2599168, upload-time = "2026-10-19T21:08:49.33Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/dc/6301553d7e27c2108604702157aab4eb919de4948ee316a4d3cc5c591a38/managed_deepagents-0.10.0.dev15-py3-none-win_arm64.whl", hash = "sha256:d9ac49f6cd8e1ff244d332a016c040121edd5084e4788cff9050a32142ce24b0", size = 2472263, upload-time = "2026-10-19T21:08:52.829Z" },
 ]
 
 [[package]]
@@ -1307,7 +1307,6 @@ version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "deepagents" },
-    { name = "httpx" },
     { name = "httpx2" },
     { name = "langchain", extra = ["mcp"] },
     { name = "langchain-anthropic" },
@@ -1321,15 +1320,14 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "deepagents", specifier = "==0.7.21" },
-    { name = "httpx", specifier = ">=0.28.1,<1.0.0" },
+    { name = "deepagents", specifier = "==0.7.28" },
     { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
-    { name = "langchain", extras = ["mcp"], specifier = ">=1.4.3" },
-    { name = "langchain-anthropic", specifier = ">=1.7.4" },
-    { name = "langchain-openai", specifier = ">=1.6.5,<2.0.0" },
-    { name = "langchain-quickjs", specifier = ">=0.3.8,<0.4.0" },
-    { name = "langsmith", specifier = ">=0.14.0" },
-    { name = "managed-deepagents", specifier = "==0.10.0.dev13" },
+    { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6" },
+    { name = "langchain-anthropic", specifier = ">=1.7.6" },
+    { name = "langchain-openai", specifier = ">=1.7.2,<2.0.0" },
+    { name = "langchain-quickjs", specifier = ">=0.3.9,<0.4.0" },
+    { name = "langsmith", specifier = ">=0.14.11" },
+    { name = "managed-deepagents", specifier = "==0.10.0.dev15" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "pydantic", specifier = ">=2.11" },
 ]

@@ -1827,11 +1827,38 @@
         "title": "EndpointAnswer",
         "type": "object"
       },
-      "EndpointRequest_GitHubEndpointEvent_str__dict_str__Any___": {
+      "EndpointEvent_str_dict_str__JsonValue__": {
+        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
+        "properties": {
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+            },
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "EndpointEvent",
+        "type": "object"
+      },
+      "EndpointRequest_EndpointEvent_str__dict_str__JsonValue___": {
         "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type.",
         "properties": {
           "event": {
-            "$ref": "#/components/schemas/GitHubEndpointEvent_str_dict_str__Any__"
+            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
           },
           "thread": {
             "$ref": "#/components/schemas/EndpointThread"
@@ -1844,15 +1871,11 @@
         "title": "EndpointRequest",
         "type": "object"
       },
-      "EndpointRequest_dict_str__JsonValue__": {
+      "EndpointRequest_GitHubEndpointEvent_str__dict_str__Any___": {
         "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type.",
         "properties": {
           "event": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
-            },
-            "title": "Event",
-            "type": "object"
+            "$ref": "#/components/schemas/GitHubEndpointEvent_str_dict_str__Any__"
           },
           "thread": {
             "$ref": "#/components/schemas/EndpointThread"
@@ -21763,7 +21786,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EndpointRequest_dict_str__JsonValue__"
+                "$ref": "#/components/schemas/EndpointRequest_EndpointEvent_str__dict_str__JsonValue___"
               }
             }
           },

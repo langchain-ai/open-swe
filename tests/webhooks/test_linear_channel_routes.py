@@ -3,6 +3,7 @@
 import json
 import sys
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -10,6 +11,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI
+from standardwebhooks import Webhook
 
 from openswe.linear import channel
 
@@ -17,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
 
 from rt.intake import backend_endpoint
 
-_SERVICE_SECRET = "service-secret"  # noqa: S105 - test value
+# As `openssl rand -hex 32` makes one: valid base64, as Standard Webhooks takes it.
+_SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 _THREAD = str(uuid.uuid4())
 
 
@@ -44,20 +47,46 @@ def _call(key: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _post(
-    app: FastAPI, body: dict[str, Any], secret: str | None = _SERVICE_SECRET
+    app: FastAPI,
+    body: dict[str, Any],
+    secret: str | None = _SERVICE_SECRET,
+    *,
+    signed_at: datetime | None = None,
+    sent: bytes | None = None,
 ) -> httpx.Response:
-    headers = {"x-mda-service-secret": secret} if secret is not None else {}
+    """POST ``body`` as MDA does: signed with ``secret``, or unsigned without one."""
+    content = json.dumps(body).encode()
+    headers = {"content-type": "application/json"}
+    if secret is not None:
+        timestamp = signed_at or datetime.now(tz=UTC)
+        headers |= {
+            "webhook-id": "msg_delivery-1",
+            "webhook-timestamp": str(int(timestamp.timestamp())),
+            "webhook-signature": Webhook(secret).sign(
+                "msg_delivery-1", timestamp, content.decode()
+            ),
+        }
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        return await client.post("/linear/channel/events", json=body, headers=headers)
+        return await client.post("/linear/channel/events", content=sent or content, headers=headers)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("secret", [None, "guess"])
+@pytest.mark.parametrize("secret", [None, "ab" * 32])
 async def test_only_the_mda_deployment_may_call(app: FastAPI, secret: str | None) -> None:
     response = await _post(app, _call("Issue.create", {"type": "Issue"}), secret)
     assert response.status_code == 401
+    app.state.record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_changed_or_replayed_call_is_refused(app: FastAPI) -> None:
+    call = _call("Issue.create", {"type": "Issue"})
+    changed = json.dumps(_call("Issue.create", {"type": "Comment"})).encode()
+    assert (await _post(app, call, sent=changed)).status_code == 401
+    stale = datetime.now(tz=UTC) - timedelta(minutes=10)
+    assert (await _post(app, call, signed_at=stale)).status_code == 401
     app.state.record.assert_not_awaited()
 
 
@@ -66,7 +95,7 @@ async def test_nobody_may_call_without_a_configured_secret(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("MDA_SERVICE_SECRET")
-    response = await _post(app, _call("Issue.create", {"type": "Issue"}), "")
+    response = await _post(app, _call("Issue.create", {"type": "Issue"}))
     assert response.status_code == 401
 
 
@@ -75,6 +104,9 @@ async def test_unknown_events_and_oversized_payloads_are_refused(app: FastAPI) -
     assert (await _post(app, _call("Issue.remove", {}))).status_code == 422
     huge = _call("Issue.create", {"type": "Issue", "data": {"description": "x" * 1_000_001}})
     assert (await _post(app, huge)).status_code == 422
+    # A body past the route's cap is refused while it streams in, before it is verified.
+    oversized = _call("Issue.create", {"type": "Issue", "data": {"description": "x" * 3_000_000}})
+    assert (await _post(app, oversized)).status_code == 413
     app.state.record.assert_not_awaited()
 
 
@@ -154,14 +186,15 @@ async def test_a_session_turn_the_backend_declines_starts_nothing(
     assert response.json() is None
 
 
-def test_the_channel_asks_the_backend_with_its_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_channel_asks_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    # MDA signs each call with the deployment's MDA_SERVICE_SECRET: no credential here.
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.example/")
-    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
-    endpoint = backend_endpoint("/linear/channel/events")
-    assert str(endpoint.url) == "https://backend.example/linear/channel/events"
-    assert endpoint.headers["x-mda-service-secret"] == _SERVICE_SECRET
+    assert (
+        backend_endpoint("/linear/channel/events")
+        == "https://backend.example/linear/channel/events"
+    )
 
     # MDA reads the channels to build the deployment, without its environment:
     # a host that never resolves stands in, so a call fails instead of misrouting.
     monkeypatch.delenv("OPEN_SWE_BACKEND_URL")
-    assert backend_endpoint("/x").url.host == "open-swe-backend.invalid"
+    assert backend_endpoint("/x") == "https://open-swe-backend.invalid/x"

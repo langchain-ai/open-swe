@@ -16,12 +16,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from managed_deepagents import EndpointAnswer, EndpointRequest, GitHubEndpointEvent
+from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue
 
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
 from openswe.github.comments import OPEN_SWE_TAGS
-from openswe.mda_channels.auth import require_mda_channel
+from openswe.mda_channels.auth import MdaChannelRoute, require_mda_channel
 from openswe.threads.router import adopt_channel_run
 from openswe.threads.runtimes import RUNTIMES
 from openswe.webhooks import common
@@ -43,7 +44,11 @@ IssueEventKey = Literal[
 _ISSUE_EVENT_KEYS: frozenset[str] = frozenset(get_args(IssueEventKey))
 
 
-router = APIRouter(prefix="/github/channel", dependencies=[Depends(require_mda_channel)])
+router = APIRouter(
+    prefix="/github/channel",
+    dependencies=[Depends(require_mda_channel)],
+    route_class=MdaChannelRoute,
+)
 
 
 async def trigger_rejection(
@@ -108,8 +113,8 @@ async def _prepare_run(
     )
     run: EndpointAnswer = {
         "input": cast(JsonValue, prepared.input),
-        "context": cast(dict[str, JsonValue], rewritten["context"]),
-        "metadata": cast(dict[str, JsonValue], run_config["metadata"]),
+        "context": cast(dict[str, AnswerJson], rewritten["context"]),
+        "metadata": cast(dict[str, AnswerJson], run_config["metadata"]),
     }
     if COMPLETION_WEBHOOK_URL:
         run["webhook"] = COMPLETION_WEBHOOK_URL

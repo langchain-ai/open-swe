@@ -79,17 +79,13 @@ jobs:
           fi
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.changed.outputs.deploy == 'true'
-      - name: Install the mda CLI
-        if: steps.changed.outputs.deploy == 'true'
-        # Same version mda/ pins.
-        run: uv tool install managed-deepagents==0.10.0.dev13
       - name: Deploy
         if: steps.changed.outputs.deploy == 'true'
         env:
           ENVIRONMENT: ${{ matrix.environment }}
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
-          # Shared with this environment's backend: the Linear channel presents it when it hands events over.
+          # Shared with this environment's backend: MDA signs each call its channels make to it.
           # Each secret is named statically, so the runner gets only these, not every secret.
           MDA_SERVICE_SECRET: >-
             ${{ matrix.environment == 'prod' && secrets.MDA_SERVICE_SECRET_PROD
@@ -109,7 +105,7 @@ jobs:
           # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
           # which forwards issue mentions to the channel.
           export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"
-          mda deploy mda \
+          uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \

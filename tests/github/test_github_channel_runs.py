@@ -1,5 +1,7 @@
 """``POST /github/channel/events``: what MDA's GitHub channel starts for an issue mention."""
 
+import json
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -7,6 +9,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from pydantic import JsonValue
+from standardwebhooks import Webhook
 
 from openswe import dispatch
 from openswe.github import channel
@@ -16,7 +19,8 @@ from openswe.threads import runtimes
 from openswe.webhooks import common as webhook_common
 from tests.conftest import register_github_logins
 
-SERVICE_SECRET = "service-secret-0123456789"
+# As `openssl rand -hex 32` makes one: valid base64, as Standard Webhooks takes it.
+SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 THREAD = "00000000-0000-4000-8000-0000000000aa"
 
 
@@ -67,14 +71,23 @@ def _event(
     }
 
 
-async def _post(body: dict[str, Any], *, secret: str | None = SERVICE_SECRET) -> httpx.Response:
+async def _post(body: dict[str, Any], *, signed: bool = True) -> httpx.Response:
+    """POST ``body`` as MDA does, signed with the shared secret."""
     app = FastAPI()
     app.include_router(channel.router)
-    headers = {} if secret is None else {"x-mda-service-secret": secret}
+    content = json.dumps(body)
+    headers = {"content-type": "application/json"}
+    if signed:
+        now = datetime.now(tz=UTC)
+        headers |= {
+            "webhook-id": "msg_delivery-1",
+            "webhook-timestamp": str(int(now.timestamp())),
+            "webhook-signature": Webhook(SERVICE_SECRET).sign("msg_delivery-1", now, content),
+        }
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://backend.test"
     ) as client:
-        return await client.post("/github/channel/events", json=body, headers=headers)
+        return await client.post("/github/channel/events", content=content, headers=headers)
 
 
 @pytest.fixture(autouse=True)
@@ -122,21 +135,11 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return prepare
 
 
-@pytest.mark.parametrize("secret", [None, "wrong-secret"])
-async def test_only_the_mda_deployment_is_answered(secret: str | None) -> None:
-    response = await _post(_event("issues.opened", _issue_payload()), secret=secret)
+async def test_only_calls_mda_signed_are_answered(prepared: AsyncMock) -> None:
+    response = await _post(_event("issues.opened", _issue_payload()), signed=False)
 
     assert response.status_code == 401
-
-
-async def test_nothing_is_answered_without_a_configured_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("MDA_SERVICE_SECRET")
-
-    response = await _post(_event("issues.opened", _issue_payload()))
-
-    assert response.status_code == 401
+    prepared.assert_not_awaited()
 
 
 async def test_an_issue_mention_starts_a_run_on_the_channels_thread(prepared: AsyncMock) -> None:

@@ -18,9 +18,6 @@ async def test_reads_say_studio_and_writes_do_not(mda: runtimes.MdaRuntime) -> N
     assert mda.read_http.headers["x-api-key"] == "lsv2_test"
     assert "x-auth-scheme" not in mda.http.headers
     assert mda.http.headers["x-api-key"] == "lsv2_test"
-    # Nothing presents the old trusted-service secret to MDA any more.
-    assert "x-mda-service-secret" not in mda.http.headers
-    assert "x-mda-service-secret" not in mda.read_http.headers
 
 
 async def test_the_sdk_reads_as_studio_and_writes_as_the_backend(

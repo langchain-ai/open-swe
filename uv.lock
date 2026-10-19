@@ -2154,7 +2154,7 @@ wheels = [
 
 [[package]]
 name = "managed-deepagents"
-version = "0.10.0.dev13"
+version = "0.10.0.dev15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "deepagents" },
@@ -2168,12 +2168,12 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/51/2a573ed5819cf7c4701e206f87b5a5f8c56e39977ce67fbd3699750690a3/managed_deepagents-0.10.0.dev13-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:fb58b06d3a9db7e6cbc85b226d28f63b018b3570d224ef43129ad6ac55c426ed", size = 2810183, upload-time = "2026-10-19T16:33:11.294Z" },
-    { url = "https://files.pythonhosted.org/packages/83/5a/8c14f52e8a2e4aa9127c9258a66dc535bdba60ec9b9b9f9ced22be271c11/managed_deepagents-0.10.0.dev13-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a868bdf543d89f0501cf5aedcd4f3b8545c9425aa484f312b3e78430bad8d8d1", size = 2589473, upload-time = "2026-10-19T16:33:14.117Z" },
-    { url = "https://files.pythonhosted.org/packages/de/5d/b23da9cbd2cdcd22666c245aae899fa6c147b37fdc9c75dd2f519da3ffd1/managed_deepagents-0.10.0.dev13-py3-none-manylinux2014_aarch64.whl", hash = "sha256:eaf5aebd68096ee693c3d494cb251ebf0684fc8b51efcb0d35bffa934ff10389", size = 2884938, upload-time = "2026-10-19T16:33:18.177Z" },
-    { url = "https://files.pythonhosted.org/packages/7e/e2/cc8d51822eef1714aa4a74444b5feccfed634ca8216f8841a3212d161dab/managed_deepagents-0.10.0.dev13-py3-none-manylinux2014_x86_64.whl", hash = "sha256:25a37cfc2a7d8726c39453ecde70d17799697d0d06be0e48d6c81a9409e7f31c", size = 3148895, upload-time = "2026-10-19T16:33:20.125Z" },
-    { url = "https://files.pythonhosted.org/packages/70/39/6df6a29b09da3d8628426ab1d0bcfeb9949d19db7274491de76e9c229ae6/managed_deepagents-0.10.0.dev13-py3-none-win_amd64.whl", hash = "sha256:258775ab7c2d664f61a6a926cd7ef5a945605e65b5d21141a1d152ff131a593b", size = 2582219, upload-time = "2026-10-19T16:33:21.967Z" },
-    { url = "https://files.pythonhosted.org/packages/66/0a/eb0df433421431a9b01bf65e5c3edae5bcaeb9d822a139abfe1593c7d6c7/managed_deepagents-0.10.0.dev13-py3-none-win_arm64.whl", hash = "sha256:6193247de7d7d0bfd65614e23bf2eb74b5b0eec5c93df4bd0765da79ada09110", size = 2455462, upload-time = "2026-10-19T16:33:23.973Z" },
+    { url = "https://files.pythonhosted.org/packages/46/8b/fffaede52eb7591069293a7ed25dd4c2c488dddb3e8e4975867a3b8035c2/managed_deepagents-0.10.0.dev15-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:07c62f01915b82ff1fd8da042392cd1d17ae60a624b1f64dd31d3169973c1693", size = 2826881, upload-time = "2026-10-19T21:08:42.117Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/7e/e0b76e785f7b2ee94b45633ea648586a6222e62ded796e884d2c2e271cca/managed_deepagents-0.10.0.dev15-py3-none-macosx_11_0_arm64.whl", hash = "sha256:8af63b68f80caafb63ae2175f93574693812033e3798a92eff3ece89a1a0705b", size = 2608170, upload-time = "2026-10-19T21:08:44.308Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/e1/cd999b8d0b4d243bb83d02953868818db1c1d50aeb251c15a586e30f2403/managed_deepagents-0.10.0.dev15-py3-none-manylinux2014_aarch64.whl", hash = "sha256:9da943f5b948d2bc0ec37c060ecee73c45a5a7a3c2669bb9ee905e984e779c90", size = 2900727, upload-time = "2026-10-19T21:08:46.052Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/2c/b09889f14daf54a5b8362e54d4c5a4757028771dc9da04b812c338c54074/managed_deepagents-0.10.0.dev15-py3-none-manylinux2014_x86_64.whl", hash = "sha256:fa9c4a6954536e0d63a1707bbdd70fe1ab1e6a614749d7db5c24bd1ef03634c1", size = 3165974, upload-time = "2026-10-19T21:08:47.637Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/e0/cca0da88689a0b2a6c6be2ece112e1dac82976ed3a6564d6d9f4f21529c5/managed_deepagents-0.10.0.dev15-py3-none-win_amd64.whl", hash = "sha256:52cc30a38927d65e6f75a42546b125f18a36fa8c6c317eda165c376550c4acdf", size = 2599168, upload-time = "2026-10-19T21:08:49.33Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/dc/6301553d7e27c2108604702157aab4eb919de4948ee316a4d3cc5c591a38/managed_deepagents-0.10.0.dev15-py3-none-win_arm64.whl", hash = "sha256:d9ac49f6cd8e1ff244d332a016c040121edd5084e4788cff9050a32142ce24b0", size = 2472263, upload-time = "2026-10-19T21:08:52.829Z" },
 ]
 
 [[package]]
@@ -2516,6 +2516,7 @@ dependencies = [
     { name = "pyjwt" },
     { name = "slack-sdk" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "standardwebhooks" },
     { name = "uvicorn" },
     { name = "websockets" },
 ]
@@ -2581,7 +2582,7 @@ requires-dist = [
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.37" },
     { name = "langgraph-sdk", specifier = ">=0.4.8" },
     { name = "langsmith", specifier = ">=0.14.11" },
-    { name = "managed-deepagents", specifier = "==0.10.0.dev13" },
+    { name = "managed-deepagents", specifier = "==0.10.0.dev15" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
     { name = "openai", specifier = ">=3.10.0,<4.0.0" },
@@ -2594,6 +2595,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.4" },
     { name = "slack-sdk", specifier = ">=3.44.1,<4.0.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.1.1" },
+    { name = "standardwebhooks", specifier = ">=1.1.0" },
     { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.84" },
     { name = "uvicorn", specifier = ">=0.52.4" },
     { name = "websockets", specifier = ">=16.1.1" },
@@ -3757,6 +3759,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/26/8c/f9290339ef6d79badbc010f067cd769d6601ec11a57d78569c683fb4dd87/sse_starlette-3.3.4.tar.gz", hash = "sha256:aaf92fc067af8a5427192895ac028e947b484ac01edbc3caf00e7e7137c7bef1", size = 32427, upload-time = "2026-03-29T09:00:23.307Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f8/7f/3de5402f39890ac5660b86bcf5c03f9d855dad5c4ed764866d7b592b46fd/sse_starlette-3.3.4-py3-none-any.whl", hash = "sha256:84bb06e58939a8b38d8341f1bc9792f06c2b53f48c608dd207582b664fc8f3c1", size = 14330, upload-time = "2026-03-29T09:00:21.846Z" },
+]
+
+[[package]]
+name = "standardwebhooks"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/50/81/a26b812525dd9ad6cc0f6ba2f8eafd5bf595542e319d95123aa92b51bf22/standardwebhooks-1.1.0.tar.gz", hash = "sha256:e5cb66e21a6356ebb9375aeb57f1348583323015808d475a7c1baaa4b718068a", size = 3232, upload-time = "2026-07-21T15:49:51.45Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/21/dc/0cd2bd9a536e61ad0ee9de3b724492a38faa88ce1828fbc15940824664c3/standardwebhooks-1.1.0-py3-none-any.whl", hash = "sha256:9a88d48a1f198be61517fc7ad328cf58ba02b73f0fbd8941d4213e9c0b6c2a61", size = 3538, upload-time = "2026-07-21T15:49:50.519Z" },
 ]
 
 [[package]]

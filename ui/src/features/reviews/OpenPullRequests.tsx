@@ -316,9 +316,10 @@ export function OpenPullRequests({
             </div>
             <Input
               size="sm"
-              className="min-w-40 flex-1"
+              className="min-w-40 flex-1 [&_input:placeholder-shown]:text-ellipsis"
               leftIcon={MagnifyingGlassRegularIcon}
               aria-label="Search pull requests"
+              title="Search title, description, or PR number"
               placeholder="Search title, description, or PR number…"
               value={search}
               onChange={(next) =>
