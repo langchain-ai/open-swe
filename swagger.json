@@ -4549,18 +4549,6 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_mcp_ptc": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Mcp Ptc"
-          },
           "experimental_monitor": {
             "agent_feature_flag": true,
             "anyOf": [
