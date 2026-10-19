@@ -130,7 +130,9 @@ test.describe("HTML artifacts", () => {
     );
     await expect(owner.getByTestId("artifact-chat")).toBeVisible();
     await expect(owner.getByTestId("composer-editor")).toBeVisible();
-    await expect(owner.getByRole("button", { name: "Submit comments" })).toHaveCount(0);
+    await expect(
+      owner.getByRole("button", { name: "Submit comments" }),
+    ).toHaveCount(0);
 
     const verificationHeading = ownerArtifact
       .contentFrame()
@@ -143,13 +145,27 @@ test.describe("HTML artifacts", () => {
       selection?.addRange(range);
       element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
-    await expect(owner.getByRole("list", { name: "Selections attached to your next message" })).toContainText("Artifact");
-    await owner.getByTestId("composer-editor").fill("Clarify the expected output.");
-    await owner.getByRole("button", { name: "Send message", exact: true }).click();
-    const feedback = owner.getByTestId("user-message").filter({ hasText: "Clarify the expected output." });
+    await expect(
+      owner.getByRole("list", {
+        name: "Selections attached to your next message",
+      }),
+    ).toContainText("Artifact");
+    await owner
+      .getByTestId("composer-editor")
+      .fill("Clarify the expected output.");
+    await owner
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
+    const feedback = owner
+      .getByTestId("user-message")
+      .filter({ hasText: "Clarify the expected output." });
     await expect(feedback).toBeVisible();
     await expect(feedback.locator("pre")).toContainText("Verification");
-    await expect(owner.getByRole("list", { name: "Selections attached to your next message" })).toHaveCount(0);
+    await expect(
+      owner.getByRole("list", {
+        name: "Selections attached to your next message",
+      }),
+    ).toHaveCount(0);
 
     await owner.getByTestId("copy-plan").click();
     await expect(owner.getByTestId("copy-plan")).toContainText("Copied!");
@@ -159,17 +175,30 @@ test.describe("HTML artifacts", () => {
     expect(clipboard).toContain("<title>Greeting Blueprint</title>");
     expect(clipboard).toContain("<h2>Verification</h2>");
 
-    const artifact = await (await owner.request.get(`/dashboard/api/plan/${threadId}`)).json();
-    const updated = await owner.evaluate(async ({ threadId, html }) => {
-      const result = await fetch(`/dashboard/api/plan/${threadId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html }),
-      });
-      return result.ok;
-    }, { threadId, html: artifact.html.replace("<h2>Verification</h2>", "<h2>Updated verification</h2>") });
+    const artifact = await (
+      await owner.request.get(`/dashboard/api/plan/${threadId}`)
+    ).json();
+    const updated = await owner.evaluate(
+      async ({ threadId, html }) => {
+        const result = await fetch(`/dashboard/api/plan/${threadId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ html }),
+        });
+        return result.ok;
+      },
+      {
+        threadId,
+        html: artifact.html.replace(
+          "<h2>Verification</h2>",
+          "<h2>Updated verification</h2>",
+        ),
+      },
+    );
     expect(updated).toBeTruthy();
-    await expect(ownerArtifact.contentFrame().getByText("Updated verification")).toBeVisible();
+    await expect(
+      ownerArtifact.contentFrame().getByText("Updated verification"),
+    ).toBeVisible();
     await expect(feedback).toBeVisible();
 
     const collabCtx = await browser.newContext();
@@ -186,17 +215,35 @@ test.describe("HTML artifacts", () => {
         .getByText("Add greet() helper"),
     ).toBeVisible({ timeout: 30_000 });
     await expect(collab.getByTestId("artifact-chat")).toBeVisible();
-    await expect(collab.getByTestId("user-message").filter({ hasText: "Clarify the expected output." })).toBeVisible({ timeout: 30_000 });
+    await expect(
+      collab
+        .getByTestId("user-message")
+        .filter({ hasText: "Clarify the expected output." }),
+    ).toBeVisible({ timeout: 30_000 });
     await collab.getByRole("link", { name: "Back to conversation" }).click();
     await expect(collab).toHaveURL(new RegExp(`/agents/${threadId}$`));
     await expect(collab.getByTestId("composer-editor")).toBeVisible();
     await expect(collab.getByTestId("inline-plan-artifact")).toBeVisible();
 
-    const minified = '<html><body><section><h2>Section one</h2><p>Before first</p><p><span>Repeated label</span></p><p>After first</p></section><section><h2>Section two</h2><p>Before second</p><p><span>Repeated label</span></p><p>After second</p><p>Trailing second</p></section></body></html>';
-    expect(await owner.evaluate(async ({ threadId, html }) => (await fetch(`/dashboard/api/plan/${threadId}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ html }),
-    })).ok, { threadId, html: minified })).toBeTruthy();
-    const repeated = ownerArtifact.contentFrame().getByText("Repeated label", { exact: true }).last();
+    const minified =
+      "<html><body><section><h2>Section one</h2><p>Before first</p><p><span>Repeated label</span></p><p>After first</p></section><section><h2>Section two</h2><p>Before second</p><p><span>Repeated label</span></p><p>After second</p><p>Trailing second</p></section></body></html>";
+    expect(
+      await owner.evaluate(
+        async ({ threadId, html }) =>
+          (
+            await fetch(`/dashboard/api/plan/${threadId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ html }),
+            })
+          ).ok,
+        { threadId, html: minified },
+      ),
+    ).toBeTruthy();
+    const repeated = ownerArtifact
+      .contentFrame()
+      .getByText("Repeated label", { exact: true })
+      .last();
     await expect(repeated).toBeVisible();
     await repeated.evaluate((element) => {
       const range = document.createRange();
@@ -206,10 +253,24 @@ test.describe("HTML artifacts", () => {
       selection?.addRange(range);
       element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
-    await expect(owner.getByRole("list", { name: "Selections attached to your next message" })).toBeVisible();
-    await owner.getByTestId("composer-editor").fill("Disambiguate this repeated label.");
-    const sent = owner.waitForRequest((req) => req.method() === "POST" && req.url().includes(threadId) && (req.postData()?.includes("Disambiguate this repeated label.") ?? false));
-    await owner.getByRole("button", { name: "Send message", exact: true }).click();
+    await expect(
+      owner.getByRole("list", {
+        name: "Selections attached to your next message",
+      }),
+    ).toBeVisible();
+    await owner
+      .getByTestId("composer-editor")
+      .fill("Disambiguate this repeated label.");
+    const sent = owner.waitForRequest(
+      (req) =>
+        req.method() === "POST" &&
+        req.url().includes(threadId) &&
+        (req.postData()?.includes("Disambiguate this repeated label.") ??
+          false),
+    );
+    await owner
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
     const modelInput = JSON.stringify((await sent).postDataJSON());
     expect(modelInput).toContain("Context before (not selected):");
     expect(modelInput).toContain("Section two");
@@ -220,7 +281,9 @@ test.describe("HTML artifacts", () => {
     expect(modelInput).toContain("After second");
     expect(modelInput).toContain("Trailing second");
     expect(modelInput).not.toContain("Before first");
-    const disambiguated = owner.getByTestId("user-message").filter({ hasText: "Disambiguate this repeated label." });
+    const disambiguated = owner
+      .getByTestId("user-message")
+      .filter({ hasText: "Disambiguate this repeated label." });
     await expect(disambiguated.locator("pre")).toHaveText("Repeated label");
 
     const prs = (await (
