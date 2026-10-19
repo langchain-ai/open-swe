@@ -40,6 +40,7 @@ from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware
+from deepagents.middleware.skills import SkillsMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
@@ -705,7 +706,7 @@ def _general_purpose_subagent(
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
     offloading: ConversationOffloadingMiddleware | None = None,
-    workspace_skills: WorkspaceSkillsMiddleware | None = None,
+    skills_middleware: SkillsMiddleware | None = None,
     incident_middleware: AgentMiddleware | None = None,
     guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
     inherited_middleware_exclusions: Sequence[str] = (),
@@ -727,7 +728,7 @@ def _general_purpose_subagent(
                 TranscriptMiddleware(),
                 ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
                 *([incident_middleware] if incident_middleware else []),
-                *([workspace_skills] if workspace_skills else []),
+                *([skills_middleware] if skills_middleware else []),
                 *_subagent_middleware(dynamic_tools),
                 *guard_middleware,
                 *([offloading] if offloading else []),
@@ -2016,10 +2017,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         use_gateway=use_gateway,
         **title_model_kwargs,
     )
-    workspace_skills = (
+    skills_middleware = (
         WorkspaceSkillsMiddleware(backend=agent_backend, sources=skill_sources)
         if credential_login is None
-        else None
+        else SkillsMiddleware(backend=agent_backend, sources=skill_sources)
     )
     run_preparation = PrepareAgentRunMiddleware(
         credential_login=credential_login,
@@ -2070,7 +2071,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             TranscriptMiddleware(),
             *([client_tools] if client_tools else []),
             *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
-            *([workspace_skills] if workspace_skills else []),
+            skills_middleware,
             ValidateImageReadsMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=incident_session.policy.max_model_calls
@@ -2141,7 +2142,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     subagent_model,
                     tools=main_tools,
                     sandbox_only_tools=sandbox_only_tools,
-                    workspace_skills=workspace_skills,
+                    skills_middleware=skills_middleware,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                     incident_middleware=IncidentMiddleware(incident_session)
