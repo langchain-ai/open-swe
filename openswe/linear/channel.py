@@ -38,6 +38,13 @@ _AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
 router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 
 
+class LinearChannelCall(EndpointRequest[EndpointEvent[str, dict[str, JsonValue]]]):
+    """What MDA's Linear channel POSTs: the event it validated and its thread.
+
+    Named, so the API schema doesn't take a name built from MDA's generic types.
+    """
+
+
 async def _record(request: Request, payload: dict[str, JsonValue], delivery_id: str) -> None:
     """Log the event and wake the threads that listen for Linear events."""
     body = json.dumps(payload).encode()
@@ -54,7 +61,7 @@ async def _record(request: Request, payload: dict[str, JsonValue], delivery_id: 
 @router.post("/events")
 async def linear_channel_event(
     request: Request,
-    call: EndpointRequest[EndpointEvent[str, dict[str, JsonValue]]],
+    call: LinearChannelCall,
     background_tasks: BackgroundTasks,
 ) -> EndpointAnswer | None:
     """The run a Linear event starts, or ``None`` to start nothing.
