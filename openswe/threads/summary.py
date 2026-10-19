@@ -46,6 +46,7 @@ _SURFACED_SOURCES: tuple[str, ...] = (
     "github",
     "slack",
     "linear",
+    "notion",
     "schedule",
     "api",
 )
@@ -333,7 +334,7 @@ def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
             category = "automation"
         elif isinstance(metadata.get("pr_number"), int) or context.pr_number:
             category = "pull_request"
-        elif context.github_issue or context.linear_issue:
+        elif context.github_issue or context.linear_issue or context.notion_page:
             category = "issue"
         else:
             category = "interactive"

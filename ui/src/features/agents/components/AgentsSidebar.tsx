@@ -638,7 +638,7 @@ export function AgentsSidebar({
           className="flex items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
           <LogoMark alt="" className="size-5" />
-          Open SWE
+          Jarvis
         </Link>
         <div className="flex items-center gap-space-1">
           <IconButton

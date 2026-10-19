@@ -45,6 +45,11 @@ async def is_review_repo_enabled(owner: str, name: str) -> bool:
     webhook.
     """
     if not owner or not name:
+        logger.warning(
+            "is_review_repo_enabled called with missing owner/name (owner=%r, name=%r)",
+            owner,
+            name,
+        )
         return False
     try:
         repository = await Repository.get(f"{owner}/{name}")

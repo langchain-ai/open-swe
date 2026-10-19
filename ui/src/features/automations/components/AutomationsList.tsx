@@ -72,8 +72,8 @@ export function AutomationsList({
           Automations
         </Text>
         <p className="mt-space-1 text-xs text-secondary">
-          Run Open SWE on a schedule or on GitHub, Slack, and Linear events.
-          Each run starts a fresh agent thread.{" "}
+          Run Jarvis on a schedule or on GitHub, Slack, and Linear events. Each
+          run starts a fresh agent thread.{" "}
           {!canManage && "Workspace admins manage automation setup."}
         </p>
         {canManage && (
