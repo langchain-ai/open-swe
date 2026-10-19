@@ -1,0 +1,91 @@
+name: Deploy Managed Deep Agents (aeteq)
+
+# Deploys mda/ to open-swe-mda, the deployment openswe-server's MDA_RUNTIME_URL
+# points at, whenever main changes it. Upstream's deploy_mda.yml skips itself in
+# this fork. The deploy is skipped when nothing it runs changed since its tag,
+# which a successful deploy moves, so a failed one is retried next time.
+# Only commits already on main are deployed: `mda deploy` can run project code
+# while it holds the workspace deploy key.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mda/**"
+      - ".github/workflows/deploy_mda_aeteq.yml"
+  workflow_dispatch:
+
+permissions:
+  # Moves the mda-deployed/aeteq tag to what the deployment runs.
+  contents: write
+
+jobs:
+  deploy:
+    name: Deploy open-swe-mda
+    if: >-
+      github.repository == 'aeteq/open-swe'
+      && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: deploy-mda
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Refuse commits that are not on main
+        run: |
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "::error::$(git rev-parse HEAD) is not on main; only main is deployed."
+            exit 1
+          }
+      - name: Check whether the deployment is behind
+        id: changed
+        env:
+          DEPLOYED_TAG: mda-deployed/aeteq
+        run: |
+          if [[ ! -f mda/agent.py ]]; then
+            echo "mda/agent.py does not exist at this commit; nothing to deploy."
+            echo "deploy=false" >>"$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda .github/workflows/deploy_mda_aeteq.yml; then
+            echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
+            echo "deploy=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >>"$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.changed.outputs.deploy == 'true'
+      - name: Install the mda CLI
+        if: steps.changed.outputs.deploy == 'true'
+        # Same version mda/ pins.
+        run: uv tool install managed-deepagents==0.9.1
+      - name: Deploy
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          backend="https://openswe-server-2d069efe31505868bbd132b926048ef6.aws.us.langgraph.app"
+          # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
+          printf 'OPEN_SWE_BACKEND_URL=%s\n' "$backend" >mda/.env
+          printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >>mda/.env
+          mda deploy mda \
+            --name "open-swe-mda" \
+            --deployment-type prod \
+            --workspace-id 7657d5d9-dea8-46fd-a8ab-d26db7f80e5f \
+            --context-strategy overwrite \
+            --yes
+      - name: Record what the deployment runs
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          DEPLOYED_TAG: mda-deployed/aeteq
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" \
+            "HEAD:refs/tags/${DEPLOYED_TAG}"
