@@ -162,7 +162,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     monkeypatch.setattr(segment, "record_webhook", slow_export)
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
-        "openswe.slack.channels.SlackChannel.load",
+        "openswe.slack.channels.SlackChannel.cached",
         AsyncMock(
             return_value=SlackChannel.from_payload(
                 {
@@ -216,6 +216,38 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         "trigger-1",
         {"command": "/oswe", "text": "hello there"},
     )
+
+
+async def test_slack_event_log_reuses_directory_without_fetching_permissions(
+    registry_db: None,
+    slack_api,
+) -> None:
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/webhooks/slack",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    refs = EventRefs(slack_channel_id="CLOG")
+    assert not await EventLog.record(request, b"{}", "slack", refs=refs)
+    await SlackChannel.save_all(
+        {
+            "id": "CLOG",
+            "is_channel": True,
+            "is_private": False,
+            "is_member": True,
+            "is_im": False,
+            "is_mpim": False,
+        }
+    )
+    assert await EventLog.record(request, b"{}", "slack", refs=refs)
+    assert slack_api.calls == []
+    async with transaction() as conn:
+        count = await conn.scalar(text("SELECT count(*) FROM event_log"))
+    assert count == 1
 
 
 async def test_record_links_a_github_pr_comment_to_its_rows(
@@ -273,7 +305,7 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
 ) -> None:
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
-        "openswe.slack.channels.SlackChannel.load",
+        "openswe.slack.channels.SlackChannel.cached",
         AsyncMock(
             return_value=SlackChannel.from_payload(
                 {

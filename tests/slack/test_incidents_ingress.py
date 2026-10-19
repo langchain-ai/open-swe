@@ -31,6 +31,9 @@ def client(monkeypatch) -> TestClient:
     monkeypatch.setattr(common, "SLACK_SIGNING_SECRET", _SIGNING_SECRET)
     app = FastAPI()
     app.include_router(routes.router)
+    from openswe.slack.events import reset_slack_event_claims
+
+    reset_slack_event_claims()
     return TestClient(app)
 
 

@@ -127,11 +127,19 @@ class SlackChannel(Base):
             return await session.scalar(select(cls).where(cls.name == name))
 
     @classmethod
+    async def cached(cls, channel_id: str) -> Self | None:
+        """Fresh directory metadata only; never contact Slack for an audit lookup."""
+        if not SLACK_BOT_TOKEN or not channel_id:
+            return None
+        known = await cls._row(channel_id)
+        return known if known is not None and known.fresh else None
+
+    @classmethod
     async def load(cls, channel_id: str, *, use_cache: bool = True) -> Self | None:
         """The channel, from the directory while fresh and from Slack otherwise."""
         if not SLACK_BOT_TOKEN or not channel_id:
             return None
-        if use_cache and (known := await cls._row(channel_id)) is not None and known.fresh:
+        if use_cache and (known := await cls.cached(channel_id)) is not None:
             return known
         try:
             async with SlackClient.bot() as client:
