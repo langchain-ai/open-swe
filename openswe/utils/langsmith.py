@@ -186,6 +186,19 @@ async def _resolve_tracing_project_id() -> str | None:
     return resolved
 
 
+async def agent_project_name() -> str | None:
+    """Name of the project the configured agent environment traces into, once it exists."""
+    project_id = await _resolve_tracing_project_id()
+    client = _build_langsmith_client()
+    if not project_id or client is None:
+        return None
+    try:
+        return (await client.read_project(project_id=project_id)).name
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not read the agent environment's project", exc_info=True)
+        return None
+
+
 async def _project_lookup_start(project_id: str) -> datetime:
     cached = _PROJECT_START_CACHE.get(_project_cache_key(project_id))
     if cached is not None:

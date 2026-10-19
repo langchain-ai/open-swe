@@ -1,7 +1,6 @@
 """Where runs are traced: the LangSmith SDK's own project setting."""
 
-from langsmith.address import EnvAddressError, resolve_destination
-from langsmith.utils import get_tracer_project
+from langsmith.address import AgentAddress, EnvAddressError, resolve_destination
 
 from openswe.config import ENV
 
@@ -18,16 +17,12 @@ def tracing_project() -> str:
     return ENV.LANGSMITH_PROJECT.get()
 
 
-def run_tracer() -> dict[str, object]:
-    """The ``langsmith_tracer`` a run sent to MDA carries, so it traces where in-process runs do.
+def tracing_address() -> AgentAddress | None:
+    """The agent environment the SDK traces into, or ``None`` when it traces into a project.
 
-    The agent address when the environment names one, else the project. A broken
-    environment leaves the SDK's own runs untraced, so it falls back to the project name.
+    A broken environment leaves the SDK's own runs untraced, so it counts as a project.
     """
     try:
-        project, address = resolve_destination()
+        return resolve_destination()[1]
     except EnvAddressError:
-        return {"project_name": get_tracer_project()}
-    if address:
-        return {"address": address}
-    return {"project_name": project or get_tracer_project()}
+        return None

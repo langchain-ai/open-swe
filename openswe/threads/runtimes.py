@@ -13,6 +13,7 @@ import httpx
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
+from langsmith.utils import get_tracer_project
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe import dispatch
@@ -23,7 +24,8 @@ from openswe.remote_runtime.client import (
     remote_run_context,
 )
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
-from openswe.utils.tracing import run_tracer
+from openswe.utils.langsmith import agent_project_name
+from openswe.utils.tracing import tracing_address
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +110,7 @@ class MdaRuntime:
         self.url = url
         self._mda_threads: set[str] = set()
         self._http: httpx.AsyncClient | None = None
+        self._tracer_address = False
 
     @property
     def http(self) -> httpx.AsyncClient:
@@ -122,6 +125,38 @@ class MdaRuntime:
 
     def sdk(self) -> LangGraphClient:
         return get_client(url=self.url, api_key=mda_runtime_api_key())
+
+    async def supports_tracer_address(self) -> bool:
+        """Whether the MDA runtime's Agent Server accepts ``langsmith_tracer.address``."""
+        if self._tracer_address:
+            return True
+        try:
+            response = await self.http.get("/info")
+            response.raise_for_status()
+            self._tracer_address = bool(
+                response.json().get("flags", {}).get("langsmith_tracing_address")
+            )
+        except httpx.HTTPError, ValueError:
+            logger.warning("Could not read the MDA runtime's capabilities", exc_info=True)
+        return self._tracer_address
+
+    async def tracer(self) -> dict[str, object] | None:
+        """The ``langsmith_tracer`` a run carries, so it traces where in-process runs do.
+
+        An MDA runtime that predates address tracing would send the run elsewhere, so it is
+        given the agent environment's project instead, once that exists.
+        """
+        address = tracing_address()
+        if address is None:
+            return {"project_name": get_tracer_project()}
+        if await self.supports_tracer_address():
+            return {"address": address}
+        if project_name := await agent_project_name():
+            return {"project_name": project_name}
+        logger.warning(
+            "The MDA runtime cannot trace to an agent address and its project is not known yet"
+        )
+        return None
 
     async def ensure_remote_thread(self, thread_id: str) -> None:
         if thread_id in self._mda_threads:
@@ -148,9 +183,8 @@ class MdaRuntime:
             # Context replaces configurable on the server, so the stream marker rides in it.
             context[_V3_STREAMING_KEY] = True
         rewritten: dict[str, object] = {**payload, "assistant_id": MDA_GRAPH_ID, "context": context}
-        if not payload.get("langsmith_tracer"):
-            # Traced where this deployment's in-process runs are.
-            rewritten["langsmith_tracer"] = run_tracer()
+        if not payload.get("langsmith_tracer") and (tracer := await self.tracer()):
+            rewritten["langsmith_tracer"] = tracer
         if config:
             rewritten["config"] = config
         else:
