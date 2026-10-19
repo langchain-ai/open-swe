@@ -26,6 +26,8 @@ export type RenderItem =
     }
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
+  /** A code-mode `eval` call, with the tool calls its code made nested inside. */
+  | { type: "code-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | {
       type: "managed-tools-item"
@@ -109,6 +111,13 @@ function attentionItems(
     return toolNeedsAttention(item.chunk, includeUnfinished) ? [item] : []
   }
 
+  if (item.type === "code-item") {
+    const chunks = [item.chunk, ...(item.chunk.calls ?? [])]
+    return chunks.some((chunk) => toolNeedsAttention(chunk, includeUnfinished))
+      ? [item]
+      : []
+  }
+
   if (item.type === "text-chunk" && item.chunk.kind === "error") {
     return [item]
   }
@@ -136,6 +145,9 @@ export function countWorkActions(items: Array<RenderItem>): number {
       item.type === "tool-item"
     ) {
       return count + 1
+    }
+    if (item.type === "code-item") {
+      return count + 1 + (item.chunk.calls?.length ?? 0)
     }
     return count
   }, 0)
@@ -285,7 +297,13 @@ export function buildRenderItems(
           ? parseManagedToolsCard(chunk.output)
           : null
 
-      if (isEditTool(chunk)) {
+      if (chunk.toolKind === "code") {
+        items.push({
+          type: "code-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+      } else if (isEditTool(chunk)) {
         items.push({
           type: "edit-item",
           key: `tool-${chunk.toolCallId}`,

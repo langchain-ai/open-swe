@@ -49,20 +49,25 @@ export function useConnectPopup(card?: ManagedToolsConnectCard) {
     }: {
       gatewayId: string
       slug: string
-      popup: Window
+      popup: Window | null
     }) => {
       const result = await api.connectManagedTool(gatewayId, slug, card)
       if (result.url) {
         pending.current = true
-        popup.location.replace(result.url)
+        if (popup) {
+          popup.location.replace(result.url)
+        } else if (!(await window.openSweDesktop?.openExternal(result.url))) {
+          throw new Error("Couldn't open the connection page in your browser")
+        }
       } else {
-        popup.close()
+        popup?.close()
       }
       return result
     },
     onMutate: ({ gatewayId, slug }) => setConnecting(`${gatewayId}:${slug}`),
     onError: (_e, { popup }) => {
-      popup.close()
+      popup?.close()
+      pending.current = false
       setConnecting(null)
     },
     onSuccess: (result) => {
@@ -75,10 +80,11 @@ export function useConnectPopup(card?: ManagedToolsConnectCard) {
   return {
     connecting,
     start: (gatewayId: string, slug: string) => {
-      // Open synchronously in the click so the browser does not block the popup.
-      const popup = window.open("about:blank", "_blank")
-      if (!popup) return
-      popup.opener = null
+      const popup = window.openSweDesktop
+        ? null
+        : window.open("about:blank", "_blank")
+      if (!popup && !window.openSweDesktop) return
+      if (popup) popup.opener = null
       connect.mutate({ gatewayId, slug, popup })
     },
   }

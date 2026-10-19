@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -23,24 +22,14 @@ export function VersionMismatchBanner() {
         intent="warning"
         className="h-10 border-b border-b-warning py-0 text-xs"
         action={
-          <div className="flex items-center gap-space-2">
-            <Button
-              as={<Link to="/my-settings/about" />}
-              size="xs"
-              variant="plain"
-              color="secondary"
-            >
-              Details
-            </Button>
-            <Button
-              size="xs"
-              variant="outlined"
-              color="secondary"
-              onClick={() => window.location.reload()}
-            >
-              Reload
-            </Button>
-          </div>
+          <Button
+            size="xs"
+            variant="outlined"
+            color="secondary"
+            onClick={() => window.location.reload()}
+          >
+            Reload
+          </Button>
         }
       >
         <span className="truncate">

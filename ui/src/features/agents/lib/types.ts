@@ -67,6 +67,8 @@ export type AcpToolKind =
   | "managed-tools"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
+  /** Code mode's `eval` tool — runs code that may call other tools. */
+  | "code"
   | "other"
 
 export type AcpToolStatus = "pending" | "in_progress" | "completed" | "error"
@@ -131,6 +133,11 @@ export interface ToolExecutionChunk {
    * show the subagent's nested activity.
    */
   subagentNamespace?: Array<string>
+  /**
+   * The tool calls a `code` chunk's code made, in order. When present the row
+   * shows them instead of the code's raw output.
+   */
+  calls?: Array<ToolExecutionChunk>
 }
 
 export interface TextChunk {
@@ -338,6 +345,41 @@ export interface QueuedThreadMessage {
 }
 
 /** A message in the thread's queue, as `/threads/{id}/queued-messages` returns it. */
+export interface AgentBackgroundCommand {
+  task_id: string
+  command: string | null
+  status: string
+  started_at: number | null
+}
+
+export interface AgentThreadMonitor {
+  monitor_id: string
+  description: string
+  command: string
+  filter: string
+  status: string
+  started_at: number | null
+  timeout: number | null
+  events: number
+  raw_lines: number
+}
+
+/** What a thread's monitors used of the allowance its last human message opened. */
+export interface AgentMonitorBudget {
+  events: number
+  max_events: number
+  starts: number
+  max_starts: number
+  window_ends_at: number
+}
+
+/** The sandbox commands and monitors running for a thread. */
+export interface AgentBackgroundWork {
+  commands: Array<AgentBackgroundCommand>
+  monitors: Array<AgentThreadMonitor>
+  monitor_budget: AgentMonitorBudget | null
+}
+
 export interface AgentQueuedMessage {
   id: string
   text: string

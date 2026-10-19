@@ -272,7 +272,7 @@ def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
 def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
     """Config for a system-started run that continues a thread where its last run left off."""
     configurable: dict[str, Any] = {"thread_id": thread_id}
-    for key in ("source", "repo", "github_login", "triggering_user_email"):
+    for key in ("source", "repo", "github_login", "started_by_id", "triggering_user_email"):
         value = metadata.get(key)
         if value is not None:
             configurable["user_email" if key == "triggering_user_email" else key] = value
@@ -355,9 +355,9 @@ async def create_durable_run(
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread. With MDA_RUNTIME_URL
-    set, threads of people who chose Managed Deep Agents run there; the request
-    goes here regardless and ``openswe.remote_runtime.proxy`` routes it.
+    means the caller already created and titled the thread. Agent and reviewer
+    threads run on Managed Deep Agents; the request goes here regardless and
+    ``openswe.threads.router`` routes it.
     """
     client = client or dispatch_client()
     if thread_title is not None:

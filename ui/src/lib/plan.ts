@@ -115,7 +115,7 @@ export async function getPlanComments(
 export function addPlanComment(
   threadId: string,
   body: string,
-  anchor: PlanTextAnchor
+  anchor: PlanTextAnchor | null
 ): Promise<PlanComment> {
   return req(`/plan/${encodeURIComponent(threadId)}/comments`, {
     method: "POST",

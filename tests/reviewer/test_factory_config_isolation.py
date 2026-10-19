@@ -1,4 +1,4 @@
-"""Tests that get_reviewer_agent and get_chat_agent do not mutate the caller's config."""
+"""Tests that graph factories do not mutate the caller's config."""
 
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -9,7 +9,10 @@ from langgraph.graph.state import RunnableConfig
 
 @pytest.mark.parametrize(
     ("module_name", "factory_name"),
-    [("openswe.reviewer", "get_reviewer_agent"), ("openswe.chat", "get_chat_agent")],
+    [
+        ("openswe.reviewer", "get_reviewer_agent"),
+        ("openswe.review_scout.graph", "get_review_scout"),
+    ],
 )
 @pytest.mark.asyncio
 async def test_factory_copies_config_dicts_but_preserves_runtime_objects(

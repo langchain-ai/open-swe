@@ -28,6 +28,7 @@ _TOOL_MODULES = {
     "list_automations": ".automations",
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
+    "monitor": ".monitor",
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -44,7 +45,6 @@ _TOOL_MODULES = {
     "publish_review": ".publish_review",
     "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
-    "read_repo_file": "openswe.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
@@ -67,7 +67,6 @@ _TOOL_MODULES = {
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
     "send_announcement": ".send_announcement",
-    "search_repo_code": "openswe.github.tools.search_repo_code",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
     "slack_attach_html": "openswe.slack.tools.attach_html",
@@ -115,6 +114,7 @@ __all__ = [
     "list_automations",
     "list_event_types",
     "listen_events",
+    "monitor",
     "list_workspaces",
     "list_findings",
     "list_review_findings",
@@ -131,7 +131,6 @@ __all__ = [
     "publish_review",
     "write_database_rows",
     "read_only_sql",
-    "read_repo_file",
     "read_user_settings",
     "record_human_input",
     "recreate_sandbox",
@@ -154,7 +153,6 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_pull_requests",
     "send_announcement",
-    "search_repo_code",
     "start_thread",
     "slack_add_reaction",
     "slack_attach_html",
@@ -177,8 +175,6 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from openswe.github.tools.read_repo_file import read_repo_file
-    from openswe.github.tools.search_repo_code import search_repo_code
     from openswe.incidents.tools import manage_incident
     from openswe.slack.tools.add_reaction import slack_add_reaction
     from openswe.slack.tools.attach_html import slack_attach_html
@@ -220,6 +216,7 @@ if TYPE_CHECKING:
     from openswe.tools.listen_events import list_event_types, listen_events
     from openswe.tools.manage_baby_sit import manage_baby_sit
     from openswe.tools.merge_expedited_pr import merge_expedited_pr
+    from openswe.tools.monitor import monitor
     from openswe.tools.notion_designs import create_notion_design, get_notion_design_template
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
