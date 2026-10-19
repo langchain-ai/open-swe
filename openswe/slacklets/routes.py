@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.slack.blocks import block_payload
-from openswe.slacklets.kinds import KINDS
+from openswe.slacklets.kinds import kind_of
 from openswe.slacklets.store import Slacklet
 from openswe.threads.summary import assert_thread_readable
 from openswe.transcript.snapshot import load_access
@@ -49,7 +49,7 @@ async def readable_slacklet(slacklet_id: UUID, login: str, email: str | None) ->
 async def api_slacklet(slacklet_id: UUID, session: dict[str, str] = SESSION_DEP) -> SlackletOut:
     """A slacklet in a thread the session may read: the blocks Slack shows, then every command."""
     slacklet = await readable_slacklet(slacklet_id, session["sub"], session.get("email"))
-    kind = KINDS.get(slacklet.kind)
+    kind = await kind_of(slacklet)
     history = await kind.history(slacklet) if kind else []
     if not history:
         raise HTTPException(404, "slacklet_not_found")

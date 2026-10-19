@@ -11,6 +11,7 @@ _TOOL_MODULES = {
     "code_channel_set_view": ".code_channel_set_view",
     "connect_managed_tools": ".connect_managed_tools",
     "create_automation": ".automations",
+    "create_slacklet": "openswe.slacklets.tools",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
@@ -81,6 +82,7 @@ _TOOL_MODULES = {
     "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
+    "update_slacklet": "openswe.slacklets.tools",
     "update_finding": ".update_finding",
     "web_search": ".web_search",
 }
@@ -94,6 +96,7 @@ __all__ = [
     "code_channel_set_view",
     "connect_managed_tools",
     "create_automation",
+    "create_slacklet",
     "create_sandbox_file_download_url",
     "delete_automation",
     "delete_workspace",
@@ -164,6 +167,7 @@ __all__ = [
     "suggest_task",
     "trigger_automation",
     "update_automation",
+    "update_slacklet",
     "update_finding",
     "web_search",
 ]
@@ -186,7 +190,7 @@ if TYPE_CHECKING:
     from openswe.slack.tools.request_pr_review import request_pr_review
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
     from openswe.slack.tools.start_review_channel import slack_start_review_channel
-    from openswe.slacklets.tools import start_slacklet
+    from openswe.slacklets.tools import create_slacklet, start_slacklet, update_slacklet
     from openswe.tools.add_finding import add_finding
     from openswe.tools.automations import (
         create_automation,

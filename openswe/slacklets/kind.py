@@ -40,7 +40,7 @@ class SlackletCommand(Frozen):
 
     @abstractmethod
     def summary(self) -> str:
-        """The command for people, as its thread reply reads."""
+        """The command for people, as the dashboard's command log shows it."""
 
 
 class SlackletRefused(ValueError):
@@ -53,6 +53,3 @@ class Entry[S: SlackletState, C: SlackletCommand](NamedTuple):
     seq: int
     command: C
     state: S
-
-    def log_text(self) -> str:
-        return f"`#{self.seq} {self.command.op}` {self.command.summary()}"

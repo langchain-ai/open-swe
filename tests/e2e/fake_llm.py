@@ -612,6 +612,83 @@ def _slacklet_status_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+DYNAMIC_SLACKLET_MARKER = "E2E_DYNAMIC_SLACKLET"
+DYNAMIC_SLACKLET_PROGRAM = """
+function init(params) { return { title: params.title, items: params.items, done: [] }; }
+function apply(state, command) {
+  if (command.op !== "check") throw new Error("unknown op " + command.op);
+  if (!state.items.includes(command.params.item)) throw new Error("no item " + command.params.item);
+  return { ...state, done: [...state.done, command.params.item] };
+}
+function render(state) {
+  const lines = state.items.map((item) => (state.done.includes(item) ? "✅ " : "⬜ ") + item);
+  return {
+    text: state.title + ": " + state.done.length + "/" + state.items.length + " done",
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text: "*" + state.title + "*" } },
+      { type: "section", text: { type: "mrkdwn", text: lines.join("\\n") } },
+      { type: "divider" },
+      { type: "context", elements: [
+        { type: "mrkdwn", text: state.done.length + " of " + state.items.length + " done" },
+      ] },
+    ],
+  };
+}
+"""
+
+
+def _dynamic_slacklet_id(messages: list[BaseMessage]) -> str:
+    return str(_tool_payload(messages, "create_slacklet")["slacklet_id"])
+
+
+def _dynamic_check_step(messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Checking off the first item.",
+        tool_calls=[
+            {
+                "name": "update_slacklet",
+                "args": {
+                    "slacklet_id": _dynamic_slacklet_id(messages),
+                    "op": "check",
+                    "params": {"item": "Tag v1.2.0"},
+                    "note": "Tagged v1.2.0",
+                },
+                "id": "call-dynamic-check",
+            }
+        ],
+    )
+
+
+def _dynamic_refused_step(messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Trying an op the program does not define.",
+        tool_calls=[
+            {
+                "name": "update_slacklet",
+                "args": {"slacklet_id": _dynamic_slacklet_id(messages), "op": "uncheck"},
+                "id": "call-dynamic-refused",
+            }
+        ],
+    )
+
+
+def _dynamic_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    refused = _tool_payload(messages, "update_slacklet")
+    return AIMessage(
+        content="Reporting back.",
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {
+                    "message": f"Checklist is live. My uncheck was refused: {refused['error']}",
+                    "response_type": "final",
+                },
+                "id": "call-dynamic-reply",
+            }
+        ],
+    )
+
+
 def _human_review_request_step(messages: list[BaseMessage]) -> AIMessage:
     """Ask the review channel to review the pull request the user named."""
     humans = _script_humans(messages)
@@ -1382,6 +1459,24 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
     ),
     "slacklet_status": (_dynamic_step(_slacklet_status_step),),
+    "dynamic_slacklet": (
+        _tool_step(
+            "Building a checklist slacklet for the release.",
+            "create_slacklet",
+            {
+                "name": "Release checklist",
+                "program": DYNAMIC_SLACKLET_PROGRAM,
+                "params": {
+                    "title": "Release v1.2.0",
+                    "items": ["Tag v1.2.0", "Publish notes", "Announce"],
+                },
+            },
+            "call-dynamic-create",
+        ),
+        _dynamic_step(_dynamic_check_step),
+        _dynamic_step(_dynamic_refused_step),
+        _dynamic_step(_dynamic_reply_step),
+    ),
     # Woken because nobody signed up within 30 minutes.
     "human_review_assign": (
         _dynamic_step(_human_review_assign_step),
@@ -1652,6 +1747,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
     ScriptRule("slacklet_status", lambda ctx: SLACKLET_STATUS_MARKER in ctx.pending_text),
+    ScriptRule(
+        "dynamic_slacklet",
+        lambda ctx: ctx.human_count <= 1 and DYNAMIC_SLACKLET_MARKER in ctx.first_text,
+    ),
     ScriptRule(
         "slacklet",
         lambda ctx: ctx.human_count <= 1 and SLACKLET_MARKER in ctx.first_text,

@@ -36,6 +36,27 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        CREATE TABLE slacklet_definition (
+            id uuid PRIMARY KEY,
+            name text NOT NULL,
+            source text NOT NULL,
+            source_sha256 text NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL
+        )
+        """
+    )
+    op.execute(
+        "CREATE UNIQUE INDEX slacklet_definition_source_idx ON slacklet_definition (source_sha256)"
+    )
+    op.execute(
+        "COMMENT ON TABLE slacklet_definition IS "
+        "'Agent-written slacklet programs; a dynamic slacklet''s subject is one of these ids.'"
+    )
+    op.execute(
+        """
         CREATE TABLE slacklet_command (
             id uuid PRIMARY KEY,
             slacklet_id uuid NOT NULL REFERENCES slacklet (id) ON DELETE CASCADE,

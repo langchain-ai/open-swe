@@ -43,7 +43,8 @@ export function toolKind(name: string): ToolKind {
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
   if (lowered === "connect_managed_tools") return "managed-tools"
-  if (lowered === "start_slacklet") return "slacklet"
+  if (lowered === "start_slacklet" || lowered === "create_slacklet")
+    return "slacklet"
   if (lowered === "linear_comment") return "linear"
   if (
     EDIT_TOOLS.has(lowered) ||

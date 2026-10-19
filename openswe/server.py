@@ -199,6 +199,7 @@ from openswe.tools import (
     connect_managed_tools,
     create_automation,
     create_sandbox_file_download_url,
+    create_slacklet,
     delete_automation,
     delete_organization_skill,
     delete_user_skill,
@@ -259,6 +260,7 @@ from openswe.tools import (
     switch_to_performance_model,
     trigger_automation,
     update_automation,
+    update_slacklet,
     web_search,
     write_database_rows,
 )
@@ -357,6 +359,8 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
         "slack_move_thread",
         "slack_start_review_channel",
         "start_slacklet",
+        "create_slacklet",
+        "update_slacklet",
     }
 )
 SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_breakout_thread"})
@@ -589,6 +593,8 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_breakout_thread",
         "slack_start_review_channel",
         "start_slacklet",
+        "create_slacklet",
+        "update_slacklet",
         "publish_workspace",
         "refresh_workspace_start",
         "configure_repository",
@@ -1759,6 +1765,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_breakout_thread,
         slack_start_review_channel,
         start_slacklet,
+        create_slacklet,
+        update_slacklet,
     ]
     static_tools = [
         http_request,
@@ -1823,6 +1831,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_breakout_thread,
         slack_start_review_channel,
         start_slacklet,
+        create_slacklet,
+        update_slacklet,
         submit_thread_feedback,
         suggest_task,
         submit_review_assessment_feedback,
