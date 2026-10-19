@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -158,6 +159,66 @@ async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
 
     assert result["status"] == "already_refreshing"
     create.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.asyncio
+async def test_a_reclaimed_job_takes_over_the_refresh_its_lost_worker_left_running() -> None:
+    """A job claimed again after its worker died must not mistake its own refresh for another."""
+    backend = _backend(_Result("provisioned", 0))
+    release = AsyncMock()
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", release),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
+    ):
+        await WORKSPACES.create(
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
+        )
+        await WORKSPACES.mark_refreshing("base", run_id="job-1")
+        await WORKSPACES.mark_refresh_builder("base", "sb-orphan")
+        blocked = await refresh.refresh_workspace("base", run_id="job-2")
+        result = await refresh.refresh_workspace("base", run_id="job-1")
+
+    assert blocked["status"] == "already_refreshing"
+    assert result["status"] == "success"
+    assert [call.args[0] for call in release.await_args_list] == ["sb-orphan", "sb-builder"]
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.asyncio
+async def test_a_cancelled_refresh_is_settled_so_its_retry_can_run() -> None:
+    backend = _backend()
+    backend.aexecute = AsyncMock(side_effect=asyncio.CancelledError)
+    release = AsyncMock()
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", release),
+    ):
+        await WORKSPACES.create(
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await refresh.refresh_workspace("base")
+        record = await WORKSPACES.get("base")
+
+    release.assert_awaited_once_with("sb-builder")
+    assert record is not None
+    assert record.refresh_status == "failed"
+    assert record.refresh_error == "interrupted"
+    assert not refresh.is_refresh_in_flight(record)
 
 
 # --- update kind + lazy trigger ---

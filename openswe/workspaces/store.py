@@ -1189,10 +1189,14 @@ class WorkspaceStore:
 
         return await self.update_state(slug, change)
 
-    async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Workspace | None:
+    async def mark_refreshing(
+        self, slug: str, kind: RefreshKind = "full", *, run_id: str | None = None
+    ) -> Workspace | None:
         def change(record: Workspace) -> None:
             record.refresh_status = "refreshing"
             record.refresh_kind = kind
+            if run_id is not None:
+                record.refresh_run_id = run_id
             record.refresh_started_at = now_iso()
             record.refresh_finished_at = None
             record.refresh_log = None

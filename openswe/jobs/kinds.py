@@ -110,7 +110,7 @@ async def _baby_sit(job: Job) -> str | None:
 @_sandbox_work(WORKSPACE_REFRESH)
 async def _workspace_refresh(job: Job) -> object:
     kind = "update" if job.payload.get("refresh_kind") == "update" else "full"
-    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind)
+    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind, run_id=str(job.id))
 
 
 @WORKER.register(AGENT_SCHEDULE_JOB_KIND)
