@@ -367,13 +367,14 @@ class HumanReviewRequest(Base):
             return Counter(dict(rows.tuples().all()))
 
     @classmethod
-    async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:
-        """Whether this Slack thread contains an Open SWE review-request card."""
+    async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
+        """The Open SWE review-request card this Slack thread holds, with its pull request."""
         if not postgres.configured():
-            return False
+            return None
         async with postgres.session() as session:
-            request_id = await session.scalar(
-                select(cls.id)
+            return await session.scalar(
+                select(cls)
+                .options(selectinload(cls.pull_request))
                 .where(
                     cls.kind.in_(("standard", "expedited")),
                     or_(
@@ -388,9 +389,9 @@ class HumanReviewRequest(Base):
                         & (cls.slack_copy_ts == thread_ts),
                     ),
                 )
+                .order_by(cls.created_at.desc())
                 .limit(1)
             )
-            return request_id is not None
 
     @classmethod
     async def copy_channels_for_author(cls, login: str, *, since: datetime) -> list[str]:
