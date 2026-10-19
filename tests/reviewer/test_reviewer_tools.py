@@ -1,11 +1,15 @@
 """Unit tests for the add_finding / update_finding / list_findings tools."""
 
+import asyncio
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from openswe.review.diff import compute_diff_line_set
+from openswe.review.findings import Finding
 from openswe.tools.add_finding import add_finding
 from openswe.tools.resolve_finding_thread import resolve_finding_thread
 from openswe.tools.update_finding import update_finding
@@ -85,6 +89,92 @@ async def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
         )
     assert result["success"] is False
     assert result["in_diff"] is False
+
+
+@pytest.mark.parametrize("source", ["diff_path", "legacy_diff_text", "timeout"])
+async def test_add_finding_keeps_hunk_and_validates_state_anchors(
+    tmp_path: Path, source: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    path_backed = source != "legacy_diff_text"
+    file = "foo '$(printf injected);.py"
+    hunk = "@@ -50,2 +10,2 @@\n-old\n+new\n context\n"
+    file_diff = f"diff --git a/{file} b/{file}\n{hunk}"
+    diff_text = (
+        "diff --git a/large.py b/large.py\n@@ -1 +1 @@\n-previous\n+"
+        + "x" * 300_000
+        + "\n"
+        + file_diff
+        + "diff --git a/other.py b/other.py\n@@ -1 +1 @@\n-old\n+unrelated\n"
+    )
+    path = tmp_path / "review '$(printf injected);.patch"
+    path.write_text(diff_text)
+    state: dict[str, object] = {"diff_line_set": compute_diff_line_set(diff_text)}
+    if path_backed:
+        state["diff_path"] = str(path)
+    else:
+        state["diff_text"] = diff_text
+    captured: list[Finding] = []
+    sandbox_output: list[str] = []
+
+    async def execute(command: str) -> dict[str, object]:
+        if source == "timeout":
+            raise TimeoutError("Sandbox read timed out")
+        process = await asyncio.create_subprocess_shell(
+            command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
+        assert process.returncode == 0, stderr.decode()
+        sandbox_output.append(stdout.decode())
+        return {"exit_code": process.returncode, "output": stdout.decode()}
+
+    async def append(thread_id: str, finding: Finding) -> dict[str, object]:
+        captured.append(finding)
+        return {"finding": finding, "created": True}
+
+    with (
+        patch("openswe.run_config.get_config", return_value=_config()),
+        patch("openswe.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("openswe.tools.add_finding.append_finding", side_effect=append),
+        patch(
+            "openswe.tools.add_finding.get_cached_sandbox_backend",
+            return_value=MagicMock(aexecute=AsyncMock(side_effect=execute)),
+        ),
+    ):
+        accepted = await add_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            file=file,
+            title="Changed code breaks behavior",
+            description="Regression in the changed code.",
+            start_line=10,
+            state=state,
+        )
+        for line, side in [(50, "RIGHT"), (10, "LEFT"), (99, "RIGHT")]:
+            rejected = await add_finding(
+                severity="high",
+                confidence="high",
+                category="correctness",
+                file=file,
+                title="Outside the changed side",
+                description="Invalid anchor.",
+                start_line=line,
+                side=side,
+                state=state,
+            )
+            assert rejected["success"] is False
+            assert rejected["in_diff"] is False
+
+    assert accepted["success"] is True
+    assert len(captured) == 1
+    assert captured[0]["in_diff"] is True
+    if source == "timeout":
+        assert captured[0]["diff_hunk"] is None
+        assert "Could not read materialized finding diff" in caplog.text
+    else:
+        assert captured[0]["diff_hunk"] == hunk.rstrip("\n")
+        if path_backed:
+            assert sandbox_output == [file_diff]
 
 
 async def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:

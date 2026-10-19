@@ -519,7 +519,8 @@ async def _cached_api_standards_skill() -> str | None:
 
 
 class PrepareReviewerRunState(PrepareRunState):
-    diff_text: NotRequired[str]
+    diff_path: NotRequired[str | None]
+    diff_text: NotRequired[None]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
     review_approval_policy: NotRequired[str | None]
 
@@ -696,9 +697,11 @@ async def prepare_reviewer_run(
         pr_number is not None and bool(repo_owner) and bool(repo_name) and bool(github_token)
     )
 
-    async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
+    async def _fetch_diff_context() -> tuple[
+        str, dict[str, dict[str, set[int]]] | None, str | None
+    ]:
         if not can_fetch_pr or github_token is None or not isinstance(pr_number, int):
-            return "", None
+            return "", None, None
         fetched_diff: str | None = None
         if not (is_re_review and last_reviewed_sha):
             fetched_diff = await fetch_pr_diff(
@@ -708,10 +711,13 @@ async def prepare_reviewer_run(
                 token=github_token,
             )
             if fetched_diff is None:
-                return "", None
+                return "", None, None
         checkout = await checkout_task
+        diff_path: str | None = None
         try:
-            diff_base, diff_head, merge_base = review_diff_range(
+            diff_base, diff_head, merge_base = await review_diff_range(
+                checkout.sandbox_backend,
+                work_dir=f"{checkout.work_dir}/{repo_name}",
                 base_sha=base_sha,
                 head_sha=head_sha,
                 last_reviewed_sha=last_reviewed_sha,
@@ -726,12 +732,13 @@ async def prepare_reviewer_run(
                 diff_text=fetched_diff,
             )
             diff_text = materialized.diff_text
+            diff_path = materialized.path
         except RuntimeError, ValueError:
             logger.exception("Failed to materialize review diff")
             if fetched_diff is None:
-                return "", None
+                return "", None, None
             diff_text = fetched_diff
-        return diff_text, compute_diff_line_set(diff_text)
+        return diff_text, compute_diff_line_set(diff_text), diff_path
 
     async def _fetch_pr_overview() -> tuple[str, str]:
         if not can_fetch_pr or github_token is None or not isinstance(pr_number, int):
@@ -829,7 +836,7 @@ async def prepare_reviewer_run(
         return content
 
     async def _fetch_scoped_agents_md() -> dict[str, str]:
-        diff_text, _ = await diff_context_task
+        diff_text, _, _ = await diff_context_task
         checkout = await checkout_task
         if not checkout.repo_ready:
             return {}
@@ -874,7 +881,7 @@ async def prepare_reviewer_run(
     )
     try:
         checkout = await checkout_task
-        pr_diff_text, pr_diff_line_set = await diff_context_task
+        _, pr_diff_line_set, pr_diff_path = await diff_context_task
         pr_overview = await pr_overview_task
         existing_threads_block = await existing_threads_task
         repo_style_prompt = await repo_style_task
@@ -966,7 +973,8 @@ async def prepare_reviewer_run(
         "work_dir": work_dir,
         "rendered_system_prompt": system_prompt,
         "review_approval_policy": approval_policy,
-        "diff_text": pr_diff_text,
+        "diff_path": pr_diff_path,
+        "diff_text": None,
         "diff_line_set": pr_diff_line_set,
     }
     return prepared

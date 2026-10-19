@@ -355,3 +355,28 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     assert catalog["also_from_code"] == ["read_file"]
+
+
+def test_reviewer_anchor_index_survives_remote_state_round_trip() -> None:
+    from typing import cast
+
+    from openswe.remote_runtime.graph import HookBody, RunSession, _json_state
+    from openswe.remote_runtime.reviewer import _restore
+    from openswe.review.diff import is_range_in_diff
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    state = {
+        "diff_path": "/workspace/repo/review-diff.patch",
+        "diff_line_set": {"app.py": {"RIGHT": {10, 11}, "LEFT": {1}}},
+    }
+    wire_state = _json_state(state)
+    body = HookBody.model_validate_json(json.dumps({"state": wire_state}))
+    session = RunSession(ToolSurface(), {}, _restore, started_here=False)
+    restored = session.state(body)
+
+    assert restored["diff_path"] == state["diff_path"]
+    assert "diff_text" not in restored
+    assert restored["diff_line_set"] == state["diff_line_set"]
+    index = cast(dict[str, dict[str, set[int]]], restored["diff_line_set"])
+    assert is_range_in_diff(index, "app.py", 10, 11)
+    assert not is_range_in_diff(index, "app.py", 12, 12)
