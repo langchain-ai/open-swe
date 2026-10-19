@@ -41,6 +41,7 @@ from openswe.human_review.requests import (
     HumanReviewParticipant,
     HumanReviewRequest,
     RequestState,
+    slack_mention,
 )
 from openswe.prompts import prompt
 from openswe.slack.blocks import Block, block_payload, context, escape, section
@@ -284,14 +285,29 @@ class ReviewCard:
             )
             return {}
 
+    async def _approvers(self, states: dict[str, str]) -> str:
+        reviewers = {r.github_login.lower(): r.user for r in self.request.reviewers}
+        mentions: list[str] = []
+        for login, state in states.items():
+            if state != "APPROVED":
+                continue
+            user = reviewers.get(login.lower()) or await User.for_login("github", login)
+            mentions.append(slack_mention(user, login))
+        return ", ".join(mentions)
+
     async def _render_standard(self, outcome: str | None) -> tuple[str, list[Block]]:
         request = self.request
         pr = request.pull_request
         author = await request.author_mention()
         states = await self._review_states() if outcome in (None, "merged") else {}
+        approvers = await self._approvers(states)
         if outcome is not None:
             return standard_card.closed_card(
-                request, title=pr.title, author=author, outcome=outcome, review_states=states
+                request,
+                title=pr.title,
+                author=author,
+                outcome=outcome,
+                approvers=approvers,
             )
         from openswe.human_review.standard import merge_wait
 
@@ -306,7 +322,11 @@ class ReviewCard:
             is None
         ):
             return standard_card.closed_card(
-                request, title=pr.title, author=author, outcome="approved", review_states=states
+                request,
+                title=pr.title,
+                author=author,
+                outcome="approved",
+                approvers=approvers,
             )
         requester = request.requested_by
         return standard_card.open_card(
@@ -315,6 +335,7 @@ class ReviewCard:
             author=author,
             requester=standard_card.mention(requester) if requester is not None else None,
             review_states=states,
+            approvers=approvers,
         )
 
     async def render(

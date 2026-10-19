@@ -431,8 +431,9 @@ def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
 @pytest.mark.parametrize(
     "states", [{"Grace": "APPROVED", "hopper": "APPROVED", "linus": "DISMISSED"}, None]
 )
+@pytest.mark.parametrize("linked", [True, False])
 async def test_merged_card_names_only_actual_approvers(
-    states: dict[str, str] | None, github_app: AsyncMock
+    states: dict[str, str] | None, linked: bool, github_app: AsyncMock
 ) -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
@@ -447,8 +448,21 @@ async def test_merged_card_names_only_actual_approvers(
         participant = HumanReviewParticipant(user_id=user.id, decision="review")
         participant.user = user
         request.participants.append(participant)
-    with patch(
-        "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+    hopper = User(
+        identities=[
+            UserIdentity(provider="github", external_id="hopper", login="hopper"),
+            UserIdentity(provider="slack", external_id="U_hopper"),
+        ]
+    )
+
+    async def lookup(provider: str, login: str) -> User | None:
+        return hopper if linked and provider == "github" and login.lower() == "hopper" else None
+
+    with (
+        patch(
+            "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+        ),
+        patch.object(User, "for_login", lookup),
     ):
         text, blocks = await ReviewCard(request).render("merged")
     payload = block_payload(blocks)
@@ -458,7 +472,8 @@ async def test_merged_card_names_only_actual_approvers(
         assert "merged" in message
         assert "by @ada" in message
         if states:
-            assert "approved by <@U_grace>, @hopper" in message
+            approver = "<@U_hopper>" if linked else "@hopper"
+            assert f"approved by <@U_grace>, {approver}" in message
         else:
             assert "approved by" not in message
         assert "linus" not in message
