@@ -125,8 +125,7 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 | `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
 | `POST /webhooks/slack/commands` | The `/oswe` slash command |
-| `POST /linear/channel/runs`, `POST /linear/channel/events` | Linear deliveries from the MDA deployment's Linear channel |
-| `POST /mda/channel/settled` | An MDA channel's run that ended, which the backend completes |
+| `POST /linear/channel/events` | The MDA deployment's Linear channel asking what a Linear event starts |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |

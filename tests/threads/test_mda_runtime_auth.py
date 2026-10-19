@@ -40,8 +40,6 @@ async def test_thread_reads_and_writes_take_their_own_clients(
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append((request.method, request.url.path, request.headers.get("x-auth-scheme")))
-        if request.url.path.endswith("/runs"):
-            return httpx.Response(200, json=[{"run_id": "run-1", "status": "success"}])
         return httpx.Response(200, json={"thread_id": "t1", "metadata": {}, "values": {}})
 
     def client(sdk_client: LangGraphClient) -> LangGraphClient:
@@ -54,11 +52,9 @@ async def test_thread_reads_and_writes_take_their_own_clients(
     threads = runtimes._SdkThreads(client(mda.sdk()), client(mda.read_sdk()))
 
     await threads.get("t1")
-    assert await threads.latest_run("t1") == {"run_id": "run-1", "status": "success"}
     await threads.update("t1", {"title": "x"})
 
     assert seen == [
         ("GET", "/threads/t1", "langsmith"),
-        ("GET", "/threads/t1/runs", "langsmith"),
         ("PATCH", "/threads/t1", None),
     ]

@@ -968,6 +968,21 @@
         "title": "ChallengeResponse",
         "type": "object"
       },
+      "ChannelThread": {
+        "description": "The conversation's thread, the issue's or an agent session's.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ChannelThread",
+        "type": "object"
+      },
       "CheckpointFile": {
         "additionalProperties": false,
         "description": "One file a turn changed, as ``git diff --numstat`` counted it.",
@@ -2449,12 +2464,29 @@
         "type": "object"
       },
       "LinearChannelEvent": {
-        "description": "A Linear event the channel received and verified, on the thread it belongs to.",
+        "description": "What the channel sends its endpoint: the event, and the thread it belongs to.",
         "properties": {
-          "delivery_id": {
+          "event": {
+            "$ref": "#/components/schemas/LinearEvent"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/ChannelThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "LinearChannelEvent",
+        "type": "object"
+      },
+      "LinearEvent": {
+        "description": "A Linear event the channel received and verified.",
+        "properties": {
+          "deliveryId": {
             "maxLength": 200,
             "minLength": 1,
-            "title": "Delivery Id",
+            "title": "Deliveryid",
             "type": "string"
           },
           "key": {
@@ -2474,20 +2506,14 @@
             },
             "title": "Payload",
             "type": "object"
-          },
-          "thread_id": {
-            "format": "uuid",
-            "title": "Thread Id",
-            "type": "string"
           }
         },
         "required": [
-          "thread_id",
-          "delivery_id",
           "key",
+          "deliveryId",
           "payload"
         ],
-        "title": "LinearChannelEvent",
+        "title": "LinearEvent",
         "type": "object"
       },
       "LinearTrigger": {
@@ -3925,26 +3951,6 @@
         "title": "PostedReviewComment",
         "type": "object"
       },
-      "PreparedLinearRun": {
-        "description": "The run the channel starts, or None to start nothing.",
-        "properties": {
-          "run": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PreparedRun"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "run"
-        ],
-        "title": "PreparedLinearRun",
-        "type": "object"
-      },
       "PreparedRun": {
         "description": "What the channel starts the run with.",
         "properties": {
@@ -3964,6 +3970,10 @@
             },
             "title": "Metadata",
             "type": "object"
+          },
+          "webhook": {
+            "title": "Webhook",
+            "type": "string"
           }
         },
         "required": [
@@ -6559,28 +6569,6 @@
           "prompt"
         ],
         "title": "SessionCreateBody",
-        "type": "object"
-      },
-      "SettledRun": {
-        "description": "A run a channel started on its thread, which ended.",
-        "properties": {
-          "run_id": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Run Id",
-            "type": "string"
-          },
-          "thread_id": {
-            "format": "uuid",
-            "title": "Thread Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "thread_id",
-          "run_id"
-        ],
-        "title": "SettledRun",
         "type": "object"
       },
       "SkillCreate": {
@@ -21330,54 +21318,8 @@
     },
     "/linear/channel/events": {
       "post": {
-        "description": "Log a Linear delivery the channel forwarded, and run the automations it triggers.",
-        "operationId": "receive_linear_event_linear_channel_events_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "linear-delivery",
-            "required": true,
-            "schema": {
-              "maxLength": 200,
-              "minLength": 1,
-              "title": "Linear-Delivery",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Receive Linear Event Linear Channel Events Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Receive Linear Event"
-      }
-    },
-    "/linear/channel/runs": {
-      "post": {
-        "description": "Prepare the run an agent session turn starts on its session's thread.",
-        "operationId": "prepare_linear_run_linear_channel_runs_post",
+        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares; ``None`` there declines, and\nthe channel tells the session. Issue events run Linear automations.",
+        "operationId": "linear_channel_event_linear_channel_events_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -21393,7 +21335,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PreparedLinearRun"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PreparedRun"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Linear Channel Event Linear Channel Events Post"
                 }
               }
             },
@@ -21410,50 +21360,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Prepare Linear Run"
-      }
-    },
-    "/mda/channel/settled": {
-      "post": {
-        "description": "Complete a channel's run that ended; any other thread's runs have their webhook.",
-        "operationId": "complete_settled_run_mda_channel_settled_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SettledRun"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Complete Settled Run Mda Channel Settled Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Complete Settled Run"
+        "summary": "Linear Channel Event"
       }
     },
     "/webhooks/github": {

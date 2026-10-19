@@ -1,14 +1,10 @@
 """What every MDA channel's backend side shares, whatever the provider.
 
 An MDA channel (Linear's, GitHub's, ...) receives its provider's events in the MDA
-deployment, asks the backend to prepare each run, and starts that run on a thread
-it owns. The pieces here are the provider-neutral half of that:
-
-- :mod:`.auth`: only the deployment, holding Open SWE's shared secret, may call a
-  channel route.
-- :mod:`.completion`: a channel run has no run-complete webhook, so the channel
-  reports each run that ends, and the thread status reconcile job completes one
-  whose report was lost (``openswe.threads.status``).
+deployment, asks the backend's endpoint for that channel what each one starts, and
+starts that run on a thread it owns, with the backend's run-complete webhook. Only
+the deployment, holding Open SWE's shared secret, may call a channel endpoint
+(:mod:`.auth`).
 
 A thread or run belongs to a channel when its metadata names one
 (``openswe.dispatch.channel_of``). The backend reads those threads as LangSmith

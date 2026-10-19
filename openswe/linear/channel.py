@@ -1,26 +1,20 @@
-"""Routes for MDA's Linear channel.
+"""The endpoint MDA's Linear channel asks what each Linear event starts.
 
-The channel receives Linear's webhooks in the MDA deployment and verifies each
-delivery's signature and age. An agent session turn comes to ``/runs`` as its key
-and the payload the channel validated, and the backend prepares the run the
-channel starts. Issue and comment events start no conversation: the channel
-forwards them to ``/events`` as Linear sent them. Only the deployment, which holds
-Open SWE's shared secret, may call these routes.
+The channel receives Linear's webhooks in the MDA deployment, verifies each
+delivery's signature and age, and POSTs the event it validated, with the thread it
+belongs to, here (``channels.linear`` ``on_event``). The backend decides: an agent
+session turn starts the run it prepares, on the session's thread, with the
+run-complete webhook; issue and comment events start nothing, and are logged and
+run Linear automations. Only the deployment, which holds Open SWE's shared secret,
+may call it.
 """
 
 import json
-from typing import Annotated, Literal, Self, TypedDict
+from typing import Literal, Self
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
-from pydantic import (
-    BaseModel,
-    Field,
-    JsonValue,
-    TypeAdapter,
-    ValidationError,
-    model_validator,
-)
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from openswe.linear.session import LinearSessionTurn, PreparedRun
 from openswe.mda_channels.auth import require_mda_channel
@@ -37,20 +31,32 @@ LinearEventKey = Literal[
     "AgentSessionEvent.created",
     "AgentSessionEvent.prompted",
 ]
-#: The events the channel forwards; they start no conversation.
-_FORWARDED_KEYS = frozenset({"Issue.create", "Issue.update", "Comment.create"})
 _AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
 
 router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 
 
-class LinearChannelEvent(BaseModel):
-    """A Linear event the channel received and verified, on the thread it belongs to."""
+class LinearEvent(BaseModel):
+    """A Linear event the channel received and verified."""
 
-    thread_id: UUID
-    delivery_id: str = Field(min_length=1, max_length=200)
+    model_config = ConfigDict(populate_by_name=True)
+
     key: LinearEventKey
+    delivery_id: str = Field(alias="deliveryId", min_length=1, max_length=200)
     payload: dict[str, JsonValue]
+
+
+class ChannelThread(BaseModel):
+    """The conversation's thread, the issue's or an agent session's."""
+
+    id: UUID
+
+
+class LinearChannelEvent(BaseModel):
+    """What the channel sends its endpoint: the event, and the thread it belongs to."""
+
+    event: LinearEvent
+    thread: ChannelThread
 
     @model_validator(mode="after")
     def _bounded(self) -> Self:
@@ -60,40 +66,38 @@ class LinearChannelEvent(BaseModel):
 
     def body(self) -> bytes:
         """The payload as JSON, as the event log keeps deliveries."""
-        return json.dumps(self.payload).encode()
+        return json.dumps(self.event.payload).encode()
 
     async def record(self, request: Request) -> None:
         """Log the event and wake the threads that listen for Linear events."""
-        await _record(request, self.body(), self.payload, self.delivery_id)
+        body = self.body()
+        await EventLog.record(
+            request,
+            body,
+            "linear",
+            event_type=str(self.event.payload.get("type") or ""),
+            delivery_id=self.event.delivery_id,
+            refs=EventRefs.linear(body),
+        )
 
 
-async def _record(
-    request: Request, body: bytes, payload: dict[str, JsonValue], delivery_id: str
-) -> None:
-    await EventLog.record(
-        request,
-        body,
-        "linear",
-        event_type=str(payload.get("type") or ""),
-        delivery_id=delivery_id,
-        refs=EventRefs.linear(body),
-    )
+@router.post("/events")
+async def linear_channel_event(
+    request: Request, call: LinearChannelEvent, background_tasks: BackgroundTasks
+) -> PreparedRun | None:
+    """The run a Linear event starts, or ``None`` to start nothing.
 
-
-class PreparedLinearRun(TypedDict):
-    """The run the channel starts, or None to start nothing."""
-
-    run: PreparedRun | None
-
-
-@router.post("/runs")
-async def prepare_linear_run(request: Request, event: LinearChannelEvent) -> PreparedLinearRun:
-    """Prepare the run an agent session turn starts on its session's thread."""
-    await event.record(request)
+    An agent session turn starts the run it prepares; ``None`` there declines, and
+    the channel tells the session. Issue events run Linear automations.
+    """
+    await call.record(request)
+    event = call.event
     turn = LinearSessionTurn.parse(event.key, event.payload)
-    if turn is None:
-        return {"run": None}
-    return {"run": await turn.prepare_run(str(event.thread_id))}
+    if turn is not None:
+        return await turn.prepare_run(str(call.thread.id))
+    if event.key in _AUTOMATION_KEYS:
+        background_tasks.add_task(_launch_automations, event.payload, event.delivery_id)
+    return None
 
 
 async def _launch_automations(payload: dict[str, JsonValue], delivery_id: str) -> None:
@@ -105,29 +109,3 @@ async def _launch_automations(payload: dict[str, JsonValue], delivery_id: str) -
         common.logger.exception(
             "Linear automations failed for a delivery", extra={"linear_delivery": delivery_id}
         )
-
-
-_payload = TypeAdapter(dict[str, JsonValue])
-
-
-@router.post("/events")
-async def receive_linear_event(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    linear_delivery: Annotated[str, Header(min_length=1, max_length=200)],
-) -> dict[str, str]:
-    """Log a Linear delivery the channel forwarded, and run the automations it triggers."""
-    body = await request.body()
-    if len(body) > _MAX_PAYLOAD_CHARS:
-        raise HTTPException(status_code=413, detail="payload is too large")
-    try:
-        payload = _payload.validate_json(body)
-    except ValidationError as error:
-        raise HTTPException(status_code=422, detail="payload is not a JSON object") from error
-    key = f"{payload.get('type')}.{payload.get('action')}"
-    if key not in _FORWARDED_KEYS:
-        return {"status": "ignored"}
-    await _record(request, body, payload, linear_delivery)
-    if key in _AUTOMATION_KEYS:
-        background_tasks.add_task(_launch_automations, payload, linear_delivery)
-    return {"status": "accepted"}

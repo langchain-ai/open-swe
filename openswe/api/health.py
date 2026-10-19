@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from openswe.completion import complete_run_once, verify_run_complete_token
+from openswe.completion import handle_run_completion, verify_run_complete_token
 
 router = APIRouter()
 
@@ -24,4 +24,4 @@ async def run_complete_webhook(request: Request) -> dict[str, Any]:
         return {"status": "error", "message": "Invalid JSON"}
     if not isinstance(payload, dict):
         return {"status": "ignored", "reason": "payload not an object"}
-    return await complete_run_once(payload)
+    return await handle_run_completion(payload)
