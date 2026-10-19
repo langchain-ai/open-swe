@@ -45,13 +45,24 @@ def _comment_payload(body: str = "@openswe try again", **issue: Any) -> dict[str
     return payload
 
 
-def _event(event: str, payload: dict[str, Any], *, interrupted: bool = False) -> dict[str, Any]:
-    """What MDA's channel POSTs its endpoint."""
+def _event(
+    event: str,
+    payload: dict[str, Any],
+    *,
+    mentions: tuple[str, ...] = ("@openswe",),
+    interrupted: bool = False,
+) -> dict[str, Any]:
+    """What MDA's channel POSTs its endpoint, with the handles it read in the event's text."""
     thread: dict[str, Any] = {"id": THREAD, "channel": {"name": "github"}}
     if interrupted:
         thread["interrupted"] = True
     return {
-        "event": {"key": event, "deliveryId": "delivery-1", "payload": payload},
+        "event": {
+            "key": event,
+            "deliveryId": "delivery-1",
+            "payload": payload,
+            "mentions": list(mentions),
+        },
         "thread": thread,
     }
 
@@ -142,7 +153,7 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(prepared: As
     assert token.thread_id == THREAD
     assert token.configurable["github_login"] == "ada"
     assert run["context"]["graph"] == "agent"
-    # Run metadata keeps only keys MDA accepts from a handler.
+    # Every run metadata key is one MDA accepts from a handler.
     metadata = run["metadata"]
     assert metadata["channel"] == "github"
     assert metadata["github_delivery"] == "delivery-1"
@@ -174,19 +185,21 @@ async def test_a_comment_mention_on_an_issue_starts_a_run(prepared: AsyncMock) -
 
 
 @pytest.mark.parametrize(
-    ("event", "payload"),
+    ("event", "payload", "mentions"),
     [
         # Pull request conversations stay on Open SWE's own intake.
-        ("issue_comment.created", _comment_payload(pull_request={"url": "https://x"})),
-        ("issues.opened", _issue_payload(issue={**_issue_payload()["issue"], "body": "no tag"})),
-        ("issue_comment.created", _comment_payload(body="no tag")),
-        ("issues.edited", _issue_payload(action="edited", changes={"labels": {}})),
+        ("issue_comment.created", _comment_payload(pull_request={"url": "https://x"}), None),
+        ("issues.opened", _issue_payload(), ()),
+        # Another deployment's handle is not this one's.
+        ("issue_comment.created", _comment_payload(), ("@openswe-preview",)),
+        ("issues.edited", _issue_payload(action="edited", changes={"labels": {}}), None),
     ],
 )
 async def test_events_open_swe_would_not_act_on_start_nothing(
-    prepared: AsyncMock, event: str, payload: dict[str, Any]
+    prepared: AsyncMock, event: str, payload: dict[str, Any], mentions: tuple[str, ...] | None
 ) -> None:
-    response = await _post(_event(event, payload))
+    sent = _event(event, payload) if mentions is None else _event(event, payload, mentions=mentions)
+    response = await _post(sent)
 
     assert response.json() is None
     prepared.assert_not_awaited()

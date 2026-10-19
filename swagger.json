@@ -997,7 +997,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -1154,7 +1154,7 @@
           },
           "params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Params",
             "type": "object"
@@ -1796,18 +1796,23 @@
         "type": "object"
       },
       "EndpointAnswer": {
-        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set. It answers ``null`` (or HTTP 204) to start nothing.",
+        "additionalProperties": false,
+        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.",
         "properties": {
           "context": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+            },
             "title": "Context",
             "type": "object"
           },
           "input": {
-            "$ref": "#/components/schemas/JsonValue"
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
           },
           "metadata": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+            },
             "title": "Metadata",
             "type": "object"
           },
@@ -1822,63 +1827,11 @@
         "title": "EndpointAnswer",
         "type": "object"
       },
-      "EndpointEvent_dict_str__Any__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
-        "type": "object"
-      },
-      "EndpointEvent_dict_str__JsonValue__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
-        "type": "object"
-      },
-      "EndpointRequest_dict_str__Any__": {
-        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, with the payload\ntype of the event key it handles, such as\n``TypeAdapter(EndpointRequest[LinearSessionCreatedPayload])``.",
+      "EndpointRequest_GitHubEndpointEvent_str__dict_str__Any___": {
+        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type.",
         "properties": {
           "event": {
-            "$ref": "#/components/schemas/EndpointEvent_dict_str__Any__"
+            "$ref": "#/components/schemas/GitHubEndpointEvent_str_dict_str__Any__"
           },
           "thread": {
             "$ref": "#/components/schemas/EndpointThread"
@@ -1892,10 +1845,14 @@
         "type": "object"
       },
       "EndpointRequest_dict_str__JsonValue__": {
-        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, with the payload\ntype of the event key it handles, such as\n``TypeAdapter(EndpointRequest[LinearSessionCreatedPayload])``.",
+        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type.",
         "properties": {
           "event": {
-            "$ref": "#/components/schemas/EndpointEvent_dict_str__JsonValue__"
+            "additionalProperties": {
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+            },
+            "title": "Event",
+            "type": "object"
           },
           "thread": {
             "$ref": "#/components/schemas/EndpointThread"
@@ -2266,6 +2223,37 @@
         "title": "GatewayStatus",
         "type": "object"
       },
+      "GitHubEndpointEvent_str_dict_str__Any__": {
+        "description": "The event a GitHub channel sends its endpoint, with the handles it mentions.",
+        "properties": {
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "mentions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mentions",
+            "type": "array"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload",
+          "mentions"
+        ],
+        "title": "GitHubEndpointEvent",
+        "type": "object"
+      },
       "GitHubTrigger": {
         "description": "Fires on events in one repository; its runs work in that repository.",
         "properties": {
@@ -2606,7 +2594,6 @@
         ],
         "type": "string"
       },
-      "JsonValue": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -3276,7 +3263,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "array"
               },
@@ -4015,7 +4002,7 @@
         "properties": {
           "annotations": {
             "items": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Annotations",
             "type": "array"
@@ -5482,7 +5469,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -5507,7 +5494,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -5664,7 +5651,7 @@
           },
           "tools": {
             "items": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Tools",
             "type": "array"
@@ -7320,7 +7307,7 @@
       },
       "ToolArguments": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
+          "$ref": "#/components/schemas/pydantic__types__JsonValue"
         },
         "title": "ToolArguments",
         "type": "object"
@@ -7442,7 +7429,7 @@
           },
           "parameters": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Parameters",
             "type": "object"
@@ -7480,7 +7467,7 @@
       "ToolResult": {
         "properties": {
           "content": {
-            "$ref": "#/components/schemas/JsonValue"
+            "$ref": "#/components/schemas/pydantic__types__JsonValue"
           },
           "status": {
             "enum": [
@@ -7883,7 +7870,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -8195,7 +8182,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -8774,7 +8761,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -8932,16 +8919,79 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
+      "managed_deepagents___channels__types__JsonValue-Input": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "managed_deepagents___channels__types__JsonValue-Output": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
+          "$ref": "#/components/schemas/pydantic__types__JsonValue"
         },
         "type": "object"
       },
       "openswe__utils__json_types__JsonObject": {
         "additionalProperties": true,
         "type": "object"
-      }
+      },
+      "pydantic__types__JsonValue": {}
     },
     "securitySchemes": {
       "DashboardSession": {
@@ -21644,7 +21694,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EndpointRequest_dict_str__Any__"
+                "$ref": "#/components/schemas/EndpointRequest_GitHubEndpointEvent_str__dict_str__Any___"
               }
             }
           },

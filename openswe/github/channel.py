@@ -10,16 +10,17 @@ and the signed run token the run calls back with.
 """
 
 import logging
-import re
+from collections.abc import Sequence
 from typing import Any, Final, Literal, cast, get_args
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from managed_deepagents import EndpointAnswer, EndpointRequest
+from fastapi import APIRouter, Depends, HTTPException
+from managed_deepagents import EndpointAnswer, EndpointRequest, GitHubEndpointEvent
 from pydantic import JsonValue
 
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
+from openswe.github.comments import OPEN_SWE_TAGS
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.threads.router import adopt_channel_run
 from openswe.threads.runtimes import RUNTIMES
@@ -31,11 +32,6 @@ logger = logging.getLogger(__name__)
 CHANNEL: Final = "github"
 # What the channel starts with while the thread waits: nothing, it only notes Open SWE acts.
 _ACTS_WHILE_INTERRUPTED: Final = "Open SWE was mentioned while the thread waits."
-# GitHub caps an issue or comment body at 65,536 characters; a payload near this is not one.
-_MAX_BODY_BYTES: Final = 2_000_000
-# The run metadata keys MDA accepts from a handler.
-_METADATA_KEY: Final = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
-_RESERVED_METADATA_KEY: Final = re.compile(r"(mda_|langgraph_).*", re.IGNORECASE)
 
 IssueEventKey = Literal[
     "issues.opened",
@@ -47,20 +43,12 @@ IssueEventKey = Literal[
 _ISSUE_EVENT_KEYS: frozenset[str] = frozenset(get_args(IssueEventKey))
 
 
-def _limit_size(request: Request) -> None:
-    """Refuse a body that is no GitHub event before reading it."""
-    length = request.headers.get("content-length", "")
-    if not length.isdigit() or int(length) > _MAX_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="The event is too large")
+router = APIRouter(prefix="/github/channel", dependencies=[Depends(require_mda_channel)])
 
 
-router = APIRouter(
-    prefix="/github/channel",
-    dependencies=[Depends(require_mda_channel), Depends(_limit_size)],
-)
-
-
-async def trigger_rejection(payload: dict[str, Any], event_type: str) -> str | None:
+async def trigger_rejection(
+    payload: dict[str, Any], event_type: str, mentions: Sequence[str]
+) -> str | None:
     """Why an issue event starts no run, as ``/webhooks/github`` decides it; None when it does."""
     issue = payload.get("issue")
     if not isinstance(issue, dict):
@@ -82,29 +70,19 @@ async def trigger_rejection(payload: dict[str, Any], event_type: str) -> str | N
         changes = payload.get("changes") or {}
         if payload.get("action") == "edited" and not any(f in changes for f in ("body", "title")):
             return "Issue edit did not change title or body"
-        text = f"{issue.get('title') or ''}\n\n{issue.get('body') or ''}"
     else:
         if payload.get("action") not in common.SUPPORTED_GH_COMMENT_ACTIONS["issue_comment"]:
             return "Unsupported GitHub issue_comment action"
         sender_login = str((payload.get("sender") or {}).get("login") or "")
         if not await service.is_accepted_commenter(sender_login):
             return "Sender is not a registered Open SWE user"
-        text = str((payload.get("comment") or {}).get("body") or "")
-    if not common.mentions_open_swe(text):
+    # MDA lists the handles the event's own text mentions, as GitHub links them.
+    if not any(tag in mentions for tag in OPEN_SWE_TAGS):
         return f"Does not mention {common.describe_open_swe_tags()}"
     gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
     if gate_rejection is not None:
         return gate_rejection["reason"]
     return None
-
-
-def _run_metadata(metadata: dict[str, Any]) -> dict[str, JsonValue]:
-    """The run's metadata, without keys MDA refuses from a handler."""
-    return {
-        key: value
-        for key, value in metadata.items()
-        if _METADATA_KEY.fullmatch(key) and not _RESERVED_METADATA_KEY.fullmatch(key)
-    }
 
 
 async def _prepare_run(
@@ -131,7 +109,7 @@ async def _prepare_run(
     run: EndpointAnswer = {
         "input": cast(JsonValue, prepared.input),
         "context": cast(dict[str, JsonValue], rewritten["context"]),
-        "metadata": _run_metadata(run_config["metadata"]),
+        "metadata": cast(dict[str, JsonValue], run_config["metadata"]),
     }
     if COMPLETION_WEBHOOK_URL:
         run["webhook"] = COMPLETION_WEBHOOK_URL
@@ -140,7 +118,7 @@ async def _prepare_run(
 
 @router.post("/events")
 async def github_channel_event(
-    call: EndpointRequest[dict[str, Any]],
+    call: EndpointRequest[GitHubEndpointEvent[str, dict[str, Any]]],
 ) -> EndpointAnswer | None:
     """The run an @openswe mention on an issue starts on the channel's thread, or ``None``.
 
@@ -158,7 +136,7 @@ async def github_channel_event(
     event_type, _, action = key.partition(".")
     if payload.get("action") != action:
         raise HTTPException(status_code=422, detail="The payload's action is not the event's")
-    reason = await trigger_rejection(payload, event_type)
+    reason = await trigger_rejection(payload, event_type, event["mentions"])
     if reason is not None:
         logger.info(
             "MDA's GitHub channel event starts no run",
