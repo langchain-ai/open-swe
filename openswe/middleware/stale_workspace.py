@@ -45,7 +45,7 @@ async def warn_stale_workspace(
     config: Mapping[str, Any], thread_id: str, workspace: Workspace
 ) -> None:
     """Warn on the dashboard, and in Slack when the run came from there. Never raises."""
-    if not is_snapshot_stale(workspace, interval_seconds=2 * 60 * 60):
+    if not is_snapshot_stale(workspace, interval_seconds=24 * 60 * 60):
         return
     queue_run_notice(
         thread_id,
