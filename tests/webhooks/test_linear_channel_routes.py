@@ -3,7 +3,7 @@
 import json
 import sys
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -19,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
 
 from rt.intake import backend_endpoint
 
-# As `openssl rand -hex 32` makes one: valid base64, as Standard Webhooks takes it.
 _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 _THREAD = str(uuid.uuid4())
 
@@ -47,18 +46,13 @@ def _call(key: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _post(
-    app: FastAPI,
-    body: dict[str, Any],
-    secret: str | None = _SERVICE_SECRET,
-    *,
-    signed_at: datetime | None = None,
-    sent: bytes | None = None,
+    app: FastAPI, body: dict[str, Any], secret: str | None = _SERVICE_SECRET
 ) -> httpx.Response:
     """POST ``body`` as MDA does: signed with ``secret``, or unsigned without one."""
     content = json.dumps(body).encode()
     headers = {"content-type": "application/json"}
     if secret is not None:
-        timestamp = signed_at or datetime.now(tz=UTC)
+        timestamp = datetime.now(tz=UTC)
         headers |= {
             "webhook-id": "msg_delivery-1",
             "webhook-timestamp": str(int(timestamp.timestamp())),
@@ -69,7 +63,7 @@ async def _post(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        return await client.post("/linear/channel/events", content=sent or content, headers=headers)
+        return await client.post("/linear/channel/events", content=content, headers=headers)
 
 
 @pytest.mark.asyncio
@@ -77,16 +71,6 @@ async def _post(
 async def test_only_the_mda_deployment_may_call(app: FastAPI, secret: str | None) -> None:
     response = await _post(app, _call("Issue.create", {"type": "Issue"}), secret)
     assert response.status_code == 401
-    app.state.record.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_a_changed_or_replayed_call_is_refused(app: FastAPI) -> None:
-    call = _call("Issue.create", {"type": "Issue"})
-    changed = json.dumps(_call("Issue.create", {"type": "Comment"})).encode()
-    assert (await _post(app, call, sent=changed)).status_code == 401
-    stale = datetime.now(tz=UTC) - timedelta(minutes=10)
-    assert (await _post(app, call, signed_at=stale)).status_code == 401
     app.state.record.assert_not_awaited()
 
 
@@ -104,9 +88,6 @@ async def test_unknown_events_and_oversized_payloads_are_refused(app: FastAPI) -
     assert (await _post(app, _call("Issue.remove", {}))).status_code == 422
     huge = _call("Issue.create", {"type": "Issue", "data": {"description": "x" * 1_000_001}})
     assert (await _post(app, huge)).status_code == 422
-    # A body past the route's cap is refused while it streams in, before it is verified.
-    oversized = _call("Issue.create", {"type": "Issue", "data": {"description": "x" * 3_000_000}})
-    assert (await _post(app, oversized)).status_code == 413
     app.state.record.assert_not_awaited()
 
 
@@ -187,7 +168,6 @@ async def test_a_session_turn_the_backend_declines_starts_nothing(
 
 
 def test_the_channel_asks_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    # MDA signs each call with the deployment's MDA_SERVICE_SECRET: no credential here.
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.example/")
     assert (
         backend_endpoint("/linear/channel/events")

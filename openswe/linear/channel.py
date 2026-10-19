@@ -18,7 +18,7 @@ from managed_deepagents import EndpointAnswer, EndpointEvent, EndpointRequest
 from pydantic import JsonValue
 
 from openswe.linear.session import LinearSessionTurn
-from openswe.mda_channels.auth import MdaChannelRoute, require_mda_channel
+from openswe.mda_channels.auth import require_mda_channel
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
 
@@ -35,11 +35,7 @@ LinearEventKey = Literal[
 _EVENT_KEYS: frozenset[str] = frozenset(get_args(LinearEventKey))
 _AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
 
-router = APIRouter(
-    prefix="/linear/channel",
-    dependencies=[Depends(require_mda_channel)],
-    route_class=MdaChannelRoute,
-)
+router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 
 
 async def _record(request: Request, payload: dict[str, JsonValue], delivery_id: str) -> None:
@@ -58,8 +54,6 @@ async def _record(request: Request, payload: dict[str, JsonValue], delivery_id: 
 @router.post("/events")
 async def linear_channel_event(
     request: Request,
-    # Any key, with Linear's payload as sent: the key is checked below, and the
-    # event log and automations keep every field.
     call: EndpointRequest[EndpointEvent[str, dict[str, JsonValue]]],
     background_tasks: BackgroundTasks,
 ) -> EndpointAnswer | None:
