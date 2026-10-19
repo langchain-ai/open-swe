@@ -115,10 +115,31 @@ jobs:
           if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda; then
             echo "deploy=true" >>"$GITHUB_OUTPUT"
           fi
-      - name: Install the mda CLI
+      # A tree whose mda/ project takes managed-deepagents from an SDK commit deploys with
+      # that commit's compiler and runtime. The commit lives in mda/, so changing it
+      # passes the diff gate above. The script runs from main, never from the tree.
+      - name: Select the MDA compiler
+        id: mda-source
         if: steps.mda-changed.outputs.deploy == 'true'
-        # Same version mda/ pins.
-        run: uv tool install managed-deepagents==0.9.1
+        env:
+          APPROVED_SHA: ${{ vars.PREVIEW_MDA_SOURCE_SHA }}
+        run: uv run scripts/preview_mda_source.py preview-tree/mda/pyproject.toml
+      - uses: actions/checkout@v7.0.1
+        if: steps.mda-source.outputs.sha != ''
+        with:
+          repository: langchain-ai/managed-deepagents-sdk
+          ref: ${{ steps.mda-source.outputs.sha }}
+          path: mda-source
+          # Read-only on the SDK repository, and only for this step: never persisted or deployed.
+          token: ${{ secrets.MDA_SDK_SOURCE_TOKEN }}
+          persist-credentials: false
+      - name: Build the MDA compiler
+        if: steps.mda-source.outputs.sha != ''
+        working-directory: mda-source
+        # As the SDK's own CI builds it, on the runner's rustup.
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          cargo +stable build --release --locked
       - name: Deploy the MDA preview
         id: mda-deploy
         if: steps.mda-changed.outputs.deploy == 'true'
@@ -126,15 +147,39 @@ jobs:
         env:
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          MDA_SOURCE_SHA: ${{ steps.mda-source.outputs.sha }}
+          TREE_SHA: ${{ needs.build.outputs.sha }}
         run: |
           # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
           printf 'OPEN_SWE_BACKEND_URL=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" >mda/.env
-          mda deploy mda \
-            --name open-swe-mda-preview \
-            --deployment-type prod \
-            --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
-            --context-strategy overwrite \
+          args=(
+            deploy mda
+            --name open-swe-mda-preview
+            --deployment-type prod
+            --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4
+            --context-strategy overwrite
             --yes
+          )
+          if [[ -n "$MDA_SOURCE_SHA" ]]; then
+            sdk="$GITHUB_WORKSPACE/mda-source"
+            version="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["project"]["version"])' "$sdk/packages/pypi/pyproject.toml")"
+            source="managed-deepagents ${version} built from langchain-ai/managed-deepagents-sdk@${MDA_SOURCE_SHA}"
+            # What the PyPI launcher tells the binary it bundles, pointed at this commit's runtime.
+            MDA_INSTALL_CHANNEL=pypi \
+              MDA_RUNTIME_VERSION="$version" \
+              MDA_BUNDLED_RUNTIME_PATH="$sdk/packages/pypi/src/managed_deepagents" \
+              "$sdk/target/release/mda" "${args[@]}"
+          else
+            source="managed-deepagents from mda/uv.lock"
+            uv run --project mda --locked --python 3.13 mda "${args[@]}"
+          fi
+          {
+            echo "## MDA preview"
+            echo "- tree (backend and mda/): \`${TREE_SHA}\`"
+            echo "- compiler and runtime: ${source}"
+            echo "- deployment: open-swe-mda-preview (its revision is in this step's log)"
+            echo "- recorded as \`mda-deployed/preview\` → \`${TREE_SHA}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
 
   # A job of its own: the deploy job ran the tree's code, so it never holds a token that can write.
   record-mda:

@@ -1,3 +1,4 @@
+import { LogoMark } from "@/components/Branding"
 import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
@@ -84,11 +85,7 @@ export function SubagentThreadView({
         aria-label="Loading subagent"
         className="flex flex-1 items-center justify-center px-space-5"
       >
-        <img
-          src={`${import.meta.env.BASE_URL}logo-mark.png`}
-          alt=""
-          className="size-12 animate-pulse"
-        />
+        <LogoMark alt="" className="size-12 animate-pulse" />
       </div>
     )
   } else if (!task) {

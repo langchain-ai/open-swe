@@ -56,12 +56,11 @@ def test_bot_thread_is_readable_and_still_promptable_from_slack(bot_thread):
 
 
 @pytest.mark.parametrize("login", ["bob", "admin"])
-async def test_dashboard_cannot_act_on_a_bot_thread(bot_thread, login):
+async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypatch):
     _, client = bot_thread
     session = {"sub": login}
     operations = [
         lambda: handlers.get_dashboard_terminal_sandbox("bot-thread", login),
-        lambda: handlers.cancel_dashboard_thread("bot-thread", login),
         lambda: handlers.delete_dashboard_thread("bot-thread", login),
         lambda: plan_api.post_plan_comment(
             "bot-thread", plan_api.CommentBody(body="comment"), session
@@ -78,6 +77,10 @@ async def test_dashboard_cannot_act_on_a_bot_thread(bot_thread, login):
         assert exc.value.status_code == 403
     client.threads.update.assert_not_awaited()
     client.runs.cancel_many.assert_not_awaited()
+
+    monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
+    await handlers.cancel_dashboard_thread("bot-thread", login)
+    assert client.threads.update.await_args.kwargs["metadata"]["latest_run_status"] == "interrupted"
 
 
 async def test_summary_names_the_starting_bot(bot_thread, monkeypatch):

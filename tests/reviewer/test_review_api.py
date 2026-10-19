@@ -85,3 +85,17 @@ async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
 
     # A URL actually embedded in the PR body is allowed.
     await _require_image_in_pr("acme", "repo", 7, "https://x.githubusercontent.com/a.png")
+
+
+async def test_review_chat_rejects_thread_not_postable_for_this_pr(monkeypatch) -> None:
+    from openswe.review import chat as review_chat_api
+
+    async def no_accessible_threads(*args):
+        return []
+
+    monkeypatch.setattr(review_chat_api.pr_fixes, "find_pr_threads", no_accessible_threads)
+    with pytest.raises(HTTPException) as error:
+        await review_chat_api.proxy_review_chat_commands(
+            "acme", "repo", 7, "octocat", "foreign-thread", b"{}"
+        )
+    assert error.value.status_code == 404

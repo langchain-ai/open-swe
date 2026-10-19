@@ -194,6 +194,8 @@ export class GhosttyTerminalCore {
   private style = 0
   private scrollbar = 0
   private rows: Array<GhosttyRow> = []
+  private renderedForeground: GhosttyColor | null = null
+  private renderedBackground: GhosttyColor | null = null
   private disposed = false
   private keyboardLayoutMap: GhosttyKeyboardLayoutMap | undefined
 
@@ -900,8 +902,13 @@ export class GhosttyTerminalCore {
       }))
     }
 
+    const colorsChanged =
+      this.renderedForeground === null ||
+      this.renderedBackground === null ||
+      !ghosttyColorsEqual(this.renderedForeground, foreground) ||
+      !ghosttyColorsEqual(this.renderedBackground, background)
     const dirtyRows = new Set<number>()
-    if (dirty !== 0) {
+    if (dirty !== 0 || colorsChanged) {
       this.assertSuccess(
         "ghostty_render_state_get(row iterator)",
         this.runtime.call(
@@ -921,7 +928,9 @@ export class GhosttyTerminalCore {
         ) !== 0
       ) {
         const rowDirty =
-          dirty === 2 || this.getRowBool(iterator, ROW_DATA.dirty)
+          colorsChanged ||
+          dirty === 2 ||
+          this.getRowBool(iterator, ROW_DATA.dirty)
         if (rowDirty) {
           this.rows[rowIndex] = this.readRow(
             iterator,
@@ -948,6 +957,9 @@ export class GhosttyTerminalCore {
         this.scratch
       )
     }
+
+    this.renderedForeground = foreground
+    this.renderedBackground = background
 
     return {
       cols,

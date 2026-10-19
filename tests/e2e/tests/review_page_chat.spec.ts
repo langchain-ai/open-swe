@@ -321,18 +321,22 @@ test.describe("review page", () => {
     ).toBeDisabled();
     await expect(page.getByText("Building the walkthrough…")).toBeVisible();
 
+    // The scout runs on Managed Deep Agents, whose run error carries what its
+    // backend hook raised.
     const failure =
-      "RuntimeError: E2E has no sandbox provider for the review scout";
-    await expect(page.getByText(`Last attempt failed: ${failure}`)).toBeVisible(
-      {
-        timeout: 30_000,
-      },
-    );
+      /RuntimeError: E2E has no sandbox provider for the review scout/;
+    await expect(
+      page.getByText(new RegExp(`^Last attempt failed: .*${failure.source}`)),
+    ).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(
       page.getByText("The walkthrough failed to build"),
     ).toBeVisible();
     await expect(
-      page.getByText(`The review scout crashed: ${failure}`),
+      page.getByText(
+        new RegExp(`^The review scout crashed: .*${failure.source}`),
+      ),
     ).toBeVisible();
     await expect(build).toBeEnabled();
 

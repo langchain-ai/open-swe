@@ -43,6 +43,7 @@ from openswe.bridge.protocol import (
     WorktreeHandoffParams,
 )
 from openswe.bridge.store import Bridge, BridgeStore, BridgeUnavailableError
+from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SandboxUnreachableError
 
 logger = logging.getLogger(__name__)
@@ -104,16 +105,21 @@ class DownloadFilesResult(BaseModel):
 class BridgeSandboxBackend(BaseSandbox):
     """The thread's sandbox, reached through the CLI's long poll."""
 
-    def __init__(self, *, bridge_id: str, thread_id: str | None = None) -> None:
-        self._bridge_id = bridge_id
+    def __init__(self, *, bridge: Bridge, thread_id: str | None = None) -> None:
+        self._bridge = bridge
+        self._bridge_id = bridge.bridge_id
         self._thread_id = thread_id
 
     @classmethod
     async def connect(cls, thread_id: str | None, bridge_id: str) -> Self:
-        """Bind to a live bridge, or refuse the run — never replace it."""
-        backend = cls(bridge_id=bridge_id, thread_id=thread_id)
-        if not await backend._is_alive():
-            raise backend._unreachable("bridge disconnected")
+        """Bind to a live bridge for its owner's run, or refuse the run — never replace it."""
+        bridge = await BridgeStore.load(bridge_id)
+        if bridge is None or not bridge.is_alive:
+            raise SandboxUnreachableError(
+                thread_id or "<unknown>", Bridge.sandbox_id_for(bridge_id), "bridge disconnected"
+            )
+        backend = cls(bridge=bridge, thread_id=thread_id)
+        backend._authorize_run()
         return backend
 
     @property
@@ -168,12 +174,27 @@ class BridgeSandboxBackend(BaseSandbox):
         bridge = await BridgeStore.load(self._bridge_id)
         return bridge is not None and bridge.is_alive
 
+    def _authorize_run(self) -> None:
+        """Refuse a run that anyone but the machine's owner started.
+
+        Checked on every request, because a connection outlives the run that
+        opened it. Outside a run, the dashboard route that got here has already
+        authorized its caller.
+        """
+        try:
+            run = RunConfig.from_runtime()
+        except RuntimeError:
+            return
+        if not self._bridge.serves(run.sender_id):
+            raise PermissionError("Only the owner of this machine can run this thread on it")
+
     def _unreachable(self, cause: str) -> SandboxUnreachableError:
         return SandboxUnreachableError(self._thread_id or "<unknown>", self.id, cause)
 
     async def _round_trip(
         self, method: BridgeMethod, params: BridgeParams, *, wait: float
     ) -> JsonObject:
+        self._authorize_run()
         try:
             async with listener.subscribe(self._bridge_id) as events:
                 request_id = await BridgeStore.enqueue(

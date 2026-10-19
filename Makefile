@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck mda-boundary test tests integration_tests help run dev dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
+.PHONY: all format format-check lint typecheck mda-boundary test tests integration_tests help run dev dev-mda dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -18,6 +18,10 @@ dev: $(if $(POSTGRES_URI),,postgres)
 		echo 'Port 2024 is already in use (a stale container or another backend?):' >&2; \
 		lsof -nP -iTCP:2024 -sTCP:LISTEN >&2; exit 1; fi
 	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
+
+# The Managed Deep Agents runtime `make dev` sends every agent run to (mda/README.md).
+dev-mda:
+	cd mda && uv run --locked mda dev --port 2025 --no-browser
 
 postgres:
 	docker compose up -d --wait postgres
@@ -120,6 +124,7 @@ format-check:
 
 typecheck:
 	uv run ty check openswe tests
+	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py
 
 # The MDA reviewer resolves imports against its own environment alone, so one
 # reaching for the backend (`openswe`) or a database driver fails here.
@@ -133,12 +138,13 @@ mda-boundary:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server (starts the local PostgreSQL container unless POSTGRES_URI is set)'
+	@echo 'dev-mda                      - Managed Deep Agents dev server on :2025, where every agent run goes'
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'migration m="..."            - create the next database migration'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
-	@echo 'run                          - run webhook server'
+	@echo 'run                          - run the FastAPI app alone on :8000'
 	@echo 'swagger                      - regenerate swagger.json from the backend routes'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'

@@ -1,15 +1,13 @@
-"""The Managed Deep Agents deployment that hosts the agent and reviewer graphs.
+"""The Managed Deep Agents deployment that hosts every Open SWE graph.
 
-``mda`` serves both as one graph; a run's context names the graph it
+``mda`` serves them as one graph; a run's context names the graph it
 plays. Dispatch stamps a signed run token into that context, and the deployment
 calls back with it for the graph's tools and run hooks.
 """
 
-from typing import Final, Literal, NotRequired, TypedDict
+from typing import Final, Literal, NotRequired, TypedDict, get_args
 from urllib.parse import urlsplit
 
-from langgraph_sdk import get_client
-from langgraph_sdk.client import LangGraphClient
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.config import ENV
@@ -18,13 +16,14 @@ from openswe.run_config import RunConfig
 
 # The graph id `mda build` derives from the project's agent name.
 MDA_GRAPH_ID: Final = "open-swe"
-HostedGraph = Literal["agent", "reviewer"]
-HOSTED_GRAPHS: Final[frozenset[str]] = frozenset({"agent", "reviewer"})
+HostedGraph = Literal["agent", "reviewer", "review-scout"]
+HOSTED_GRAPHS: Final[frozenset[str]] = frozenset(get_args(HostedGraph))
 # Thread metadata naming where a thread's runs and checkpoints live.
 RUNTIME_METADATA_KEY: Final = "runtime"
 MDA_RUNTIME: Final = "mda"
 
 _configurable = TypeAdapter(dict[str, JsonValue])
+_hosted_graph = TypeAdapter(HostedGraph)
 
 
 # The run context the MDA deployment builds its graph from. The token's key is a
@@ -41,13 +40,15 @@ RemoteRunContext = TypedDict(
 
 
 class RemoteRuntimeConfigurationError(RuntimeError):
-    """A remote runtime is configured in a way this backend cannot safely call."""
+    """Managed Deep Agents is missing or configured in a way this backend cannot safely call."""
 
 
-def mda_runtime_url() -> str | None:
+def mda_runtime_url() -> str:
     url = ENV.MDA_RUNTIME_URL.optional()
     if url is None:
-        return None
+        raise RemoteRuntimeConfigurationError(
+            "MDA_RUNTIME_URL is required: Open SWE's graphs run on Managed Deep Agents"
+        )
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise RemoteRuntimeConfigurationError("MDA_RUNTIME_URL is not absolute")
@@ -60,20 +61,13 @@ def mda_runtime_url() -> str | None:
     return url.rstrip("/")
 
 
-def remote_runtime_client() -> LangGraphClient | None:
-    """The client for the MDA deployment, or None when graphs run on this one."""
-    url = mda_runtime_url()
-    if url is None:
-        return None
-    return get_client(url=url, api_key=mda_runtime_api_key())
+def validate_mda_startup_config() -> None:
+    """Refuse to start without the Managed Deep Agents deployment every agent run needs."""
+    mda_runtime_url()
 
 
 def mda_runtime_api_key() -> str | None:
     return ENV.MDA_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-
-
-def hosted_on_mda(assistant_id: str) -> bool:
-    return assistant_id in HOSTED_GRAPHS and mda_runtime_url() is not None
 
 
 async def remote_run_context(
@@ -86,7 +80,7 @@ async def remote_run_context(
     """
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
-    graph: HostedGraph = "agent" if assistant_id == "agent" else "reviewer"
+    graph = _hosted_graph.validate_python(assistant_id)
     token = sign_runtime_token(
         RemoteRun(
             thread_id=thread_id,
@@ -95,10 +89,10 @@ async def remote_run_context(
         )
     )
     # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime import agent, reviewer
+    from openswe.remote_runtime.hosted import hosted_graphs
 
     cfg = RunConfig.parse(configurable)
-    models = await (agent.run_models(cfg) if graph == "agent" else reviewer.run_models(cfg))
+    models = await hosted_graphs()[graph].start_models(cfg)
     context: RemoteRunContext = {
         "graph": graph,
         "__run_token": token,

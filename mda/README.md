@@ -1,6 +1,6 @@
 # Open SWE on Managed Deep Agents
 
-Open SWE's coding agent and pull request reviewer, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`. Each run's context names the Open SWE graph it plays (`agent` or `reviewer`); the factory in `agent.py` builds that graph's deep agent from it.
+Open SWE's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`. Each run's context names the Open SWE graph it plays (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds that graph's deep agent from it.
 
 The model loop and its checkpoints run here. Everything else is the in-process Open SWE graph, which the backend builds for each run (`openswe/remote_runtime/graph.py`), including the thread's sandbox: the backend creates, reuses and credentials it exactly as for an in-process run, so local, bridged and task-worker sandboxes work too, and this deployment declares none. All calls go to `POST /remote-runtime/hooks/{hook}`, authenticated with the run token.
 
@@ -15,18 +15,17 @@ The model loop and its checkpoints run here. Everything else is the in-process O
 - **State:** graph state those hooks write that MDA does not know rides in `open_swe_state` and goes back with every call. Custom stream events they emit are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
 
-The run's context carries the signed run token and the models dispatch picked. The proxy also sets the run's LangSmith tracing project to the backend's, so agent and reviewer traces stay in one project whichever runtime runs them. The backend reads the thread and run configuration from the token, never from the request body. This deployment holds no GitHub, Slack or database credentials.
+The run's context carries the signed run token and the models dispatch picked. The backend's thread router also sets the run's LangSmith tracing project to the backend's, so every graph's traces stay in one project whichever runtime runs them. The backend reads the thread and run configuration from the token, never from the request body. This deployment holds no GitHub, Slack or database credentials.
 
 This directory is its own project and is never imported by the backend.
 
 ## Routing
 
-With `MDA_RUNTIME_URL` set, the backend's `openswe.remote_runtime.proxy` middleware routes these threads to this deployment:
+Every agent, reviewer and review scout thread runs here. The backend refuses to start without `MDA_RUNTIME_URL`, and its thread router (`openswe.threads.router`), which serves threads from its PostgreSQL thread index, routes these threads' runs to this deployment:
 
-- **Choosing.** Each person picks the runtime with **Run on Managed Deep Agents** under *My settings → Experiments* (the `run_on_mda` preference; the switch shows only when `MDA_RUNTIME_URL` is set). It decides for threads they own, or for threads with no owner whose run they start. Threads no person starts (API keys, GitHub Actions workflows, system reviews) follow the workspace's **Managed Deep Agents** setting, which admins switch in workspace settings. Everything else keeps the in-process graphs on this backend.
-- **Claiming.** Starting an `agent` or `reviewer` run on a thread with no local history, for a person or workspace that chose MDA, claims the thread for MDA (`runtime: mda` in its metadata). The run is created on `open-swe`, with its configurable moved into the signed context. A protocol v2 `run.start` becomes such a run too. A thread stays on the runtime it started on, so turning the switch off later leaves existing MDA threads on MDA.
-- **Forwarding.** Every run, state, history, stream and cancel request for a claimed thread is then forwarded here. This covers the dashboard, the CLI and every backend client.
-- **Merging.** `GET /threads/{id}` and `POST /threads/search` still answer from the backend, with run status taken from here.
+- **Creating.** Every new thread is created here (`runtime: mda` in its metadata). Its runs are created on `open-swe`, with their configurable moved into the signed context. A protocol v2 `run.start` becomes such a run too. Threads created on the backend before it required MDA keep running there, and the router logs a warning each time one is used.
+- **Forwarding.** Every run, state, history, stream and cancel request for an MDA thread is forwarded here. This covers the dashboard, the CLI and every backend client.
+- **Indexing.** Thread reads and searches answer from the backend's thread index. A run started here marks the thread busy there, and the run-complete webhook settles it.
 
 ## Configure
 
@@ -43,15 +42,17 @@ The backend:
 
 | Variable | Purpose |
 |---|---|
-| `MDA_RUNTIME_URL` | This deployment's URL; new agent and reviewer threads of people (or, for threads no person starts, workspaces) that turned on `run_on_mda` run here |
+| `MDA_RUNTIME_URL` | This deployment's URL; every new agent, reviewer and review scout thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 
 ## Run locally
 
 1. In the repository root `.env`, add `REMOTE_RUNTIME_TOKEN_SECRET` (any random string) and `MDA_RUNTIME_URL=http://localhost:2025`, then start the backend with `make dev`.
-2. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above. Then run `mda dev --port 2025 --no-browser` from `mda`. Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
-3. Turn on **Run on Managed Deep Agents** under *My settings → Experiments*, then use Open SWE as usual: your dashboard, Slack and GitHub threads start here. `uv run python -m evals.reviewer.run_eval --limit 3` runs reviews here without publishing to GitHub.
+2. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above. Then run `make dev-mda` from the repository root. Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
+3. Use Open SWE as usual: your dashboard, Slack and GitHub threads run here. `uv run python -m evals.reviewer.run_eval --limit 3` runs reviews here without publishing to GitHub.
+
+The browser E2E suite runs this project the same way, with a scripted model: `tests/e2e/mda-dev.sh`.
 
 ## Build and deploy
 
@@ -66,10 +67,13 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 Each deployment's only configuration is `OPEN_SWE_BACKEND_URL`, in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding only that deployment's backend URL:
 
 ```bash
-uv tool install managed-deepagents==0.9.1
 cd mda
-mda deploy --name open-swe-mda-staging --deployment-type prod
+uv run --locked --python 3.13 mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
+
+CI and manual deploys run the CLI from this project's locked environment, so its version follows the runtime dependency without a separate install pin. Keep `managed-deepagents` and `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping them; `--locked` rejects an out-of-date lockfile.
+
+The preview can also deploy an unreleased SDK commit, for a preview-labelled PR only. The PR takes `managed-deepagents` from that commit in `[tool.uv.sources]` (`git` on `langchain-ai/managed-deepagents-sdk`, a full `rev`, `subdirectory = "packages/pypi"`), pinned to that commit's package version, and relocks. A repository administrator approves the commit by setting the `PREVIEW_MDA_SOURCE_SHA` variable to it. The preview workflow then builds that commit's compiler and deploys with it and its runtime (`scripts/preview_mda_source.py`). A tree naming any other source fails its MDA deploy. Approving after a refused deploy takes effect on the next preview build that changes the tree, or a `workflow_dispatch` with `force`. Staging and production never build from source.
 
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 
