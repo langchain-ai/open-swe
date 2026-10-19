@@ -82,7 +82,7 @@ jobs:
       - name: Install the mda CLI
         if: steps.changed.outputs.deploy == 'true'
         # Same version mda/ pins.
-        run: uv tool install managed-deepagents==0.10.0.dev9
+        run: uv tool install managed-deepagents==0.10.0.dev10
       - name: Deploy
         if: steps.changed.outputs.deploy == 'true'
         env:
