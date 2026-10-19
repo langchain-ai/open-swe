@@ -112,15 +112,15 @@ class _Harness:
         async def context(
             configurable: dict[str, JsonValue],
             *,
-            metadata: dict[str, JsonValue],
             thread_id: str,
             assistant_id: str,
+            metadata: dict[str, JsonValue] | None = None,
         ) -> dict[str, JsonValue]:
             run = RemoteRun(
                 thread_id=thread_id,
                 assistant_id=assistant_id,
                 configurable=configurable,
-                metadata=metadata,
+                metadata=metadata or {},
             )
             return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
