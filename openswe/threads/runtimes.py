@@ -76,21 +76,6 @@ class _SdkThreads:
             (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
         )
 
-    async def latest_run(self, thread_id: str) -> dict[str, JsonValue] | None:
-        """The thread's most recent run here, or ``None`` when it has none."""
-        try:
-            runs = await self.reads.runs.list(thread_id, limit=1)
-        except NotFoundError:
-            return None
-        return next((_object.validate_python(dict(run)) for run in runs), None)
-
-    async def run(self, thread_id: str, run_id: str) -> dict[str, JsonValue] | None:
-        """One of the thread's runs here, or ``None`` when it has no such run."""
-        try:
-            return _object.validate_python(dict(await self.reads.runs.get(thread_id, run_id)))
-        except NotFoundError:
-            return None
-
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
         await self.client.threads.create(
             thread_id=thread_id, if_exists="do_nothing", metadata=dict(metadata)

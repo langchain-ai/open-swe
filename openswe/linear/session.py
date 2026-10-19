@@ -5,19 +5,19 @@ thread, so the conversation's reply, Stop and errors reach Linear. Each agent
 session is its own thread, so a second session on the same issue is a new
 conversation, with the issue's title. The backend decides everything else, as it
 does for its own runs: the repository, the workspace, the input, and the signed
-run token the run calls back with. The channel reports the run once it ends, which
-completes it (``openswe.mda_channels.completion``), and reports its failures in
-the session.
+run token the run calls back with. The run carries the backend's run-complete
+webhook, which completes it as it does the backend's own runs; the channel reports
+its failures in the session.
 """
 
-from typing import TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
 from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic.alias_generators import to_camel
 
-from openswe.dispatch import CHANNEL_METADATA_KEY, prepare_durable_run
+from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import (
     PersonIdentity,
     RunInput,
@@ -105,6 +105,8 @@ class PreparedRun(TypedDict):
     input: RunInput
     context: dict[str, JsonValue]
     metadata: dict[str, JsonValue]
+    webhook: NotRequired[str]
+    """Where the Agent Server POSTs the finished run: the run-complete webhook."""
 
 
 class LinearSessionTurn:
@@ -228,11 +230,14 @@ class LinearSessionTurn:
         rewritten = await RUNTIMES.mda_runtime.run_payload(
             thread_id, {"assistant_id": "agent", "config": cast(JsonValue, run_config)}
         )
-        return {
+        prepared: PreparedRun = {
             "input": self._input(issue_prompt, repository, images, description_urls),
             "context": cast(dict[str, JsonValue], rewritten["context"]),
             "metadata": cast(dict[str, JsonValue], run_config["metadata"]),
         }
+        if COMPLETION_WEBHOOK_URL:
+            prepared["webhook"] = COMPLETION_WEBHOOK_URL
+        return prepared
 
     async def _images(
         self, urls: list[str], login: str | None, workspace: str | None

@@ -117,8 +117,8 @@ async def adopt_channel_run(thread_id: str, channel: str) -> None:
 
     The channel creates the thread on MDA as its conversation's own, so unlike a
     claim this never creates it there, and marks it the channel's, so it stays
-    read-only here. Busy now, so the dashboard shows the run; the channel's report
-    that the run ended settles it, or the reconcile job when that report was lost.
+    read-only here. Busy now, so the dashboard shows the run; its run-complete
+    webhook settles it, or the reconcile job.
     """
     thread = await index.get(thread_id)
     if thread is None:

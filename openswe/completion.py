@@ -10,24 +10,19 @@ The reply is idempotent per run when the webhook includes a run id. Older or
 manual payloads without a run id fall back to legacy thread-level idempotence so
 missing ids degrade dedupe instead of silencing failure replies.
 
-Runs an MDA channel starts (run metadata ``channel``) have no webhook: the channel
-reports each run that ended (``openswe.mda_channels.completion``), and the thread
-status reconcile job completes one whose report was lost. Both come through
-:func:`complete_run_once`, as the webhook does, so whichever arrives first settles
-a run, once. The channel answers in its
-own conversation, failures included, and starts every run on its threads, so a
+Runs an MDA channel starts (run metadata ``channel``) carry the same webhook, which
+the backend hands the channel with the run. The channel answers in its own
+conversation, failures included, and starts every run on its threads, so a
 channel run gets no failure reply and starts no follow-up runs.
 """
 
 import hmac
 import logging
-from datetime import timedelta
-from typing import Any, Final
+from typing import Any
 
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
-from openswe import event_claims
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
 from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
@@ -73,10 +68,6 @@ _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
 _MESSAGE_CONVERSION_ERRORS = (NotImplementedError, TypeError, ValueError)
-# One completion per run, whichever of the webhook, the channel's report and the
-# reconcile job reaches it first; longer than a run's token lives.
-_COMPLETION_CLAIM_SCOPE: Final = "run_completion"
-_COMPLETION_CLAIM_TTL: Final = timedelta(days=3)
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
@@ -503,24 +494,6 @@ def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: 
             },
         },
     )
-
-
-async def complete_run_once(payload: dict[str, Any]) -> dict[str, str]:
-    """:func:`handle_run_completion`, at most once per run id.
-
-    The webhook, a channel's report and the reconcile job all come here. A
-    completion that raises lets the next one try again.
-    """
-    raw_run_id = payload.get("run_id")
-    if not isinstance(raw_run_id, str) or not raw_run_id:
-        return await handle_run_completion(payload)
-    if not await event_claims.claim(_COMPLETION_CLAIM_SCOPE, raw_run_id, ttl=_COMPLETION_CLAIM_TTL):
-        return {"status": "ignored", "reason": "run already completed"}
-    try:
-        return await handle_run_completion(payload)
-    except Exception:
-        await event_claims.release(_COMPLETION_CLAIM_SCOPE, raw_run_id)
-        raise
 
 
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
