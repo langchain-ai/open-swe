@@ -230,7 +230,10 @@ async def test_external_channel_refuses_without_starting_a_run(
 
 @pytest.mark.parametrize(
     "context",
-    [SlackChannelContext(), SlackChannelContext(is_ext_shared=False)],
+    [
+        SlackChannelContext(lookup_retry_after=60),
+        SlackChannelContext(is_ext_shared=False, lookup_retry_after=60),
+    ],
 )
 async def test_unverified_channel_retries_without_reply_or_run(
     monkeypatch: pytest.MonkeyPatch,
@@ -263,6 +266,60 @@ async def test_unverified_channel_retries_without_reply_or_run(
     response = await _post(payload, background_tasks, {"X-Slack-Retry-Num": "1"})
     assert response["status"] == "accepted"
     assert len(background_tasks.tasks) == 1
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"type": "reaction_added", "reaction": "eyes"},
+        {"type": "channel_archive"},
+        {"type": "message", "subtype": "bot_message", "bot_id": "B1"},
+        {"type": "message", "text": "ordinary channel chatter"},
+        {"type": "message", "text": "<@OTHER> can you help?"},
+    ],
+)
+async def test_transient_lookup_does_not_retry_irrelevant_events(
+    monkeypatch: pytest.MonkeyPatch,
+    event: dict[str, str],
+) -> None:
+    monkeypatch.setattr(
+        webhook_common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value=SlackChannelContext(lookup_retry_after=30)),
+    )
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
+    payload = _channel_message_payload()
+    payload["event"].update(event)
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(payload, tasks))["status"] == "ignored"
+
+
+async def test_transient_lookup_retries_an_allowlisted_bot_mention(
+    monkeypatch: pytest.MonkeyPatch,
+    allowed_bot: None,
+) -> None:
+    monkeypatch.setattr(
+        webhook_common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value=SlackChannelContext(lookup_retry_after=17)),
+    )
+    with pytest.raises(HTTPException) as error:
+        await _post(_bot_payload(), _FakeBackgroundTasks())
+    assert error.value.status_code == 503
+    assert error.value.headers == {"Retry-After": "17"}
+
+
+async def test_definitive_lookup_failure_does_not_retry_a_mention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        webhook_common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value=SlackChannelContext()),
+    )
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(_mention_payload(), tasks))["status"] == "ignored"
+    assert tasks.tasks == []
 
 
 async def test_pending_external_channel_is_not_retried_or_dispatched(
