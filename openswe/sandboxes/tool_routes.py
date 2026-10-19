@@ -71,3 +71,35 @@ async def background_task_heartbeat(task_id: TaskId, access: Access) -> None:
         raise HTTPException(404, "No such background task")
     if outcome == "finished":
         raise HTTPException(409, "Background task is no longer running")
+
+
+MonitorId = Annotated[str, Path(pattern=r"^mon-[0-9a-f-]{1,64}$")]
+
+
+@router.post("/monitors/{monitor_id}/sync", status_code=204)
+async def monitor_sync(monitor_id: MonitorId, access: Access) -> None:
+    """A monitor's runner has new events or has ended; a 5xx makes a final sync retry."""
+    from openswe.monitors.delivery import sync_monitor_callback
+
+    try:
+        await sync_monitor_callback(monitor_id, access)
+    except PermissionError as exc:
+        logger.warning(
+            "Monitor sync rejected",
+            extra={
+                "monitor_id": monitor_id,
+                "agent_thread_id": access.thread_id,
+                "sandbox_id": access.sandbox_id,
+            },
+        )
+        raise HTTPException(403, str(exc)) from exc
+    except LookupError as exc:
+        logger.warning(
+            "Monitor sync for an unknown monitor",
+            extra={
+                "monitor_id": monitor_id,
+                "agent_thread_id": access.thread_id,
+                "sandbox_id": access.sandbox_id,
+            },
+        )
+        raise HTTPException(404, str(exc)) from exc

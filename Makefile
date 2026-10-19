@@ -124,6 +124,7 @@ format-check:
 
 typecheck:
 	uv run ty check openswe tests
+	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py
 
 # The MDA reviewer resolves imports against its own environment alone, so one
 # reaching for the backend (`openswe`) or a database driver fails here.

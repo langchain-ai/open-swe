@@ -311,6 +311,7 @@ export interface Profile {
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   experimental_mcp_ptc?: boolean
+  experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -333,6 +334,7 @@ export interface ProfileUpdate {
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   experimental_mcp_ptc?: boolean
+  experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -1123,7 +1125,6 @@ export interface PullRequestSearchResult {
   number: number
   url: string
   title: string
-  body: string
   state: "open" | "draft" | "merged" | "closed"
 }
 
