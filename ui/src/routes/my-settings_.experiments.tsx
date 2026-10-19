@@ -38,6 +38,11 @@ function ExperimentsPage() {
           description="Opening a thread that predates the transcript log, or an imported Claude Code session, moves its history to the transcript log so it loads faster. Sessions you import afterwards are recorded there directly."
         />
         <ProfileSwitchRow
+          field="experimental_monitor"
+          label="Monitors (experimental)"
+          description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
+        />
+        <ProfileSwitchRow
           field="experimental_mcp_ptc"
           label="Code Mode (Experimental)"
           description="Let the agent call integrations and supported tools from JavaScript, combining calls and filtering results before they enter its context. Separate from sandbox tool routing; not available for local runs. Applies on the next run."
@@ -47,13 +52,6 @@ function ExperimentsPage() {
           label="Prefer tools through the sandbox"
           description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint so it can filter their output. Applies to threads you start afterwards."
         />
-        {profile.data?.mda_available && (
-          <ProfileSwitchRow
-            field="run_on_mda"
-            label="Run on Managed Deep Agents"
-            description="Your agent and review threads run their model loop on the Managed Deep Agents deployment instead of this server. Applies to threads you start afterwards; existing threads stay where they are."
-          />
-        )}
         <ProfileSwitchRow
           field="experimental_act_as_approval"
           label="Approve PRs opened as you"

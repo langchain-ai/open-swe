@@ -67,19 +67,3 @@ async def ensure_titled_thread(client: LangGraphClient, thread_id: str, *, title
     metadata = thread_metadata(thread)
     if metadata.get(TITLE_LOCKED_KEY) is not True and metadata.get("title") != title:
         await client.threads.update(thread_id=thread_id, metadata={"title": title})
-
-
-async def create_lock_thread(
-    client: LangGraphClient,
-    thread_id: str,
-    *,
-    ttl_minutes: int,
-    metadata: Mapping[str, object] | None = None,
-) -> None:
-    """Hold a short-lived, never-listed thread as a mutex; raises ``ConflictError`` while held."""
-    if metadata:
-        await client.threads.create(
-            thread_id=thread_id, if_exists="raise", ttl=ttl_minutes, metadata=dict(metadata)
-        )
-    else:
-        await client.threads.create(thread_id=thread_id, if_exists="raise", ttl=ttl_minutes)

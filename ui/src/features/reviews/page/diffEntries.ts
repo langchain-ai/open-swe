@@ -78,6 +78,7 @@ function wholeFileDiff(file: ReviewDiffFile): FileDiffMetadata {
     console.warn("Could not parse a file's patch", { path: file.path, error })
     diff = getSingularPatch(patchHeader(file))
   }
+  diff.cacheKey = `${file.baseSha}:${file.headSha}:${file.path}:whole`
   parsed.set(file, diff)
   return diff
 }

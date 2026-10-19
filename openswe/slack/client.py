@@ -109,6 +109,20 @@ def slack_message_bot_id(message: dict[str, Any]) -> str:
     return "" if isinstance(user_id, str) and user_id.strip() else "unknown"
 
 
+def slack_image_file_urls(message: Mapping[str, object]) -> list[str]:
+    """Private URLs of the images attached to a Slack message."""
+    files = message.get("files")
+    if not isinstance(files, list):
+        return []
+    return [
+        str(file_info["url_private"])
+        for file_info in files
+        if isinstance(file_info, dict)
+        and str(file_info.get("mimetype", "")).startswith("image/")
+        and file_info.get("url_private")
+    ]
+
+
 def slack_message_bot_name(message: dict[str, Any]) -> str:
     """The display name for a bot-authored Slack message."""
     profile = message.get("bot_profile")
@@ -985,6 +999,38 @@ async def stop_slack_stream(
             raise
 
 
+_TRANSIENT_SLACK_ERRORS = (
+    "rate_limited",
+    "http_error",
+    "invalid_response",
+    "invalid_slack_response",
+    "internal_error",
+    "fatal_error",
+    "service_unavailable",
+    "request_timeout",
+)
+
+
+async def _set_agent_session_status(channel_id: str, thread_ts: str, status: str) -> bool:
+    """Set a thread's agent session status, which carries Slack's native Stop button.
+
+    Returns False when Slack has no agent session there; transient failures raise.
+    """
+    try:
+        data = await _slack_stream_call(
+            "agents.sessions.setStatus",
+            {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
+        )
+    except SlackStreamError as exc:
+        if exc.code.startswith(_TRANSIENT_SLACK_ERRORS):
+            raise
+        logger.info("Slack agent session status unavailable: %s", exc.code)
+        return False
+    if data.get("warning"):
+        logger.warning("Slack agent session status warning: %s", data["warning"])
+    return True
+
+
 async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) -> bool:
     """Set (or clear, with "") the animated assistant status shown under a thread."""
     from openswe.slack.dm import CONCIERGE_TS
@@ -992,6 +1038,10 @@ async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) 
     if channel_id.startswith("D") and thread_ts == CONCIERGE_TS:
         return True
     try:
+        if await _set_agent_session_status(
+            channel_id, thread_ts, "processing" if status else "active"
+        ):
+            return True
         await _slack_stream_call(
             "assistant.threads.setStatus",
             {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
@@ -1771,13 +1821,7 @@ async def resolve_slack_links_in_context(
                 resolved_parts.append(
                     f"**{link_url}**\n  Author: {author}\n  Message: {resolved_text}"
                 )
-                for file_info in resolved.get("files", []):
-                    if (
-                        isinstance(file_info, dict)
-                        and file_info.get("mimetype", "").startswith("image/")
-                        and file_info.get("url_private")
-                    ):
-                        image_urls.append(file_info["url_private"])
+                image_urls.extend(slack_image_file_urls(resolved))
             else:
                 resolved_parts.append(
                     f"**{link_url}**\n  (Could not fetch — bot may not have access)"

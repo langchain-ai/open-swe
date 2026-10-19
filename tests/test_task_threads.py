@@ -364,7 +364,7 @@ async def test_desktop_worker_cannot_be_shared(
         current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
     )
 
-    with pytest.raises(HTTPException, match="owner's Mac") as error:
+    with pytest.raises(HTTPException, match="owner's machine") as error:
         await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
     assert error.value.status_code == 409
     client.threads.update.assert_not_called()

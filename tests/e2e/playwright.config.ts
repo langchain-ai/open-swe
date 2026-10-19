@@ -4,7 +4,18 @@ import { resolve } from "node:path";
 const repoRoot = resolve(__dirname, "..", "..");
 const PORT = Number(process.env.E2E_PORT ?? 2024);
 const UI_PORT = Number(process.env.E2E_UI_PORT ?? 3100);
+const MDA_PORT = Number(process.env.E2E_MDA_PORT ?? 2025);
 const harnessURL = `http://127.0.0.1:${PORT}`;
+// Busy window for the specs that hold a run open so follow-ups land mid-run.
+// `E2E_BUSY_HOLD:<n>` overrides it per message; this is the fallback for the
+// specs that just say `E2E_BUSY_HOLD` and then cancel the run, so it only has to
+// outlast the assertions they make while it is busy. The fake model reads it, on
+// the Managed Deep Agents server for agent runs and on the harness for the rest.
+const serverEnv = {
+  ...process.env,
+  E2E_BUSY_HOLD_SECONDS: "8",
+  E2E_EXIT_WHEN_ORPHANED: "1",
+};
 // The app's own server, as a deployed browser sees it: it serves the pages and
 // fronts `/dashboard/api/*` itself. Driving the harness origin instead skipped
 // the app server's proxy, which is how a broken proxy shipped past a green run.
@@ -47,27 +58,30 @@ export default defineConfig({
     launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    // Real langgraph dev: real agent graph + real webhook routes + the harness
-    // http app (fake GitHub/Slack + mock UIs). Only the LLM is faked.
-    command:
-      "uv run langgraph dev --config tests/e2e/langgraph.e2e.json " +
-      `--port ${PORT} --no-browser --allow-blocking --no-reload`,
-    cwd: repoRoot,
-    url: `${harnessURL}/mock/github/data`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
-    // Busy window for the specs that hold a run open so follow-ups land
-    // mid-run. `E2E_BUSY_HOLD:<n>` overrides it per message; this is the
-    // fallback for the specs that just say `E2E_BUSY_HOLD` and then cancel the
-    // run, so it only has to outlast the assertions they make while it is busy.
-    // E2E_UI_SERVER is the app's own server, which global-setup starts on that
-    // port; the harness needs it to address the dashboard in "Open in Web" links.
-    env: {
-      ...process.env,
-      E2E_BUSY_HOLD_SECONDS: "8",
-      E2E_UI_SERVER: `http://127.0.0.1:${UI_PORT}`,
-      E2E_EXIT_WHEN_ORPHANED: "1",
+  webServer: [
+    {
+      // The real mda/ project on Managed Deep Agents' local dev server, where
+      // every Open SWE thread runs its model loop. Only the LLM is faked.
+      command: "tests/e2e/mda-dev.sh",
+      cwd: repoRoot,
+      url: `http://127.0.0.1:${MDA_PORT}/ok`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+      env: serverEnv,
     },
-  },
+    {
+      // Real langgraph dev: the backend's graphs, hooks and webhook routes + the
+      // harness http app (fake GitHub/Slack + mock UIs). Only the LLM is faked.
+      command:
+        "uv run langgraph dev --config tests/e2e/langgraph.e2e.json " +
+        `--port ${PORT} --no-browser --allow-blocking --no-reload`,
+      cwd: repoRoot,
+      url: `${harnessURL}/mock/github/data`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+      // E2E_UI_SERVER is the app's own server, which global-setup starts on that
+      // port; the harness needs it to address the dashboard in "Open in Web" links.
+      env: { ...serverEnv, E2E_UI_SERVER: `http://127.0.0.1:${UI_PORT}` },
+    },
+  ],
 });

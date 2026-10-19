@@ -17,7 +17,13 @@ from langgraph.config import get_config
 from langgraph.types import Command
 from pydantic import JsonValue
 
-from rt.backend import BackendTimeoutError, OpenSweBackend, ToolSpec, run_body
+from rt.backend import (
+    BackendTimeoutError,
+    BackendUnavailableError,
+    OpenSweBackend,
+    ToolSpec,
+    run_body,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +45,29 @@ def run_id() -> str | None:
 def backend_tool(spec: ToolSpec, backend: OpenSweBackend) -> BaseTool:
     async def call(runtime: ToolRuntime, **arguments: JsonValue) -> Command:
         tool_call_id = runtime.tool_call_id or ""
+        body = run_body(
+            run_id(),
+            runtime.state,
+            name=spec.name,
+            arguments=dict(arguments),
+            tool_call_id=tool_call_id,
+        )
         try:
-            reply = await backend.tool(
-                run_body(
-                    run_id(),
-                    runtime.state,
-                    name=spec.name,
-                    arguments=dict(arguments),
-                    tool_call_id=tool_call_id,
-                )
-            )
+            reply = await backend.tool(body)
         except BackendTimeoutError:
-            # One stuck call fails that call, not the whole run.
             logger.warning("The backend did not answer a tool call", exc_info=True)
             message = ToolMessage(content=_TIMED_OUT, tool_call_id=tool_call_id, status="error")
+            return Command(update={"messages": [message]})
+        except BackendUnavailableError:
+            logger.warning("The backend could not complete a tool call")
+            message = ToolMessage(
+                content=(
+                    "Error: The Open SWE backend could not be reached for this tool call. "
+                    "It may or may not have run; check state before retrying."
+                ),
+                tool_call_id=tool_call_id,
+                status="error",
+            )
             return Command(update={"messages": [message]})
         for event in reply.events:
             runtime.stream_writer(event)

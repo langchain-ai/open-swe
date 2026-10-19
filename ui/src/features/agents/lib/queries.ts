@@ -18,6 +18,7 @@ import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -57,6 +58,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "pull-request-status"] as const,
   queuedMessages: (threadId: string) =>
     ["agent-threads", threadId, "queued-messages"] as const,
+  backgroundWork: (threadId: string) =>
+    ["agent-threads", threadId, "background-work"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -895,6 +898,17 @@ export function useAgentThreadQueuedMessages(threadId: string) {
   })
 }
 
+export function useAgentThreadBackgroundWork(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.backgroundWork(threadId),
+    queryFn: () => agentsApi.getThreadBackgroundWork(threadId),
+    enabled: Boolean(threadId),
+    meta: {
+      invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
+    },
+  })
+}
+
 export function useAgentThreadBranchDiff(threadId: string, enabled: boolean) {
   return useQuery({
     queryKey: agentThreadKeys.branchDiff(threadId),
@@ -1242,6 +1256,39 @@ export function useShareThreadWithWorkspace() {
       storeAgentThread(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
     },
+  })
+}
+
+/** Move a thread to the cloud, or onto a fresh checkout on this Mac, before its next message. */
+export function useMoveThread(
+  thread: Pick<AgentThread, "id" | "repoFullName">
+) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (to: "cloud" | "local") => {
+      let destination: ThreadMoveDestination = { target: "cloud" }
+      if (to === "local") {
+        if (!window.openSweDesktop)
+          throw new Error(
+            "Open this thread in the Open SWE app to move it here"
+          )
+        destination = {
+          sandbox_bridge_id: await window.openSweDesktop.takeOverThread({
+            threadId: thread.id,
+            repo: thread.repoFullName,
+          }),
+        }
+      }
+      return agentsApi.moveThread(thread.id, destination)
+    },
+    meta: { errorTitle: "Couldn't move thread" },
+    onSuccess: (moved) => {
+      storeAgentThread(queryClient, moved)
+      invalidateAgentThreadLists(queryClient)
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: localThreadKeys.all }),
   })
 }
 

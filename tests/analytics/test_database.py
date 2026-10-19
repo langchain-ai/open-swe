@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from alembic.util import CommandError
 from blockbuster import BlockBuster
 from sqlalchemy import text
 
@@ -63,6 +64,23 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
     await postgres.close()
     await initialize_database()
     assert database.workspace_id() == old_workspace
+
+
+async def test_preview_forgets_revision_whose_script_left_the_tree(deployment_db, monkeypatch):
+    migrations = postgres.load_migrations()
+    (head,) = migrations.get_heads()
+    async with postgres.engine().begin() as conn:
+        await conn.execute(text("CREATE SCHEMA open_swe"))
+        await conn.run_sync(
+            postgres.upgrade, migrations, "open_swe", migrations.get_revision(head).down_revision
+        )
+        await conn.execute(text("INSERT INTO alembic_version VALUES ('a8caff4f6051')"))
+    with pytest.raises(CommandError, match="a8caff4f6051"):
+        await postgres.migrate()
+    monkeypatch.setenv("OPENSWE_ENV", "preview")
+    await postgres.migrate()
+    async with postgres.connection() as conn:
+        assert await conn.scalar(text("SELECT version_num FROM open_swe.alembic_version")) == head
 
 
 @pytest.mark.parametrize(

@@ -124,6 +124,7 @@ async def test_worker_refreshes_binding_during_concurrent_host_reconnect(
     assert worker is not host
 
 
+@pytest.mark.usefixtures("memory_event_claims")
 async def test_worker_reattach_recovers_a_missed_background_completion(
     shared_sandbox: dict[str, dict[str, object]], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -63,7 +63,7 @@ class _DisableInheritedMiddleware(AgentMiddleware):
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
-from openswe.bridge.constants import BridgeClient
+from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
 from openswe.bridge.store import Bridge
 from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
 from openswe.bridge.worktree_handoff import worktree_handoff
@@ -82,6 +82,7 @@ from openswe.dashboard.options import (
     model_supports_effort,
     model_supports_images,
 )
+from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.token import resolve_github_token
@@ -128,6 +129,7 @@ from openswe.middleware.code_mode import CodeModeMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
+from openswe.middleware.pr_creation_guard import SHELL_TOOL_ARGS
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware
 from openswe.middleware.require_user_reply import (
@@ -146,7 +148,7 @@ from openswe.model_request import (
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import construct_system_prompt
-from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
+from openswe.prompts import apply_tool_descriptions, common_prompt, prompt, warm_tool_schemas
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import RunConfig
@@ -181,6 +183,7 @@ from openswe.sandboxes.tool_runtime import (
     ToolSurface,
     save_tool_context,
 )
+from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
@@ -220,6 +223,7 @@ from openswe.tools import (
     manage_incident,
     manage_thread,
     merge_expedited_pr,
+    monitor,
     open_pull_request,
     output_iframe,
     publish_workspace,
@@ -318,7 +322,6 @@ client = get_client()
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
-BLOBS_ROUTE = "/blobs/"
 BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
@@ -331,7 +334,7 @@ DEEP_AGENT_TOOL_NAMES = {
     "task",
     "write_file",
 }
-DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
+DEEP_AGENT_EXCLUDED_TOOLS = SHELL_SEARCH_EXCLUDED_TOOLS
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
@@ -563,6 +566,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
+        "monitor",
         "expose_port",
         "http_request",
         "expedite_pr_approval",
@@ -636,6 +640,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
     return name.startswith("slack_") or name in {
         "background_execute",
         "background_task",
+        "monitor",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         "get_thread",
@@ -722,6 +727,7 @@ def _general_purpose_subagent(
                 _SubagentToolGuard(sandbox_only_tools),
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 TranscriptMiddleware(),
+                ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
@@ -810,7 +816,7 @@ async def _run_mcp_tools(
 # The sandbox's file and shell tools, which code mode offers directly as well.
 SANDBOX_TOOL_NAMES = frozenset({*FILESYSTEM_TOOL_NAMES, "delete", "background_execute"})
 # In-process code mode calls tools directly, skipping the guards that wrap these calls.
-_GUARDED_SHELL_TOOLS = frozenset({"execute", "background_execute"})
+_GUARDED_SHELL_TOOLS = frozenset(SHELL_TOOL_ARGS)
 # Never called from code: subagents, the replies a run waits on, and tools whose
 # results update graph state, which a call from code drops.
 _NOT_FROM_CODE = (
@@ -832,7 +838,12 @@ _NOT_FROM_CODE = (
     )
 )
 # Everyday tools code mode still offers the model directly.
-_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {"open_pull_request", "web_search", "fetch_url"}
+_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
+    "monitor",
+    "open_pull_request",
+    "web_search",
+    "fetch_url",
+}
 
 
 def callable_from_code(name: str) -> bool:
@@ -899,7 +910,7 @@ async def _cached_profile(profile_login: str | None):
     if not profile_login:
         return None
     return await ttl_cache.cached(
-        f"profile:{profile_login}", 30, lambda: load_profile(profile_login)
+        PROFILES.cache_key(profile_login), 30, lambda: load_profile(profile_login)
     )
 
 
@@ -1127,6 +1138,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     error=None if prepared else "Model selection preparation failed",
                 )
 
+    async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
+        await resolve_github_token(self._config, self._thread_id)
+
     async def _prepare_with_decision(
         self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
     ) -> dict[str, object]:  # noqa: ARG002
@@ -1145,6 +1159,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 handoff = await infer_requested_model(
                     messages=state.get("messages") or [],
                     requested_models=self._requested_models,
+                    performance_model=self._routing_defaults.get("performance"),
                     decision=decision.classifier,
                     effort_decision=decision.effort_classifier,
                     slack_event_ts=(
@@ -1636,6 +1651,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
+    monitors_enabled = bool(sender_profile and sender_profile.get("experimental_monitor") is True)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -1757,6 +1773,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         web_search,
         background_execute,
         background_task,
+        *((monitor,) if monitors_enabled else ()),
         save_plan,
         save_user_instructions,
         save_user_settings,
@@ -1947,12 +1964,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     if credential_login:
         skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
         skill_sources.insert(0, USER_SKILLS_ROUTE)
+    artifacts_root = "/" if bridge_client is None else f"{LOCAL_ARTIFACTS_DIR}/{thread_id}/"
     # Offloaded images live in PostgreSQL so they can be read without the sandbox.
-    skill_routes[BLOBS_ROUTE] = StoreBackend(
+    skill_routes[f"{artifacts_root}blobs/"] = StoreBackend(
         store=ThreadBlobs(thread_id),
         namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
     )
-    agent_backend = CompositeBackend(default=backend, routes=skill_routes)
+    agent_backend = CompositeBackend(
+        default=backend, routes=skill_routes, artifacts_root=artifacts_root
+    )
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
@@ -2171,7 +2191,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.graph_assembly"):
         graph = create_deep_agent(
             model=main_model,
-            system_prompt="",
+            system_prompt=common_prompt(),
             tools=main_tools,
             subagents=[
                 _general_purpose_subagent(

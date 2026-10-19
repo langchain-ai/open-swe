@@ -8,12 +8,24 @@ from openswe.github import dashboard_routes, repo_cache, repos
 from openswe.users import User
 from tests.support.github_sdk import mock_github_sdk
 
+_read_cached_repos = repo_cache.read_cached_repos
+_write_cached_repos = repo_cache.write_cached_repos
+
 
 @pytest.fixture(autouse=True)
 def _no_repo_cache(monkeypatch) -> None:
     """Default every test to a cache miss with writes swallowed."""
     monkeypatch.setattr(dashboard_routes, "read_cached_repos", AsyncMock(return_value=None))
-    monkeypatch.setattr(dashboard_routes, "write_cached_repos", AsyncMock(return_value=None))
+    monkeypatch.setattr(repo_cache, "read_cached_repos", AsyncMock(return_value=None))
+    monkeypatch.setattr(repo_cache, "write_cached_repos", AsyncMock(return_value=None))
+
+
+@pytest.fixture
+def real_repo_cache(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(repo_cache, "read_cached_repos", _read_cached_repos)
+    monkeypatch.setattr(repo_cache, "write_cached_repos", _write_cached_repos)
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada,bob")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
 
 
 async def test_list_repos_refreshes_expired_user_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,10 +157,8 @@ async def test_schedule_repo_cache_refresh_runs_once_per_login() -> None:
     assert "octocat" not in repo_cache._refreshing
 
 
-@pytest.mark.usefixtures("registry_db")
-async def test_repo_cache_round_trips_per_person(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada,bob")
-    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+@pytest.mark.usefixtures("real_repo_cache")
+async def test_repo_cache_round_trips_per_person() -> None:
     await User.sign_in("github", "1", login="ada")
     await User.sign_in("github", "2", login="bob")
     payload = {"installations": [], "repositories": [{"full_name": "acme/api"}]}
@@ -158,3 +168,23 @@ async def test_repo_cache_round_trips_per_person(monkeypatch: pytest.MonkeyPatch
     cached = await repo_cache.read_cached_repos("ada")
     assert cached is not None and cached[0] == payload
     assert await repo_cache.read_cached_repos("bob") is None
+
+
+@pytest.mark.usefixtures("real_repo_cache")
+async def test_access_trusts_a_cached_listing_briefly_and_drops_it_on_installation_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await User.sign_in("github", "1", login="ada")
+    fetch = AsyncMock(side_effect=[([], [{"full_name": "Acme/API"}]), ([], []), ([], [])])
+    monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
+
+    assert await repos.accessible_repo_full_names("ada") == {"acme/api"}
+    assert await repos.accessible_repo_full_names("ada") == {"acme/api"}
+    assert fetch.await_count == 1
+
+    await repo_cache.forget_cached_repos()
+    assert await repos.accessible_repo_full_names("ada") == set()
+
+    monkeypatch.setattr(repos, "ACCESS_FRESH_MS", -1)
+    await repos.accessible_repo_full_names("ada")
+    assert fetch.await_count == 3

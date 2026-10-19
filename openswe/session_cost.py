@@ -2,12 +2,14 @@
 
 import logging
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, NotRequired
 
 from langgraph_sdk.client import LangGraphClient
 from typing_extensions import TypedDict
 
 from openswe.invocation import resolve_invocation_id
+from openswe.jobs import queue
 from openswe.slack.client import (
     fetch_slack_thread_message_by_ts,
     format_slack_session_cost,
@@ -110,7 +112,6 @@ async def schedule_session_cost_refresh(
     state: Mapping[str, Any],
     *,
     attempt: int = 0,
-    client: LangGraphClient | None = None,
 ) -> bool:
     """Schedule one stateless, delayed refresh attempt."""
     if attempt < 0 or attempt >= len(_RETRY_DELAYS_SECONDS):
@@ -118,15 +119,12 @@ async def schedule_session_cost_refresh(
     payload = _payload(state, attempt)
     if payload is None:
         return False
-    client = client or langgraph_client()
     try:
-        await client.runs.create(
-            None,
-            "scheduler",
-            input=payload,
+        await queue.schedule(
+            "session_cost",
+            payload,
+            due_at=datetime.now(UTC) + timedelta(seconds=_RETRY_DELAYS_SECONDS[attempt]),
             metadata={"kind": "session_cost_refresh", "run_id": payload["run_id"]},
-            after_seconds=_RETRY_DELAYS_SECONDS[attempt],
-            on_completion="delete",
         )
     except Exception:  # noqa: BLE001
         logger.warning("Could not schedule session-cost refresh", exc_info=True)
@@ -247,7 +245,7 @@ async def run_session_cost_refresh(
         logger.info("Session-cost refresh exhausted for run %s: %s", state.get("run_id"), reason)
         await _clear_pending_cost(state)
         return {"status": "exhausted", "reason": reason}
-    scheduled = await schedule_session_cost_refresh(state, attempt=next_attempt, client=client)
+    scheduled = await schedule_session_cost_refresh(state, attempt=next_attempt)
     if not scheduled:
         await _clear_pending_cost(state)
     return {
