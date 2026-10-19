@@ -21,6 +21,7 @@ from managed_deepagents import (
     LinearSessionCreatedPayload,
     LinearSessionPromptedPayload,
 )
+from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
@@ -243,8 +244,8 @@ class LinearSessionTurn:
             "input": cast(
                 JsonValue, self._input(issue_prompt, repository, images, description_urls)
             ),
-            "context": cast(dict[str, JsonValue], rewritten["context"]),
-            "metadata": cast(dict[str, JsonValue], run_config["metadata"]),
+            "context": cast(dict[str, AnswerJson], rewritten["context"]),
+            "metadata": cast(dict[str, AnswerJson], run_config["metadata"]),
         }
         if COMPLETION_WEBHOOK_URL:
             prepared["webhook"] = COMPLETION_WEBHOOK_URL

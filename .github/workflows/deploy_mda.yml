@@ -82,14 +82,14 @@ jobs:
       - name: Install the mda CLI
         if: steps.changed.outputs.deploy == 'true'
         # Same version mda/ pins.
-        run: uv tool install managed-deepagents==0.10.0.dev13
+        run: uv tool install managed-deepagents==0.10.0.dev14
       - name: Deploy
         if: steps.changed.outputs.deploy == 'true'
         env:
           ENVIRONMENT: ${{ matrix.environment }}
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
-          # Shared with this environment's backend: the Linear channel presents it when it hands events over.
+          # Shared with this environment's backend: MDA signs each call its channels make to it.
           # Each secret is named statically, so the runner gets only these, not every secret.
           MDA_SERVICE_SECRET: >-
             ${{ matrix.environment == 'prod' && secrets.MDA_SERVICE_SECRET_PROD

@@ -215,9 +215,9 @@ ENV.var(
 )
 ENV.var(
     "MDA_SERVICE_SECRET",
-    "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): its "
-    "channels present it when they hand events to /linear/channel/*. Open SWE's own "
-    "credential between the two; required for the Linear channel.",
+    "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
+    "signs each call its channels make to /linear/channel/* with it (Standard Webhooks), and "
+    "the backend verifies the signature; required for the Linear channel.",
     secret=True,
 )
 ENV.var(

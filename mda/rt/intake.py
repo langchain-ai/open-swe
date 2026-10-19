@@ -3,24 +3,20 @@
 MDA's channels verify each delivery and own their conversations: they start the
 runs on their threads. Each channel's ``on_event`` names the backend's endpoint for
 it, which decides the rest, as for any Open SWE run, and answers with the run to
-start, or nothing. Every call presents Open SWE's own credential between the two,
-the backend's ``MDA_SERVICE_SECRET``.
+start, or nothing. MDA signs every call with the deployment's
+``MDA_SERVICE_SECRET``, and the backend verifies it.
 """
 
 import os
 from typing import Final
 
-import httpx
-
 from rt.backend import BACKEND_URL_ENV
 
-SERVICE_SECRET_ENV: Final = "MDA_SERVICE_SECRET"
-_SERVICE_SECRET_HEADER: Final = "x-mda-service-secret"
 # MDA reads the channels to build the deployment, without its environment.
 _UNCONFIGURED: Final = "https://open-swe-backend.invalid"
 
 
-def backend_endpoint(path: str) -> httpx.Request:
+def backend_endpoint(path: str) -> str:
     """The backend's endpoint at ``path``, as a channel's ``on_event`` takes it.
 
     Without ``OPEN_SWE_BACKEND_URL``, as when MDA builds the deployment, it names
@@ -28,5 +24,4 @@ def backend_endpoint(path: str) -> httpx.Request:
     conversation.
     """
     base = os.environ.get(BACKEND_URL_ENV, "").strip().rstrip("/") or _UNCONFIGURED
-    secret = os.environ.get(SERVICE_SECRET_ENV, "").strip()
-    return httpx.Request("POST", f"{base}{path}", headers={_SERVICE_SECRET_HEADER: secret})
+    return f"{base}{path}"

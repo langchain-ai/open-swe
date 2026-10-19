@@ -118,7 +118,7 @@ jobs:
       - name: Install the mda CLI
         if: steps.mda-changed.outputs.deploy == 'true'
         # Same version mda/ pins.
-        run: uv tool install managed-deepagents==0.10.0.dev13
+        run: uv tool install managed-deepagents==0.10.0.dev14
       - name: Deploy the MDA preview
         id: mda-deploy
         if: steps.mda-changed.outputs.deploy == 'true'
@@ -126,7 +126,7 @@ jobs:
         env:
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
-          # Shared with the preview backend: the Linear channel presents it when it hands events over.
+          # Shared with the preview backend: MDA signs each call its channels make to it.
           MDA_SERVICE_SECRET: ${{ secrets.MDA_SERVICE_SECRET_PREVIEW }}
         run: |
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
