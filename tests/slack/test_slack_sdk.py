@@ -105,3 +105,34 @@ async def test_malformed_response_preserves_rate_limit_metadata(
     assert raised.value.status_code == expected
     if expected == 429:
         assert raised.value.headers == {"Retry-After": "12"}
+
+
+@pytest.mark.parametrize(
+    "status,code,delay",
+    [
+        (429, "ratelimited", 17),
+        (503, "unavailable", 60),
+        (200, "internal_error", 60),
+        (200, "channel_not_found", None),
+        (200, "not_in_channel", None),
+        (200, "missing_scope", None),
+        (403, "invalid_auth", None),
+    ],
+)
+async def test_channel_context_distinguishes_transient_and_definitive_failures(
+    slack_api: SlackAPI,
+    status: int,
+    code: str,
+    delay: int | None,
+) -> None:
+    from openswe.webhooks.common import resolve_slack_channel_context
+
+    slack_api.respond(
+        {"ok": False, "error": code},
+        status=status,
+        headers={"Retry-After": "17"} if status == 429 else {},
+    )
+    context = await resolve_slack_channel_context("C1", use_cache=False)
+    assert not context.allows_operations
+    assert context.lookup_retry_after == delay
+    assert "lookup_retry_after" not in context.dump()

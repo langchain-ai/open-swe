@@ -296,6 +296,56 @@ async def _launch_slack_automations(
         )
 
 
+async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
+    event = envelope.event
+    if event is None or event.type not in {"message", "app_mention"}:
+        return False
+    if event.subtype not in {"", "file_share", "thread_broadcast", "bot_message"}:
+        return False
+    if (
+        not isinstance(event.user, str)
+        or not (event.user or event.bot_id)
+        or event.text is None
+        or not event.ts
+    ):
+        return False
+    bot_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
+    leading = re.match(r"\s*<@([^>]+)>", event.text)
+    if event.user == bot_id or (leading and leading.group(1) != bot_id):
+        return False
+    if event.is_from_bot:
+        if (
+            not bot_id
+            or f"<@{bot_id}>" not in event.text
+            or (event.app_id and event.app_id == envelope.api_app_id)
+        ):
+            return False
+        return (
+            await resolve_allowed_slack_bot(
+                envelope.team_id or event.team,
+                event.bot_id,
+                user_id=event.user,
+                app_id=event.app_id,
+            )
+            is not None
+        )
+    if event.type == "app_mention" or (bot_id and f"<@{bot_id}>" in event.text):
+        return True
+    channel_id = event.resolve_channel_id()
+    if event.channel_type == "im" or await common.is_code_channel(channel_id):
+        return True
+    if await is_kitchen_channel(channel_id):
+        return True
+    return bool(event.thread_ts) and await allow_solo_thread_followup(
+        get_langgraph_client(),
+        channel_id=channel_id,
+        thread_ts=event.thread_ts,
+        message_ts=event.ts,
+        user_id=event.user,
+        explicit_mention=False,
+    )
+
+
 @router.post("/webhooks/slack")
 async def slack_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
@@ -353,7 +403,12 @@ async def slack_webhook(
         channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
         if not channel_context.allows_operations:
             is_external = channel_context.is_ext_shared is True
-            if not is_external and channel_context.is_pending_ext_shared is not True:
+            if (
+                not is_external
+                and channel_context.is_pending_ext_shared is not True
+                and channel_context.lookup_retry_after is not None
+                and await _retry_channel_verification(envelope)
+            ):
                 common.logger.warning(
                     "Slack channel verification unavailable; requesting event redelivery",
                     extra={"slack_channel_id": channel_id, "slack_event_id": event_id},
@@ -361,7 +416,7 @@ async def slack_webhook(
                 raise HTTPException(
                     503,
                     "Slack channel verification is temporarily unavailable.",
-                    headers={"Retry-After": "60"},
+                    headers={"Retry-After": str(channel_context.lookup_retry_after)},
                 )
             event_ts = event.event_ts or event.ts
             thread_ts = event.thread_ts or event.ts
