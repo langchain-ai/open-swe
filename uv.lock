@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -2063,15 +2063,15 @@ inmem = [
 
 [[package]]
 name = "langgraph-prebuilt"
-version = "1.1.0"
+version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
     { name = "langgraph-checkpoint" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/66/ed9b93f56bc17ef22d551892f0ac2b225a97fe0fcf23a511b857f70d590b/langgraph_prebuilt-1.1.0.tar.gz", hash = "sha256:3c579cf6eed2d17f9c157c2d0fcaddcd8688524e7022d3b22b37a3bf4589d528", size = 178833, upload-time = "2026-05-12T03:37:49.332Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/d9/e50d6e6b8d241b90564892afed8fac98d17da023c82810577cdb4530f87c/langgraph_prebuilt-1.1.1.tar.gz", hash = "sha256:f1b1a4772e7f9f15ba736411aad3877183ad40cd9349748df76bd2b9f58a83c7", size = 179437, upload-time = "2026-10-15T04:32:25.224Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e9/43/3fe1a700b8490ed02679cdbbc8c915eb23a092faf496c9c1118abcd10be3/langgraph_prebuilt-1.1.0-py3-none-any.whl", hash = "sha256:51e311747d755b751d5c6b39b0c1446124d3a7643d2515017e6714b323508fc9", size = 41043, upload-time = "2026-05-12T03:37:48.007Z" },
+    { url = "https://files.pythonhosted.org/packages/38/26/4da2c6ae8b9fe73c3c09cf32c058415c5041e773fd00219c5e0d76588c23/langgraph_prebuilt-1.1.1-py3-none-any.whl", hash = "sha256:fae17c22562e501940eb7aa052a15c58a431febbabf33f8ad172e1b44354a7e4", size = 42254, upload-time = "2026-10-15T04:32:24.1Z" },
 ]
 
 [[package]]
@@ -2150,6 +2150,30 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/05/7f/0b891a82379ffd96d2d8cc6d435fb1055cdaed52829287f81d2a43fd71cb/mako-1.4.2.tar.gz", hash = "sha256:7227a060ee3af55a493af61d73d6beef13044b81dba9586736c13945f09464ce", size = 412231, upload-time = "2026-09-22T20:40:55.06Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/bb/0e4c30a18858adebc75496ea8a8c3fb65cbf4b36ea1c5028ed8a0a5fa196/mako-1.4.2-py3-none-any.whl", hash = "sha256:e70a2a4308952b33a21208bfd6725da79fae5a8c224578f8cfdeb60e5ace03df", size = 80163, upload-time = "2026-09-22T20:40:56.423Z" },
+]
+
+[[package]]
+name = "managed-deepagents"
+version = "0.10.0.dev11"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "deepagents" },
+    { name = "httpx" },
+    { name = "langchain" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "langgraph-prebuilt" },
+    { name = "langgraph-sdk" },
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/75/b0/9fe189469e19d5eccf8b78a7a49f8bd90c1389740ea3d6bc9ef0af7e53a1/managed_deepagents-0.10.0.dev11-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:4894cf88b5d84712b87f773d5762be0f55e373c925de701adc337c97ff321f8f", size = 2808531, upload-time = "2026-10-19T05:22:54.38Z" },
+    { url = "https://files.pythonhosted.org/packages/18/db/9a1ac78a6be4303e39ef10ab5718ebfda07d4832cd0fe39ba816ebe69b27/managed_deepagents-0.10.0.dev11-py3-none-macosx_11_0_arm64.whl", hash = "sha256:c27feb6db8a9d7da29d5d99ee7df020d2fcbe6d8a8f876a99d68c3e64067ce3c", size = 2587821, upload-time = "2026-10-19T05:22:56.705Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/ef/4fb468d418d244bbba36d2fc671eb59e4511398deb4fdb2f234c30f947bf/managed_deepagents-0.10.0.dev11-py3-none-manylinux2014_aarch64.whl", hash = "sha256:45c0e0853a09e2d5c965c73138e8db2637f7513639b8abd8df3db236bea05e84", size = 2883287, upload-time = "2026-10-19T05:22:59.08Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/3d/30d79e33cc349fd0f896b50a3afe627a786810c83abb0fe55ae7aa295db9/managed_deepagents-0.10.0.dev11-py3-none-manylinux2014_x86_64.whl", hash = "sha256:669c02cccdc286d625b8d87ebf9a5ff299da1066df82b32796532d43bddf3993", size = 3147239, upload-time = "2026-10-19T05:23:01.234Z" },
+    { url = "https://files.pythonhosted.org/packages/76/ae/3b2db772b6db324db8583cb929803e1c9680ec1a433f7e8edba61921e425/managed_deepagents-0.10.0.dev11-py3-none-win_amd64.whl", hash = "sha256:50f5834c4e484a34c7f8231394d6c323e688200c35a332966a7de7b32532178e", size = 2580569, upload-time = "2026-10-19T05:23:03.131Z" },
+    { url = "https://files.pythonhosted.org/packages/23/bb/7ad38ec03dfb175210502f3e04342c79298aeb320295e08dc3cbd7e1068b/managed_deepagents-0.10.0.dev11-py3-none-win_arm64.whl", hash = "sha256:16ce625b476bae2cc5ce21b8d1ea666087f8278285d42b8fe446fe4cac6fc965", size = 2453809, upload-time = "2026-10-19T05:23:05.132Z" },
 ]
 
 [[package]]
@@ -2483,6 +2507,7 @@ dependencies = [
     { name = "langgraph-cli", extra = ["inmem"] },
     { name = "langgraph-sdk" },
     { name = "langsmith" },
+    { name = "managed-deepagents" },
     { name = "markdown-it-py" },
     { name = "markdownify" },
     { name = "openai" },
@@ -2556,6 +2581,7 @@ requires-dist = [
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.35" },
     { name = "langgraph-sdk", specifier = ">=0.4.7" },
     { name = "langsmith", specifier = ">=0.14.9" },
+    { name = "managed-deepagents", specifier = "==0.10.0.dev11" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
     { name = "openai", specifier = ">=3.10.0,<4.0.0" },

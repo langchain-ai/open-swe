@@ -1,20 +1,6 @@
 {
   "components": {
     "schemas": {
-      "ActsWhileInterrupted": {
-        "description": "Open SWE would act, so the channel tells the issue the thread waits; nothing starts.",
-        "properties": {
-          "input": {
-            "title": "Input",
-            "type": "string"
-          }
-        },
-        "required": [
-          "input"
-        ],
-        "title": "ActsWhileInterrupted",
-        "type": "object"
-      },
       "AddressCommentIntent": {
         "properties": {
           "comment_url": {
@@ -982,23 +968,6 @@
         "title": "ChallengeResponse",
         "type": "object"
       },
-      "ChannelEvent": {
-        "description": "What the channel sends its endpoint: the event, and the thread it belongs to.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/GitHubEvent"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/openswe__github__channel__ChannelThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "ChannelEvent",
-        "type": "object"
-      },
       "CheckpointFile": {
         "additionalProperties": false,
         "description": "One file a turn changed, as ``git diff --numstat`` counted it.",
@@ -1741,6 +1710,112 @@
         "title": "EnabledReviewRepoUpdate",
         "type": "object"
       },
+      "EndpointAnswer": {
+        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set. It answers ``null`` (or HTTP 204) to start nothing.",
+        "properties": {
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "webhook": {
+            "title": "Webhook",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "EndpointAnswer",
+        "type": "object"
+      },
+      "EndpointEvent_dict_str__JsonValue__": {
+        "description": "The event a channel sends its endpoint, as the provider sent it.",
+        "properties": {
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "EndpointEvent",
+        "type": "object"
+      },
+      "EndpointRequest_dict_str__JsonValue__": {
+        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, with the payload\ntype of the event key it handles, such as\n``TypeAdapter(EndpointRequest[LinearSessionCreatedPayload])``.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EndpointEvent_dict_str__JsonValue__"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "EndpointRequest",
+        "type": "object"
+      },
+      "EndpointThread": {
+        "description": "The conversation's thread an endpoint request is about.",
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/EndpointThreadChannel"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "interrupted": {
+            "title": "Interrupted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "channel"
+        ],
+        "title": "EndpointThread",
+        "type": "object"
+      },
+      "EndpointThreadChannel": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "EndpointThreadChannel",
+        "type": "object"
+      },
       "ExcludedHunk": {
         "additionalProperties": false,
         "description": "A hunk left off the card.",
@@ -2062,40 +2137,6 @@
           "ready"
         ],
         "title": "GatewayStatus",
-        "type": "object"
-      },
-      "GitHubEvent": {
-        "description": "An issue event MDA's GitHub channel verified.",
-        "properties": {
-          "deliveryId": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "enum": [
-              "issues.opened",
-              "issues.edited",
-              "issues.reopened",
-              "issue_comment.created",
-              "issue_comment.edited"
-            ],
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "GitHubEvent",
         "type": "object"
       },
       "GitHubTrigger": {
@@ -2511,59 +2552,6 @@
           "body"
         ],
         "title": "LineComment",
-        "type": "object"
-      },
-      "LinearChannelEvent": {
-        "description": "What the channel sends its endpoint: the event, and the thread it belongs to.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/LinearEvent"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/openswe__linear__channel__ChannelThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "LinearChannelEvent",
-        "type": "object"
-      },
-      "LinearEvent": {
-        "description": "A Linear event the channel received and verified.",
-        "properties": {
-          "deliveryId": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "enum": [
-              "Issue.create",
-              "Issue.update",
-              "Comment.create",
-              "AgentSessionEvent.created",
-              "AgentSessionEvent.prompted"
-            ],
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "LinearEvent",
         "type": "object"
       },
       "LinearTrigger": {
@@ -3999,39 +3987,6 @@
           "html_url"
         ],
         "title": "PostedReviewComment",
-        "type": "object"
-      },
-      "PreparedRun": {
-        "description": "What the channel starts the run with.",
-        "properties": {
-          "context": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "$ref": "#/components/schemas/RunInput"
-          },
-          "metadata": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Metadata",
-            "type": "object"
-          },
-          "webhook": {
-            "title": "Webhook",
-            "type": "string"
-          }
-        },
-        "required": [
-          "input",
-          "context",
-          "metadata"
-        ],
-        "title": "PreparedRun",
         "type": "object"
       },
       "PreviewCheck": {
@@ -6268,64 +6223,6 @@
           "commits"
         ],
         "title": "RolloutAccepted",
-        "type": "object"
-      },
-      "RunInput": {
-        "properties": {
-          "files": {
-            "additionalProperties": true,
-            "title": "Files",
-            "type": "object"
-          },
-          "messages": {
-            "items": {
-              "$ref": "#/components/schemas/RunMessage"
-            },
-            "title": "Messages",
-            "type": "array"
-          }
-        },
-        "required": [
-          "messages"
-        ],
-        "title": "RunInput",
-        "type": "object"
-      },
-      "RunMessage": {
-        "properties": {
-          "content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              }
-            ],
-            "title": "Content"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "role": {
-            "enum": [
-              "user",
-              "system"
-            ],
-            "title": "Role",
-            "type": "string"
-          }
-        },
-        "required": [
-          "role",
-          "content"
-        ],
-        "title": "RunMessage",
         "type": "object"
       },
       "ScheduleCreateBody": {
@@ -8723,41 +8620,6 @@
           }
         },
         "title": "WorkspaceUpdate",
-        "type": "object"
-      },
-      "openswe__github__channel__ChannelThread": {
-        "description": "The conversation's thread: the run starts on it, or it waits on an interrupt.",
-        "properties": {
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "interrupted": {
-            "default": false,
-            "title": "Interrupted",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "title": "ChannelThread",
-        "type": "object"
-      },
-      "openswe__linear__channel__ChannelThread": {
-        "description": "The conversation's thread, the issue's or an agent session's.",
-        "properties": {
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "title": "ChannelThread",
         "type": "object"
       },
       "openswe__transcript__events__JsonObject": {
@@ -21379,56 +21241,6 @@
         ]
       }
     },
-    "/github/channel/events": {
-      "post": {
-        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
-        "operationId": "github_channel_event_github_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChannelEvent"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/PreparedRun"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ActsWhileInterrupted"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Github Channel Event Github Channel Events Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Github Channel Event"
-      }
-    },
     "/health": {
       "get": {
         "operationId": "health_check_health_get",
@@ -21459,7 +21271,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LinearChannelEvent"
+                "$ref": "#/components/schemas/EndpointRequest_dict_str__JsonValue__"
               }
             }
           },
@@ -21472,7 +21284,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/PreparedRun"
+                      "$ref": "#/components/schemas/EndpointAnswer"
                     },
                     {
                       "type": "null"

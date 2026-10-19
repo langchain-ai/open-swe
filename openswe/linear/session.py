@@ -10,12 +10,18 @@ webhook, which completes it as it does the backend's own runs; the channel repor
 its failures in the session.
 """
 
-from typing import NotRequired, TypedDict, cast
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
-from pydantic import BaseModel, ConfigDict, JsonValue
-from pydantic.alias_generators import to_camel
+from managed_deepagents import (
+    EndpointAnswer,
+    LinearSessionCreatedPayload,
+    LinearSessionPromptedPayload,
+)
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import (
@@ -40,16 +46,29 @@ SESSION_EVENT_KEYS: frozenset[str] = frozenset(
 )
 
 
-class _Model(BaseModel):
-    """Linear's camelCase payload, keeping only what a turn needs."""
+_PAYLOADS: dict[str, TypeAdapter[Any]] = {
+    "AgentSessionEvent.created": TypeAdapter(LinearSessionCreatedPayload),
+    "AgentSessionEvent.prompted": TypeAdapter(LinearSessionPromptedPayload),
+}
 
-    model_config = ConfigDict(extra="ignore", alias_generator=to_camel, populate_by_name=True)
 
+@dataclass(frozen=True)
+class LinearAuthor:
+    """Who wrote a session turn. Linear sends ``email`` too, which MDA's schema keeps."""
 
-class LinearPerson(_Model):
     id: str = ""
     name: str = ""
     email: str = ""
+
+    @classmethod
+    def of(cls, person: Mapping[str, object] | None) -> LinearAuthor | None:
+        if not person:
+            return None
+        return cls(
+            id=str(person.get("id") or ""),
+            name=str(person.get("name") or ""),
+            email=str(person.get("email") or ""),
+        )
 
     def identity(self) -> PersonIdentity:
         key = self.id or self.email or self.name or "unknown"
@@ -61,79 +80,68 @@ class LinearPerson(_Model):
         return person
 
 
-class _Issue(_Model):
+@dataclass(frozen=True)
+class _Issue:
     id: str
     identifier: str = ""
     title: str = ""
     description: str | None = None
     url: str = ""
 
-
-class _Comment(_Model):
-    id: str
-    body: str = ""
-
-
-class _Session(_Model):
-    id: str
-    issue: _Issue
-    comment: _Comment | None = None
-    creator: LinearPerson | None = None
-
-
-class _ActivityContent(_Model):
-    body: str = ""
-
-
-class _Activity(_Model):
-    content: _ActivityContent
-    source_comment_id: str | None = None
-    user: LinearPerson | None = None
-
-
-class _Payload(_Model):
-    type: str
-    action: str
-    agent_session: _Session
-    agent_activity: _Activity | None = None
-    actor: LinearPerson | None = None
-
-
-class PreparedRun(TypedDict):
-    """What the channel starts the run with."""
-
-    input: RunInput
-    context: dict[str, JsonValue]
-    metadata: dict[str, JsonValue]
-    webhook: NotRequired[str]
-    """Where the Agent Server POSTs the finished run: the run-complete webhook."""
+    @classmethod
+    def of(cls, issue: Mapping[str, Any]) -> _Issue:
+        return cls(
+            id=str(issue["id"]),
+            identifier=issue.get("identifier") or "",
+            title=issue.get("title") or "",
+            description=issue.get("description"),
+            url=issue.get("url") or "",
+        )
 
 
 class LinearSessionTurn:
     """One turn of a Linear agent session: who asked what about which issue."""
 
-    def __init__(self, payload: _Payload) -> None:
-        session = payload.agent_session
-        self.session_id = session.id
-        self.issue = session.issue
-        activity = payload.agent_activity
-        if activity is not None:
+    def __init__(
+        self,
+        payload: LinearSessionCreatedPayload | LinearSessionPromptedPayload,
+        issue: Mapping[str, Any],
+    ) -> None:
+        session = payload["agentSession"]
+        self.session_id = session["id"]
+        self.issue = _Issue.of(issue)
+        creator = LinearAuthor.of(cast(Mapping[str, object] | None, session.get("creator")))
+        actor = LinearAuthor.of(cast(Mapping[str, object] | None, payload.get("actor")))
+        if payload["action"] == "prompted":
             # A reply in the session.
-            self.comment_id = activity.source_comment_id or ""
-            self.body = activity.content.body
-            self.author = activity.user or session.creator or payload.actor or LinearPerson()
+            activity = cast(LinearSessionPromptedPayload, payload)["agentActivity"]
+            user = LinearAuthor.of(cast(Mapping[str, object] | None, activity.get("user")))
+            self.comment_id = activity.get("sourceCommentId") or ""
+            self.body = activity["content"].get("body") or ""
+            self.author = user or creator or actor or LinearAuthor()
         else:
             # The mention or delegation that opened it.
-            self.comment_id = session.comment.id if session.comment else ""
-            self.body = session.comment.body if session.comment else ""
-            self.author = session.creator or payload.actor or LinearPerson()
+            comment = session.get("comment")
+            self.comment_id = comment["id"] if comment else ""
+            self.body = (comment.get("body") if comment else None) or ""
+            self.author = creator or actor or LinearAuthor()
 
     @classmethod
     def parse(cls, key: str, payload: object) -> LinearSessionTurn | None:
-        """The session turn an event carries, or None for any other Linear event."""
-        if key not in SESSION_EVENT_KEYS or not isinstance(payload, dict):
+        """The session turn an event carries, or None for any other Linear event.
+
+        The payload is checked against MDA's schema for the event; a session
+        without its issue has nothing to work on.
+        """
+        adapter = _PAYLOADS.get(key)
+        if adapter is None:
             return None
-        return cls(_Payload.model_validate(payload))
+        try:
+            validated = adapter.validate_python(payload)
+        except ValidationError:
+            return None
+        issue = validated["agentSession"].get("issue")
+        return cls(validated, issue) if issue else None
 
     async def repository(self) -> dict[str, str] | None:
         """The repository the turn works in, when one is named, preferred or allowed."""
@@ -160,7 +168,7 @@ class LinearSessionTurn:
             return None
         return repo
 
-    async def prepare_run(self, thread_id: str) -> PreparedRun | None:
+    async def prepare_run(self, thread_id: str) -> EndpointAnswer | None:
         """Index the session's thread and prepare the run for it, or None to start nothing."""
         repo = await self.repository()
         if repo is None:
@@ -230,8 +238,10 @@ class LinearSessionTurn:
         rewritten = await RUNTIMES.mda_runtime.run_payload(
             thread_id, {"assistant_id": "agent", "config": cast(JsonValue, run_config)}
         )
-        prepared: PreparedRun = {
-            "input": self._input(issue_prompt, repository, images, description_urls),
+        prepared: EndpointAnswer = {
+            "input": cast(
+                JsonValue, self._input(issue_prompt, repository, images, description_urls)
+            ),
             "context": cast(dict[str, JsonValue], rewritten["context"]),
             "metadata": cast(dict[str, JsonValue], run_config["metadata"]),
         }
