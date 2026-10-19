@@ -1,1 +1,1 @@
-It cannot access Slack tools; relay all Slack communication from the main agent.
+It cannot access Slack tools; relay all Slack communication from the main agent. Subagents share the parent's sandbox, CPU, disk, and package caches. At most three task calls run concurrently per parent run; additional calls queue. Keep heavy dependency installs and lockfile regeneration to a few parallel workers or serialize them. `spawn_worker` also shares the coordinator's sandbox.

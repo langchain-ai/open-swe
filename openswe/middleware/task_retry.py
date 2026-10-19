@@ -1,4 +1,12 @@
+import asyncio
 import json
+from collections.abc import Awaitable, Callable
+
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.types import Command
+
+from openswe.middleware.trace import OpenSWEMiddleware
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
 _RETURN_TO_MODEL_STATUS_CODES = frozenset({400, 422})
@@ -82,3 +90,20 @@ def task_on_failure(exc: Exception) -> str:
         {"status": "failed", "source": "subagent", "error": error},
         sort_keys=True,
     )
+
+
+class TaskConcurrencyMiddleware(OpenSWEMiddleware):
+    """Queue task calls beyond the three sharing this run's sandbox."""
+
+    def __init__(self) -> None:
+        self._slots = asyncio.Semaphore(3)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        if request.tool_call["name"] != "task":
+            return await handler(request)
+        async with self._slots:
+            return await handler(request)

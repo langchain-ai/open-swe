@@ -1,10 +1,19 @@
+import asyncio
 import json
+import sys
+from pathlib import Path
 
 import httpx2
 import pytest
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
 
 from openswe.middleware.model_call_timeout import ModelCallTimeoutError
-from openswe.middleware.task_retry import task_on_failure, task_retry_on
+from openswe.middleware.task_retry import TaskConcurrencyMiddleware, task_on_failure, task_retry_on
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
+
+from rt.middleware import TaskConcurrencyMiddleware as RuntimeTaskConcurrencyMiddleware
 
 
 class _HTTPError(Exception):
@@ -50,3 +59,74 @@ def test_task_on_failure_reraises_unrecoverable_error() -> None:
     exc = RuntimeError("boom")
     with pytest.raises(RuntimeError, match="boom"):
         task_on_failure(exc)
+
+
+@pytest.mark.parametrize(
+    "middleware_type", [TaskConcurrencyMiddleware, RuntimeTaskConcurrencyMiddleware]
+)
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+async def test_task_batch_queues_until_a_slot_is_released(
+    middleware_type: type[TaskConcurrencyMiddleware] | type[RuntimeTaskConcurrencyMiddleware],
+    outcome: str,
+) -> None:
+    middleware = middleware_type()
+    entered: asyncio.Queue[int] = asyncio.Queue()
+    release = [asyncio.Event() for _ in range(10)]
+    active = 0
+    peak = 0
+
+    async def execute(request: ToolCallRequest) -> ToolMessage:
+        nonlocal active, peak
+        index = int(request.tool_call["id"])
+        active += 1
+        peak = max(peak, active)
+        entered.put_nowait(index)
+        try:
+            await release[index].wait()
+            if index == 0 and outcome == "failure":
+                raise RuntimeError("subagent failed")
+            return ToolMessage(content="done", tool_call_id=str(index))
+        finally:
+            active -= 1
+
+    calls = [
+        asyncio.create_task(
+            middleware.awrap_tool_call(
+                ToolCallRequest(
+                    tool_call={"name": "task", "args": {}, "id": str(index)},
+                    tool=None,
+                    state={"messages": []},
+                    runtime=None,
+                ),
+                execute,
+            )
+        )
+        for index in range(10)
+    ]
+    try:
+        async with asyncio.timeout(5):
+            running = [await entered.get() for _ in range(3)]
+            await asyncio.sleep(0)
+            assert entered.empty()
+            assert active == 3
+            if outcome == "cancel":
+                calls[0].cancel()
+            else:
+                release[0].set()
+            running.remove(0)
+            running.append(await entered.get())
+            for _ in range(6):
+                release[running.pop(0)].set()
+                running.append(await entered.get())
+            for index in running:
+                release[index].set()
+            results = await asyncio.gather(*calls, return_exceptions=True)
+            assert peak == 3
+            assert active == 0
+            assert sum(isinstance(result, ToolMessage) for result in results) == (
+                10 if outcome == "success" else 9
+            )
+    finally:
+        for call in calls:
+            call.cancel()
+        await asyncio.gather(*calls, return_exceptions=True)

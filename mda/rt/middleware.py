@@ -649,3 +649,20 @@ def _tool_message(result: ToolMessage | Command, tool_call_id: str) -> ToolMessa
         if isinstance(message, ToolMessage) and message.tool_call_id == tool_call_id:
             return message
     return ToolMessage(content="", tool_call_id=tool_call_id)
+
+
+class TaskConcurrencyMiddleware(AgentMiddleware):
+    """Queue task calls beyond the three sharing this run's sandbox."""
+
+    def __init__(self) -> None:
+        self._slots = asyncio.Semaphore(3)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        if request.tool_call["name"] != "task":
+            return await handler(request)
+        async with self._slots:
+            return await handler(request)
