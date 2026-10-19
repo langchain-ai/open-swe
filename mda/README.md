@@ -69,7 +69,7 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 Each deployment's configuration is `OPEN_SWE_BACKEND_URL` and `MDA_SERVICE_SECRET` (repository secret `MDA_SERVICE_SECRET_<ENVIRONMENT>`), in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding only that deployment's backend URL:
 
 ```bash
-uv tool install managed-deepagents==0.10.0.dev9
+uv tool install managed-deepagents==0.10.0.dev10
 cd mda
 mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
