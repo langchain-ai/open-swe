@@ -76,10 +76,6 @@ class _Threads:
         thread = self.threads.get(thread_id)
         return None if thread is None else index.as_status(thread.get("status"))
 
-    async def has_history(self, thread_id: str) -> bool:
-        thread = self.threads.get(thread_id)
-        return thread is not None and bool(thread.get("values"))
-
 
 class _Runtimes:
     def __init__(self, mda_runtime: runtimes.MdaRuntime) -> None:
@@ -152,11 +148,12 @@ class _Harness:
         async def send(message: Message) -> None:
             sent.append(message)
 
+        path, _, query = path.partition("?")
         scope: Scope = {
             "type": "http",
             "method": method,
             "path": path,
-            "query_string": b"",
+            "query_string": query.encode(),
             "headers": [(b"content-type", b"application/json")],
         }
         await self.router(scope, receive, send)
@@ -179,7 +176,7 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
         "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada"}}
     )
     assert status == 200 and isinstance(created, dict)
-    assert created["metadata"] == {"owner_login": "ada"}
+    assert created["metadata"] == {"owner_login": "ada", "runtime": "mda"}
     assert (await harness.request("POST", "/threads", {"thread_id": THREAD}))[0] == 409
 
     await harness.request("PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Fix it"}})
@@ -190,11 +187,19 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     _, counted = await harness.request(
         "POST", "/threads/count", {"metadata": {"owner_login": "ada"}}
     )
+    _, matched = await harness.request(
+        "POST", "/threads/search?text=fix", {"select": ["thread_id"]}
+    )
+    _, missed = await harness.request("POST", "/threads/count?text=nope", {})
 
-    assert isinstance(read, dict) and read["metadata"] == {"owner_login": "ada", "title": "Fix it"}
+    assert isinstance(read, dict)
+    assert read["metadata"] == {"owner_login": "ada", "title": "Fix it", "runtime": "mda"}
     assert found == [{"thread_id": THREAD}]
+    assert isinstance(matched, list) and [thread["thread_id"] for thread in matched] == [THREAD]
+    assert missed == 0
     assert counted == 1
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
+    assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.reached_here == []
 
 
@@ -221,14 +226,14 @@ async def test_a_thread_only_the_agent_server_knows_is_indexed_on_first_read(
 
 @pytest.mark.parametrize("runtime", ["local", "mda"])
 async def test_a_run_goes_to_its_threads_runtime_and_marks_the_thread_busy(
-    monkeypatch: pytest.MonkeyPatch, secret: None, runtime: Runtime
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    secret: None,
+    runtime: Runtime,
 ) -> None:
     harness = _Harness(monkeypatch)
+    # A local thread is one made before every new thread ran on MDA.
     await index.create(THREAD, runtime=runtime, metadata={"owner_login": "ada"})
-    if runtime == "local":
-        # A thread whose runs left checkpoints here before every new thread ran on MDA.
-        await harness.runtimes.local.create(THREAD, {"owner_login": "ada"})
-        harness.runtimes.local.threads[THREAD]["values"] = {"messages": [{"content": "hi"}]}
     run = {
         "assistant_id": "agent",
         "input": {},
@@ -240,10 +245,15 @@ async def test_a_run_goes_to_its_threads_runtime_and_marks_the_thread_busy(
     assert status == 200
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "busy"
+    warnings = [r for r in caplog.records if r.name == router.__name__ and r.levelname == "WARNING"]
     if runtime == "local":
         assert harness.reached_here == [f"/threads/{THREAD}/runs"]
         assert harness.forwarded == []
+        [warning] = warnings
+        assert warning.__dict__["thread_id"] == THREAD
+        assert warning.__dict__["assistant_id"] == "agent"
     else:
+        assert warnings == []
         assert harness.reached_here == []
         [(path, sent)] = harness.forwarded
         assert path == f"/threads/{THREAD}/runs" and sent["assistant_id"] == "open-swe"
@@ -254,15 +264,13 @@ async def test_a_refused_run_leaves_the_thread_idle(monkeypatch: pytest.MonkeyPa
     harness.local_status = 409
     await index.create(THREAD, runtime="local")
 
-    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "review-scout"})
+    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent"})
 
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "idle"
 
 
-async def test_a_fresh_agent_thread_moves_to_mda(
-    monkeypatch: pytest.MonkeyPatch, secret: None
-) -> None:
+async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret: None) -> None:
     harness = _Harness(monkeypatch)
     await harness.request(
         "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada"}}
@@ -303,11 +311,14 @@ async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = _Harness(monkeypatch)
-    await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"source": "linear"}}
-    )
 
     await router.adopt_channel_run(THREAD, "linear")
+    # The session's metadata is written after, as a create that finds the thread.
+    await harness.request(
+        "POST",
+        "/threads",
+        {"thread_id": THREAD, "metadata": {"source": "linear"}, "if_exists": "do_nothing"},
+    )
 
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.runtime == "mda"
@@ -320,10 +331,12 @@ async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
 
 
 async def _channel_thread(harness: _Harness) -> None:
-    await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"source": "linear"}}
-    )
     await router.adopt_channel_run(THREAD, "linear")
+    await harness.request(
+        "POST",
+        "/threads",
+        {"thread_id": THREAD, "metadata": {"source": "linear"}, "if_exists": "do_nothing"},
+    )
     harness.runtimes.mda_runtime._mda_threads.discard(THREAD)
 
 
@@ -447,20 +460,6 @@ async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPa
     assert harness.runtimes.local.threads == {} and harness.runtimes.mda.threads == {}
 
 
-@pytest.mark.parametrize(("assistant_id", "moves"), [("agent", True), ("review-scout", False)])
-async def test_only_agent_and_reviewer_threads_move_to_mda(
-    monkeypatch: pytest.MonkeyPatch, secret: None, assistant_id: str, moves: bool
-) -> None:
-    harness = _Harness(monkeypatch)
-    await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": {}})
-
-    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": assistant_id})
-
-    indexed = await index.get(THREAD)
-    assert indexed is not None and indexed.runtime == ("mda" if moves else "local")
-    assert bool(harness.forwarded) is moves
-
-
 async def test_a_run_started_by_command_on_mda_settles_through_the_completion_webhook(
     monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:
@@ -480,26 +479,6 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
     [(path, sent)] = harness.forwarded
     assert path == f"/threads/{THREAD}/runs"
     assert sent["webhook"] == "https://swe.test/webhooks/run-complete"
-
-
-async def test_a_first_state_write_moves_a_fresh_thread_to_mda(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _Harness(monkeypatch)
-    await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"graph_id": "agent"}}
-    )
-
-    await harness.request("POST", f"/threads/{THREAD}/state", {"values": {"messages": []}})
-
-    indexed = await index.get(THREAD)
-    assert indexed is not None and indexed.runtime == "mda"
-    assert harness.runtimes.mda.threads[THREAD]["metadata"] == {
-        "graph_id": "open-swe",
-        "runtime": "mda",
-    }
-    [(path, _)] = harness.forwarded
-    assert path == f"/threads/{THREAD}/state"
 
 
 async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.MonkeyPatch) -> None:

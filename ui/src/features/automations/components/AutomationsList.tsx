@@ -271,6 +271,13 @@ function AutomationRow({
             )}
             <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
           </div>
+          <div className="mt-space-1 flex flex-wrap gap-x-space-3 gap-y-space-1 text-xs break-all text-tertiary">
+            <span>Created by: {schedule.createdBy || "Unknown"}</span>
+            <span>
+              Last edited by:{" "}
+              {schedule.updatedBy || schedule.createdBy || "Unknown"}
+            </span>
+          </div>
         </div>
       </Link>
       {schedule.lastThreadId && (

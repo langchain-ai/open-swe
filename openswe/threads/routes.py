@@ -17,6 +17,10 @@ from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
 from openswe.threads import terminal
+from openswe.threads.background_work import (
+    BackgroundWork,
+    get_dashboard_thread_background_work,
+)
 from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
@@ -383,6 +387,15 @@ async def api_get_thread_path(
 ) -> WorkspacePath:
     return await get_dashboard_thread_path(
         thread_id, session["sub"], path, email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/background-work")
+async def api_get_thread_background_work(
+    thread_id: str, session: dict[str, Any] = SESSION_DEP
+) -> BackgroundWork:
+    return await get_dashboard_thread_background_work(
+        thread_id, session["sub"], email=session.get("email")
     )
 
 

@@ -217,6 +217,8 @@ class LinearSessionTurn:
         if model_override:
             configurable["agent_model_id"], configurable["agent_effort"] = model_override
 
+        # First, so the metadata write below doesn't create the thread on MDA.
+        await adopt_channel_run(thread_id, LINEAR_CHANNEL)
         await common.upsert_agent_thread_metadata(
             thread_id,
             source="linear",
@@ -227,7 +229,6 @@ class LinearSessionTurn:
             source_context=SourceContext.parse({"linear_issue": linear_issue}),
             workspace=workspace,
         )
-        await adopt_channel_run(thread_id, LINEAR_CHANNEL)
 
         run_config = await prepare_durable_run(
             "agent",
