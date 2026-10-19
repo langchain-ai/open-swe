@@ -14,7 +14,9 @@ import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtif
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { useAgentThreadPullRequestStatus } from "@/features/agents/lib/queries"
 import { agentsApi } from "@/features/agents/lib/api"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { pageTitle } from "@/lib/pageTitle"
+import { cn } from "@/lib/utils"
 import { AssistantMessage } from "./Message"
 import { Composer } from "./Composer"
 import { useThreadMetadata } from "./AssistantProvider"
@@ -36,6 +38,9 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         ? String(streamError)
         : undefined)
   const [panelCollapsed, setPanelCollapsed] = useState(true)
+  const sidebarCollapsed = useSidebarCollapsed()
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const checks = useAgentThreadPullRequestStatus(
     thread?.id ?? "",
     Boolean(thread?.pullRequests?.length)
@@ -59,7 +64,13 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         data-testid="assistant-ui-conversation"
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
-        <header className="flex items-center gap-space-3 border-b border-default px-space-4 py-space-3">
+        <header
+          className={cn(
+            "flex shrink-0 items-center gap-space-3 border-b border-default px-space-4 py-space-3",
+            sidebarCollapsed && (isDesktop ? "pl-32" : "pl-space-8"),
+            thread && panelCollapsed && "pr-space-8"
+          )}
+        >
           <Text
             as="h1"
             variant="h5"
