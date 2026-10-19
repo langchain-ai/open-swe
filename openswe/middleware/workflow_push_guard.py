@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
@@ -452,6 +453,36 @@ def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
     return dashboard_workflow_approval_url(thread_id, fingerprint)
 
 
+async def _new_branch_base(backend: SandboxBackendProtocol, root: str, head: str) -> str:
+    upstream = await _run_git(backend, root, "rev-parse --symbolic-full-name '@{upstream}'")
+    if upstream.ok and upstream.output:
+        merge_base = await _run_git(
+            backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(upstream.output)}"
+        )
+        if merge_base.ok and merge_base.output:
+            return _first_line(merge_base.output)
+
+    branches = await _run_git(
+        backend, root, "for-each-ref --format='%(refname)' refs/remotes/origin/"
+    )
+    newest_timestamp = -1
+    base_sha = ""
+    for branch in branches.output.splitlines() if branches.ok else []:
+        if branch == "refs/remotes/origin/HEAD":
+            continue
+        merge_base = await _run_git(
+            backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(branch)}"
+        )
+        candidate = _first_line(merge_base.output) if merge_base.ok else ""
+        if not candidate:
+            continue
+        timestamp = await _run_git(backend, root, f"show -s --format=%ct {shlex.quote(candidate)}")
+        if timestamp.ok and timestamp.output.isdigit() and int(timestamp.output) > newest_timestamp:
+            newest_timestamp = int(timestamp.output)
+            base_sha = candidate
+    return base_sha
+
+
 async def _workflow_change_for_push(
     backend: Any, parsed: ParsedGitPush
 ) -> WorkflowPushChange | None:
@@ -479,18 +510,13 @@ async def _workflow_change_for_push(
         backend, root, f"rev-parse --verify {shlex.quote(remote_branch)}"
     )
     if remote_branch_exists.ok and _first_line(remote_branch_exists.output):
-        base_ref = remote_branch
-        range_expr = f"{shlex.quote(base_ref)}..{shlex.quote(head)}"
-        base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(base_ref)}")
-        base_sha = _first_line(base_result.output)
+        base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(remote_branch)}")
+        base_sha = _first_line(base_result.output) if base_result.ok else ""
     else:
-        origin_head = await _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
-        base_ref = _first_line(origin_head.output) if origin_head.ok else "origin/main"
-        range_expr = f"{shlex.quote(base_ref)}...{shlex.quote(head)}"
-        merge_base = await _run_git(
-            backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(base_ref)}"
-        )
-        base_sha = _first_line(merge_base.output)
+        base_sha = await _new_branch_base(backend, root, head)
+    if not base_sha:
+        return parsed.inspection_failed()
+    range_expr = f"{shlex.quote(base_sha)}..{shlex.quote(head)}"
 
     names = await _run_git(
         backend,

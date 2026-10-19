@@ -1,4 +1,7 @@
+import asyncio
 import json
+import shlex
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -44,6 +47,8 @@ class _Backend:
         if "rev-parse --verify refs/remotes/origin/feature" in command:
             return _Response("", 1)
         if "symbolic-ref --short refs/remotes/origin/HEAD" in command:
+            return _Response("origin/main\n")
+        if "rev-parse --symbolic-full-name" in command:
             return _Response("origin/main\n")
         if "rev-list --parents -n 1" in command:
             if self.inherited_from_main:
@@ -174,6 +179,96 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     )
     assert lease_change is not None
     assert lease_change.fingerprint != change.fingerprint
+
+
+class _GitBackend:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> _Response:
+        process = await asyncio.create_subprocess_shell(
+            command,
+            cwd=self.root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        return _Response(output.decode(), process.returncode or 0)
+
+    async def git(self, args: str) -> str:
+        result = await self.aexecute(f"git {args}")
+        assert result.exit_code == 0, result.output
+        return result.output.strip()
+
+
+@pytest.mark.parametrize("base", ["fallback", "upstream", "remote"])
+@pytest.mark.parametrize("workflow_edit", [False, True])
+async def test_release_branch_push_excludes_inherited_workflows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base: str, workflow_edit: bool
+) -> None:
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00+00:00")
+    backend = _GitBackend(tmp_path)
+    await backend.git("init -b main")
+    await backend.git("config user.email test@example.com")
+    await backend.git("config user.name Test")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    inherited = workflows / "inherited.yml"
+    inherited.write_text("main workflow\n")
+    edited = workflows / "ci.yml"
+    edited.write_text("original workflow\n")
+    await backend.git("add .")
+    await backend.git("commit -qm main")
+    await backend.git("update-ref refs/remotes/origin/main HEAD")
+    await backend.git("symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main")
+    await backend.git("checkout -b v15-stable")
+    inherited.write_text("release workflow\n")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-01-02T00:00:00+00:00")
+    await backend.git("commit -qam release")
+    release_sha = await backend.git("rev-parse HEAD")
+    await backend.git("update-ref refs/remotes/origin/v15-stable HEAD")
+    await backend.git("checkout -b feature")
+    if base == "upstream":
+        await backend.git("config remote.origin.url https://github.com/example/repo.git")
+        await backend.git("config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'")
+        await backend.git("branch --set-upstream-to=origin/main")
+    elif base == "remote":
+        await backend.git("update-ref refs/remotes/origin/feature HEAD")
+        await backend.git("config branch.feature.remote .")
+        await backend.git("config branch.feature.merge refs/heads/main")
+    (tmp_path / "uv.lock").write_text("dependency update\n")
+    if workflow_edit:
+        edited.write_text("updated workflow\n")
+    await backend.git("add .")
+    await backend.git("commit -qm update")
+
+    change = await guard._workflow_change_for_push(
+        backend,
+        guard.ParsedGitPush(
+            repo_dir=str(tmp_path), remote="origin", local_ref="feature", remote_ref="feature"
+        ),
+    )
+
+    if not workflow_edit and base != "upstream":
+        assert change is None
+        return
+    assert change is not None
+    expected_files = [".github/workflows/ci.yml"] if workflow_edit else []
+    if base == "upstream":
+        expected_files.append(".github/workflows/inherited.yml")
+        assert change.base_sha == await backend.git("rev-parse main")
+    else:
+        assert change.base_sha == release_sha
+        assert "inherited.yml" not in change.diff_preview
+    assert change.files == expected_files
+    assert change.diff_stats == {
+        "files": len(expected_files),
+        "additions": len(expected_files),
+        "deletions": len(expected_files),
+    }
+    assert change.diff_preview == await backend.git(
+        f"diff --binary --full-index {shlex.quote(change.base_sha)}..HEAD -- .github/workflows"
+    )
 
 
 async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
