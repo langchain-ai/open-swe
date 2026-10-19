@@ -88,6 +88,9 @@ async def test_unknown_events_and_oversized_payloads_are_refused(app: FastAPI) -
     assert (await _post(app, _call("Issue.remove", {}))).status_code == 422
     huge = _call("Issue.create", {"type": "Issue", "data": {"description": "x" * 1_000_001}})
     assert (await _post(app, huge)).status_code == 422
+    not_an_object = _call("Issue.create", {})
+    not_an_object["event"]["payload"] = ["Issue"]
+    assert (await _post(app, not_an_object)).status_code == 422
     app.state.record.assert_not_awaited()
 
 

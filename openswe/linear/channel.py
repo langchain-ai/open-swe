@@ -14,8 +14,9 @@ from typing import Any, Literal, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from managed_deepagents import EndpointAnswer, EndpointEvent, EndpointRequest
+from managed_deepagents import EndpointAnswer, EndpointEvent, EndpointThread
 from pydantic import JsonValue
+from typing_extensions import TypedDict
 
 from openswe.linear.session import LinearSessionTurn
 from openswe.mda_channels.auth import require_mda_channel
@@ -38,11 +39,16 @@ _AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
 router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 
 
-class LinearChannelCall(EndpointRequest[EndpointEvent[str, dict[str, JsonValue]]]):
+class LinearChannelCall(TypedDict):
     """What MDA's Linear channel POSTs: the event it validated and its thread.
 
-    Named, so the API schema doesn't take a name built from MDA's generic types.
+    MDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a
+    generic TypedDict's type arguments to a subclass, and the API schema gets a
+    name of its own.
     """
+
+    event: EndpointEvent[str, dict[str, JsonValue]]
+    thread: EndpointThread
 
 
 async def _record(request: Request, payload: dict[str, JsonValue], delivery_id: str) -> None:
