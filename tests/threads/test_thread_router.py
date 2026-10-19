@@ -311,11 +311,14 @@ async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = _Harness(monkeypatch)
-    await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"source": "linear"}}
-    )
 
     await router.adopt_channel_run(THREAD, "linear")
+    # The session's metadata is written after, as a create that finds the thread.
+    await harness.request(
+        "POST",
+        "/threads",
+        {"thread_id": THREAD, "metadata": {"source": "linear"}, "if_exists": "do_nothing"},
+    )
 
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.runtime == "mda"
@@ -328,10 +331,12 @@ async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
 
 
 async def _channel_thread(harness: _Harness) -> None:
-    await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"source": "linear"}}
-    )
     await router.adopt_channel_run(THREAD, "linear")
+    await harness.request(
+        "POST",
+        "/threads",
+        {"thread_id": THREAD, "metadata": {"source": "linear"}, "if_exists": "do_nothing"},
+    )
     harness.runtimes.mda_runtime._mda_threads.discard(THREAD)
 
 
