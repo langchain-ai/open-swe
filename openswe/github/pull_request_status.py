@@ -84,6 +84,18 @@ query PullRequestAllReviewThreads($owner: String!, $repo: String!, $number: Int!
   }
 }
 """
+_REVIEW_THREAD_STATES_QUERY = """
+query PullRequestFindingThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id isResolved }
+      }
+    }
+  }
+}
+"""
 _ADD_REVIEW_THREAD_MUTATION = """
 mutation($input: AddPullRequestReviewThreadInput!) {
   addPullRequestReviewThread(input: $input) { thread { id } }
@@ -533,6 +545,39 @@ class PullRequestClient:
             cursor = _next_cursor(connection, seen)
             if cursor is None:
                 return threads
+
+    async def review_thread_states(self) -> dict[str, bool]:
+        """Explicit resolution states, returned only after every page was read."""
+        states: dict[str, bool] = {}
+        cursor: str | None = None
+        seen: set[str] = set()
+        while True:
+            pull = _graphql_pull(
+                await self.repo.graphql(
+                    _REVIEW_THREAD_STATES_QUERY, {"number": self.number, "cursor": cursor}
+                )
+            )
+            connection = pull.get("reviewThreads") if pull is not None else None
+            if not isinstance(connection, Mapping) or not isinstance(connection.get("nodes"), list):
+                raise ValueError("GitHub answered finding threads without a list")
+            page_info = connection.get("pageInfo")
+            if not isinstance(page_info, Mapping) or not isinstance(
+                page_info.get("hasNextPage"), bool
+            ):
+                raise ValueError("GitHub answered finding threads without pagination")
+            for node in connection["nodes"]:
+                if (
+                    not isinstance(node, Mapping)
+                    or not isinstance(thread_id := node.get("id"), str)
+                    or not thread_id
+                    or not isinstance(resolved := node.get("isResolved"), bool)
+                    or thread_id in states
+                ):
+                    raise ValueError("GitHub answered an invalid finding thread")
+                states[thread_id] = resolved
+            cursor = _next_cursor(connection, seen)
+            if cursor is None:
+                return states
 
     async def add_review_thread(self, thread: Mapping[str, object]) -> None:
         """Add an inline comment to a pending review; ``thread`` is GraphQL's thread input."""

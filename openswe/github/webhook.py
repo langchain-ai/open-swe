@@ -13,6 +13,7 @@ from openswe.baby_sit import handle_ci_webhook
 from openswe.database import postgres
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
+from openswe.github.http import GitHubClient
 from openswe.github.notifications import notify_slack_review
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.human_review.lifecycle import close_for_pull_request
@@ -36,6 +37,7 @@ from openswe.review.findings import (
     ReviewerSlackThread,
     reviewer_thread_title,
 )
+from openswe.review.reconcile import reconcile_linked_findings
 from openswe.run_config import Repo
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
@@ -1242,6 +1244,26 @@ async def process_github_pr_comment(
             edited_body=event_body if payload.get("action") == "edited" else None,
             edited_at=event_comment["event_at"],
         )
+
+
+async def process_github_review_thread(payload: dict[str, object]) -> None:
+    """Re-read thread states so delayed resolution events cannot overwrite newer ones."""
+    repository = payload.get("repository")
+    pull_request = payload.get("pull_request")
+    if not isinstance(repository, dict) or not isinstance(pull_request, dict):
+        return
+    owner_data = repository.get("owner")
+    owner = owner_data.get("login") if isinstance(owner_data, dict) else None
+    repo = repository.get("name")
+    number = pull_request.get("number")
+    if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
+        return
+    thread_id = reviewer_thread_id(owner, repo, number)
+    metadata = await common.get_thread_metadata_safe(thread_id)
+    if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
+        return
+    async with GitHubClient.as_app(owner, repo) as github:
+        await reconcile_linked_findings(thread_id, github.repo(owner, repo).pull_request(number))
 
 
 async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:

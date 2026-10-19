@@ -1,17 +1,25 @@
+import logging
+from collections.abc import Mapping
 from typing import Any
 
+import httpx2
+
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.review.findings import (
     Finding,
     FindingInteraction,
+    SurfaceState,
     comment_ids_for_finding,
     list_findings,
     mark_surfaced,
-    replace_findings,
+    mutate_findings,
     resolved_thread_ids_for_finding,
     set_surface_state,
     thread_ids_for_finding,
 )
 from openswe.review.publish import parse_review_comment_marker
+
+logger = logging.getLogger(__name__)
 
 ReviewThread = dict[str, Any]
 ReviewThreadMatch = tuple[ReviewThread, int | None]
@@ -84,24 +92,19 @@ def _find_review_threads_for_finding(
     by_comment_id: dict[int, ReviewThread],
     by_marker_id: dict[str, list[ReviewThreadMatch]],
 ) -> list[ReviewThreadMatch]:
-    finding_id = finding.get("id")
-    if isinstance(finding_id, str):
-        marker_match = by_marker_id.get(finding_id)
-        if marker_match:
-            return marker_match
-
-    thread_ids = thread_ids_for_finding(finding)
+    matches = list(by_marker_id.get(finding["id"], []))
+    matched_ids = {thread.get("id") for thread, _ in matches}
     comment_ids = comment_ids_for_finding(finding)
-    if thread_ids:
-        review_thread = by_thread_id.get(thread_ids[0])
-        if review_thread is not None:
-            return [(review_thread, comment_ids[0] if comment_ids else None)]
-
-    if comment_ids:
-        review_thread = by_comment_id.get(comment_ids[0])
-        if review_thread is not None:
-            return [(review_thread, comment_ids[0])]
-    return []
+    for thread_id in thread_ids_for_finding(finding):
+        if thread_id not in matched_ids and (thread := by_thread_id.get(thread_id)) is not None:
+            matches.append((thread, None))
+            matched_ids.add(thread_id)
+    for comment_id in comment_ids:
+        thread = by_comment_id.get(comment_id)
+        if thread is not None and thread.get("id") not in matched_ids:
+            matches.append((thread, comment_id))
+            matched_ids.add(thread.get("id"))
+    return matches
 
 
 def _sync_publication_identity(
@@ -125,34 +128,63 @@ def _sync_publication_identity(
     return mark_surfaced(finding) or updated
 
 
-def _is_terminal_thread(review_thread: ReviewThread) -> bool:
-    return bool(review_thread.get("is_resolved") or review_thread.get("is_outdated"))
-
-
-def _sync_thread_status(finding: Finding, matches: list[ReviewThreadMatch]) -> bool:
-    if not matches or not all(_is_terminal_thread(review_thread) for review_thread, _ in matches):
+def _sync_thread_status(finding: Finding, states: Mapping[str, bool]) -> bool:
+    thread_ids = thread_ids_for_finding(finding)
+    if not thread_ids:
         return False
 
-    updated = False
-    resolved_thread_ids = resolved_thread_ids_for_finding(finding)
-    all_resolved = True
-    for review_thread, _comment_id in matches:
-        thread_id = review_thread.get("id")
-        if review_thread.get("is_resolved") and isinstance(thread_id, str) and thread_id:
-            if thread_id not in resolved_thread_ids:
-                resolved_thread_ids.append(thread_id)
-                finding["github_resolved_thread_ids"] = resolved_thread_ids
-                updated = True
-        else:
-            all_resolved = False
-
-    if not all_resolved:
+    resolved_ids = resolved_thread_ids_for_finding(finding)
+    current_resolved = [
+        thread_id for thread_id in thread_ids if states.get(thread_id, thread_id in resolved_ids)
+    ]
+    updated = current_resolved != resolved_ids
+    if updated:
+        finding["github_resolved_thread_ids"] = current_resolved
+    if not all(thread_id in states for thread_id in thread_ids) and not any(
+        states.get(thread_id) is False for thread_id in thread_ids
+    ):
         return updated
 
-    if finding.get("status") == "open":
+    all_resolved = all(states.get(thread_id) is True for thread_id in thread_ids)
+    reopened = finding.get("surface_state") == "resolved" or any(
+        thread_id in resolved_ids and states.get(thread_id) is False for thread_id in thread_ids
+    )
+    if all_resolved and finding["status"] == "open":
         finding["status"] = "resolved"
         updated = True
-    return set_surface_state(finding, "resolved") or updated
+    elif not all_resolved and reopened and finding["status"] == "resolved":
+        finding["status"] = "open"
+        updated = True
+    surface_state: SurfaceState = "resolved" if all_resolved else "surfaced"
+    if not all_resolved and finding.get("surface_state") == "resolve_pending":
+        surface_state = "resolve_pending"
+    return set_surface_state(finding, surface_state) or updated
+
+
+async def reconcile_linked_findings(
+    reviewer_thread_id: str, pull: PullRequestClient
+) -> list[Finding]:
+    """Refresh linked findings without changing them when GitHub is unavailable."""
+    findings = await list_findings(reviewer_thread_id)
+    if not any(thread_ids_for_finding(finding) for finding in findings):
+        return findings
+    try:
+        states = await pull.review_thread_states()
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Could not reconcile GitHub finding threads",
+            extra={"reviewer_thread_id": reviewer_thread_id},
+            exc_info=True,
+        )
+        return findings
+
+    def _sync(latest: list[Finding]) -> bool:
+        updated = False
+        for finding in latest:
+            updated = _sync_thread_status(finding, states) or updated
+        return updated
+
+    return await mutate_findings(reviewer_thread_id, _sync)
 
 
 def _sync_latest_human_reply(
@@ -221,27 +253,29 @@ async def reconcile_findings_with_review_threads(
     review_threads: list[ReviewThread],
 ) -> list[Finding]:
     """Sync tracked Open SWE findings with the current GitHub review-thread state."""
-    findings = await list_findings(reviewer_thread_id)
-    if not findings:
-        return findings
-
     by_thread_id, by_comment_id, by_marker_id = _index_review_threads(review_threads)
+    states = {
+        thread_id: resolved
+        for thread_id, thread in by_thread_id.items()
+        if isinstance(resolved := thread.get("is_resolved"), bool)
+    }
 
-    updated = False
-    for finding in findings:
-        matches = _find_review_threads_for_finding(
-            finding,
-            by_thread_id=by_thread_id,
-            by_comment_id=by_comment_id,
-            by_marker_id=by_marker_id,
-        )
-        for review_thread, comment_id in matches:
-            updated = _sync_publication_identity(finding, review_thread, comment_id) or updated
-            updated = (
-                _sync_latest_human_reply(finding, review_thread, comment_id=comment_id) or updated
+    def _sync(findings: list[Finding]) -> bool:
+        updated = False
+        for finding in findings:
+            matches = _find_review_threads_for_finding(
+                finding,
+                by_thread_id=by_thread_id,
+                by_comment_id=by_comment_id,
+                by_marker_id=by_marker_id,
             )
-        updated = _sync_thread_status(finding, matches) or updated
+            for review_thread, comment_id in matches:
+                updated = _sync_publication_identity(finding, review_thread, comment_id) or updated
+                updated = (
+                    _sync_latest_human_reply(finding, review_thread, comment_id=comment_id)
+                    or updated
+                )
+            updated = _sync_thread_status(finding, states) or updated
+        return updated
 
-    if updated:
-        await replace_findings(reviewer_thread_id, findings)
-    return findings
+    return await mutate_findings(reviewer_thread_id, _sync)

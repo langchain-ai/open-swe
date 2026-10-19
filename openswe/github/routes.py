@@ -179,6 +179,13 @@ async def github_webhook(
         )
         return {"status": "accepted", "message": "Processing GitHub CI event"}
 
+    if event_type == "pull_request_review_thread" and payload.get("action") in {
+        "resolved",
+        "unresolved",
+    }:
+        background_tasks.add_task(service.process_github_review_thread, payload)
+        return {"status": "accepted", "message": "Processing review thread resolution"}
+
     if event_type == "pull_request_review" and payload.get("action") in {"submitted", "dismissed"}:
         # Any reviewer's verdict can complete a review request, registered with Open SWE or not.
         background_tasks.add_task(service.settle_human_reviews, payload)

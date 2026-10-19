@@ -1,9 +1,21 @@
+from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
 
+import httpx2
 import pytest
 
-from openswe.review.findings import is_thread_resolved
+from openswe.review.findings import Finding, coerce_finding, is_thread_resolved
+from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
+
+
+def _storage(findings: list[Finding], replace: AsyncMock):
+    async def mutate(thread_id: str, update: Callable[[list[Finding]], bool]) -> list[Finding]:
+        if update(findings):
+            await replace(thread_id, findings)
+        return findings
+
+    return patch("openswe.review.reconcile.mutate_findings", side_effect=mutate)
 
 
 @pytest.mark.asyncio
@@ -19,10 +31,7 @@ async def test_reconcile_marks_resolved_github_thread_resolved() -> None:
     ]
     replace = AsyncMock()
 
-    with (
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", replace),
-    ):
+    with _storage(findings, replace):
         result = await reconcile_findings_with_review_threads(
             "tid",
             [
@@ -45,10 +54,7 @@ async def test_reconcile_backfills_comment_and_thread_ids_from_bot_marker() -> N
     findings = [{"id": "f1", "status": "open"}]
     replace = AsyncMock()
 
-    with (
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", replace),
-    ):
+    with _storage(findings, replace):
         result = await reconcile_findings_with_review_threads(
             "tid",
             [
@@ -82,10 +88,7 @@ async def test_reconcile_backfills_marker_from_graphql_app_login() -> None:
     findings = [{"id": "f1", "status": "open"}]
     replace = AsyncMock()
 
-    with (
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", replace),
-    ):
+    with _storage(findings, replace):
         result = await reconcile_findings_with_review_threads(
             "tid",
             [
@@ -123,10 +126,7 @@ async def test_reconcile_duplicate_markers_require_all_threads_terminal() -> Non
         '"end_line":1,"side":"RIGHT"} -->\n\nbug'
     )
 
-    with (
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", replace),
-    ):
+    with _storage(findings, replace):
         result = await reconcile_findings_with_review_threads(
             "tid",
             [
@@ -161,10 +161,7 @@ async def test_reconcile_duplicate_markers_stay_open_when_some_threads_only_outd
         '"end_line":1,"side":"RIGHT"} -->\n\nbug'
     )
 
-    with (
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", replace),
-    ):
+    with _storage(findings, replace):
         result = await reconcile_findings_with_review_threads(
             "tid",
             [
@@ -195,10 +192,7 @@ async def test_reconcile_ignores_spoofed_non_bot_marker() -> None:
     findings = [{"id": "f1", "status": "open"}]
     replace = AsyncMock()
 
-    with (
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", replace),
-    ):
+    with _storage(findings, replace):
         result = await reconcile_findings_with_review_threads(
             "tid",
             [
@@ -231,10 +225,7 @@ async def test_reconcile_records_latest_human_reply_after_bot_comment() -> None:
     findings = [{"id": "f1", "status": "open", "github_review_comment_ids": [11]}]
     replace = AsyncMock()
 
-    with (
-        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("openswe.review.reconcile.replace_findings", replace),
-    ):
+    with _storage(findings, replace):
         result = await reconcile_findings_with_review_threads(
             "tid",
             [
@@ -261,3 +252,108 @@ async def test_reconcile_records_latest_human_reply_after_bot_comment() -> None:
     assert isinstance(reply_body, str)
     assert "not valid" in reply_body
     replace.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("initial", "states", "expected", "resolved_ids", "surface"),
+    [
+        ("open", {"A": True, "B": False}, "open", ["A"], "surfaced"),
+        ("open", {"A": True, "B": True}, "resolved", ["A", "B"], "resolved"),
+        ("resolved", {"A": True, "B": False}, "open", ["A"], "surfaced"),
+        ("open", {"A": True}, "open", ["A"], "surfaced"),
+        ("resolved", {"A": False}, "open", ["B"], "surfaced"),
+        ("dismissed", {"A": True, "B": True}, "dismissed", ["A", "B"], "resolved"),
+        ("dismissed", {"A": False, "B": False}, "dismissed", [], "surfaced"),
+    ],
+)
+async def test_linked_thread_transitions(
+    initial: str,
+    states: dict[str, bool],
+    expected: str,
+    resolved_ids: list[str],
+    surface: str,
+) -> None:
+    finding = coerce_finding(
+        {
+            "id": "f1",
+            "status": initial,
+            "github_review_thread_ids": ["A", "B"],
+            "github_resolved_thread_ids": ["A", "B"] if initial == "resolved" else [],
+            "surface_state": "resolved" if initial == "resolved" else "surfaced",
+        }
+    )
+    findings = [finding]
+    with _storage(findings, AsyncMock()):
+        result = await reconcile_findings_with_review_threads(
+            "tid", [{"id": key, "is_resolved": value} for key, value in states.items()]
+        )
+    assert result[0]["status"] == expected
+    assert result[0]["github_resolved_thread_ids"] == resolved_ids
+    assert result[0]["surface_state"] == surface
+
+
+@pytest.mark.asyncio
+async def test_marker_match_does_not_hide_another_linked_thread() -> None:
+    findings = [
+        coerce_finding({"id": "f1", "github_review_thread_ids": ["A", "B"], "status": "open"})
+    ]
+    marker = '<!-- open-swe-review-comment {"id":"f1","file_path":"a.py"} -->'
+    with _storage(findings, AsyncMock()):
+        result = await reconcile_findings_with_review_threads(
+            "tid",
+            [
+                {
+                    "id": "A",
+                    "is_resolved": True,
+                    "comments": [{"id": 11, "author": "open-swe[bot]", "body": marker}],
+                },
+                {"id": "B", "is_resolved": False},
+            ],
+        )
+    assert result[0]["status"] == "open"
+    assert result[0]["github_resolved_thread_ids"] == ["A"]
+
+
+@pytest.mark.asyncio
+async def test_unpublished_findings_are_not_resolved_by_other_github_threads() -> None:
+    findings = [coerce_finding({"id": "unpublished", "status": "open"})]
+    with _storage(findings, AsyncMock()):
+        result = await reconcile_findings_with_review_threads(
+            "tid", [{"id": "other", "is_resolved": True, "is_outdated": True}]
+        )
+    assert result[0]["status"] == "open"
+    assert result[0]["surface_state"] == "not_surfaced"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["http", "graphql", "limit", "cursor"])
+async def test_reviewer_thread_fetch_discards_incomplete_snapshots(failure: str) -> None:
+    first_page = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [{"id": "A", "isResolved": True}],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "next"},
+                    }
+                }
+            }
+        }
+    }
+    second_page = first_page if failure == "cursor" else {"errors": [{"message": "failed"}]}
+    responses = [
+        httpx2.Response(200, json=first_page),
+        httpx2.Response(503 if failure == "http" else 200, json=second_page),
+    ]
+    for response in responses:
+        response.request = httpx2.Request("POST", "https://api.github.com/graphql")
+    with patch("openswe.review.publish.github_request", AsyncMock(side_effect=responses)):
+        threads = await fetch_pr_review_threads(
+            owner="acme",
+            repo="app",
+            pr_number=7,
+            token="t",
+            max_threads=1 if failure == "limit" else 100,
+        )
+    assert threads == []
