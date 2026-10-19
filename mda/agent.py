@@ -33,7 +33,10 @@ from rt.middleware import (
     ServedToolsMiddleware,
 )
 from rt.models import RunModels, build_model
+from rt.sandbox_proxy import keep_backend_proxy_rules
 from rt.tools import backend_tool
+
+keep_backend_proxy_rules()
 
 Graph = Literal["agent", "reviewer", "review-scout"]
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
