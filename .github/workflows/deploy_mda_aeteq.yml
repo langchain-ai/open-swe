@@ -68,6 +68,8 @@ jobs:
         env:
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          # The workspace is hosted on AWS; mda derives its control plane (aws.api.host.langchain.com) from this.
+          LANGSMITH_ENDPOINT: https://aws.api.smith.langchain.com
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           backend="https://openswe-server-2d069efe31505868bbd132b926048ef6.aws.us.langgraph.app"
