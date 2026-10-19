@@ -181,12 +181,14 @@ def _discovery_slots() -> asyncio.Semaphore:
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
     from langgraph_api.cache import cache_get, cache_set
 
-    key = (
-        "mcp-failure:"
-        + hashlib.sha256(json.dumps((namespace, record.name, record.revision)).encode()).hexdigest()
-    )
-    managed = namespace[0:1] == ("managed_tools",)
-    if managed:
+    key: str | None = None
+    if namespace[0:1] == ("managed_tools",):
+        key = (
+            "mcp-failure:"
+            + hashlib.sha256(
+                json.dumps((namespace, record.name, record.revision)).encode()
+            ).hexdigest()
+        )
         failure: object = await cache_get(key)
         if (
             isinstance(failure, list)
@@ -201,7 +203,7 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
             tools = await _discover_tools(record, namespace)
     except Exception as exc:
         reason = _discovery_error(exc)
-        if managed and _backoff_failure(exc):
+        if key is not None and _backoff_failure(exc):
             await cache_set(
                 key,
                 [reason, time() + _MANAGED_FAILURE_BACKOFF.total_seconds()],
