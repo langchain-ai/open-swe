@@ -65,10 +65,31 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     [excerpts, removeExcerpt, clearExcerpts]
   )
   const attachSelection = useCallback((anchor: PlanTextAnchor) => {
-    const snippet = anchor.exact
+    const before = (anchor.context_before ?? anchor.prefix)
       .split("\n")
-      .map((line, i) => `> ${i + 1} | ${line}`)
-      .join("\n")
+      .filter((line) => line.trim())
+      .slice(-2)
+    const selected = anchor.exact.split("\n")
+    const after = (anchor.context_after ?? anchor.suffix)
+      .split("\n")
+      .filter((line) => line.trim())
+      .slice(0, 2)
+    const snippet = [
+      ...(before.length
+        ? [
+            "Context before (not selected):",
+            ...before.map((line) => `  | ${line}`),
+          ]
+        : []),
+      "Selected text:",
+      ...selected.map((line, i) => `> ${i + 1} | ${line}`),
+      ...(after.length
+        ? [
+            "Context after (not selected):",
+            ...after.map((line) => `  | ${line}`),
+          ]
+        : []),
+    ].join("\n")
     setExcerpts((current) =>
       current.some((excerpt) => excerpt.snippet === snippet)
         ? current

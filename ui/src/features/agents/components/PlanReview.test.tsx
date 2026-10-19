@@ -16,6 +16,7 @@ import { InlinePlanArtifact } from "./InlinePlanArtifact"
 import { PlanReview } from "./PlanReview"
 import { makeQueryClient } from "@/lib/query"
 import type { PlanData, PlanTextAnchor } from "@/lib/plan"
+import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
 
 const mocks = vi.hoisted(() => ({
   addPlanComment: vi.fn(),
@@ -36,6 +37,8 @@ vi.mock("@/features/agents/components/AgentThreadPage", async () => {
   const { useContext } = await import("react")
   const { ChatExcerptChips, ChatExcerptsContext } =
     await import("./composer/ChatExcerptChips")
+  const { serializeExcerpts } =
+    await import("@/features/agents/utils/codeExcerpt")
   return {
     AgentThreadPage: ({
       threadId,
@@ -52,6 +55,9 @@ vi.mock("@/features/agents/components/AgentThreadPage", async () => {
           data-embedded={String(embedded)}
         >
           {excerpts && <ChatExcerptChips {...excerpts} />}
+          <output data-testid="model-input">
+            {serializeExcerpts("Question", excerpts?.excerpts ?? [])}
+          </output>
         </div>
       )
     },
@@ -86,6 +92,9 @@ vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
             exact: "Plan",
             prefix: "",
             suffix: " details",
+            context_before: "Distant before\nSection heading\nPreceding line",
+            context_after:
+              "Following line\nSecond following line\nDistant after",
             start: 0,
             end: 4,
           })
@@ -168,6 +177,13 @@ describe("PlanReview", () => {
       name: "Selections attached to your next message",
     })
     expect(selections.textContent).toContain("Artifact")
+    const modelInput = screen.getByTestId("model-input").textContent ?? ""
+    expect(modelInput).toContain(
+      "Context before (not selected):\n  | Section heading\n  | Preceding line\nSelected text:\n> 1 | Plan\nContext after (not selected):\n  | Following line\n  | Second following line"
+    )
+    expect(modelInput).not.toContain("Distant before")
+    expect(modelInput).not.toContain("Distant after")
+    expect(parseExcerpts(modelInput).excerpts[0]?.code).toBe("Plan")
     fireEvent.click(screen.getByRole("button", { name: "Select text" }))
     expect(
       screen.getAllByRole("button", { name: "Remove Artifact selection" })
