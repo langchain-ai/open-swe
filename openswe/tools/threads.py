@@ -131,11 +131,11 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         login = await User.login_for_email(email)
     if not login:
         return None
-    current_login = await _latest_state_github_login(state)
-    if current_login and current_login.lower() != login.lower():
-        login = current_login
-        email = None
     try:
+        current_login = await _latest_state_github_login(state)
+        if current_login and current_login.lower() != login.lower():
+            login = current_login
+            email = None
         await enforce_github_login_gate(login)
     except HTTPException:
         return None
@@ -532,14 +532,16 @@ async def _latest_state_github_login(state: Mapping[str, object] | None) -> str 
                             return value.strip()
             try:
                 user = await User.for_identity("github", login)
-            except Exception:
+            except Exception as exc:
                 logger.warning(
                     "Could not resolve GitHub sender",
                     extra={"sender_id": sender_id},
                     exc_info=True,
                 )
-                return None
-            return (user.github_login or None) if user is not None else None
+                raise HTTPException(403, _NO_ACTOR) from exc
+            if user is None or not user.github_login:
+                raise HTTPException(403, _NO_ACTOR)
+            return user.github_login
         return None
     return None
 
