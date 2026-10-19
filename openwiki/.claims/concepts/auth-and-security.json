@@ -1,45 +1,7 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:9398d410510074c595f1bf1864da0fdce6c686545dee152d7feaf57d31970b41",
+  "pageVersion": "sha256:3ea1f36f48cf3f75349e272fa45e7fb05be87b681ff20d927252653319268129",
   "claims": [
-    {
-      "id": "claim_546378dd07a04b50822ce54a69069bb8",
-      "statement": "resolve_github_token routes GitHub token resolution by run source: sources carrying a mapped GitHub login (slack, linear, dashboard, schedule) prefer the triggering user's per-user OAuth token from the dashboard store — even in bot-token-only mode — so PRs and comments are attributed to that user.",
-      "evidence": [
-        {
-          "resource": "repo://openswe/credential_scope.py#L75-L83",
-          "version": "repo-lines-v1:sha256:982bf582d4a7a7dd350f9fa37c2b349fdba6b362c62e1b59efd6d59c8e2fa556:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTI3MjhjOTVmNGI0N2E3YzY1MGIwOWZjNjAyNDVkN2MyNzU2MGViYjAxY2VhZmZmMmZlYWJjMmI3NWQzNmQwNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiM2ExNzk2M2E3MGQwYjhlZjIxMDNkOWQ5ZWE3M2E4YmQzZGU0ZTMyM2QwMDJmZGUxMzE0ZGRkMWM4NTE5MzQxOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDhkNzQzNjE5M2Q5ODcxYTQyZWViMDAwMWIwZDQzNzUyYWJiMGI0YmQxNzE5NjA1NzNiNTBjOTliM2M4YWI2ZSJ9"
-        },
-        {
-          "resource": "repo://openswe/github/token.py#L112-L124",
-          "version": "repo-lines-v1:sha256:62a5cb1d353ea32fd3482db8e5d2d98b5e3fb351347f8b21eda9572aba067527:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyMTNmNDA4MGZhYmY5Yjk1MDA2ZDBlY2VhYzRmNTllYTExYmMyZGRlNmRmODM0MTdmYjkwNjc1YjFlMjAxODAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQxMjU0MmZiNjdmNjlmOTMyNWM2ODIwMzIyOWZhYTAwZmU1N2ExOGI2ZTk5NGQxMDQxYTcxNzY3ODk3Mzc2NzciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_d69edef1da0b4265a51a3eb7197a0e17",
-      "statement": "When no valid per-user GitHub token is available, resolve_github_token falls back to a GitHub App installation token only in bot-token-only mode; in interactive mode it instead raises GitHubUserAuthRequired to force (re-)authentication rather than silently acting as the bot.",
-      "evidence": [
-        {
-          "resource": "repo://openswe/github/token.py#L112-L124",
-          "version": "repo-lines-v1:sha256:62a5cb1d353ea32fd3482db8e5d2d98b5e3fb351347f8b21eda9572aba067527:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyMTNmNDA4MGZhYmY5Yjk1MDA2ZDBlY2VhYzRmNTllYTExYmMyZGRlNmRmODM0MTdmYjkwNjc1YjFlMjAxODAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQxMjU0MmZiNjdmNjlmOTMyNWM2ODIwMzIyOWZhYTAwZmU1N2ExOGI2ZTk5NGQxMDQxYTcxNzY3ODk3Mzc2NzciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        },
-        {
-          "resource": "repo://openswe/github/token.py#L46-L54",
-          "version": "repo-lines-v1:sha256:8db5aca860f9f50836e044efa93d1b3b610220bf033af485d4f0b2f5c74ed6d6:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNTJjYjgzYjgxZjhiZDI3ZDMyMGM3MmNkYThkNWZhNWFiNzQ1NWU4ZWQxOTBmM2RkYzY0MzM3NzVhMzgxM2E3NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTM2NTFlYTVjMWVhYzQ0M2E3MmNmNzJhN2NiMDgyZjk1NmZjNzk0NTMyNWYzYWY3MmE0NjQ2ZGVjNTRjOTQyNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNjkxZWUwNDdjY2YyMTFlMjYxZGU0NzBhZjRhM2RhNDkyMjEyZDVlYzU2ZWI1ZjE5NTkyNWE5MzViNWUwOTJmNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZmY5ZGQ5MGY0NTA1NDNlMTI1ODE3ZTc4MWZlNDk1NDhlNDU5ODQyYjBkYmE1MzY3MzY2NDQyOGUwMmFmZjZhMiJ9"
-        }
-      ]
-    },
-    {
-      "id": "claim_29cafb9b779f4eeea11cc3a63ad846e3",
-      "statement": "is_bot_token_only_mode() is true when LANGSMITH_API_KEY is set but neither X_SERVICE_AUTH_JWT_SECRET nor USER_ID_API_KEY_MAP is configured, meaning per-user OAuth tokens cannot be resolved and the GitHub App installation token is used for git operations.",
-      "evidence": [
-        {
-          "resource": "repo://openswe/github/token.py#L46-L54",
-          "version": "repo-lines-v1:sha256:8db5aca860f9f50836e044efa93d1b3b610220bf033af485d4f0b2f5c74ed6d6:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNTJjYjgzYjgxZjhiZDI3ZDMyMGM3MmNkYThkNWZhNWFiNzQ1NWU4ZWQxOTBmM2RkYzY0MzM3NzVhMzgxM2E3NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTM2NTFlYTVjMWVhYzQ0M2E3MmNmNzJhN2NiMDgyZjk1NmZjNzk0NTMyNWYzYWY3MmE0NjQ2ZGVjNTRjOTQyNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNjkxZWUwNDdjY2YyMTFlMjYxZGU0NzBhZjRhM2RhNDkyMjEyZDVlYzU2ZWI1ZjE5NTkyNWE5MzViNWUwOTJmNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZmY5ZGQ5MGY0NTA1NDNlMTI1ODE3ZTc4MWZlNDk1NDhlNDU5ODQyYjBkYmE1MzY3MzY2NDQyOGUwMmFmZjZhMiJ9"
-        }
-      ]
-    },
     {
       "id": "claim_16867de3ca5946d1b3de2199f82d880f",
       "statement": "Resolved GitHub tokens are cached only in process memory keyed by (thread_id, principal), where the principal isolates one user's token from another (login:/email:) and a distinct bot principal isolates installation tokens; tokens are never persisted and caching an unbound user token with no principal is refused.",
@@ -112,7 +74,7 @@
     },
     {
       "id": "claim_be58b0a576994be9b9832bbc8e629232",
-      "statement": "The OAuth login/callback flow binds a random state nonce to the browser: /auth/login stores the nonce's HMAC in a signed state JWT and the raw nonce in a cookie, and /auth/callback verifies them with a constant-time compare before exchanging the code, resolving the login, enforcing the org gate, and issuing the session.",
+      "statement": "The OAuth login/callback flow binds a random state nonce to the browser: /auth/login stores the nonce's HMAC in a signed state JWT and the raw nonce in a cookie, and /auth/callback verifies them with a constant-time compare before exchanging the code, resolving the login, enforcing the authorization gate, and issuing the session.",
       "evidence": [
         {
           "resource": "repo://openswe/dashboard/oauth.py#L268-L282",
@@ -127,20 +89,6 @@
         {
           "resource": "repo://openswe/dashboard/oauth.py#L186-L211",
           "version": "repo-lines-v1:sha256:619a1e4a1c3aa9fa979ea37e69fcb0478772d73a66ee3cf57554e40a10df8e62:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViMTUwNzhmNjI5ZWE4MTNkZTYwN2EyYzZiNGEyZjVjZjQxZTUxZmFlNmExMWM1N2UzY2Y3YTliMjk2YjM1Y2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjMDU1ZWIyYTZhYmY3MTlhOGQ0NTE5YjhiYzg2M2ZiY2RlNzg5YzBiNzFmNTZhYmUwMWE5NWZmNmM1YWYzNjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZmZGZjZmE0YTlmZmNiYWFhZTVlN2NiM2U1MGI3ZmFiNzgzZjNjYTZiNDFmZjIxNDQ4MDAzY2JmNTZiOTUxZWEifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_4b6072a42f794538a01173c5870118b9",
-      "statement": "enforce_org_login_gate treats a nonempty ALLOWED_GITHUB_ORGS allowlist as fail-closed: it allows only an active member of at least one listed org, checking membership with a GitHub App installation token and rejecting API/token/membership failures; when the allowlist is empty it intentionally fails open but logs once per process that any GitHub account may log in and all logged-in users can read surfaced threads.",
-      "evidence": [
-        {
-          "resource": "repo://openswe/dashboard/oauth.py#L214-L229",
-          "version": "repo-lines-v1:sha256:8f21275aa9999f932e4484bdca2be723c163439533953a5e28d29953d55b19bf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczYzQxOTM1YjMxN2Y4OTU3MzNmYTk1Y2RkYjQ5NzhhNWZhYmUzYWJmZDg2OWZlM2MxNmY1NDQ4YTg1MzdiNTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjNDgxYTNmZGNjNmMzNDg1OGExNThlZWFiODM5NmYwNDYwYzRhYTc0MzU4Y2U4NTlhNjYxNWZmZTdmMTYwODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4ZDc0NDI3YzdlOWU3ZjkyMDFmZGM5NWRhNGM0NzAxZDFlNzE4NmI0NzlkZTY1ZDc3NTEwNWMwMWVmZjZkOTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA1MGY0NTk2MWE4Y2FlZWM2N2ZjYzY0YjJlNjFiMjliYjc1YTE5YzdiYWM2MDRlMGE2NjFiMjAzNjIzYzU1NDgifQ"
-        },
-        {
-          "resource": "repo://openswe/github/org_membership.py#L26-L89",
-          "version": "repo-lines-v1:sha256:0419837536d8bf61bb9c00959ead29754bd31c49e1d9d42df575fb5c33e89e3b:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5NDFiZmY5ZmQ0NjQyNjM1OTI2ODlmZTk4NWUwMzljYjFkOTllY2YzMjg1NGIxM2IwM2VjOTFjOGE5NDhlMWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjljM2UwNmJkZDgxM2M0Mzc1OTNlNzMyYzRhNGQ5YjlmOTlmZDEzNWU2NDA0ZmE5MTllYzhmNGIxMDQzZGU1ODEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVkN2EyNzVmMzgyOTdhYWJhMmMwMDYxZTJjNjVlNjE0YjUyMWZjMDFmY2Q3ZjNkMWIwOGQ0MTgzOWJmOWFkNDMifQ"
         }
       ]
     },
@@ -339,10 +287,34 @@
           "version": "repo-lines-v1:sha256:c28e9b7d3bd822ad5dc9cd778cb09add68f9522ad09cb95a7ffcf81028ac8218:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4YmIyNDUwNDA0OWQ5ZTZiMTYyNzRjMDMwN2NhYTBiMzg2YmViYzgyNjRlOTZmZjI3ZWRlYTRjYWM3MzY0ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVjODgwNGU4ODMwMWM4NmJkMmUxMWVhMDljMzY2M2ZiZjRkMmY4N2Y4NmNjZGNkODczZWZiZjNmNmE5YzBiNTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFhN2U3ZDQ1ZjVhNDczNmM0ZjY4OWU5NzJmMzQ1ODQ0MzYwNmFhZmIxNjA0M2ExYTFjMzViZmY4YjJlNzJiYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
+    },
+    {
+      "id": "claim_5329c40351e3481c9be09c796edc8b0c",
+      "statement": "resolve_github_token routes GitHub token resolution by thread visibility and ownership: for private threads started by the thread owner, it attempts to retrieve that owner's per-user OAuth token from the dashboard store; if the token is not found or revoked, it raises GitHubUserAuthRequired to force re-authentication rather than silently using a bot token. For public threads or private threads not started by the owner, it requests a GitHub App installation token.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/github/token.py#L112-L124",
+          "version": "repo-lines-v1:sha256:62a5cb1d353ea32fd3482db8e5d2d98b5e3fb351347f8b21eda9572aba067527:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyMTNmNDA4MGZhYmY5Yjk1MDA2ZDBlY2VhYzRmNTllYTExYmMyZGRlNmRmODM0MTdmYjkwNjc1YjFlMjAxODAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQxMjU0MmZiNjdmNjlmOTMyNWM2ODIwMzIyOWZhYTAwZmU1N2ExOGI2ZTk5NGQxMDQxYTcxNzY3ODk3Mzc2NzciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c323de47bb504daaa5a96fcdd72beffd",
+      "statement": "Dashboard login authorization is enforced by validate_github_login_allowlist, which requires at least one of ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS to be configured at startup (failing closed if neither is set), and enforce_github_login_gate which permits only users listed in ALLOWED_GITHUB_USERS or active members of ALLOWED_GITHUB_ORGS, checking membership with a GitHub App installation token and rejecting API/token/membership failures.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/dashboard/oauth.py#L214-L229",
+          "version": "repo-lines-v1:sha256:f7a02b482372d89ebb6b2e42725cf254ffb378f093a4ffd983ada447362af1fc:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczYzQxOTM1YjMxN2Y4OTU3MzNmYTk1Y2RkYjQ5NzhhNWZhYmUzYWJmZDg2OWZlM2MxNmY1NDQ4YTg1MzdiNTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjNDgxYTNmZGNjNmMzNDg1OGExNThlZWFiODM5NmYwNDYwYzRhYTc0MzU4Y2U4NTlhNjYxNWZmZTdmMTYwODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU4ZDc0NDI3YzdlOWU3ZjkyMDFmZGM5NWRhNGM0NzAxZDFlNzE4NmI0NzlkZTY1ZDc3NTEwNWMwMWVmZjZkOTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA1MGY0NTk2MWE4Y2FlZWM2N2ZjYzY0YjJlNjFiMjliYjc1YTE5YzdiYWM2MDRlMGE2NjFiMjAzNjIzYzU1NDgifQ"
+        },
+        {
+          "resource": "repo://openswe/users/authorization.py#L21-L38",
+          "version": "repo-lines-v1:sha256:03b4e6a8ee2c3e371991c555c939c9f2e2d2457c7548d0a00b3cc09a9d2e6dc9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiNmE5NjZkNzU2MGI2NGI0MzMyNTYxZDZkN2Q5Y2Q1MmI5ODI5NGU5ZjE2MDBiZTk0MTc3YmNlYTk1YTZiNzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1YmM0NzExZWNjYTA0NTBhZmM4MzI3NzlhODg2NzZhN2M2OTYwZmEzZGE1YWY0MTBlZTAyZDFlMDE1MTU5MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM1ZmM3ZGQ4NzUyYzhhMDc0ODgwY2VhYWU5NzZhYmQ1N2VjY2RmNGRiMGI0Mzg1ZTJkY2FmYTBmYzNhMjlkNGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-15T13:12:32.024Z"
+    "at": "2026-10-18T12:31:08.965Z"
   }
 }

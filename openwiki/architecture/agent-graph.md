@@ -5,12 +5,10 @@ description: How the primary Deep Agents coding graph is assembled per executabl
 tags: [agent-graph, deep-agents, langgraph, middleware, subagents, sandbox, tools, factory]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+    at: 2026-10-18T12:31:08.965Z
 sources:
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
-  - id: openwiki-source-3e4d955c2e907c017e3302d0
-    resource: repo://openswe/desktop.py
   - id: openwiki-source-813c25f6bac2408de322a1f5
     resource: repo://openswe/graphs/agent.py
   - id: openwiki-source-75a672d9a8b6d6c500b1cf8d
@@ -27,7 +25,7 @@ sources:
     resource: repo://openswe/sandboxes/lifecycle.py
   - id: openwiki-source-919e16feae379651f2cbc1c9
     resource: repo://openswe/server.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 ---
 
 # Coding Agent Assembly and Execution
@@ -46,7 +44,7 @@ The factory then binds the graph using `bindable_config(config)`, which strips `
 
 `profile_login` is the person who triggered the run; it controls authorization and credentialed integrations. In contrast, model choices and repository instructions are stored in thread settings—initially seeded from a profile but then retained by the thread—so a later participant does not silently replace durable decisions.
 
-The factory creates a cached `SandboxBackendProxy` and starts its reconnect task immediately, before resolving the rest of the graph. For desktop runs, the reconnect callback returns a `LocalShellBackend` via `create_desktop_backend`; for hosted runs, it calls `ensure_sandbox_for_thread` with the workspace slug, which resolves the sandbox environment from thread metadata, refreshes proxy credentials, or creates and binds a new sandbox. The lifecycle deliberately raises for an unreachable existing sandbox rather than replacing potentially uncommitted work; a deleted sandbox is replaced because retaining its stale id would permanently block the thread.
+The factory creates a cached `SandboxBackendProxy` and starts its reconnect task immediately, before resolving the rest of the graph. For bridged desktop runs, the sandbox connection is to the user's own machine via `BridgeSandboxBackend`; for hosted runs, the reconnect callback calls `ensure_sandbox_for_thread` with the workspace slug, which resolves the sandbox environment from thread metadata, refreshes proxy credentials, or creates and binds a new sandbox. The lifecycle deliberately raises for an unreachable existing sandbox rather than replacing potentially uncommitted work; a deleted sandbox is replaced because retaining its stale id would permanently block the thread.
 
 ## Model and effort routing
 
@@ -67,7 +65,7 @@ Desktop runs skip thread-settings lookup and use workspace defaults directly; Sl
 
 The factory supplies `create_deep_agent` an empty static system prompt and relies on `PrepareAgentRunMiddleware` to render the per-thread prompt dynamically in its `abefore_agent` hook.
 
-`construct_system_prompt` builds the main-agent system prompt in a fixed order: working environment, dashboard/source context, plan guidance, self-awareness, default repository, optional repository scope, repository setup and task execution, optional Corridor guidance, dependency and untrusted-comment guidance, commit/PR guidance, repository instructions, workspace instructions, optional admin-environment guidance, and shared-base guidance. Sender identity, attribution, standing user instructions, and participant context are intentionally excluded from this durable system prompt to avoid rewriting cached history.
+`construct_system_prompt` builds the main-agent system prompt in a fixed order: working environment (local-specific or sandbox-standard), dashboard/source context, source-guidance section, default-prompt foundation, optional repository scope, collaboration and co-author guidance, external-comment warnings, commit/PR guidance, repository instructions, workspace instructions, and recent-thread context. Sender identity, attribution, standing user instructions, and participant context are intentionally excluded from this durable system prompt to avoid rewriting cached history.
 
 For hosted runs, preparation resolves the GitHub token, sandbox work directory, sender identity, instruction context, and thread participants. It adds the resulting sender context as a separate generated message after a human input, allowing the model to distinguish between user input and infrastructure context. A sandbox-unreachable failure posts a user-facing notification before being re-raised.
 
@@ -79,9 +77,8 @@ The primary backend is a `CompositeBackend` whose default route is the sandbox p
 
 - **Bundled skills** (`/bundled-skills/`) come from `FilesystemBackend(BUNDLED_SKILLS_DIR)`.
 - **Hosted organization skills** (`/organization-skills/`) come from a `StoreBackend` namespaced in the LangGraph store scoped to the workspace.
-- **Hosted user skills** (`/skills/`) come from a `StoreBackend` namespaced to `profile_login` when one exists; desktop user skills instead use a read-only `StateBackend` snapshot.
+- **Hosted user skills** (`/skills/`) come from a `StoreBackend` namespaced to `profile_login` when one exists.
 - **Blobs** (`/blobs/`) on hosted runs use a `StoreBackend` routed to PostgreSQL (`ThreadBlobs`) so offloaded images can be read without sandbox access.
-- **Desktop artifact routes** (`/large_tool_results/`, `/conversation_history/`, `/blobs/`) on local runs are routed to a thread-specific artifact root outside the selected project, preventing agent scratch files from becoming repository changes.
 
 The ordered `skill_sources` list is supplied to both the parent agent and the general-purpose subagent, ensuring consistent skill availability across delegation.
 

@@ -5,7 +5,7 @@ description: Selects and operates sandbox providers, handles thread binding and 
 tags: [sandbox, providers, langsmith, configuration, extension, lifecycle]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+    at: 2026-10-18T12:31:08.965Z
 sources:
   - id: openwiki-source-b3a1e5fc7fe45f62e902bef9
     resource: repo://openswe/config.py
@@ -31,7 +31,7 @@ sources:
     resource: repo://openswe/sandboxes/repo_prep.py
   - id: openwiki-source-63c74145043dac21719006df
     resource: repo://openswe/sandboxes/retry.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 ---
 
 # Sandbox Providers and Backends
@@ -201,46 +201,12 @@ Unless the operator explicitly provides `GIT_CONFIG_GLOBAL`, it writes a root-lo
 
 ### Desktop backend
 
-Desktop is not a sandbox provider selection. In desktop runs, the main backend is the user project and the server composes read-only routes for bundled skills and state-backed user skills, with separate desktop artifact routes so agent scratch files do not land in the project.
+Desktop runs compose read-only bundled and user skill routes plus separate artifact routes. `ReadOnlyBackend` delegates only async read operations and rejects synchronous calls, ensuring the desktop cannot mutate a sandbox's working tree.
 
-`ReadOnlyBackend` delegates async listing, read, grep, glob, and download operations while rejecting synchronous calls and exposes no mutation operations. This keeps the user's repository read-only while agent work flows into isolated artifact storage.
+## Extension points
 
-## Reviewer repository preparation
+Adding a provider requires a `create_<name>_sandbox(sandbox_id: str | None = None)` factory that returns `SandboxBackendProtocol` and a corresponding `(module, function)` registry entry; a factory may be synchronous or asynchronous. The factory receives the optional existing sandbox id for reconnection. If the id is supplied, the factory connects to that existing sandbox; when absent, it creates a new one. Registry validation runs at server startup to fail fast on missing dependencies.
 
-Reviewer sandboxes are reusable but their repository content is deliberately re-derived. Before the first model call, `prepare_review_repo()`:
+## Repository preparation
 
-1. Clones or fetches the target repository
-2. Fetches the base and PR head (including the pull ref for fork PRs)
-3. Force-checks out the expected head SHA
-4. Verifies `HEAD` matches the target commit
-
-The function has a 240-second command timeout and returns `False` rather than failing the review when preparation cannot complete. The reviewer can still use fetched diff context.
-
-When preparation succeeds, `materialize_trusted_skills()` copies `.agents/skills` and `.claude/skills` from the PR base SHA—not the PR head—into a sibling `.review-skills` directory. This prevents a PR author from injecting new reviewer instructions through a changed `SKILL.md`.
-
-## Adding a provider
-
-To add a new provider:
-
-1. **Implement the factory**: Create `openswe/sandboxes/providers/<name>.py` with a function `create_<name>_sandbox(sandbox_id: str | None = None)`. It must:
-   - Reconnect when given an id
-   - Create a new sandbox when id is `None`
-   - Return a `SandboxBackendProtocol` instance
-   - Support synchronous or `async def` signature
-
-2. **Register the factory**: Add `"<name>": ("openswe.sandboxes.providers.<name>", "create_<name>_sandbox")` to `SANDBOX_FACTORIES` in `openswe/sandboxes/providers/registry.py`.
-
-3. **Define failure semantics**: Distinguish between missing and unreachable states (e.g., `SandboxGoneError` vs. `SandboxUnreachableError`). Do not mask a reconnect failure by returning an empty replacement: persistent working trees make unreachable and deleted states materially different.
-
-4. **Test and decide on features**: Test factory creation/reconnection and registry dispatch. Decide explicitly whether provider-specific capabilities such as reset, snapshots, resource overrides, proxy credential refresh, and browser tooling are unsupported or need an equivalent implementation.
-
-### Backend extension
-
-A custom backend can extend `deepagents.backends.sandbox.BaseSandbox`, whose file operations delegate to execution. The provider then supplies an `id` and shell execution implementation. Ensure the actual backend supports the async operations used by the agent lifecycle.
-
-## Verification
-
-- `tests/sandbox/test_langsmith_sandbox_config.py`: endpoint and create-body behavior, default-root snapshot omission, validation, retry, and missing-box classification
-- `test_langsmith_sandbox_timeout.py`: deadline, kill, server timeout, response conversion, fallback, and retry behavior
-- Provider-focused tests: Daytona and E2B defaults plus Local root, environment, and Git-config isolation
-- Lifecycle tests: safe recovery, reset/recreate handoff ordering, and reviewer replacement policy
+Reviewer preparation clone-or-fetches and verifies the PR head before agent work, while trusted skills are extracted from the base SHA rather than the author-controlled PR head; preparation failure returns `False` so review can continue from diff context. This prevents a PR author from injecting instructions into the reviewer prompt by adding or editing a `SKILL.md` file.

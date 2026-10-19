@@ -3,9 +3,6 @@ type: workflow
 title: Context and Prompt Engineering
 description: Workflow for assembling run input, managing dynamic context deduplication, and constructing layered system prompts from multiple instruction sources.
 tags: [context-assembly, prompt-engineering, system-prompt, dynamic-context, agents-md, skills, review-conventions]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-1685d34aae8025be9332f45a
     resource: repo://openswe/dispatch.py
@@ -35,7 +32,10 @@ sources:
     resource: repo://openswe/threads/recent_context.py
   - id: openwiki-source-6cab3229da0697cc82ed6224
     resource: repo://openswe/utils/agents_md.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Context and Prompt Engineering
@@ -68,7 +68,7 @@ This shows the separation between event normalization at dispatch and run-specif
 
 The generic dispatcher derives identities when an adapter has not supplied a complete input: Slack uses the triggering-user and channel information in `RunConfig`; GitHub login or Linear email supplies a person identity; otherwise the event is attributed to a synthetic system identity. Adapters can instead pass a deliberately ordered prebuilt transcript, which is necessary when history contains several participants or system/bot messages.
 
-`dispatch_agent_run` rejects the combination of a prebuilt `input` with raw fields (`content`, `context`, `channels`, `systems`), enforcing that callers choose one path: either construct the input themselves and pass it directly, or pass raw content and identities and let the dispatcher construct it.
+`dispatch_agent_run` validates its inputs strictly: if a prebuilt `input` is provided along with any of the raw fields (`content`, `context`, `channels`, `systems`), it raises a `ValueError`. This enforces that callers choose one path: either construct the input themselves and pass it directly, or pass raw content and identities and let the dispatcher construct it. Once validated, the run is created using the v3 streaming protocol with async durability, resumable event streams, and an optional completion webhook.
 
 ### Surface-specific history
 
@@ -90,9 +90,9 @@ The type is intentionally tolerant of distributed writers. All context models al
 
 The graph factory creates a deep agent with an initially empty system prompt. `PrepareAgentRunMiddleware` performs setup before the agent: it obtains the sandbox/work directory, resolves the environment and sender information, schedules thread-title work, writes run metadata, and produces `rendered_system_prompt` plus separate sender-context messages. It deliberately does not splice sender metadata into a historical user message, because changing cached history would make later invocations send a different transcript.
 
-`BasePrepareRunMiddleware` fingerprints the latest message and relevant configuration. Once its before-agent update is checkpointed, a resumed attempt with the same fingerprint skips preparation; a later invocation prepares fresh credentials, prompt, and context. Preparation must therefore be idempotent, and a sandbox failure is surfaced and re-raised rather than silently continuing without a workspace.
+`BasePrepareRunMiddleware` fingerprints the latest message and relevant configuration by computing a SHA256 hash of a JSON payload containing the middleware name, message fingerprint, and config fingerprint. Once its before-agent update is checkpointed, a resumed attempt with the same fingerprint skips preparation; a later invocation prepares fresh credentials, prompt, and context. Preparation must therefore be idempotent, and a sandbox failure is surfaced and re-raised rather than silently continuing without a workspace.
 
-For every model call, the middleware combines the rendered prompt with any existing system message. The main prompt states that repository custom instructions and workspace instructions are mandatory, while `AGENTS.md` overrides them on conflict; sender-level standing instructions yield to repository instructions and `AGENTS.md`.
+For every model call, the middleware combines the rendered prompt with any existing system message using `awrap_model_call`. The main prompt states that repository custom instructions and workspace instructions are mandatory, while `AGENTS.md` overrides them on conflict; sender-level standing instructions yield to repository instructions and `AGENTS.md`.
 
 ### Instruction precedence in the main agent
 
@@ -115,19 +115,19 @@ The main-agent prompt requires that, after a repository is synchronized or clone
 
 The reviewer cannot assume a sandbox clone; instead, it fetches convention documents deterministically from GitHub at the PR base SHA (never the PR head, which the author controls). It prefers `AGENTS.md` and falls back to `CLAUDE.md` only when a 404 indicates the preferred file does not exist. A non-200 response, network failure, or content exceeding 64 KiB produces no root context rather than stale fallback rules, ensuring the reviewer enforces only documented conventions.
 
-The reviewer also derives ancestor convention paths for changed files and fetches scoped files concurrently in shallow-to-deep order, up to 8 concurrent requests. Each candidate independently skips failures (missing, oversized, unreadable, or non-UTF-8 files); the absence of one scoped file does not hide valid instructions in another changed subtree. The ordered results make nested instructions override parent instructions.
+The reviewer also derives ancestor convention paths for changed files and fetches scoped files concurrently via `fetch_scoped_agents_md`, which uses `git ls-tree` and `git cat-file` to read files efficiently from the trusted base revision. Up to 8 concurrent requests are possible, but each candidate independently skips failures (missing, oversized, unreadable, or non-UTF-8 files); the absence of one scoped file does not hide valid instructions in another changed subtree. The ordered results make nested instructions override parent instructions.
 
 Fetching `AGENTS.md` and scoped variants happens in parallel with repo checkout and diff computation during `PrepareReviewerRunMiddleware`. This deterministic loading means the reviewer assesses a pull request against rules that were stable at the PR base, not rules introduced or modified by the PR itself.
 
 ## Approval policy selection by review type
 
-The reviewer's approval behavior—whether it only comments (`dry_run`), never approves (`off`), or submits GitHub approvals (`approve`)—is selected per repository from the review style record, persisted in LangGraph Store at the `review_styles` namespace. When a reviewer runs, it fetches the approval policy from `.open-swe/APPROVALS.md` on the **default branch** (not the PR head), ensuring the PR cannot rewrite the criteria it is judged by. If the approval mode is `off`, no policy is fetched or consulted. The mode is configured in the dashboard and applies to all PRs in the repository.
+The reviewer's approval behavior—whether it only comments (`dry_run`), never approves (`off`), or submits GitHub approvals (`approve`)—is selected per repository from the review style record, persisted in LangGraph Store at the `review_styles` namespace. When a reviewer runs, `approval_policy_for_review` checks the approval mode first; if the mode is `off`, no policy is fetched. Otherwise, it fetches `.open-swe/APPROVALS.md` from the default branch (not the PR head), ensuring the PR cannot rewrite the criteria it is judged by. A failed lookup or non-200 response returns `None` and the review proceeds without a custom policy; the mode applies to all PRs in the repository and is configured in the dashboard.
 
 ## Skills: lazily readable prompt extensions
 
 Skills are instructions exposed as virtual `SKILL.md` files rather than copied wholesale into the prompt. A `CompositeBackend` keeps the run backend as default and routes skill prefixes to specialized backends; it strips the route prefix before delegation. Passing those prefixes in `create_deep_agent(skills=[...])` lets deepagents advertise skills while the agent reads full instructions through ordinary `read_file`.
 
-The main graph always mounts repository-bundled `baby-sit` and `html-artifacts` skills read-only at `/bundled-skills/`. Hosted runs additionally mount organization skills read-only at `/organization-skills/` and, when a profile login exists, per-user skills read-only at `/skills/`; the user route is first, so it has priority. Skills are persisted as `/<name>/SKILL.md` under the appropriate store namespace with YAML name/description front matter and a replacement instruction body. Names, sizes, and organization count are bounded; user tools resolve the current GitHub login, while organization-skill tools require an admin. Desktop runs instead source user skills from run state, omit organization skills, and route artifacts away from the project checkout.
+The main graph always mounts repository-bundled `baby-sit` and `html-artifacts` skills read-only at `/bundled-skills/`. Hosted runs additionally mount organization skills read-only at `/organization-skills/` and, when a profile login exists, per-user skills read-only at `/skills/`; the user route is first in the sources list, so it has priority in lookups. Skills are persisted as `/<name>/SKILL.md` under the appropriate store namespace with YAML name/description front matter and a replacement instruction body. Names, sizes, and organization count are bounded; user tools resolve the current GitHub login, while organization-skill tools require an admin. Desktop runs instead source user skills from run state, omit organization skills, and route artifacts away from the project checkout.
 
 ### Reviewer: trusted skills from base revision
 

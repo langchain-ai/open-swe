@@ -3,9 +3,6 @@ type: testing strategy
 title: Testing Infrastructure and Validation Patterns
 description: Test organization, fixture strategies, E2E setup, and focused validation patterns for agent behavior, middleware, integrations, and production boundaries.
 tags: [testing, pytest, vitest, playwright, e2e, fixtures, isolation, fakes]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
 sources:
   - id: openwiki-source-24f77a48f966a05631988d08
     resource: repo://desktop/package.json
@@ -41,7 +38,10 @@ sources:
     resource: repo://turbo.json
   - id: openwiki-source-436f4179fe22abf615d2f7d0
     resource: repo://ui/package.json
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Testing Infrastructure and Validation Patterns
@@ -77,14 +77,13 @@ make typecheck
 
 `tests/conftest.py` provides autouse fixtures that make unit tests independent of a live Store and built dashboard:
 
-- **`fake_store`**: Routes `agent.store` access to an in-memory `FakeStore` that round-trips values through `model_dump`/`model_validate` the same way production does. Seed it only when persisted state is part of the contract.
 - **`_no_bundled_dashboard`** (autouse): Points `DASHBOARD_STATIC_DIR` to a missing temporary directory so a locally built `ui/.output` cannot influence Python tests.
 - **`_reset_ttl_cache`** (autouse): Clears the process-global TTL cache before and after each test, preventing cached team settings from leaking between tests. Also clears the langgraph_api in-process cache when not running against a PostgreSQL backend.
 - **`_reset_sandbox_registries`** (autouse): Clears `SANDBOX_BACKENDS` and `SANDBOX_CONNECTIONS` (process globals) to prevent one test's sandbox from answering for another's thread.
 - **`_default_enable_auto_review`** (autouse): Stubs `is_review_repo_enabled` to return `True` for every repository because the dashboard opt-in list is empty without a live Store. Tests targeting the auto-review gate must override it with a stricter policy.
 - **`registry_db`** and **`registry_db_if_available`**: Isolated PostgreSQL schemas for pull-request and repository rows; required for tests using the real database code path. Set `TEST_ANALYTICS_POSTGRES_URI` to enable.
 - **`slack_api`**: A mock Slack API server for tests driving real Slack endpoints without credentials.
-- **`allowed_bot`**: Seeds a test Slack bot configuration into the fake store.
+- **`allowed_bot`**: Seeds a test Slack bot configuration; requires the `registry_db` fixture.
 
 ### System-boundary test locations and patterns
 

@@ -28,14 +28,16 @@ sources:
     resource: repo://openswe/slack/webhook.py
   - id: openwiki-source-1b56c0378ee7dbe5ac66ab32
     resource: repo://openswe/threads/handlers.py
+  - id: openwiki-source-4b5283763f4ffcc761aa1c9f
+    resource: repo://openswe/threads/proxy.py
   - id: openwiki-source-5c84530a3d0edb1fb15187f1
     resource: repo://openswe/threads/runs.py
   - id: openwiki-source-996097a4d0a674613168d766
     resource: repo://openswe/utils/thread_ops.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-15T13:12:32.024Z
+    at: 2026-10-18T12:31:08.965Z
 ---
 
 # Follow-up Messages and Interruption
@@ -69,23 +71,29 @@ The sandbox lifecycle relies on interrupt dispatch: a subsequent agent step reso
 
 ### Queueing messages for a live run
 
-The dashboard's message continuation path does not create a new run immediately. Instead, it queues a message for injection into the active run at its next model boundary. It authorizes the caller against thread metadata, checks that the thread is `busy` (returning 409 for idle threads and 502 if status cannot be determined), then stores the message in the store:
+When a dashboard user sends a follow-up, the system routes it based on thread activity: if the thread is busy (a run is pending or running), the message is queued for injection into that run at its next model boundary; if idle, a new run is created. The system authorizes the caller against thread metadata and returns 409 if a machine principal attempts to interact with a busy thread (machines cannot be attributed to messages), and 502 on operational failures.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Dashboard as Dashboard UI
+    participant LangGraph as LangGraph<br/>Platform
     participant Store as Store API
     participant Middleware as Before-model<br/>middleware
     participant Model
 
-    User->>Dashboard: send follow-up to busy thread
-    Dashboard->>Store: append to pending_messages
-    Note over Middleware: at next model call
-    Middleware->>Store: read pending_messages
-    Middleware->>Store: delete pending_messages
-    Middleware->>Middleware: build attributed input messages
-    Middleware-->>Model: inject into state
+    User->>Dashboard: send follow-up
+    alt thread is busy
+        Dashboard->>LangGraph: check thread status
+        Dashboard->>Store: append to pending_messages
+        Note over Middleware: at next model call
+        Middleware->>Store: read pending_messages
+        Middleware->>Store: delete pending_messages
+        Middleware->>Middleware: build attributed input messages
+        Middleware-->>Model: inject into state
+    else thread is idle
+        Dashboard->>LangGraph: create new run
+    end
 ```
 
 `queue_message_for_thread` persists each message as a database row in the message queue. Messages are appended in FIFO order and the queue caps at 100 newest entries, dropping the oldest on overflow. Store errors are logged and reported to the dashboard as a failed queue operation.
