@@ -11,6 +11,7 @@ An async subagent's first run carries a worker grant instead: it may read its
 coordinator's catalog and ``adopt`` a run token of its own, nothing else.
 """
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
@@ -101,12 +102,42 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         )
         return
     try:
+
+        async def disconnected() -> None:
+            while (await receive())["type"] != "http.disconnect":
+                pass
+
         if isinstance(principal, WorkerGrant) and grant_hook is not None:
-            result = await grant_hook(principal, body)
+            invocation = grant_hook(principal, body)
         elif run_hook is not None:
-            result = await run_hook(run, body)
+            invocation = run_hook(run, body)
         else:
-            result = await graph(run, hook, body)
+            invocation = graph(run, hook, body)
+        hook_task = asyncio.ensure_future(invocation)
+        disconnect_task = asyncio.create_task(disconnected())
+        done: set[asyncio.Task[JsonValue]] = set()
+        try:
+            done, _ = await asyncio.wait(
+                {hook_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if disconnect_task in done:
+                disconnect_task.result()
+                return
+            result = hook_task.result()
+        finally:
+            for task in (hook_task, disconnect_task):
+                if not task.done():
+                    task.cancel()
+            results = await asyncio.gather(hook_task, disconnect_task, return_exceptions=True)
+            for task_result in results:
+                if isinstance(task_result, Exception) and (
+                    hook_task not in done or disconnect_task in done
+                ):
+                    logger.error(
+                        "Remote runtime hook failed during disconnect",
+                        exc_info=task_result,
+                        extra={"hook": hook, "thread_id": run.thread_id},
+                    )
     except UnknownHookError:
         await JSONResponse({"detail": f"Unknown hook {hook}"}, status_code=404)(
             scope, receive, send
