@@ -25,7 +25,7 @@ def _start_issue_run(
 ) -> bool:
     """Start the agent run an issue mention asks for; True when MDA's GitHub channel does."""
     if forwarding.forwards_issues(repo_config):
-        # The channel owns the issue's conversation; it asks /github/channel/runs what to start.
+        # The channel owns the issue's conversation; it asks /github/channel/events what to start.
         background_tasks.add_task(
             forwarding.forward_to_mda_channel, body, forwarding.forwarded_headers(request.headers)
         )

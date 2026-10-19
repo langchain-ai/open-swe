@@ -3,20 +3,21 @@
 Open SWE's App keeps its webhook at ``/webhooks/github``, which forwards issue
 deliveries to the MDA deployment's GitHub channel (``openswe.github.forwarding``).
 The channel verifies GitHub's signature, owns the conversation's thread and
-starts its runs; its handler asks this route what to start. The backend decides
+starts its runs; its ``on_event`` names this endpoint, which it asks what each
+event starts. Each run carries the backend's run-complete webhook. The backend decides
 everything else, as for its own runs: who may trigger, the prompt, the workspace,
 and the signed run token the run calls back with.
 """
 
 import logging
 import re
-from typing import Any, Final, Literal, TypedDict, cast
+from typing import Any, Final, Literal, NotRequired, TypedDict, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from openswe.dispatch import CHANNEL_METADATA_KEY, prepare_durable_run
+from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
 from openswe.input_messages import RunInput
 from openswe.mda_channels.auth import require_mda_channel
@@ -28,6 +29,8 @@ from openswe.workspaces.routing import repo_is_routable
 logger = logging.getLogger(__name__)
 
 CHANNEL: Final = "github"
+# What the channel starts with while the thread waits: nothing, it only notes Open SWE acts.
+_ACTS_WHILE_INTERRUPTED: Final = "Open SWE was mentioned while the thread waits."
 # GitHub caps an issue or comment body at 65,536 characters; a payload near this is not one.
 _MAX_BODY_BYTES: Final = 2_000_000
 # The run metadata keys MDA accepts from a handler.
@@ -56,18 +59,29 @@ router = APIRouter(
 )
 
 
-class ChannelEvent(BaseModel):
-    """An event MDA's GitHub channel verified, as its handler hands it over."""
+class GitHubEvent(BaseModel):
+    """An issue event MDA's GitHub channel verified."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(populate_by_name=True)
 
-    thread_id: UUID
+    key: IssueEventKey
+    delivery_id: str = Field(alias="deliveryId", min_length=1, max_length=200)
+    payload: dict[str, Any]
+
+
+class ChannelThread(BaseModel):
     """The conversation's thread: the run starts on it, or it waits on an interrupt."""
+
+    id: UUID
     interrupted: bool = False
     """The thread waits on an interrupt, so nothing starts: only whether Open SWE acts."""
-    delivery_id: str = Field(min_length=1, max_length=200)
-    event: IssueEventKey
-    payload: dict[str, Any]
+
+
+class ChannelEvent(BaseModel):
+    """What the channel sends its endpoint: the event, and the thread it belongs to."""
+
+    event: GitHubEvent
+    thread: ChannelThread
 
 
 class PreparedRun(TypedDict):
@@ -76,13 +90,14 @@ class PreparedRun(TypedDict):
     input: RunInput
     context: dict[str, JsonValue]
     metadata: dict[str, JsonValue]
+    webhook: NotRequired[str]
+    """Where the Agent Server POSTs the finished run: the run-complete webhook."""
 
 
-class PreparedGitHubRun(TypedDict):
-    """The run the channel starts, if any, and whether Open SWE acts on the event at all."""
+class ActsWhileInterrupted(TypedDict):
+    """Open SWE would act, so the channel tells the issue the thread waits; nothing starts."""
 
-    run: PreparedRun | None
-    acts: bool
+    input: str
 
 
 async def trigger_rejection(payload: dict[str, Any], event_type: str) -> str | None:
@@ -132,8 +147,7 @@ def _run_metadata(metadata: dict[str, Any]) -> dict[str, JsonValue]:
     }
 
 
-async def _prepare_run(event: ChannelEvent, event_type: str) -> PreparedRun | None:
-    thread_id = str(event.thread_id)
+async def _prepare_run(event: GitHubEvent, thread_id: str, event_type: str) -> PreparedRun | None:
     prepared = await service.prepare_github_issue_run(event.payload, event_type, thread_id)
     if prepared is None:
         return None
@@ -151,27 +165,35 @@ async def _prepare_run(event: ChannelEvent, event_type: str) -> PreparedRun | No
     rewritten = await RUNTIMES.mda_runtime.run_payload(
         thread_id, {"assistant_id": "agent", "config": cast(JsonValue, run_config)}
     )
-    return {
+    run: PreparedRun = {
         "input": prepared.input,
         "context": cast(dict[str, JsonValue], rewritten["context"]),
         "metadata": _run_metadata(run_config["metadata"]),
     }
+    if COMPLETION_WEBHOOK_URL:
+        run["webhook"] = COMPLETION_WEBHOOK_URL
+    return run
 
 
-@router.post("/runs")
-async def prepare_github_run(event: ChannelEvent) -> PreparedGitHubRun:
-    """Prepare the run an @openswe mention on an issue starts on the channel's thread."""
-    event_type, _, action = event.event.partition(".")
+@router.post("/events")
+async def github_channel_event(call: ChannelEvent) -> PreparedRun | ActsWhileInterrupted | None:
+    """The run an @openswe mention on an issue starts on the channel's thread, or ``None``.
+
+    While the thread waits on an interrupt nothing starts: a non-null answer only
+    tells the channel Open SWE would act, so it points the issue to the decision.
+    """
+    event = call.event
+    event_type, _, action = event.key.partition(".")
     if event.payload.get("action") != action:
         raise HTTPException(status_code=422, detail="The payload's action is not the event's")
     reason = await trigger_rejection(event.payload, event_type)
     if reason is not None:
         logger.info(
             "MDA's GitHub channel event starts no run",
-            extra={"github_event": event.event, "github_delivery": event.delivery_id},
+            extra={"github_event": event.key, "github_delivery": event.delivery_id},
         )
-        return {"run": None, "acts": False}
-    if event.interrupted:
+        return None
+    if call.thread.interrupted:
         # Nothing starts while the thread waits; no reaction or metadata either.
-        return {"run": None, "acts": True}
-    return {"run": await _prepare_run(event, event_type), "acts": True}
+        return {"input": _ACTS_WHILE_INTERRUPTED}
+    return await _prepare_run(event, str(call.thread.id), event_type)

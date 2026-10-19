@@ -6,19 +6,20 @@ GitHub sent them. Pull requests, reviews, CI and automations stay on the backend
 """
 
 from managed_deepagents import channels
-from rt import intake
-from rt.github import GITHUB
+from rt.intake import backend_endpoint
+
+# The backend decides what each mention starts, and whether one on a thread that
+# waits on an interrupt gets the notice that it does.
+backend = backend_endpoint("/github/channel/events")
 
 channel = channels.github(
     # A new mention redirects the work in progress, as the backend's own dispatch did.
     multitask_strategy="interrupt",
     on_event={
-        "issues.opened": GITHUB.start_run,
-        "issues.edited": GITHUB.start_run,
-        "issues.reopened": GITHUB.start_run,
-        "issue_comment.created": GITHUB.start_run,
-        "issue_comment.edited": GITHUB.start_run,
+        "issues.opened": backend,
+        "issues.edited": backend,
+        "issues.reopened": backend,
+        "issue_comment.created": backend,
+        "issue_comment.edited": backend,
     },
-    # The channel starts the runs, so no run-complete webhook follows them.
-    on_settled=intake.settled,
 )

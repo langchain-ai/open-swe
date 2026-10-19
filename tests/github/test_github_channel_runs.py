@@ -1,4 +1,4 @@
-"""``POST /github/channel/runs``: what MDA's GitHub channel starts for an issue mention."""
+"""``POST /github/channel/events``: what MDA's GitHub channel starts for an issue mention."""
 
 from typing import Any
 from unittest.mock import AsyncMock
@@ -45,13 +45,14 @@ def _comment_payload(body: str = "@openswe try again", **issue: Any) -> dict[str
     return payload
 
 
-def _event(event: str, payload: dict[str, Any], **fields: Any) -> dict[str, Any]:
+def _event(event: str, payload: dict[str, Any], *, interrupted: bool = False) -> dict[str, Any]:
+    """What MDA's channel POSTs its endpoint."""
+    thread: dict[str, Any] = {"id": THREAD, "channel": {"name": "github"}}
+    if interrupted:
+        thread["interrupted"] = True
     return {
-        "thread_id": THREAD,
-        "delivery_id": "delivery-1",
-        "event": event,
-        "payload": payload,
-        **fields,
+        "event": {"key": event, "deliveryId": "delivery-1", "payload": payload},
+        "thread": thread,
     }
 
 
@@ -62,7 +63,7 @@ async def _post(body: dict[str, Any], *, secret: str | None = SERVICE_SECRET) ->
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://backend.test"
     ) as client:
-        return await client.post("/github/channel/runs", json=body, headers=headers)
+        return await client.post("/github/channel/events", json=body, headers=headers)
 
 
 @pytest.fixture(autouse=True)
@@ -124,9 +125,7 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(prepared: As
     response = await _post(_event("issues.opened", _issue_payload()))
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["acts"] is True
-    run = body["run"]
+    run = response.json()
     assert run["input"] == {"messages": [{"role": "user", "content": "Fix the crash"}]}
     prepared.assert_awaited_once()
     assert prepared.await_args.args[1:] == ("issues", THREAD)
@@ -146,10 +145,24 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(prepared: As
     assert not [key for key in metadata if key.startswith(("mda_", "langgraph_"))]
 
 
+async def test_the_run_completes_through_the_run_complete_webhook(
+    prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    webhook = "https://backend.example/webhooks/run-complete?token=t"
+    monkeypatch.setattr(channel, "COMPLETION_WEBHOOK_URL", webhook)
+    response = await _post(_event("issues.opened", _issue_payload()))
+    assert response.json()["webhook"] == webhook
+
+    # Without one configured, the run carries none.
+    monkeypatch.setattr(channel, "COMPLETION_WEBHOOK_URL", None)
+    response = await _post(_event("issues.opened", _issue_payload()))
+    assert "webhook" not in response.json()
+
+
 async def test_a_comment_mention_on_an_issue_starts_a_run(prepared: AsyncMock) -> None:
     response = await _post(_event("issue_comment.created", _comment_payload()))
 
-    assert response.json()["run"] is not None
+    assert response.json() is not None
     assert prepared.await_args.args[1:] == ("issue_comment", THREAD)
 
 
@@ -168,7 +181,7 @@ async def test_events_open_swe_would_not_act_on_start_nothing(
 ) -> None:
     response = await _post(_event(event, payload))
 
-    assert response.json() == {"run": None, "acts": False}
+    assert response.json() is None
     prepared.assert_not_awaited()
 
 
@@ -179,7 +192,7 @@ async def test_an_unregistered_commenter_starts_nothing(
 
     response = await _post(_event("issue_comment.created", _comment_payload()))
 
-    assert response.json() == {"run": None, "acts": False}
+    assert response.json() is None
     prepared.assert_not_awaited()
 
 
@@ -194,14 +207,15 @@ async def test_the_public_repository_gate_applies(
 
     response = await _post(_event("issues.opened", _issue_payload()))
 
-    assert response.json() == {"run": None, "acts": False}
+    assert response.json() is None
     prepared.assert_not_awaited()
 
 
 async def test_a_waiting_thread_is_only_asked_whether_open_swe_acts(prepared: AsyncMock) -> None:
     response = await _post(_event("issue_comment.created", _comment_payload(), interrupted=True))
 
-    assert response.json() == {"run": None, "acts": True}
+    # Open SWE would act, so the channel points the issue to the decision; nothing starts.
+    assert response.json() == {"input": "Open SWE was mentioned while the thread waits."}
     # No reaction, metadata or run token while the thread waits.
     prepared.assert_not_awaited()
     channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]
@@ -213,7 +227,7 @@ async def test_a_run_the_issue_intake_declines_starts_nothing(prepared: AsyncMoc
 
     response = await _post(_event("issues.opened", _issue_payload()))
 
-    assert response.json() == {"run": None, "acts": True}
+    assert response.json() is None
     channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]
 
 

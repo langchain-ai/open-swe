@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "ActsWhileInterrupted": {
+        "description": "Open SWE would act, so the channel tells the issue the thread waits; nothing starts.",
+        "properties": {
+          "input": {
+            "title": "Input",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "ActsWhileInterrupted",
+        "type": "object"
+      },
       "AddressCommentIntent": {
         "properties": {
           "comment_url": {
@@ -968,19 +982,21 @@
         "title": "ChallengeResponse",
         "type": "object"
       },
-      "ChannelThread": {
-        "description": "The conversation's thread, the issue's or an agent session's.",
+      "ChannelEvent": {
+        "description": "What the channel sends its endpoint: the event, and the thread it belongs to.",
         "properties": {
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
+          "event": {
+            "$ref": "#/components/schemas/GitHubEvent"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/openswe__github__channel__ChannelThread"
           }
         },
         "required": [
-          "id"
+          "event",
+          "thread"
         ],
-        "title": "ChannelThread",
+        "title": "ChannelEvent",
         "type": "object"
       },
       "CheckpointFile": {
@@ -2048,6 +2064,40 @@
         "title": "GatewayStatus",
         "type": "object"
       },
+      "GitHubEvent": {
+        "description": "An issue event MDA's GitHub channel verified.",
+        "properties": {
+          "deliveryId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "key": {
+            "enum": [
+              "issues.opened",
+              "issues.edited",
+              "issues.reopened",
+              "issue_comment.created",
+              "issue_comment.edited"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "GitHubEvent",
+        "type": "object"
+      },
       "GitHubTrigger": {
         "description": "Fires on events in one repository; its runs work in that repository.",
         "properties": {
@@ -2470,7 +2520,7 @@
             "$ref": "#/components/schemas/LinearEvent"
           },
           "thread": {
-            "$ref": "#/components/schemas/ChannelThread"
+            "$ref": "#/components/schemas/openswe__linear__channel__ChannelThread"
           }
         },
         "required": [
@@ -8673,6 +8723,41 @@
           }
         },
         "title": "WorkspaceUpdate",
+        "type": "object"
+      },
+      "openswe__github__channel__ChannelThread": {
+        "description": "The conversation's thread: the run starts on it, or it waits on an interrupt.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "interrupted": {
+            "default": false,
+            "title": "Interrupted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ChannelThread",
+        "type": "object"
+      },
+      "openswe__linear__channel__ChannelThread": {
+        "description": "The conversation's thread, the issue's or an agent session's.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ChannelThread",
         "type": "object"
       },
       "openswe__transcript__events__JsonObject": {
@@ -21292,6 +21377,56 @@
           "dashboard",
           "settings"
         ]
+      }
+    },
+    "/github/channel/events": {
+      "post": {
+        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
+        "operationId": "github_channel_event_github_channel_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PreparedRun"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ActsWhileInterrupted"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Github Channel Event Github Channel Events Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Github Channel Event"
       }
     },
     "/health": {
