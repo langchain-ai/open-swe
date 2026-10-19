@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Open SWE's coding agent and pull request reviewer as one Managed Deep Agent; the Open SWE backend serves their tools."
 requires-python = ">=3.12"
 dependencies = [
-    "managed-deepagents==0.9.3",
+    "managed-deepagents",
     "deepagents==0.7.28",
     "langchain[mcp]>=1.4.6",
     "langchain-anthropic>=1.7.6",
@@ -15,6 +15,11 @@ dependencies = [
     "mcp>=2.2.0,<3",
     "pydantic>=2.11",
 ]
+
+# Named sandboxes, create fields and an unmanaged proxy (langchain-ai/managed-deepagents-sdk
+# branch ramon/open-swe-sandboxes, on 0.9.3); the preview deploys it once approved (README).
+[tool.uv.sources]
+managed-deepagents = { git = "https://github.com/langchain-ai/managed-deepagents-sdk", rev = "6fa736de672fb327f4917efcfa06220fad49a158", subdirectory = "packages/pypi" }
 
 [tool.mda]
 # bsdiff4 (via langchain-quickjs) has no 3.14 wheels and MDA build images have no compiler: langchain-ai/deepagents#6878.

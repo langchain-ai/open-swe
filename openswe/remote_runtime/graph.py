@@ -77,6 +77,7 @@ from openswe.remote_runtime.server import UnknownHookError
 from openswe.remote_runtime.tokens import RemoteRun
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
+from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -334,6 +335,13 @@ class RunSession:
             }
         )
 
+    async def sandbox(self) -> ManagedSandbox | None:
+        """The thread's box, which MDA adopts or creates before the run prepares."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is None:
+            return None
+        return await ManagedSandbox.for_thread(cfg.thread_id, cfg.workspace_slug)
+
     def start_models(self) -> RunModels:
         return RunModels(
             model=_model_spec(self.models.main),
@@ -559,9 +567,17 @@ class RemoteGraph:
             return await self._call(run, CallBody.model_validate(raw))
         body = HookBody.model_validate(raw)
         if hook == "catalog":
-            return (await self.session(run, body.run_id)).catalog()
+            session = await self.session(run, body.run_id)
+            sandbox = await session.sandbox()
+            return {
+                **session.catalog(),
+                "sandbox": None if sandbox is None else _json.validate_python(sandbox.model_dump()),
+            }
         if hook == "prepare":
             session = await self.session(run, body.run_id, fresh=True)
+            # MDA made the box before preparing; preparation connects to it as to any other.
+            if (sandbox := await session.sandbox()) is not None:
+                await sandbox.bind()
             return await self._phase(session, "before_agent", body)
         session = await self.session(run, body.run_id)
         if hook == "before_model":

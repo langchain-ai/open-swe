@@ -17,6 +17,7 @@ import logging
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping, Sequence
 from typing import Annotated, Final, NotRequired
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
@@ -220,6 +221,20 @@ class DescribedToolsMiddleware(AgentMiddleware):
         return await handler(request.override(tool_call={**call, "args": args}))
 
 
+async def _open_sandbox(runtime: Runtime) -> None:
+    """Adopt or create the thread's box, so preparation on the backend finds it.
+
+    A box MDA cannot open is left to the backend, whose preparation reports it.
+    """
+    backend = getattr(runtime, "backend", None)
+    if not isinstance(backend, SandboxBackendProtocol):
+        return
+    try:
+        await backend.aexecute("true")
+    except Exception:
+        logger.warning("Could not open the thread's sandbox", exc_info=True)
+
+
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Run the Open SWE graph's own middleware on the backend, phase by phase."""
 
@@ -235,10 +250,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return _RunConfigurable.model_validate(get_config().get("configurable", {})).thread_id
 
     @hook_config(can_jump_to=["end"])
-    async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+    async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
             return {"open_swe_backend_failure": None}
+        await _open_sandbox(runtime)
         update = await self._phase("prepare", state)
         if not update.get("open_swe_backend_failure"):
             update.update(open_swe_prepared_for=invocation, open_swe_backend_failure=None)

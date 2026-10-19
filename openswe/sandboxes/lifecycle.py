@@ -22,7 +22,11 @@ from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_to
 from openswe.github.sandbox_access import SandboxGitHubAccess, workspace_token
 from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
-from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
+from openswe.sandboxes.providers.langsmith import (
+    LangSmithCreateOptions,
+    configure_sandbox_proxy,
+    get_sandbox_proxy_config,
+)
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from openswe.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -89,6 +93,13 @@ class SandboxCreateConfig:
     @property
     def proxy_config(self) -> dict[str, Any] | None:
         return get_sandbox_proxy_config(self.create_params)
+
+    def langsmith_options(self) -> LangSmithCreateOptions:
+        """What the box is created with when MDA creates it, its proxy config left to us."""
+        create_params = {k: v for k, v in self.create_params.items() if k != "proxy_config"}
+        return LangSmithCreateOptions.resolve(
+            snapshot_id=self.snapshot_id, create_params=create_params, **self.resources
+        )
 
     async def boot(self) -> SandboxBackendProtocol:
         if self.create_params:
@@ -601,6 +612,27 @@ async def ensure_sandbox_for_thread(
         # A runner killed with its sandbox never calls back; this is where its task turns up lost.
         _fire_and_forget(reconcile_background_tasks(thread_id), "background task reconcile")
     return published
+
+
+async def bind_created_sandbox(
+    thread_id: str, sandbox_id: str, *, workspace_slug: str | None = None
+) -> None:
+    """Bind a thread that has no sandbox yet to one created for it elsewhere.
+
+    The next connection to it then configures it as it does any reused sandbox:
+    proxy credentials, git identity, the tool channel.
+    """
+    if (await get_sandbox_metadata(thread_id)).get("sandbox_id") is not None:
+        return
+    config = await SandboxCreateConfig.resolve(workspace_slug)
+    bind_metadata: dict[str, Any] = {"sandbox_id": sandbox_id}
+    if config.proxy_config is not None:
+        bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = config.proxy_config
+    async with aphase(thread_id, "sandbox.bind_thread"):
+        await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
+    if config.workspace is not None and is_snapshot_stale(config.workspace):
+        _STALE_BOOTS[thread_id] = config.workspace
+    _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
 
 
 class SandboxRecreationStopError(RuntimeError):

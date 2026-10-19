@@ -22,7 +22,9 @@ from managed_deepagents import (
     DeepAgentDefinition,
     ManagedServerRuntime,
     define_deep_agent,
+    define_sandbox,
 )
+from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
 from rt.middleware import (
@@ -33,10 +35,8 @@ from rt.middleware import (
     ServedToolsMiddleware,
 )
 from rt.models import RunModels, build_model
-from rt.sandbox_proxy import keep_backend_proxy_rules
+from rt.sandbox import SandboxSpec
 from rt.tools import backend_tool
-
-keep_backend_proxy_rules()
 
 Graph = Literal["agent", "reviewer", "review-scout"]
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
@@ -73,6 +73,25 @@ class OpenSweRunContext(BaseModel):
     invocation_id: str | None = None
     # JSON, not RunModels: the gRPC runtime serializes only the context's top level.
     models: dict[str, JsonValue] | None = None
+
+
+def _sandbox(spec: SandboxSpec) -> SandboxDefinition:
+    """The thread's box: adopted by the backend's name for it, or created there as it would.
+
+    The backend keeps the box's proxy config, its GitHub credentials and tool channel.
+    """
+    create = spec.create
+    return define_sandbox(
+        name=spec.name,
+        manage_proxy=False,
+        create_fields=dict(create.extra_fields),
+        snapshot_id=create.snapshot_id,
+        idle_ttl_seconds=create.idle_ttl_seconds,
+        delete_after_stop_seconds=create.delete_after_stop_seconds,
+        fs_capacity_bytes=create.fs_capacity_bytes,
+        vcpus=create.vcpus,
+        mem_bytes=create.mem_bytes,
+    )
 
 
 def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
@@ -140,7 +159,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # and shell tools: the backend runs them in the thread's sandbox. Code-only
         # tools stay callable by name, as in-process, though no request offers them.
         tools=tools,
-        sandbox=None,
+        # The thread's box, for MDA's own use of it such as the browser's screenshots;
+        # the backend's tools run in the same box.
+        sandbox=_sandbox(catalog.sandbox) if catalog.sandbox is not None else None,
         subagents=[
             {
                 "name": subagent.name,
