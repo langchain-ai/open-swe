@@ -73,6 +73,8 @@ uv run --locked --python 3.13 mda deploy --name open-swe-mda-staging --deploymen
 
 CI and manual deploys run the CLI from this project's locked environment, so its version follows the runtime dependency without a separate install pin. Keep `managed-deepagents` and `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping them; `--locked` rejects an out-of-date lockfile.
 
+The preview can also deploy an unreleased SDK commit, for a preview-labelled PR only. The PR takes `managed-deepagents` from that commit in `[tool.uv.sources]` (`git` on `langchain-ai/managed-deepagents-sdk`, a full `rev`, `subdirectory = "packages/pypi"`), pinned to that commit's package version, and relocks. A repository administrator approves the commit by setting the `PREVIEW_MDA_SOURCE_SHA` variable to it. The preview workflow then builds that commit's compiler and deploys with it and its runtime (`scripts/preview_mda_source.py`). A tree naming any other source fails its MDA deploy. Approving after a refused deploy takes effect on the next preview build that changes the tree, or a `workflow_dispatch` with `force`. Staging and production never build from source.
+
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 
 Locally, each fresh `mda dev` start rebuilds `.mda/build` and starts with empty checkpoints. MDA's dev server also refuses loopback webhooks, so the completion webhook (`COMPLETION_WEBHOOK_URL`) needs the backend at a non-loopback URL.
