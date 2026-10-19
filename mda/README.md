@@ -67,10 +67,11 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 Each deployment's only configuration is `OPEN_SWE_BACKEND_URL`, in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding only that deployment's backend URL:
 
 ```bash
-uv tool install managed-deepagents==0.9.1
 cd mda
-mda deploy --name open-swe-mda-staging --deployment-type prod
+uv run --locked --python 3.13 mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
+
+CI and manual deploys run the CLI from this project's locked environment, so its version follows the runtime dependency without a separate install pin. Keep `managed-deepagents` and `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping them; `--locked` rejects an out-of-date lockfile.
 
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 

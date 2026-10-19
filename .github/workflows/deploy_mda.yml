@@ -79,10 +79,6 @@ jobs:
           fi
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.changed.outputs.deploy == 'true'
-      - name: Install the mda CLI
-        if: steps.changed.outputs.deploy == 'true'
-        # Same version mda/ pins.
-        run: uv tool install managed-deepagents==0.9.1
       - name: Deploy
         if: steps.changed.outputs.deploy == 'true'
         env:
@@ -98,7 +94,7 @@ jobs:
           esac
           # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
           printf 'OPEN_SWE_BACKEND_URL=%s\n' "$backend" >mda/.env
-          mda deploy mda \
+          uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
