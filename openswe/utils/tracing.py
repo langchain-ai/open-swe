@@ -1,6 +1,6 @@
 """Where runs are traced: the LangSmith SDK's own project setting."""
 
-from langsmith.address import EnvAddressError, address_from_env
+from langsmith.address import EnvAddressError, resolve_destination
 
 from openswe.config import ENV
 
@@ -18,8 +18,8 @@ def tracing_project() -> str:
 
 
 def traces_to_agent() -> bool:
-    """Whether the LANGSMITH_AGENT_* variables name a complete, valid agent environment."""
+    """Whether the SDK traces into an agent environment, by the LANGSMITH_AGENT_* variables."""
     try:
-        return address_from_env() is not None
+        return resolve_destination()[1] is not None
     except EnvAddressError:
         return False
