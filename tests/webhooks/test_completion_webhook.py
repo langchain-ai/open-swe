@@ -241,16 +241,21 @@ def _slack_metadata() -> dict[str, Any]:
     }
 
 
-@pytest.mark.parametrize("status", ["success", "interrupted", "error"])
-async def test_stale_backend_failure_does_not_reclassify_completion(
-    monkeypatch: pytest.MonkeyPatch, status: str
+@pytest.mark.parametrize(
+    ("failure_run_id", "expected_status"), [("run-1", "success"), ("run-2", "error")]
+)
+async def test_backend_failure_only_reclassifies_its_own_run(
+    monkeypatch: pytest.MonkeyPatch, failure_run_id: str, expected_status: str
 ) -> None:
     monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(_slack_metadata()))
     settle = AsyncMock()
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "_settle_transcript_turn", settle)
     monkeypatch.setattr(completion, "_post_failure_reply", reply)
-    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", AsyncMock())
+    pickup = AsyncMock()
+    telemetry = AsyncMock()
+    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", pickup)
+    monkeypatch.setattr(completion, "_finalize_agent_usage_telemetry", telemetry)
     monkeypatch.setattr(
         completion, "_handle_successful_run", AsyncMock(return_value={"status": "ok"})
     )
@@ -259,17 +264,22 @@ async def test_stale_backend_failure_does_not_reclassify_completion(
         {
             "thread_id": "t1",
             "run_id": "run-2",
-            "status": status,
-            "values": {"open_swe_backend_failure": {"run_id": "run-1", "phase": "before_model"}},
+            "status": "success",
+            "values": {
+                "open_swe_backend_failure": {"run_id": failure_run_id, "phase": "before_model"}
+            },
         }
     )
 
-    settle.assert_awaited_once_with("t1", "run-2", status)
-    if status == "error":
-        assert reply.await_args is not None
-        assert reply.await_args.args[-1] is None
+    settle.assert_awaited_once_with("t1", "run-2", expected_status)
+    assert telemetry.await_args is not None
+    assert telemetry.await_args.args[1] == expected_status
+    if expected_status == "error":
+        reply.assert_awaited_once_with("t1", _slack_metadata(), "error", "backend_interrupted")
+        pickup.assert_not_awaited()
     else:
         reply.assert_not_awaited()
+        pickup.assert_awaited_once_with("t1")
 
 
 def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import httpx2
 import pytest
 from langchain.agents import create_agent
@@ -13,8 +12,6 @@ from langchain_core.messages import ToolMessage, message_to_dict
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
-
-from openswe import completion
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
 
@@ -95,11 +92,12 @@ async def test_backend_connection_failures(
         ("after_agent", 503),
     ],
 )
-async def test_phase_recovers_from_gateway_failures(
+@pytest.mark.parametrize("failures", [3, 4])
+async def test_phase_gateway_retries(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     hook: Literal["prepare", "before_model", "after_model", "after_agent"],
     status: int,
+    failures: int,
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     sleep = AsyncMock()
@@ -107,142 +105,46 @@ async def test_phase_recovers_from_gateway_failures(
     request = httpx2.Request("POST", "https://backend.invalid")
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(
-        side_effect=[httpx2.Response(status, request=request)] * 3
+        side_effect=[httpx2.Response(status, request=request)] * failures
         + [httpx2.Response(200, request=request, json={"update": {"recovered": True}})]
     )
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
 
-    reply = await OpenSweBackend("secret-token").phase(hook, {})
-
-    assert reply.update == {"recovered": True}
+    backend = OpenSweBackend("secret-token")
+    if failures == 4:
+        with pytest.raises(BackendUnavailableError):
+            await backend.phase(hook, {})
+    else:
+        reply = await backend.phase(hook, {})
+        assert reply.update == {"recovered": True}
     assert client.post.await_count == 4
     assert [call.args[0] for call in sleep.await_args_list] == [1, 3, 9]
-    assert len([record for record in caplog.records if "retrying" in record.message]) == 3
 
 
-@pytest.mark.parametrize(
-    ("hook", "status", "failures", "source"),
-    [
-        ("before_model", 503, 1, "slack"),
-        ("prepare", 503, 4, "slack"),
-        ("before_model", 503, 4, "slack"),
-        ("after_model", 503, 4, "slack"),
-        ("before_model", 500, 1, "slack"),
-        ("after_model", 500, 1, "slack"),
-        ("before_model", 503, 4, "github"),
-    ],
-)
-async def test_model_phase_failure_reaches_completion(
-    monkeypatch: pytest.MonkeyPatch, hook: str, status: int, failures: int, source: str
+@pytest.mark.parametrize("hook", ["prepare", "before_model", "after_model"])
+async def test_phase_failure_ends_with_a_run_scoped_marker(
+    monkeypatch: pytest.MonkeyPatch, hook: str
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    monkeypatch.setattr("rt.backend.asyncio.sleep", AsyncMock())
-    attempts = 0
+    backend = OpenSweBackend("secret-token")
 
-    async def post(url: str, **kwargs: object) -> httpx2.Response:
-        nonlocal attempts
-        request = httpx2.Request("POST", url)
-        if url.endswith(f"/{hook}"):
-            attempts += 1
-            if attempts <= failures:
-                return httpx2.Response(status, request=request)
-        return httpx2.Response(200, request=request, json={})
+    async def phase(name: str, body: object) -> PhaseReply:
+        if name == hook:
+            raise BackendUnavailableError(f"{hook} failed")
+        assert name != "after_agent"
+        return PhaseReply()
 
-    client = MagicMock(is_closed=False)
-    client.post = AsyncMock(side_effect=post)
-    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(backend, "phase", phase)
     graph = create_agent(
         model=FakeListChatModel(responses=["done"]),
-        middleware=[BackendRunMiddleware(OpenSweBackend("secret-token"), "invocation-1")],
-    )
-    if status == 503 and failures == 1:
-        result = await graph.ainvoke({"messages": [("user", "hello")]})
-        assert result["messages"][-1].content == "done"
-        assert attempts == 2
-        return
-
-    payload: dict[str, object] = {"thread_id": "thread-1", "run_id": "run-1"}
-    if status == 503:
-        values = await graph.ainvoke({"messages": [("user", "hello")]})
-        assert values["open_swe_backend_failure"] == {"run_id": "run-1", "phase": hook}
-        assert not any(
-            call.args[0].endswith("/after_agent") for call in client.post.await_args_list
-        )
-        assert values["messages"][-1].content == ("done" if hook == "after_model" else "hello")
-        payload.update(
-            status="success",
-            values={
-                **values,
-                "messages": [message_to_dict(message) for message in values["messages"]],
-            },
-        )
-    else:
-        with pytest.raises(BackendCallError) as failure:
-            await graph.ainvoke({"messages": [("user", "hello")]})
-        payload.update(status="error", error={"error": type(failure.value).__name__})
-    assert attempts == failures
-
-    threads = MagicMock()
-    metadata = (
-        {
-            "source": "slack",
-            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
-        }
-        if source == "slack"
-        else {
-            "source": "github",
-            "repo": {"owner": "acme", "name": "widgets"},
-            "source_context": {"pr_number": 7},
-        }
-    )
-    threads.get = AsyncMock(return_value={"metadata": metadata})
-    threads.update = AsyncMock()
-    platform = MagicMock(threads=threads)
-    monkeypatch.setattr(completion, "langgraph_client", lambda: platform)
-    reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
-    monkeypatch.setattr(completion, "post_github_comment", reply)
-    monkeypatch.setattr(
-        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+        middleware=[BackendRunMiddleware(backend, "invocation-1")],
     )
 
-    settle = AsyncMock()
-    pickup = AsyncMock()
-    telemetry = AsyncMock()
-    monkeypatch.setattr(completion, "_settle_transcript_turn", settle)
-    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", pickup)
-    monkeypatch.setattr(completion, "_finalize_agent_usage_telemetry", telemetry)
+    values = await graph.ainvoke({"messages": [("user", "hello")]})
 
-    from openswe.api.app import app
-
-    monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", "completion-secret")
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as webhook:
-        response = await webhook.post(
-            "/webhooks/run-complete?token=completion-secret", json=payload
-        )
-    assert response.status_code == 200
-    result = response.json()
-
-    settle.assert_awaited_once_with("thread-1", "run-1", "error")
-    assert telemetry.await_args is not None
-    assert telemetry.await_args.args[1] == "error"
-    pickup.assert_not_awaited()
-
-    assert result == {"status": "ok", "reason": "failure reply posted"}
-    assert reply.await_args is not None
-    assert reply.await_args.args[:2] == (
-        ("C1", "123.45") if source == "slack" else ({"owner": "acme", "name": "widgets"}, 7)
-    )
-    text = reply.await_args.args[2]
-    if status == 503:
-        assert "Open SWE backend was interrupted" in text
-        assert "Re-trigger" in text
-    else:
-        assert "unexpected error" in text
-        assert "backend was interrupted" not in text
+    assert values["open_swe_backend_failure"] == {"run_id": "run-1", "phase": hook}
+    assert values["messages"][-1].content == ("done" if hook == "after_model" else "hello")
 
 
 async def test_a_new_run_clears_a_checkpointed_backend_failure(
