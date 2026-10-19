@@ -56,7 +56,13 @@ def _prep_command(
         f"if [ -d {q_repo_dir}/.git ]; then",
         # Tolerate fetch-all failures: the targeted head/base fetches below
         # are what the checkout actually needs.
-        f"  cd {q_repo_dir} && {{ git fetch --all --quiet || true; }}",
+        f"  cd {q_repo_dir}",
+        "  git_process_status=0",
+        "  pgrep -x git >/dev/null || git_process_status=$?",
+        '  if [ "$git_process_status" -eq 1 ]; then',
+        "    rm -f .git/index.lock .git/shallow.lock",
+        "  fi",
+        "  git fetch --all --quiet || true",
         "else",
         # The head checkout below replaces the default branch's, so skip fetching its blobs.
         f"  cd {q_work_dir} && gh repo clone {q_full_name} -- {clone_args} && cd {q_repo_name}",
