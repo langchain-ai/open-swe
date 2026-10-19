@@ -620,6 +620,37 @@ async def test_author_dm_success_is_quiet_only_when_the_status_card_updates(
     assert "nope" in ephemeral.call_args.args[2]
 
 
+async def test_dismiss_repairs_a_stale_author_dm_even_when_its_status_was_cached(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    approval.state = "cancelled"
+    approval.detail = "dismissed by <@U_ADA>"
+    approval.slack_dm_channel_id = "D_ADA"
+    approval.slack_dm_message_ts = "4.0"
+    approval = await approval.save()
+    updated = AsyncMock()
+    monkeypatch.setattr(lifecycle, "update_slack_message", updated)
+    monkeypatch.setattr(voting, "update_slack_message", updated)
+    monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://origin"))
+    assert await ReviewCard(approval).refresh_author_dm(None)
+
+    await voting.process_vote(
+        str(approval.id),
+        decision="dismiss",
+        person={"id": "slack:U_ADA"},
+        channel_id="D_ADA",
+        thread_ts="4.0",
+        message_ts="4.0",
+        message_text="Review this draft.",
+        message_blocks=[{"type": "actions"}],
+    )
+
+    assert "dismissed by" in str(updated.call_args)
+    assert "actions" not in str(updated.call_args)
+    assert (await _stored(approval)).state == "cancelled"
+
+
 async def test_failed_pending_restore_preserves_rejected_vote(
     harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
