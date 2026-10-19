@@ -1,10 +1,13 @@
 name: Managed Deep Agents runtime
 description: >-
   Sync mda/'s environment. When it takes managed-deepagents from an SDK commit,
-  fetch that commit with read access to the SDK, and with `cli` build its mda CLI into it.
+  fetch that commit with a read-only token the org's GitHub App mints for the SDK,
+  and with `cli` build its mda CLI into it.
 inputs:
-  token:
-    description: Read-only token for langchain-ai/managed-deepagents-sdk (MDA_SDK_SOURCE_TOKEN).
+  app-private-key:
+    description: >-
+      Private key of the langchain-actions-pr-bot GitHub App (LANGCHAIN_ACTIONS_PR_BOT_PRIVATE_KEY),
+      which mints a read-only token for langchain-ai/managed-deepagents-sdk.
     required: false
     default: ""
   cli:
@@ -17,15 +20,25 @@ runs:
     - id: source
       shell: bash
       run: echo "sha=$(scripts/mda_cli.sh sha)" >>"$GITHUB_OUTPUT"
+    - if: steps.source.outputs.sha != '' && inputs.app-private-key == ''
+      shell: bash
+      run: |
+        echo "::error::mda/ takes managed-deepagents from an SDK commit, which needs LANGCHAIN_ACTIONS_PR_BOT_PRIVATE_KEY to read"
+        exit 1
+    - id: sdk-token
+      if: steps.source.outputs.sha != ''
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        client-id: "Iv23liMFOFBcPTKFWi3S"
+        private-key: ${{ inputs.app-private-key }}
+        owner: langchain-ai
+        repositories: managed-deepagents-sdk
+        permission-contents: read
     - if: steps.source.outputs.sha != ''
       shell: bash
       env:
-        TOKEN: ${{ inputs.token }}
+        TOKEN: ${{ steps.sdk-token.outputs.token }}
       run: |
-        if [[ -z "$TOKEN" ]]; then
-          echo "::error::mda/ takes managed-deepagents from an SDK commit; add the MDA_SDK_SOURCE_TOKEN secret (read access to langchain-ai/managed-deepagents-sdk)"
-          exit 1
-        fi
         # uv and the CLI build fetch the SDK commit with it; the runner is discarded with the job.
         git config --global url."https://x-access-token:${TOKEN}@github.com/langchain-ai/managed-deepagents-sdk".insteadOf https://github.com/langchain-ai/managed-deepagents-sdk
     - shell: bash

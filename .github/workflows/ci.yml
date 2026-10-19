@@ -81,7 +81,7 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - uses: ./.github/actions/mda-runtime
         with:
-          token: ${{ secrets.MDA_SDK_SOURCE_TOKEN }}
+          app-private-key: ${{ secrets.LANGCHAIN_ACTIONS_PR_BOT_PRIVATE_KEY }}
       - name: Check the MDA project imports nothing from the backend
         run: make mda-boundary
 
@@ -323,7 +323,7 @@ jobs:
         timeout-minutes: 15
         uses: ./.github/actions/mda-runtime
         with:
-          token: ${{ secrets.MDA_SDK_SOURCE_TOKEN }}
+          app-private-key: ${{ secrets.LANGCHAIN_ACTIONS_PR_BOT_PRIVATE_KEY }}
           cli: "true"
       - run: corepack enable
       # Chromium and the dashboard build are identical across the three shards
@@ -397,7 +397,7 @@ jobs:
         timeout-minutes: 15
         uses: ./.github/actions/mda-runtime
         with:
-          token: ${{ secrets.MDA_SDK_SOURCE_TOKEN }}
+          app-private-key: ${{ secrets.LANGCHAIN_ACTIONS_PR_BOT_PRIVATE_KEY }}
           cli: "true"
       - run: corepack enable
       - name: Install workspace dependencies
