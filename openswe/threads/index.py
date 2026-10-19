@@ -17,6 +17,7 @@ from sqlalchemy import RowMapping, text
 
 from openswe.database.postgres import transaction
 from openswe.remote_runtime.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
+from openswe.ui_invalidations import Topic
 
 Runtime = Literal["local", "mda"]
 ThreadStatus = Literal["idle", "busy", "interrupted", "error"]
@@ -254,6 +255,8 @@ async def create(
             .mappings()
             .first()
         )
+        if row is not None:
+            await Topic.THREADS.invalidate(conn, key=thread_id)
     if row is not None:
         return IndexedThread.from_row(row)
     if if_exists == "raise":
@@ -292,6 +295,8 @@ async def import_newer(threads: Sequence[IndexedThread]) -> None:
             ],
         )
 
+        await Topic.THREADS.invalidate(conn)
+
 
 async def sync(thread_id: str, read: Callable[[], Awaitable[IndexedThread | None]]) -> None:
     """Index a thread as ``read`` finds it on the Agent Server now, or drop it once gone.
@@ -312,6 +317,7 @@ async def sync(thread_id: str, read: Callable[[], Awaitable[IndexedThread | None
                 text("DELETE FROM thread_index WHERE thread_id = :thread_id"),
                 {"thread_id": thread_id},
             )
+            await Topic.THREADS.invalidate(conn, key=thread_id)
             return
         await conn.execute(
             text(
@@ -331,6 +337,8 @@ async def sync(thread_id: str, read: Callable[[], Awaitable[IndexedThread | None
                 "metadata": json.dumps(thread.metadata),
             },
         )
+
+        await Topic.THREADS.invalidate(conn, key=thread_id)
 
 
 async def get(thread_id: str) -> IndexedThread | None:
@@ -365,6 +373,8 @@ async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedTh
             .mappings()
             .first()
         )
+        if row is not None:
+            await Topic.THREADS.invalidate(conn, key=thread_id)
     return None if row is None else IndexedThread.from_row(row)
 
 
@@ -379,6 +389,8 @@ async def set_status(thread_id: str, status: ThreadStatus) -> None:
             {"thread_id": thread_id, "status": status},
         )
 
+        await Topic.THREADS.invalidate(conn, key=thread_id)
+
 
 async def delete(thread_id: str) -> bool:
     async with transaction() as conn:
@@ -386,6 +398,8 @@ async def delete(thread_id: str) -> bool:
             text("DELETE FROM thread_index WHERE thread_id = :thread_id"),
             {"thread_id": thread_id},
         )
+        if result.rowcount:
+            await Topic.THREADS.invalidate(conn, key=thread_id)
     return bool(result.rowcount)
 
 

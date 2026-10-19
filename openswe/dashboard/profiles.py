@@ -88,6 +88,9 @@ class ProfileUpdate(BaseModel):
     pr_failure_reactions: bool | None = None
     prefer_tools_in_sandbox: bool | None = None
     experimental_task_coordination: bool | None = None
+    experimental_detailed_sidebar: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = Field(
@@ -152,6 +155,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
+        "experimental_detailed_sidebar": (
+            update.experimental_detailed_sidebar
+            if update.experimental_detailed_sidebar is not None
+            else existing.get("experimental_detailed_sidebar", False)
+        ),
         "experimental_assistant_ui": (
             update.experimental_assistant_ui
             if update.experimental_assistant_ui is not None

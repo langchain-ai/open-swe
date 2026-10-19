@@ -5,6 +5,8 @@ import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { agentsApi } from "./api"
+import { useSidebarPullRequests } from "./prChecks"
+import { cloudSidebarThread } from "./sidebarThreads"
 import {
   SIDEBAR_PAGE_SIZE,
   agentScheduleKeys,
@@ -296,7 +298,7 @@ describe("setAgentThreadStatus", () => {
 })
 
 describe("sidebar queries", () => {
-  it("polls independent pins, detects external starts, and stops when all finish", async () => {
+  it("refreshes pins on invalidation without polling running threads", async () => {
     vi.useFakeTimers()
     const idle = {
       ...optimisticThread("outside-page", { prompt: "Old resolved pin" }),
@@ -320,14 +322,27 @@ describe("sidebar queries", () => {
       ),
     })
     await vi.waitFor(() => expect(result.current.data?.[0]).toEqual(idle))
-    await act(() => vi.advanceTimersByTimeAsync(2000))
+    await act(() => vi.advanceTimersByTimeAsync(60_000))
+    expect(listPins).toHaveBeenCalledTimes(1)
+    await act(() =>
+      client.invalidateQueries({
+        predicate: (query) =>
+          query.meta?.invalidatedBy?.includes("threads") ?? false,
+      })
+    )
+
     await vi.waitFor(() =>
       expect(result.current.data?.map((thread) => thread.status)).toEqual([
         "running",
         "finished",
       ])
     )
-    await act(() => vi.advanceTimersByTimeAsync(2000))
+    await act(() =>
+      client.invalidateQueries({
+        predicate: (query) =>
+          query.meta?.invalidatedBy?.includes("threads") ?? false,
+      })
+    )
     await vi.waitFor(() =>
       expect(
         result.current.data?.every((thread) => thread.status === "finished")
@@ -972,7 +987,7 @@ describe("sidebar task families", () => {
     ).toEqual([])
   })
 
-  it("keeps the existing page poll alive for idle coordinators and discovers new workers", async () => {
+  it("discovers workers through invalidation without discovery polling", async () => {
     profile.data.experimental_task_coordination = true
     vi.useFakeTimers()
     let workers: Array<AgentThread> = [{ ...worker, status: "finished" }]
@@ -992,13 +1007,75 @@ describe("sidebar task families", () => {
     await act(() => vi.advanceTimersByTimeAsync(2100))
     expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
     await act(() => vi.advanceTimersByTimeAsync(30_000))
+    expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
+    await act(() =>
+      client.invalidateQueries({
+        predicate: (query) =>
+          query.meta?.invalidatedBy?.includes("threads") ?? false,
+      })
+    )
     await vi.waitFor(() =>
       expect(result.current.items[0]?.taskWorkers).toHaveLength(2)
     )
     workers = workers.map((thread) => ({ ...thread, status: "finished" }))
-    await act(() => vi.advanceTimersByTimeAsync(2100))
+    await act(() =>
+      client.invalidateQueries({
+        predicate: (query) =>
+          query.meta?.invalidatedBy?.includes("threads") ?? false,
+      })
+    )
     await vi.waitFor(() =>
       expect(result.current.items[0]?.taskWorkers?.[1]?.status).toBe("finished")
     )
+  })
+})
+
+describe("sidebar PR invalidations", () => {
+  it("does not let a previously opened thread mask a newer batched PR state", async () => {
+    const thread = optimisticThread("pr-thread", { prompt: "Fix it" })
+    const item = cloudSidebarThread({
+      ...thread,
+      repoFullName: "acme/app",
+      pr: {
+        number: 7,
+        title: "Fix it",
+        state: "open",
+        headRef: "fix",
+        baseRef: "main",
+        url: "https://github.com/acme/app/pull/7",
+      },
+    })
+    vi.spyOn(agentsApi, "getPullRequestChecks").mockResolvedValue({
+      "acme/app#7": { state: "merged", checks: "passing" },
+    })
+    const client = testClient()
+    const status = (state: string) => ({
+      pullRequests: [
+        {
+          repoFullName: "acme/app",
+          number: 7,
+          statusAvailable: true,
+          state,
+          isDraft: false,
+        },
+      ],
+    })
+    client.setQueryData(
+      agentThreadKeys.pullRequestStatus(thread.id),
+      status("open"),
+      { updatedAt: 1 }
+    )
+    const { result } = renderHook(() => useSidebarPullRequests([item], true), {
+      wrapper: wrapperFor(client),
+    })
+    await waitFor(() => expect(result.current(item)?.state).toBe("merged"))
+    act(() =>
+      client.setQueryData(
+        agentThreadKeys.pullRequestStatus(thread.id),
+        status("closed"),
+        { updatedAt: Date.now() + 1 }
+      )
+    )
+    await waitFor(() => expect(result.current(item)?.state).toBe("closed"))
   })
 })

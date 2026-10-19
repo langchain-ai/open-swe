@@ -11,6 +11,7 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr/SidebarSimple"
 
 import { cn } from "@/lib/utils"
+import { useProfile } from "@/lib/profile"
 
 const STORAGE_WIDTH = "open-swe.sidebar.width"
 const STORAGE_COLLAPSED = "open-swe.sidebar.collapsed"
@@ -19,11 +20,11 @@ export const SIDEBAR_DEFAULT_WIDTH = 260
 export const SIDEBAR_MIN_WIDTH = 200
 export const SIDEBAR_MAX_WIDTH = 420
 
-function readStoredWidth(): number {
-  if (typeof window === "undefined") return SIDEBAR_DEFAULT_WIDTH
+function readStoredWidth(): number | null {
+  if (typeof window === "undefined") return null
   const raw = window.localStorage.getItem(STORAGE_WIDTH)
   const parsed = raw ? Number(raw) : NaN
-  if (!Number.isFinite(parsed)) return SIDEBAR_DEFAULT_WIDTH
+  if (!Number.isFinite(parsed)) return null
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, parsed))
 }
 
@@ -36,7 +37,11 @@ function readStoredCollapsed(): boolean {
 }
 
 export function useSidebarLayout() {
-  const [width, setWidthState] = useState<number>(() => readStoredWidth())
+  const detailed = useProfile().data?.experimental_detailed_sidebar === true
+  const [storedWidth, setWidthState] = useState<number | null>(() =>
+    readStoredWidth()
+  )
+  const width = storedWidth ?? (detailed ? 360 : SIDEBAR_DEFAULT_WIDTH)
   const [collapsed, setCollapsedState] = useState<boolean>(() =>
     readStoredCollapsed()
   )

@@ -20,6 +20,11 @@ function ExperimentsPage() {
     >
       <SettingsSection title="Interface">
         <AssistantUiPreference />
+        <ProfileSwitchRow
+          field="experimental_detailed_sidebar"
+          label="Detailed sidebar"
+          description="Show larger task cards, compact Slack conversations, and time groups when threads are in one list."
+        />
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow

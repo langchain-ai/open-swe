@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest"
 import type { AgentThread } from "./types"
 import {
   cloudSidebarThread,
+  groupSidebarThreadsByTime,
+  isSidebarConversation,
   groupRepoGroupsByWorkspace,
   sortSidebarThreads,
 } from "./sidebarThreads"
@@ -119,5 +121,68 @@ describe("groupRepoGroupsByWorkspace", () => {
         repos: [expect.objectContaining({ key: "repo:acme/solo" })],
       },
     ])
+  })
+})
+
+describe("detailed sidebar", () => {
+  it("keeps unknown or coding threads detailed, including changes without a PR", () => {
+    const conversation = cloudThread({
+      source: "slack",
+      status: "finished",
+      sandboxId: null,
+    })
+    expect(isSidebarConversation(cloudSidebarThread(conversation))).toBe(true)
+    for (const patch of [
+      { sandboxId: undefined },
+      { sandboxId: "sandbox" },
+      { status: "running" as const },
+      { diffStats: { files: 1, additions: 3, deletions: 0 } },
+      { attentionReason: "Approve changes" },
+      { taskWorkers: [cloudThread()] },
+      {
+        pr: {
+          number: 1,
+          title: "Work",
+          state: "open" as const,
+          headRef: "feature",
+          baseRef: "main",
+          url: "https://github.com/acme/app/pull/1",
+        },
+      },
+    ]) {
+      expect(
+        isSidebarConversation(cloudSidebarThread({ ...conversation, ...patch }))
+      ).toBe(false)
+    }
+  })
+
+  it("uses non-overlapping rolling time groups and the selected sort timestamp", () => {
+    const day = 86_400_000
+    const now = 100 * day
+    const items = [0, 1, 7, 30].map((age) =>
+      cloudSidebarThread(
+        cloudThread({
+          id: String(age),
+          createdAt: now - age * day,
+          updatedAt: now,
+        })
+      )
+    )
+    expect(
+      groupSidebarThreadsByTime(items, "created", now).map((bucket) => [
+        bucket.label,
+        bucket.items.map((item) => item.id),
+      ])
+    ).toEqual([
+      ["Last day", ["0"]],
+      ["Last 7 days", ["1"]],
+      ["Last 30 days", ["7"]],
+      ["Older", ["30"]],
+    ])
+    expect(
+      groupSidebarThreadsByTime(items, "updated", now).map(
+        (bucket) => bucket.items.length
+      )
+    ).toEqual([4])
   })
 })

@@ -41,6 +41,7 @@ from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     _assert_thread_postable,
     _assert_thread_promptable,
+    _is_thread_viewed,
     _now_ms,
     _refresh_latest_run_metadata,
     _thread_is_busy,
@@ -75,6 +76,8 @@ async def _mark_thread_viewed(
     *,
     latest_run_id: str | None,
 ) -> dict[str, Any]:
+    if _is_thread_viewed(metadata, latest_run_id):
+        return metadata
     now_ms = _now_ms()
     metadata_update: dict[str, Any] = {"last_viewed_at_ms": now_ms}
     run_id = _thread_run_id(metadata, latest_run_id)

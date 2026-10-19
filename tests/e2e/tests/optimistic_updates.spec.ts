@@ -275,6 +275,7 @@ async function holdOnce(
     seen.count += 1;
     await gate.promise;
     await answer(route);
+    await request.response();
     settled.resolve();
   });
   return { release: gate.resolve, seen, settled: settled.promise };
