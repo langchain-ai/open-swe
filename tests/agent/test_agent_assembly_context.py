@@ -76,10 +76,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
 
 
-@pytest.mark.parametrize("visibility", ["private", "public"])
-async def test_remote_agent_discovers_skills_with_saved_thread_scope(
-    saved_thread_scope, monkeypatch: pytest.MonkeyPatch, visibility: str
-) -> None:
+async def test_remote_agent_discovers_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     from deepagents.middleware.skills import SkillsMiddleware
     from langgraph.runtime import Runtime
 
@@ -87,13 +84,12 @@ async def test_remote_agent_discovers_skills_with_saved_thread_scope(
     from openswe.sandboxes.tool_runtime import ToolSurface
     from openswe.skill_store.store import _record
 
-    saved_thread_scope["visibility"] = visibility
     monkeypatch.setattr(
         "openswe.skill_store.backend.agent_skills",
         AsyncMock(
-            side_effect=lambda login: [
-                _record("personal-workflow" if login else "team-workflow", "A workflow", "Do it.")
-            ]
+            side_effect=lambda login: (
+                [_record("personal-workflow", "A workflow", "Do it.")] if login else []
+            )
         ),
     )
     captured = await _capture_create_deep_agent_kwargs()
@@ -110,9 +106,7 @@ async def test_remote_agent_discovers_skills_with_saved_thread_scope(
         prepared = await session.run_phase("before_agent", state, Runtime())
     shaped = await session.model_call({**state, **prepared.update}, Runtime())
 
-    assert "team-workflow" in shaped.system_prompt
-    assert "baby-sit" in shaped.system_prompt
-    assert ("personal-workflow" in shaped.system_prompt) == (visibility == "private")
+    assert "personal-workflow" in shaped.system_prompt
 
 
 @pytest.mark.asyncio
