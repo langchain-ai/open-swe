@@ -200,3 +200,70 @@ async def test_as_user_asks_for_sign_in_when_github_rejects_the_refreshed_token(
         with pytest.raises(GitHubSignInRequired):
             await asyncio.gather(github.get("user"), github.get("user/repos"))
     assert tokens.await_count == 2
+
+
+@pytest.mark.parametrize("conclusion", ["cancelled", "stale", "failure"])
+@pytest.mark.parametrize("replacement", ["success", "failure", None])
+async def test_check_runs_only_discards_superseded_cancellations(
+    monkeypatch: pytest.MonkeyPatch, conclusion: str, replacement: str | None
+) -> None:
+    runs = [
+        {
+            "name": "validate README",
+            "status": "completed" if result else "in_progress",
+            "conclusion": result,
+            "app": {"id": 15368, "slug": "github-actions"},
+            "check_suite": {"id": suite},
+        }
+        for suite, result in [(10, conclusion), (20, replacement)]
+    ]
+    workflows = [
+        {"id": suite, "check_suite_id": suite, "workflow_id": 100, "event": "pull_request"}
+        for suite in (10, 20)
+    ]
+    pages = AsyncMock(side_effect=[runs, workflows])
+    monkeypatch.setattr(github_http.RepoClient, "pages", pages)
+    async with httpx2.AsyncClient() as http:
+        result = await GitHubClient(http).repo("acme", "app").check_runs("a" * 40)
+    assert result == (runs if conclusion == "failure" else [runs[1]])
+
+
+@pytest.mark.parametrize(
+    "distinct", ["workflow", "app", "event", "same_run", "older_success", "unavailable"]
+)
+async def test_check_runs_retains_cancellations_without_a_known_replacement(
+    monkeypatch: pytest.MonkeyPatch, distinct: str
+) -> None:
+    runs = [
+        {
+            "name": "test",
+            "status": "completed",
+            "conclusion": result,
+            "app": {"id": 15368, "slug": "github-actions"},
+            "check_suite": {"id": suite},
+        }
+        for suite, result in [(10, "cancelled"), (20, "success")]
+    ]
+    workflows = [
+        {"id": suite, "check_suite_id": suite, "workflow_id": 100, "event": "pull_request"}
+        for suite in (10, 20)
+    ]
+    if distinct == "workflow":
+        workflows[1]["workflow_id"] = 200
+    elif distinct == "app":
+        runs[1]["app"] = {"id": 123, "slug": "other-app"}
+    elif distinct == "event":
+        workflows[1]["event"] = "push"
+    elif distinct == "same_run":
+        runs[1]["check_suite"] = {"id": 10}
+    elif distinct == "older_success":
+        workflows[1]["id"] = 5
+    pages = AsyncMock(
+        side_effect=[
+            runs,
+            ValueError("Actions unavailable") if distinct == "unavailable" else workflows,
+        ]
+    )
+    monkeypatch.setattr(github_http.RepoClient, "pages", pages)
+    async with httpx2.AsyncClient() as http:
+        assert await GitHubClient(http).repo("acme", "app").check_runs("a" * 40) == runs
