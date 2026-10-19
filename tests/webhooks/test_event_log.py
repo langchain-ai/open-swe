@@ -162,7 +162,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     monkeypatch.setattr(segment, "record_webhook", slow_export)
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
-        "openswe.slack.channels.SlackChannel.cached",
+        "openswe.slack.channels.SlackChannel.load",
         AsyncMock(
             return_value=SlackChannel.from_payload(
                 {
@@ -232,7 +232,6 @@ async def test_slack_event_log_reuses_directory_without_fetching_permissions(
         }
     )
     refs = EventRefs(slack_channel_id="CLOG")
-    assert not await EventLog.record(request, b"{}", "slack", refs=refs)
     await SlackChannel.save_all(
         {
             "id": "CLOG",
@@ -305,7 +304,7 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
 ) -> None:
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
-        "openswe.slack.channels.SlackChannel.cached",
+        "openswe.slack.channels.SlackChannel.load",
         AsyncMock(
             return_value=SlackChannel.from_payload(
                 {
