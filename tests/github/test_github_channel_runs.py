@@ -85,7 +85,13 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         input={"messages": [{"role": "user", "content": "Fix the crash"}]},
         configurable={"source": "github", "github_login": "ada", "repo": {"owner": "acme"}},
     )
-    prepare = AsyncMock(return_value=run)
+    async def adopt_then_prepare(*_args: object, adopt: Any = None) -> object:
+        # The real one adopts the thread before it writes the thread's metadata.
+        if adopt is not None and prepare.return_value is not None:
+            await adopt(THREAD)
+        return prepare.return_value
+
+    prepare = AsyncMock(side_effect=adopt_then_prepare, return_value=run)
     monkeypatch.setattr(github_webhooks, "prepare_github_issue_run", prepare)
     monkeypatch.setattr(channel, "adopt_channel_run", AsyncMock())
     monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value="user-1"))

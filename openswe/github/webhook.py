@@ -4,7 +4,7 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -1404,12 +1404,16 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
 
 async def prepare_github_issue_run(
-    payload: dict[str, Any], event_type: str, thread_id: str | None = None
+    payload: dict[str, Any],
+    event_type: str,
+    thread_id: str | None = None,
+    adopt: Callable[[str], Awaitable[None]] | None = None,
 ) -> GitHubIssueRun | None:
     """Prepare the run an issue or issue comment that tagged @open-swe starts, or None.
 
     ``thread_id`` is the conversation's thread when MDA's GitHub channel owns it;
-    Open SWE's own intake uses the issue's thread.
+    Open SWE's own intake uses the issue's thread. ``adopt`` indexes that thread as
+    the channel's before its metadata is written, so the write doesn't create it.
     """
     issue = payload.get("issue", {})
     repo = payload.get("repository", {})
@@ -1552,6 +1556,8 @@ async def prepare_github_issue_run(
     }
 
     token_repositories = common.event_thread_token_repositories(repo_config, payload)
+    if adopt is not None:
+        await adopt(thread_id)
     persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="github",

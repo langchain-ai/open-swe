@@ -110,10 +110,11 @@ def _run_metadata(metadata: dict[str, Any]) -> dict[str, JsonValue]:
 async def _prepare_run(
     payload: dict[str, Any], delivery_id: str, thread_id: str, event_type: str
 ) -> EndpointAnswer | None:
-    prepared = await service.prepare_github_issue_run(payload, event_type, thread_id)
+    prepared = await service.prepare_github_issue_run(
+        payload, event_type, thread_id, adopt=lambda thread: adopt_channel_run(thread, CHANNEL)
+    )
     if prepared is None:
         return None
-    await adopt_channel_run(thread_id, CHANNEL)
     run_config = await prepare_durable_run(
         "agent",
         {"configurable": prepared.configurable},
