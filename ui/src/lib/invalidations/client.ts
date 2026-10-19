@@ -1,4 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query"
+import type { Query, QueryClient } from "@tanstack/react-query"
 
 import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 
@@ -44,6 +44,7 @@ export class InvalidationTab {
   private readonly id = crypto.randomUUID()
   /** Per topic, the last time an open stream was known to cover it. */
   private readonly covered: Since = new Map()
+  private readonly pendingPaginationInvalidations = new WeakSet<Query>()
   private channel: BroadcastChannel | null = null
   private leader: Leader | null = null
   private releaseLock: (() => void) | null = null
@@ -204,10 +205,34 @@ export class InvalidationTab {
   private invalidate(topics: readonly InvalidationTopic[]): void {
     if (!topics.length) return
     const invalidated = new Set(topics)
-    void this.queryClient.invalidateQueries({
+    const queries = this.queryClient.getQueryCache().findAll({
       predicate: (query) =>
         query.meta?.invalidatedBy?.some((topic) => invalidated.has(topic)) ??
         false,
+    })
+    queries.forEach((query) => this.revalidate(query))
+  }
+
+  private revalidate(query: Query): void {
+    if (this.stopped) return
+    const promise = query.promise
+    if (
+      query.state.fetchStatus === "fetching" &&
+      query.state.fetchMeta?.fetchMore &&
+      promise
+    ) {
+      if (this.pendingPaginationInvalidations.has(query)) return
+      this.pendingPaginationInvalidations.add(query)
+      const finished = () => {
+        this.pendingPaginationInvalidations.delete(query)
+        this.revalidate(query)
+      }
+      void promise.then(finished, finished)
+      return
+    }
+    void this.queryClient.invalidateQueries({
+      queryKey: query.queryKey,
+      exact: true,
     })
   }
 
