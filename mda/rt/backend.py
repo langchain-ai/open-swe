@@ -47,6 +47,17 @@ Hook = Literal[
     # The thread's box was replaced: the backend connects to the fresh one.
     "sandbox",
 ]
+# Waits before resending a call the backend never received. A refused connection
+# never reached it, so every hook is resent, briefly.
+_CONNECT_RETRY_SECONDS: Final = (1.0, 3.0)
+# ``catalog`` only reads, and ``prepare`` is the run's first call, which a restarted
+# run makes again anyway, so these are also resent after a gateway answered that it
+# could not reach the backend, for as long as a backend rollout takes. A 504 is
+# never resent: the backend may still be running the call.
+_ROLLOUT_RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
+_ROLLOUT_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare"})
+_UNREACHED_STATUSES: Final = frozenset({502, 503})
+_GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
 
@@ -223,7 +234,9 @@ class OpenSweBackend:
             )
         if seconds is None:
             seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
-        for attempt in range(3):
+        rollout = hook in _ROLLOUT_HOOKS
+        waits = iter(_ROLLOUT_RETRY_SECONDS if rollout else _CONNECT_RETRY_SECONDS)
+        while True:
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}/remote-runtime/hooks/{hook}",
@@ -235,23 +248,28 @@ class OpenSweBackend:
                 break
             except httpx2.TimeoutException as exc:
                 raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
-            except httpx2.ConnectError as exc:
-                if attempt >= 2:
-                    raise BackendUnavailableError(f"{hook} failed (ConnectError)") from exc
-                logger.warning("Backend connection failed; retrying", extra={"hook": hook})
-                await asyncio.sleep((1, 3)[attempt])
             except httpx2.HTTPError as exc:
-                gateway_failure = isinstance(
-                    exc, httpx2.HTTPStatusError
-                ) and exc.response.status_code in {502, 503, 504}
+                status = (
+                    exc.response.status_code if isinstance(exc, httpx2.HTTPStatusError) else None
+                )
                 if isinstance(exc, httpx2.HTTPStatusError) and (
                     failure := _hook_failure(exc.response)
                 ):
                     # What the hook itself raised, so the run fails with the cause, as in-process.
                     raise BackendCallError(f"{hook} failed: {failure.describe()}") from exc
+                unreached = isinstance(exc, httpx2.ConnectError) or (
+                    rollout and status in _UNREACHED_STATUSES
+                )
+                if unreached and (wait := next(waits, None)) is not None:
+                    logger.warning(
+                        "Backend unavailable; retrying",
+                        extra={"hook": hook, "status_code": status, "wait_seconds": wait},
+                    )
+                    await asyncio.sleep(wait)
+                    continue
                 error = (
                     BackendUnavailableError
-                    if isinstance(exc, httpx2.TransportError) or gateway_failure
+                    if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES
                     else BackendCallError
                 )
                 raise error(f"{hook} failed ({type(exc).__name__})") from exc

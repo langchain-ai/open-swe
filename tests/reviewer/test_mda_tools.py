@@ -9,8 +9,6 @@ from langchain.agents import create_agent
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import ToolMessage, message_to_dict
-from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
@@ -84,7 +82,7 @@ async def test_backend_connection_failures(
 @pytest.mark.parametrize(
     ("hook", "status"),
     [
-        ("prepare", 503),
+        ("prepare", 504),
         ("before_model", 502),
         ("before_model", 503),
         ("before_model", 504),
@@ -115,8 +113,39 @@ async def test_phase_gateway_failure_is_not_replayed(
     sleep.assert_not_awaited()
 
 
+@pytest.mark.parametrize(("failures", "recovers"), [(10, True), (11, False)])
+async def test_preparation_waits_out_a_backend_rollout(
+    monkeypatch: pytest.MonkeyPatch, failures: int, recovers: bool
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    sleep = AsyncMock()
+    monkeypatch.setattr("rt.backend.asyncio.sleep", sleep)
+    request = httpx2.Request("POST", "https://backend.invalid")
+    unavailable = [
+        httpx2.Response(503, request=request),
+        httpx2.Response(502, request=request),
+        httpx2.ConnectError("secret-token"),
+    ]
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(
+        side_effect=[unavailable[i % 3] for i in range(failures)]
+        + [httpx2.Response(200, request=request, json={"update": {"prepared": True}})]
+    )
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    backend = OpenSweBackend("secret-token")
+
+    if recovers:
+        reply = await backend.phase("prepare", {})
+        assert reply.update == {"prepared": True}
+        assert sum(call.args[0] for call in sleep.await_args_list) >= 120
+    else:
+        with pytest.raises(BackendUnavailableError):
+            await backend.phase("prepare", {})
+    assert client.post.await_count == min(failures + 1, 11)
+
+
 @pytest.mark.parametrize("hook", ["prepare", "before_model", "after_model"])
-async def test_phase_failure_ends_with_a_run_scoped_marker(
+async def test_an_unreachable_backend_fails_the_run(
     monkeypatch: pytest.MonkeyPatch, hook: str
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
@@ -135,39 +164,8 @@ async def test_phase_failure_ends_with_a_run_scoped_marker(
         middleware=[BackendRunMiddleware(backend, "invocation-1")],
     )
 
-    values = await graph.ainvoke({"messages": [("user", "hello")]})
-
-    assert values["open_swe_backend_failure"] == {"run_id": "run-1", "phase": hook}
-    assert values["messages"][-1].content == ("done" if hook == "after_model" else "hello")
-
-
-async def test_a_new_run_clears_a_checkpointed_backend_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    current_run = "run-1"
-    monkeypatch.setattr("rt.middleware.run_id", lambda: current_run)
-    backend = OpenSweBackend("secret-token")
-    monkeypatch.setattr(
-        backend,
-        "phase",
-        AsyncMock(side_effect=[PhaseReply(), BackendUnavailableError("before_model failed")]),
-    )
-    graph = create_agent(
-        model=FakeListChatModel(responses=["recovered"]),
-        middleware=[BackendRunMiddleware(backend, "invocation-1")],
-        checkpointer=InMemorySaver(),
-    )
-    config: RunnableConfig = {"configurable": {"thread_id": "thread-1"}}
-    result = await graph.ainvoke({"messages": [("user", "hello")]}, config)
-    assert result["open_swe_backend_failure"]["run_id"] == "run-1"
-
-    current_run = "run-2"
-    monkeypatch.setattr(backend, "phase", AsyncMock(return_value=PhaseReply()))
-    result = await graph.ainvoke({"messages": [("user", "retry")]}, config)
-
-    assert result["open_swe_backend_failure"] is None
-    assert result["messages"][-1].content == "recovered"
+    with pytest.raises(BackendUnavailableError):
+        await graph.ainvoke({"messages": [("user", "hello")]})
 
 
 async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
