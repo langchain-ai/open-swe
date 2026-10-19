@@ -129,6 +129,11 @@ class UserRecords:
         async with postgres.session() as session:
             await session.execute(delete(UserRecord).where(self._where(login, key)))
 
+    async def clear(self) -> None:
+        """Delete everyone's records of this kind."""
+        async with postgres.session() as session:
+            await session.execute(delete(UserRecord).where(UserRecord.kind == self.kind))
+
     async def pop(self, login: str, key: str = "") -> JsonObject | None:
         """Delete a record and return what it held."""
         async with postgres.session() as session:

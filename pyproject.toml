@@ -94,6 +94,8 @@ packages = ["openswe"]
 
 [tool.ruff]
 line-length = 100
+# Scripts copied into sandboxes run on whatever python3 the image ships.
+per-file-target-version = { "openswe/sandbox_scripts/*.py" = "py38" }
 
 [tool.ruff.lint]
 # PLC2701 (private-name imports) is preview-only; explicit-preview-rules keeps every
@@ -136,7 +138,8 @@ testpaths = ["tests"]
 [tool.ty.src]
 include = ["openswe", "tests"]
 # Runs in the mda/ project's environment, against the graph `mda build` compiles.
-exclude = ["tests/e2e/mda_entrypoint.py"]
+# Sandbox scripts run on an older python3; `make typecheck` checks them at 3.8.
+exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]
 
 [tool.ty.environment]
 extra-paths = ["mda"]

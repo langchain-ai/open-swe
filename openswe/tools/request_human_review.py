@@ -127,7 +127,8 @@ async def _request_for_mcp_caller(
     elif requester.slack_user_id and await send_dm(
         requester.slack_user_id,
         f"Review requested for <{pr_ref.url}|{pr_ref.repo}#{pr_ref.number}> "
-        f"in <#{result.channel}>.",
+        f"in <#{result.channel}>."
+        + (f" <{result.permalink}|View review request>" if result.permalink else ""),
     ):
         posted = "The review card is posted and the person was sent a Slack DM pointing to it."
     else:

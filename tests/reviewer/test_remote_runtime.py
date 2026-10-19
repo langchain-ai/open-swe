@@ -1,3 +1,4 @@
+import json
 import time
 
 import jwt
@@ -50,6 +51,93 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
 
     assert choice.model_id == requested
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
+
+
+async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
+    from collections.abc import Awaitable, Callable
+
+    from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
+    from langchain_core.tools import tool
+
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    def plan(step: str) -> str:
+        """Plan a step."""
+        return step
+
+    @tool
+    def record(summary: str) -> str:
+        """Record a summary."""
+        return summary
+
+    class HideRecordUntilAsked(AgentMiddleware):
+        async def awrap_model_call(
+            self,
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            if not request.state.get("asked"):
+                request = request.override(tools=[t for t in request.tools if t.name != "record"])
+            return await handler(request)
+
+    session = RunSession(
+        ToolSurface(tools={"plan": plan, "record": record}, middleware=[HideRecordUntilAsked()]),
+        {},
+        None,
+        started_here=True,
+    )
+
+    assert (await session.model_call({"messages": []}, None)).hidden_tools == ["record"]
+    assert (await session.model_call({"messages": [], "asked": True}, None)).hidden_tools == []
+
+
+@pytest.mark.parametrize("environment", ["preview", "staging", "production"])
+async def test_remote_prompts_include_deployment_context(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    from langgraph.runtime import Runtime
+
+    from openswe.middleware.prepare_run import BasePrepareRunMiddleware
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import (
+        ModelChoice,
+        SurfaceModels,
+        SurfaceSubagent,
+        ToolSurface,
+    )
+
+    monkeypatch.setenv("OPENSWE_ENV", environment)
+    model = ModelChoice("openai:gpt-6.1-sol", {})
+    session = RunSession(
+        ToolSurface(
+            middleware=[BasePrepareRunMiddleware()],
+            models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+            subagents=[SurfaceSubagent("worker", "worker", "subagent instructions")],
+        ),
+        {},
+        None,
+        started_here=True,
+    )
+    main_prompt = (
+        await session.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
+    ).system_prompt
+    subagents = session.catalog()["subagents"]
+    assert isinstance(subagents, list)
+    assert isinstance(subagents[0], dict)
+    subagent_prompt = subagents[0]["system_prompt"]
+    assert isinstance(subagent_prompt, str)
+
+    for rendered, original in (
+        (main_prompt, "main instructions"),
+        (subagent_prompt, "subagent instructions"),
+    ):
+        if environment == "production":
+            assert rendered == original
+        else:
+            assert rendered.count(f"**{environment}**") == 1
+            assert rendered.endswith(original)
 
 
 async def test_app_lifespan_exits_without_managed_deep_agents(
@@ -207,6 +295,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
+    from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.remote_runtime.graph import RemoteGraph
     from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
@@ -218,9 +307,15 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
         return StructuredTool.from_function(coroutine=run, name=name, description=name)
 
     async def build(config: object, surface: ToolSurface) -> None:
-        surface.dynamic = DynamicToolMiddleware(
-            {"MCP": [integration("mcp_search"), integration("mcp.dotted")]}
-        )
+        search = integration("mcp_search")
+        search.metadata = {
+            "mcp_provenance": MCPToolProvenance(
+                connection_name="lmt", scope="managed", overridden_scopes=["instance", "user"]
+            ),
+            "headers": {"Authorization": "private-token"},
+            "namespace": ["managed_tools", "private-owner", "private-gateway"],
+        }
+        surface.dynamic = DynamicToolMiddleware({"MCP": [search, integration("mcp.dotted")]})
         core = [integration(name) for name in ("read_file", "manage_thread", "slack_reply")]
         middleware: list[AgentMiddleware] = [
             surface.dynamic,
@@ -246,5 +341,17 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     names = {tool["name"] for tool in tools if isinstance(tool, dict)}
     assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
     assert "eval" not in names
+    search = next(tool for tool in tools if isinstance(tool, dict) and tool["name"] == "mcp_search")
+    assert isinstance(search, dict)
+    expected = {
+        "connection_name": "lmt",
+        "scope": "managed",
+        "overridden_scopes": ["instance", "user"],
+    }
+    assert search["mcp_provenance"] == expected
+    assert json.dumps(expected, separators=(",", ":")) in str(search["description"])
+    assert "private-token" not in str(catalog)
+    assert "private-owner" not in str(catalog)
+    assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     assert catalog["also_from_code"] == ["read_file"]

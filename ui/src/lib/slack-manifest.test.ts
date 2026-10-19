@@ -42,6 +42,7 @@ describe("slackAppManifest", () => {
           "app_mention",
           "message.im",
           "message.mpim",
+          "agent_session_stopped",
         ])
       )
       expect(new Set(events).size).toBe(events.length)
