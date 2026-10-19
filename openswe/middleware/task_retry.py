@@ -6,6 +6,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from openswe.config import ENV
 from openswe.middleware.trace import OpenSWEMiddleware
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
@@ -92,11 +93,18 @@ def task_on_failure(exc: Exception) -> str:
     )
 
 
+def subagent_concurrency_limit() -> int:
+    limit = ENV.OPEN_SWE_SUBAGENT_CONCURRENCY.get_int(3)
+    if limit < 1:
+        raise ValueError("OPEN_SWE_SUBAGENT_CONCURRENCY must be positive")
+    return limit
+
+
 class TaskConcurrencyMiddleware(OpenSWEMiddleware):
-    """Queue task calls beyond the three sharing this run's sandbox."""
+    """Queue task calls for the lifetime of their shared-sandbox subagent."""
 
     def __init__(self) -> None:
-        self._slots = asyncio.Semaphore(3)
+        self._slots = asyncio.Semaphore(subagent_concurrency_limit())
 
     async def awrap_tool_call(
         self,

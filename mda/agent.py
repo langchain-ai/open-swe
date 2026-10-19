@@ -209,7 +209,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     ]
     # This agent's own, as the agent a worker is; deepagents passes no middleware down.
     agent_middleware = [
-        TaskConcurrencyMiddleware(),
+        TaskConcurrencyMiddleware(catalog.subagent_concurrency),
         BackendRunMiddleware(
             backend,
             context.invocation_id,

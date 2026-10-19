@@ -733,6 +733,7 @@ def _general_purpose_subagent(
             list[AgentMiddleware[Any, Any, Any]],
             [
                 _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
+                _DisableInheritedMiddleware(TaskConcurrencyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
                 _SubagentToolGuard(),
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),

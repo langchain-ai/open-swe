@@ -81,6 +81,7 @@ from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_
 from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.tool_error_handler import ToolErrorMiddleware
+from openswe.middleware.task_retry import subagent_concurrency_limit
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.middleware.validate_image_reads import ValidateImageReadsMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
@@ -391,6 +392,7 @@ class RunSession:
                     for subagent in (() if self._delegates else self.surface.subagents)
                 ],
                 "models": self.start_models().model_dump(),
+                "subagent_concurrency": subagent_concurrency_limit(),
                 # Hidden from the model, as the in-process graph hides them.
                 "excluded": sorted(
                     ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)

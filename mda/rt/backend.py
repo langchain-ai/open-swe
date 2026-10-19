@@ -20,7 +20,7 @@ from weakref import WeakKeyDictionary
 import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from langsmith.run_trees import RunTree
-from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
 from rt.models import ModelSpec, RunModels
 from rt.sandbox import SandboxSpec
@@ -130,6 +130,7 @@ class Catalog(BaseModel):
 
     tools: list[ToolSpec] = []
     subagents: list[SubagentSpec] = []
+    subagent_concurrency: int = Field(default=3, gt=0)
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
     # Tools the graph keeps from the model, including MDA's own of the same name.

@@ -652,10 +652,10 @@ def _tool_message(result: ToolMessage | Command, tool_call_id: str) -> ToolMessa
 
 
 class TaskConcurrencyMiddleware(AgentMiddleware):
-    """Queue task calls beyond the three sharing this run's sandbox."""
+    """Queue task calls for the lifetime of their shared-sandbox subagent."""
 
-    def __init__(self) -> None:
-        self._slots = asyncio.Semaphore(3)
+    def __init__(self, limit: int = 3) -> None:
+        self._slots = asyncio.Semaphore(limit)
 
     async def awrap_tool_call(
         self,

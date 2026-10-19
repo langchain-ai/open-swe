@@ -47,6 +47,7 @@ from openswe.middleware import (
     ToolErrorMiddleware,
 )
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.middleware.task_retry import TaskConcurrencyMiddleware
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.author_guidance import SteeringHistory
@@ -334,6 +335,7 @@ async def build_review_scout(
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            TaskConcurrencyMiddleware(),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeOpenAIResponsesMiddleware(),
