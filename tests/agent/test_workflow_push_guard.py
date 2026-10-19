@@ -2,7 +2,9 @@ import asyncio
 import json
 import shlex
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -11,6 +13,7 @@ from langchain_core.messages import ToolMessage
 
 from openswe.middleware import workflow_push_guard as guard
 from openswe.sandboxes.state import SandboxBackendProxy
+from openswe.threads import workflow_approval, workflow_approval_api
 
 
 class _Response:
@@ -201,7 +204,10 @@ class _GitBackend:
         return result.output.strip()
 
 
-@pytest.mark.parametrize("base", ["fallback", "upstream", "remote"])
+@pytest.mark.parametrize(
+    "base",
+    ["fallback", "upstream", "configured", "configured_main", "configured_missing", "remote"],
+)
 @pytest.mark.parametrize("workflow_edit", [False, True])
 async def test_release_branch_push_excludes_inherited_workflows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base: str, workflow_edit: bool
@@ -228,10 +234,11 @@ async def test_release_branch_push_excludes_inherited_workflows(
     release_sha = await backend.git("rev-parse HEAD")
     await backend.git("update-ref refs/remotes/origin/v15-stable HEAD")
     await backend.git("checkout -b feature")
-    if base == "upstream":
+    if base in {"upstream", "configured", "configured_main", "configured_missing"}:
         await backend.git("config remote.origin.url https://github.com/example/repo.git")
         await backend.git("config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'")
-        await backend.git("branch --set-upstream-to=origin/main")
+        upstream = "v15-stable" if base in {"configured_main", "configured_missing"} else "main"
+        await backend.git(f"branch --set-upstream-to=origin/{upstream}")
     elif base == "remote":
         await backend.git("update-ref refs/remotes/origin/feature HEAD")
         await backend.git("config branch.feature.remote .")
@@ -242,19 +249,25 @@ async def test_release_branch_push_excludes_inherited_workflows(
     await backend.git("add .")
     await backend.git("commit -qm update")
 
-    change = await guard._workflow_change_for_push(
-        backend,
-        guard.ParsedGitPush(
-            repo_dir=str(tmp_path), remote="origin", local_ref="feature", remote_ref="feature"
-        ),
+    configured_base = {
+        "configured": "v15-stable",
+        "configured_main": "main",
+        "configured_missing": "missing",
+        "remote": "main",
+    }.get(base)
+    request = _Request(f"git -C {shlex.quote(str(tmp_path))} push origin feature")
+    monkeypatch.setattr(guard, "_backend", lambda thread_id: backend)
+    monkeypatch.setattr(
+        guard, "_configurable", lambda request: guard.RunConfig(base_branch=configured_base)
     )
+    change = await guard.WorkflowPushGuardMiddleware()._change_for_request(request)
 
-    if not workflow_edit and base != "upstream":
+    if not workflow_edit and base not in {"upstream", "configured_main"}:
         assert change is None
         return
     assert change is not None
     expected_files = [".github/workflows/ci.yml"] if workflow_edit else []
-    if base == "upstream":
+    if base in {"upstream", "configured_main"}:
         expected_files.append(".github/workflows/inherited.yml")
         assert change.base_sha == await backend.git("rev-parse main")
     else:
@@ -269,6 +282,149 @@ async def test_release_branch_push_excludes_inherited_workflows(
     assert change.diff_preview == await backend.git(
         f"diff --binary --full-index {shlex.quote(change.base_sha)}..HEAD -- .github/workflows"
     )
+
+
+class _ApprovalThreads:
+    def __init__(self) -> None:
+        self.metadata: dict[str, object] = {}
+
+    async def get(self, thread_id: str) -> dict[str, object]:
+        return {"metadata": self.metadata}
+
+    async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+        self.metadata.update(metadata)
+
+
+async def test_release_pushes_share_approval_only_for_identical_workflow_diffs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _GitBackend(tmp_path)
+    await backend.git("init -b main")
+    await backend.git("config user.email test@example.com")
+    await backend.git("config user.name Test")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    inherited = workflows / "inherited.yml"
+    inherited.write_text("main workflow\n")
+    edited = workflows / "ci.yml"
+    edited.write_text("original workflow\n")
+    await backend.git("add .")
+    await backend.git("commit -qm main")
+    await backend.git("init --bare remote.git")
+    await backend.git("remote add origin ./remote.git")
+    await backend.git("push origin main")
+    await backend.git("checkout -b v15-stable")
+    inherited.write_text("release workflow\n")
+    await backend.git("commit -qam release")
+    await backend.git("push origin v15-stable")
+
+    threads = _ApprovalThreads()
+    client = SimpleNamespace(threads=threads)
+    monkeypatch.setattr(workflow_approval, "get_client", lambda: client)
+    monkeypatch.setattr(guard, "get_client", lambda **kwargs: client)
+    monkeypatch.setattr(guard, "_backend", lambda thread_id: backend)
+    monkeypatch.setattr(
+        guard,
+        "_configurable",
+        lambda request: guard.RunConfig(thread_id="thread-1", base_branch="v15-stable"),
+    )
+    notifications: list[str] = []
+
+    async def active(*args: object) -> dict[str, str]:
+        return {"channel_id": "C123", "thread_ts": "1700000000.000100"}
+
+    async def post(channel: str, timestamp: str, message: str, **kwargs: object) -> str:
+        notifications.append(message)
+        return "notification-ts"
+
+    monkeypatch.setattr(guard, "get_active_slack_thread", active)
+    monkeypatch.setattr(guard, "post_slack_thread_reply_with_ts", post)
+    middleware = guard.WorkflowPushGuardMiddleware()
+
+    async def push(request: ToolCallRequest) -> ToolMessage:
+        result = await backend.aexecute(request.tool_call["args"]["command"])
+        assert result.exit_code == 0, result.output
+        return ToolMessage(content="pushed", tool_call_id="call-1")
+
+    async def attempt(branch: str) -> ToolMessage:
+        return cast(
+            ToolMessage,
+            await middleware.awrap_tool_call(
+                cast(
+                    ToolCallRequest,
+                    _Request(f"git -C {shlex.quote(str(tmp_path))} push origin {branch}"),
+                ),
+                push,
+            ),
+        )
+
+    for branch in ["lock-one", "lock-two", "workflow-one", "workflow-two", "different"]:
+        await backend.git(f"checkout -b {branch} v15-stable")
+        (tmp_path / "uv.lock").write_text(f"{branch}\n")
+        if branch.startswith("workflow"):
+            edited.write_text("updated workflow\n")
+        elif branch == "different":
+            edited.write_text("different workflow\n")
+        await backend.git("add uv.lock .github/workflows")
+        await backend.git(f"commit -qm {branch}")
+        result = await attempt(branch)
+        if branch.startswith("lock"):
+            assert result.content == "pushed"
+            assert await workflow_approval.get_workflow_push_approvals("thread-1") == {}
+            assert notifications == []
+        else:
+            assert (
+                json.loads(str(result.content))["workflow_approval_status"] == "approval_required"
+            )
+
+    approvals = await workflow_approval.get_workflow_push_approvals("thread-1")
+    assert len(approvals) == len(notifications) == 2
+    shared = next(record for record in approvals.values() if record["branch"] == "workflow-two")
+    response = workflow_approval.workflow_push_approval_response(shared)
+    assert response["files"] == [".github/workflows/ci.yml"]
+    assert "inherited.yml" not in response["diffPreview"]
+    monkeypatch.setattr(
+        workflow_approval_api,
+        "fetch_thread_metadata",
+        AsyncMock(return_value={"visibility": "public", "owner_login": "reviewer"}),
+    )
+    wake = AsyncMock(return_value={"run_id": "approval-run"})
+    monkeypatch.setattr(workflow_approval_api, "dispatch_followup", wake)
+    await workflow_approval_api.approve_workflow_push(
+        "thread-1", shared["fingerprint"], session={"sub": "reviewer"}
+    )
+    for branch in ["workflow-one", "workflow-two"]:
+        await backend.git(f"checkout {branch}")
+        assert (await attempt(branch)).content == "pushed"
+        assert await backend.git(f"rev-parse refs/remotes/origin/{branch}") == await backend.git(
+            "rev-parse HEAD"
+        )
+    await backend.git("checkout different")
+    assert (
+        json.loads(str((await attempt("different")).content))["workflow_approval_status"]
+        == "approval_required"
+    )
+    assert len(notifications) == 2
+    assert wake.await_count == 1
+    assert len(await workflow_approval.get_workflow_push_approvals("thread-1")) == 2
+
+    await backend.git("clone -b v15-stable ./remote.git other")
+    other = _GitBackend(tmp_path / "other")
+    await other.git("config user.email test@example.com")
+    await other.git("config user.name Test")
+    await other.git("config remote.origin.url ./remote.git")
+    await other.git("checkout -b different")
+    (other.root / ".github/workflows/ci.yml").write_text("different workflow\n")
+    await other.git("commit -qam different")
+    other_change = await guard._workflow_change_for_push(
+        other,
+        guard.ParsedGitPush(
+            repo_dir=str(other.root), remote="origin", local_ref="different", remote_ref="different"
+        ),
+        base_branch="v15-stable",
+    )
+    assert other_change is not None
+    assert other_change.fingerprint not in approvals
 
 
 async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
