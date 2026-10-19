@@ -801,3 +801,24 @@ async def test_historical_personal_models_and_routing_do_not_override_workspace(
     )
     assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
     assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"
+
+
+async def test_anthropic_title_model_omits_thinking_without_affecting_agent() -> None:
+    captured = await _capture_create_deep_agent_kwargs(
+        workspace_settings=WorkspaceSettings(
+            {
+                **_MODEL_DEFAULTS,
+                "default_agent_model": "anthropic:claude-opus-5-5",
+                "default_agent_reasoning_effort": "high",
+                "default_thread_title_model": "anthropic:claude-haiku-5-5",
+                "default_thread_title_reasoning_effort": "high",
+            }
+        )
+    )
+    calls = cast(list[tuple[str, dict[str, object]]], captured["make_model_calls"])
+    title_kwargs = next(kwargs for model, kwargs in calls if model == "anthropic:claude-haiku-5-5")
+    assert "thinking" not in title_kwargs
+    assert title_kwargs["effort"] == "high"
+    assert title_kwargs["max_tokens"] == 1024
+    agent_kwargs = next(kwargs for model, kwargs in calls if model == "anthropic:claude-opus-5-5")
+    assert agent_kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}

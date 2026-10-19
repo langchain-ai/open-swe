@@ -4,9 +4,11 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, Field
+from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, Field, ValidationError
 
 from openswe.input_messages import dynamic_context_hash, human_input, input_message_text
 from openswe.prompts import prompt
@@ -82,7 +84,6 @@ async def generate_and_store_thread_title(
     ):
         return
 
-    structured = model.with_structured_output(_ThreadTitle)
     title_input = human_input(
         conversation,
         {
@@ -93,19 +94,36 @@ async def generate_and_store_thread_title(
     )["content"]
     if not isinstance(title_input, str):
         return
+    messages = [
+        SystemMessage(content=_TITLE_SYSTEM_PROMPT),
+        HumanMessage(content=title_input),
+    ]
+    # Empty callbacks keep title tokens out of the thread's message stream.
+    config: RunnableConfig = {"callbacks": [], "run_name": "thread-title"}
     async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
-        result = await structured.ainvoke(
-            [
-                SystemMessage(content=_TITLE_SYSTEM_PROMPT),
-                HumanMessage(content=title_input),
-            ],
-            # Empty callbacks, so this call cannot inherit the run's handlers and
-            # stream its tokens into the thread the user is watching.
-            config={"callbacks": [], "run_name": "thread-title"},
-        )
-    if not isinstance(result, _ThreadTitle):
-        return
-    title = _normalize_title(result.title)
+        try:
+            structured = model.with_structured_output(_ThreadTitle)
+            result = await structured.ainvoke(messages, config=config)
+        except OutputParserException, ValidationError:
+            logger.warning(
+                "Thread title extraction failed; retrying as text",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+            response = await model.ainvoke(
+                [
+                    SystemMessage(
+                        content=_TITLE_SYSTEM_PROMPT + "\n\n" + prompt("thread-title-plain")
+                    ),
+                    HumanMessage(content=title_input),
+                ],
+                config=config,
+            )
+            title = _normalize_title(response.text)
+        else:
+            if not isinstance(result, _ThreadTitle):
+                return
+            title = _normalize_title(result.title)
     if not title:
         return
 

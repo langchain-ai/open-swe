@@ -1743,6 +1743,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         title_effort,
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
+    if title_model_id.startswith("anthropic:"):
+        title_model_kwargs.pop("thinking", None)
+        title_model_kwargs["max_tokens"] = 1024
 
     def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
         fallback = fallback_model_choice(primary_model_id)
