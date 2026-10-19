@@ -1,11 +1,13 @@
 /** @vitest-environment jsdom */
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -295,6 +297,102 @@ describe("PlanReview", () => {
     expect(
       await screen.findByRole("button", { name: "Submit comments" })
     ).toBeTruthy()
+  })
+
+  it("keeps follow-on replies with their parent before batch submission and preserves failed drafts", async () => {
+    mocks.getPlanComments.mockResolvedValue([comment])
+    let rejectReply!: (error: Error) => void
+    mocks.addPlanComment.mockReturnValueOnce(
+      new Promise<PlanComment>((_, reject) => {
+        rejectReply = reject
+      })
+    )
+    render(<PlanReview plan={plan} />)
+    const parent = await screen.findByTestId("plan-comment")
+    fireEvent.click(within(parent).getByRole("button", { name: "Reply" }))
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "Also show an example" },
+    })
+    fireEvent.keyDown(screen.getByTestId("comment-input"), {
+      key: "Enter",
+      ctrlKey: true,
+    })
+    expect(within(parent).getByTestId("plan-reply").textContent).toContain(
+      "Also show an example"
+    )
+    expect(mocks.submitPlanComments).not.toHaveBeenCalled()
+    rejectReply(new Error("Offline"))
+    await waitFor(() => expect(screen.queryByTestId("plan-reply")).toBeNull())
+    expect(
+      (screen.getByTestId("comment-input") as HTMLTextAreaElement).value
+    ).toBe("Also show an example")
+    mocks.addPlanComment.mockResolvedValueOnce({
+      ...comment,
+      id: "reply-1",
+      body: "Also show an example",
+      anchor: null,
+      parent_id: comment.id,
+    })
+    fireEvent.click(screen.getByTestId("comment-submit"))
+    await waitFor(() =>
+      expect(screen.queryByTestId("comment-composer")).toBeNull()
+    )
+    expect(mocks.addPlanComment).toHaveBeenLastCalledWith(
+      "thread-1",
+      "Also show an example",
+      null,
+      comment.id
+    )
+    expect(within(parent).getByTestId("plan-reply").textContent).toContain(
+      "Also show an example"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Submit comments" }))
+    await waitFor(() =>
+      expect(mocks.submitPlanComments).toHaveBeenCalledWith("thread-1")
+    )
+  })
+
+  it("preserves a reply draft when polling removes its parent", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.getPlanComments.mockResolvedValue([comment])
+      await act(async () => {
+        render(<PlanReview plan={plan} />)
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Reply" }))
+      fireEvent.change(screen.getByTestId("comment-input"), {
+        target: { value: "Keep this draft" },
+      })
+      mocks.getPlanComments.mockResolvedValue([])
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(screen.getByRole("status").textContent).toContain(
+        "The original comment was deleted"
+      )
+      expect(
+        (screen.getByTestId("comment-input") as HTMLTextAreaElement).value
+      ).toBe("Keep this draft")
+      expect(
+        (screen.getByTestId("comment-submit") as HTMLButtonElement).disabled
+      ).toBe(true)
+      fireEvent.keyDown(screen.getByTestId("comment-input"), {
+        key: "Enter",
+        ctrlKey: true,
+      })
+      expect(mocks.addPlanComment).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("comment-submit"))
+      })
+      expect(mocks.addPlanComment).toHaveBeenCalledWith(
+        "thread-1",
+        "Keep this draft",
+        null
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("shows historical artifacts without approval or implementation actions", async () => {

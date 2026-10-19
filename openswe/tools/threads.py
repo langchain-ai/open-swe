@@ -597,6 +597,7 @@ def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) ->
             "author": comment.get("author"),
             "author_login": comment.get("author_login"),
             "body": str(comment.get("body") or "")[:_MAX_DETAIL_MESSAGE_CHARS],
+            "parent_id": comment.get("parent_id"),
             "anchor": comment.get("anchor") if isinstance(comment.get("anchor"), Mapping) else None,
             "created_at": comment.get("created_at"),
         }
