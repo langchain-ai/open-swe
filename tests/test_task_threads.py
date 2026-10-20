@@ -514,6 +514,13 @@ async def test_cancel_discards_owed_events_without_reviving_worker(
     assert await TaskMessage.deliver(worker_id, "interrupt") is False
     assert not client.created_runs
 
+    # Unlike a person stopping the task, the coordinator that cancelled still hears the outcome.
+    from openswe.tasks.events import finished_delivery_id, worker_finished
+
+    run_id = str(uuid4())
+    await worker_finished(worker_id, run_id, "interrupted", {})
+    assert await TaskMessage.recorded(COORDINATOR, finished_delivery_id(worker_id, run_id))
+
 
 @pytest.mark.usefixtures("registry_db")
 async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
@@ -629,31 +636,60 @@ async def test_coordinator_settles_once_every_worker_report_has_reached_it(
     client.threads.get_state.return_value = {"values": {"messages": wake["input"]["messages"]}}
     assert (await activity.CoordinatorActivity.of(COORDINATOR)).settled
 
+    stuck = str((await launch(actor, "stuck", "Review"))["worker_thread_id"])
+    assert sorted(await states()) == ["done", "starting"]
+    async with postgres.session() as session:
+        delegation = await session.get_one(store.TaskDelegation, stuck)
+        delegation.created_at = datetime.now(UTC) - activity.LOST_AFTER
+    current = await activity.CoordinatorActivity.of(COORDINATOR)
+    assert {
+        worker.worker_thread_id: (worker.state, worker.error) for worker in current.workers
+    } == {
+        worker_id: ("done", None),
+        stuck: ("failed", "The worker did not start within 5 minutes."),
+    }
+    assert current.settled
+
 
 @pytest.mark.usefixtures("registry_db")
 async def test_cancelling_a_coordinators_workers_spares_finished_ones(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:
     from openswe.tasks import activity
+    from openswe.tasks.events import finished_delivery_id, worker_finished
 
     monkeypatch.setattr(activity, "langgraph_client", lambda: client)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     actor = service.Actor(COORDINATOR, OWNER)
     running = str((await launch(actor, "running", "Implement"))["worker_thread_id"])
     finished = str((await launch(actor, "finished", "Review"))["worker_thread_id"])
+    running_run, finished_run = str(uuid4()), str(uuid4())
     client.created_runs += [
-        {"thread_id": running, "run_id": str(uuid4()), "status": "running"},
-        {"thread_id": finished, "run_id": str(uuid4()), "status": "success"},
+        {"thread_id": running, "run_id": running_run, "status": "running"},
+        {"thread_id": finished, "run_id": finished_run, "status": "success"},
     ]
+    client.statuses[COORDINATOR] = "busy"
+    await service.message_task_thread(
+        service.Actor(running, OWNER), message="Halfway", worker_thread_id=None, request_id="note"
+    )
+    answer = {"values": {"messages": [{"type": "ai", "content": "Reviewed"}]}}
+    await worker_finished(finished, finished_run, "success", answer)
 
-    await (await activity.CoordinatorActivity.of(COORDINATOR)).cancel_workers()
+    await (await activity.CoordinatorActivity.of(COORDINATOR)).stop_workers()
+    # The interrupted run's completion lands after the stop, with the coordinator idle.
+    client.statuses[COORDINATOR] = "idle"
+    await worker_finished(running, running_run, "interrupted", {})
 
+    owed = await TaskMessage.owed(COORDINATOR, [])
+    assert [message.delivery_id for message in owed] == [
+        finished_delivery_id(finished, finished_run)
+    ]
+    assert not [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
     current = await activity.CoordinatorActivity.of(COORDINATOR)
     assert {worker.worker_thread_id: worker.state for worker in current.workers} == {
         running: "cancelled",
         finished: "done",
     }
-    assert current.settled
 
 
 @pytest.mark.usefixtures("registry_db")
