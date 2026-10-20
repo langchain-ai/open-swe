@@ -138,11 +138,12 @@ class _Harness:
         async def send(message: Message) -> None:
             sent.append(message)
 
+        path, _, query = path.partition("?")
         scope: Scope = {
             "type": "http",
             "method": method,
             "path": path,
-            "query_string": b"",
+            "query_string": query.encode(),
             "headers": [(b"content-type", b"application/json")],
         }
         await self.router(scope, receive, send)
@@ -176,10 +177,16 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     _, counted = await harness.request(
         "POST", "/threads/count", {"metadata": {"owner_login": "ada"}}
     )
+    _, matched = await harness.request(
+        "POST", "/threads/search?text=fix", {"select": ["thread_id"]}
+    )
+    _, missed = await harness.request("POST", "/threads/count?text=nope", {})
 
     assert isinstance(read, dict)
     assert read["metadata"] == {"owner_login": "ada", "title": "Fix it", "runtime": "mda"}
     assert found == [{"thread_id": THREAD}]
+    assert isinstance(matched, list) and [thread["thread_id"] for thread in matched] == [THREAD]
+    assert missed == 0
     assert counted == 1
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]

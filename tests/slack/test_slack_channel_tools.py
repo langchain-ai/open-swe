@@ -38,12 +38,32 @@ async def test_list_members_preserves_pagination_and_only_exposes_public_identit
     slack_api.respond({"ok": True, "channel": {"id": "C123", "is_private": True}})
     slack_api.respond({"ok": True, "members": ["U123"]})
     slack_api.respond(
-        {"ok": True, "user": {"profile": {"display_name": "Ada", "email": "private@example.com"}}}
+        {
+            "ok": True,
+            "user": {
+                "profile": {
+                    "display_name": "Ada",
+                    "email": "private@example.com",
+                    "status_text": "On vacation",
+                    "status_emoji": ":palm_tree:",
+                    "status_expiration": 2000000000,
+                }
+            },
+        }
     )
     assert await tools.slack_list_channel_members("C123", cursor="more") == {
         "success": True,
         "channel_id": "C123",
-        "members": [{"id": "U123", "name": "Ada", "github_login": "octocat"}],
+        "members": [
+            {
+                "id": "U123",
+                "name": "Ada",
+                "github_login": "octocat",
+                "status_text": "On vacation",
+                "status_emoji": ":palm_tree:",
+                "status_expiration": 2000000000,
+            }
+        ],
         "next_cursor": "",
     }
     assert slack_api.calls[3][1]["cursor"] == "more"
@@ -99,7 +119,16 @@ async def test_list_members_keeps_unknown_identity_when_profile_lookup_fails(
     assert result == {
         "success": True,
         "channel_id": "C123",
-        "members": [{"id": "U123", "name": "U123", "github_login": None}],
+        "members": [
+            {
+                "id": "U123",
+                "name": "U123",
+                "github_login": None,
+                "status_text": None,
+                "status_emoji": None,
+                "status_expiration": None,
+            }
+        ],
         "next_cursor": "",
     }
 

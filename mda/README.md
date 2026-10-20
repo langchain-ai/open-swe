@@ -67,10 +67,13 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 Each deployment's only configuration is `OPEN_SWE_BACKEND_URL`, in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding only that deployment's backend URL:
 
 ```bash
-uv tool install managed-deepagents==0.9.1
 cd mda
-mda deploy --name open-swe-mda-staging --deployment-type prod
+uv run --locked --python 3.13 mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
+
+CI and manual deploys run the CLI from this project's locked environment, so its version follows the runtime dependency without a separate install pin. Keep `managed-deepagents` and `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping them; `--locked` rejects an out-of-date lockfile.
+
+The preview can also deploy an unreleased SDK commit, for a preview-labelled PR only. The PR takes `managed-deepagents` from that commit in `[tool.uv.sources]` (`git` on `langchain-ai/managed-deepagents-sdk`, a full `rev`, `subdirectory = "packages/pypi"`), pinned to that commit's package version, and relocks. A repository administrator approves the commit by setting the `PREVIEW_MDA_SOURCE_SHA` variable to it. The preview workflow then builds that commit's compiler and deploys with it and its runtime (`scripts/preview_mda_source.py`). A tree naming any other source fails its MDA deploy. Approving after a refused deploy takes effect on the next preview build that changes the tree, or a `workflow_dispatch` with `force`. Staging and production never build from source.
 
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 

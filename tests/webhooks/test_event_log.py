@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -17,7 +17,7 @@ from openswe.slack import routes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common, event_log
-from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, EventRefs
 
 
 async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
@@ -134,15 +134,16 @@ async def test_kinds_name_actions_and_narrow_by_prefix(
     assert opened.payload_shape == {"action": "string", "number": "number"}
 
 
-async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) -> None:
-    await EventLog.rotate_partitions(date(2026, 9, 1))
+async def test_rotation_keeps_the_retained_days_and_tomorrow(registry_db: None) -> None:
+    first = date(2026, 9, 1)
+    await EventLog.rotate_partitions(first)
     assert await _partitions() == {"event_log_20260901", "event_log_20260902"}
 
-    await EventLog.rotate_partitions(date(2026, 9, 3))
+    today = first + timedelta(days=RETAINED_DAYS)
+    await EventLog.rotate_partitions(today)
     assert await _partitions() == {
-        "event_log_20260902",
-        "event_log_20260903",
-        "event_log_20260904",
+        f"event_log_{day.strftime('%Y%m%d')}"
+        for day in (first + timedelta(days=1), today, today + timedelta(days=1))
     }
 
 

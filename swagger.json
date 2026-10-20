@@ -1304,6 +1304,19 @@
             "minLength": 1,
             "title": "Body",
             "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
           }
         },
         "required": [
@@ -4430,18 +4443,6 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_mcp_ptc": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Mcp Ptc"
-          },
           "experimental_monitor": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -4949,10 +4950,6 @@
       },
       "PullRequestSearchResult": {
         "properties": {
-          "body": {
-            "title": "Body",
-            "type": "string"
-          },
           "number": {
             "title": "Number",
             "type": "integer"
@@ -4985,7 +4982,6 @@
           "number",
           "url",
           "title",
-          "body",
           "state"
         ],
         "title": "PullRequestSearchResult",

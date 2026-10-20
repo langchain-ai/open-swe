@@ -4,13 +4,13 @@ version = "0.0.0"
 description = "Open SWE's coding agent and pull request reviewer as one Managed Deep Agent; the Open SWE backend serves their tools."
 requires-python = ">=3.12"
 dependencies = [
-    "managed-deepagents==0.9.1",
-    "deepagents==0.7.21",
-    "langchain[mcp]>=1.4.3",
-    "langchain-anthropic>=1.7.4",
-    "langchain-openai>=1.6.5,<2.0.0",
-    "langchain-quickjs>=0.3.8,<0.4.0",
-    "langsmith>=0.14.0",
+    "managed-deepagents==0.9.3",
+    "deepagents==0.7.28",
+    "langchain[mcp]>=1.4.6",
+    "langchain-anthropic>=1.7.6",
+    "langchain-openai>=1.7.2,<2.0.0",
+    "langchain-quickjs>=0.3.9,<0.4.0",
+    "langsmith>=0.14.11",
     "httpx2>=2.12.0,<3.0.0",
     "mcp>=2.2.0,<3",
     "pydantic>=2.11",

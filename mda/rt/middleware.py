@@ -33,7 +33,15 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import BaseModel, JsonValue
 
-from rt.backend import BackendCallError, OpenSweBackend, PhaseReply, run_body, subagent_of
+from rt.backend import (
+    BackendCallError,
+    BackendUnavailableError,
+    Hook,
+    OpenSweBackend,
+    PhaseReply,
+    run_body,
+    subagent_of,
+)
 from rt.models import ModelSpec, build_model
 from rt.tools import STATE_KEY, run_id
 
@@ -67,6 +75,7 @@ class RunState(AgentState):
     open_swe_state: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput, _merge]]
     open_swe_call: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput]]
     open_swe_prepared_for: NotRequired[Annotated[str, OmitFromOutput]]
+    open_swe_backend_failure: NotRequired[dict[str, JsonValue] | None]
 
 
 class _RunConfigurable(BaseModel):
@@ -225,18 +234,33 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             return self._invocation_id
         return _RunConfigurable.model_validate(get_config().get("configurable", {})).thread_id
 
+    @hook_config(can_jump_to=["end"])
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
-            return None
-        reply = await self._backend.phase("prepare", run_body(run_id(), state))
-        return {**_apply(reply), "open_swe_prepared_for": invocation}
+            return {"open_swe_backend_failure": None}
+        update = await self._phase("prepare", state)
+        if not update.get("open_swe_backend_failure"):
+            update.update(open_swe_prepared_for=invocation, open_swe_backend_failure=None)
+        return update
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        reply = await self._backend.phase("before_model", run_body(run_id(), state))
+        return await self._phase("before_model", state)
+
+    async def _phase(self, hook: Hook, state: RunState) -> dict[str, object]:
+        try:
+            reply = await self._backend.phase(hook, run_body(run_id(), state))
+        except BackendUnavailableError:
+            logger.warning(
+                "The backend interrupted a run phase", extra={"hook": hook}, exc_info=True
+            )
+            return {
+                "open_swe_backend_failure": {"run_id": run_id(), "phase": hook},
+                "jump_to": "end",
+            }
         update = _apply(reply)
-        if reply.system_prompt is not None:
+        if hook == "before_model" and reply.system_prompt is not None:
             update["open_swe_call"] = ModelCall(
                 system_prompt=reply.system_prompt,
                 hidden_tools=reply.hidden_tools,
@@ -273,9 +297,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        return _apply(await self._backend.phase("after_model", run_body(run_id(), state)))
+        return await self._phase("after_model", state)
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        failure = state.get("open_swe_backend_failure")
+        if failure and failure.get("run_id") == run_id():
+            return None
         try:
             return _apply(await self._backend.phase("after_agent", run_body(run_id(), state)))
         except BackendCallError:
