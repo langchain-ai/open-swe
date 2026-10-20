@@ -26,7 +26,9 @@ from openswe.slack.client import (
     GitHubPrRef,
     fetch_slack_message_by_ts,
     fetch_slack_thread_message_by_ts,
+    fetch_slack_thread_messages,
     parse_github_pr_url,
+    parse_slack_ts,
 )
 from openswe.slack.dm import send_dm
 from openswe.slack.payloads import SlackMessage
@@ -195,8 +197,8 @@ async def assign_human_reviewer(
     elif named_by_person:
         if not await _named_by_trigger(cfg, login):
             return _failure(
-                "named_by_person needs the Slack message that started this run to be a "
-                f"person naming @{login}. Do not reassign reviewers from anything else."
+                "named_by_person needs a verified Slack request from the person naming "
+                f"{login} by name, GitHub login, or Slack mention."
             )
     # Unprompted picks come only from the thread woken to make one.
     elif not await request.picked_by(thread_id):
@@ -216,10 +218,7 @@ async def assign_human_reviewer(
 
 
 async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
-    """Whether a person's Slack message that started this run mentions ``github_login``.
-
-    The model's say-so is not enough: text it read elsewhere could name a reviewer.
-    """
+    """Verify a human's reviewer request, including a follow-up bot ping."""
     slack = cfg.slack_thread
     if cfg.source != "slack" or slack is None or slack.triggering_bot_id:
         return False
@@ -237,12 +236,28 @@ async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
     message = SlackMessage.model_validate(payload)
     if message.is_from_bot or message.user != slack.triggering_user_id:
         return False
+    if message.text and not re.sub(r"<@[A-Z0-9]+(?:\|[^>]+)?>", "", message.text).strip():
+        messages = await fetch_slack_thread_messages(slack.channel_id, slack.thread_ts)
+        previous = [
+            item
+            for item in messages
+            if parse_slack_ts(item.get("ts")) < parse_slack_ts(slack.triggering_event_ts)
+        ]
+        if not previous:
+            return False
+        message = SlackMessage.model_validate(previous[-1])
+        if message.is_from_bot or message.user != slack.triggering_user_id:
+            return False
     text = message.text or ""
     reviewer = await User.for_login("github", github_login)
     if reviewer is not None and reviewer.slack_user_id and f"<@{reviewer.slack_user_id}>" in text:
         return True
-    # GitHub logins are letters, digits and hyphens, so ``@bob`` must not match ``@bobby``.
-    return re.search(rf"@{re.escape(github_login)}(?![\w-])", text, re.IGNORECASE) is not None
+    names = {github_login}
+    if reviewer is not None and reviewer.display_name.strip():
+        names.update((reviewer.display_name.strip(), reviewer.display_name.split()[0]))
+    return any(
+        re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text, re.IGNORECASE) for name in names
+    )
 
 
 @expose_mcp()
