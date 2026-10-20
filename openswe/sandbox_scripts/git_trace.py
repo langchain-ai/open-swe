@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict
 
 
-def git(path: Path, *args: str) -> bytes:
+def git(path: Path, *args: str, optional: bool = False) -> bytes:
     result = subprocess.run(
         ["git", "--no-optional-locks", "-C", str(path), *args],
         stdout=subprocess.PIPE,
@@ -20,6 +20,8 @@ def git(path: Path, *args: str) -> bytes:
         check=False,
     )
     if result.returncode:
+        if optional:
+            return b""
         raise ValueError("git inspection failed")
     return result.stdout
 
@@ -31,14 +33,16 @@ def snapshot(directory: str) -> Dict[str, Dict[str, Dict[str, str]]]:
     for path in paths:
         if path.is_symlink() or not (path / ".git").exists():
             continue
-        remote = git(path, "remote", "get-url", "origin").decode().strip()
+        remote = git(path, "remote", "get-url", "origin", optional=True).decode().strip()
         match = re.fullmatch(
             r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?/?",
             remote,
         )
         if not match:
             continue
-        head = git(path, "rev-parse", "HEAD").decode().strip()
+        head = git(path, "rev-parse", "--verify", "HEAD", optional=True).decode().strip()
+        if not head:
+            continue
         branch = git(path, "branch", "--show-current").decode().strip()
         digest = hashlib.sha256(git(path, "diff", "--no-ext-diff", "--no-textconv", "HEAD"))
         untracked = git(path, "ls-files", "--others", "--exclude-standard", "-z")

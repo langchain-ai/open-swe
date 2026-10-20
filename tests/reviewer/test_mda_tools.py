@@ -171,8 +171,9 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
         await OpenSweBackend("secret-token").phase("prepare", {})
 
 
+@pytest.mark.parametrize("next_trace_available", [True, False])
 async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, next_trace_available: bool
 ) -> None:
     from copy import deepcopy
 
@@ -181,6 +182,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     from langchain_core.tools import tool
     from langchain_core.tracers.langchain import LangChainTracer
     from langsmith import Client, tracing_context
+    from langsmith.run_trees import RunTree
     from rt.tracing import TurnTrace
 
     from openswe.remote_runtime.git_metadata import GitTarget, TurnGitMetadata
@@ -233,16 +235,21 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
 
     client.update_run.side_effect = update
     tracer = LangChainTracer(client=client, project_name="test")
+    parent = RunTree(name="external request", run_type="chain", ls_client=client)
     monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
     graph = create_deep_agent(
         model=FakeListChatModel(responses=["done"]),
         middleware=[BackendRunMiddleware(backend, "turn", trace_metadata=actor)],
     )
-    with tracing_context(enabled=True):
+    with tracing_context(enabled=True, parent=parent):
         await graph.ainvoke(
             {"messages": [("user", "hello")]},
-            {"callbacks": [tracer], "metadata": {"existing_key": "preserved"}},
+            {
+                "callbacks": [tracer],
+                "metadata": {"invocation_id": "turn", "existing_key": "preserved"},
+            },
         )
+    assert "ls_git_repo" not in parent.metadata
     created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
     assert any(run["run_type"] == "llm" for run in created.values())
     assert any(run["run_type"] == "tool" for run in created.values())
@@ -254,7 +261,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     attributed = {
         run_id
         for run_id, run in created.items()
-        if run["run_type"] in {"llm", "tool"} or run.get("parent_run_id") is None
+        if run["run_type"] in {"llm", "tool"} or run.get("parent_run_id") == parent.id
     }
     assert attributed <= reconciled.keys()
     for run_id in attributed:
@@ -268,6 +275,64 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert len({run["trace_id"] for run in created.values()}) == 1
     previous_update_count = len(updates)
     final["ls_git_branch"] = "Next/turn"
-    with tracing_context(enabled=True):
-        await graph.ainvoke({"messages": [("user", "next turn")]}, {"callbacks": [tracer]})
+    if not next_trace_available:
+
+        def unavailable_trace() -> None:
+            raise RuntimeError("trace lookup unavailable")
+
+        monkeypatch.setattr(TurnTrace, "current_root", staticmethod(unavailable_trace))
+    with tracing_context(enabled=True, parent=parent):
+        await graph.ainvoke(
+            {"messages": [("user", "next turn")]},
+            {"callbacks": [tracer], "metadata": {"invocation_id": "turn"}},
+        )
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
+
+
+@pytest.mark.parametrize("failure", ["lookup", "evidence", "export"])
+async def test_optional_trace_failures_do_not_change_successful_turn_output(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from langchain_core.tracers.langchain import LangChainTracer
+    from langsmith import Client, tracing_context
+    from rt.tracing import TurnTrace
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+
+    def unavailable_trace() -> None:
+        raise RuntimeError("trace lookup unavailable")
+
+    if failure == "lookup":
+        monkeypatch.setattr(TurnTrace, "current_root", staticmethod(unavailable_trace))
+
+    async def phase(name: str, body: object) -> PhaseReply:
+        if name == "before_model":
+            TurnTrace.record_evidence({"git_trace_pr:call": {"invocation": "turn", "targets": []}})
+        if failure == "evidence" and name == "after_model":
+            root = TurnTrace.current_root()
+            assert root is not None
+            root.metadata["open_swe_git_evidence"] = "invalid"
+        return PhaseReply()
+
+    def update(run_id: object, **kwargs: object) -> None:
+        if failure == "export" and "end_time" not in kwargs:
+            raise RuntimeError("metadata exporter unavailable")
+
+    monkeypatch.setattr(backend, "phase", phase)
+    client = MagicMock(spec=Client)
+    client.update_run.side_effect = update
+    graph = create_agent(
+        model=FakeListChatModel(responses=["done"]),
+        middleware=[BackendRunMiddleware(backend, "turn")],
+    )
+    with tracing_context(enabled=True):
+        result = await graph.ainvoke(
+            {"messages": [("user", "hello")]},
+            {
+                "callbacks": [LangChainTracer(client=client, project_name="test")],
+                "metadata": {"invocation_id": "turn"},
+            },
+        )
+    assert result["messages"][-1].content == "done"

@@ -8,7 +8,7 @@ from time import time_ns
 from typing import Final
 
 from langchain_core.runnables import RunnableConfig
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, ValidationError
 
 from openswe.run_config import RunConfig
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
@@ -20,7 +20,6 @@ BASELINE: Final = "git_trace_baseline"
 PR_PREFIX: Final = "git_trace_pr:"
 WORK_PREFIX: Final = "git_trace_work:"
 OBSERVED_TOOLS: Final = frozenset({"execute", "write_file", "edit_file", "delete"})
-_json = TypeAdapter(dict[str, JsonValue])
 
 
 class GitTarget(BaseModel):
@@ -35,6 +34,16 @@ class GitCheckout(GitTarget):
 
 class GitSnapshot(BaseModel):
     repos: dict[str, GitCheckout] = {}
+
+    @classmethod
+    def parse(cls, value: object) -> GitSnapshot | None:
+        if value is None:
+            return None
+        try:
+            return cls.model_validate(value)
+        except ValidationError:
+            logger.warning("Ignoring invalid git snapshot", exc_info=True)
+            return None
 
     def changes_since(self, before: GitSnapshot) -> list[GitTarget]:
         return [
@@ -83,7 +92,7 @@ class TurnGitMetadata:
             metadata["ls_attribution_identifier"] = self.attribution
         return metadata
 
-    async def snapshot(self) -> dict[str, JsonValue] | None:
+    async def snapshot(self) -> GitSnapshot | None:
         if not self.config.thread_id:
             return None
         try:
@@ -92,14 +101,18 @@ class TurnGitMetadata:
             result = await SandboxScript("git_trace.py", f"{root}/.open-swe/scripts").run(
                 backend, {"root": root}
             )
-            return result
+            return GitSnapshot.parse(result)
         except Exception:
             logger.warning("Could not capture turn git evidence", exc_info=True)
             return None
 
     async def begin(self) -> dict[str, JsonValue]:
+        snapshot = await self.snapshot()
         return {
-            BASELINE: {"invocation": self.config.invocation_id, "snapshot": await self.snapshot()}
+            BASELINE: {
+                "invocation": self.config.invocation_id,
+                "snapshot": snapshot.model_dump() if snapshot is not None else None,
+            }
         }
 
     def evidence(
@@ -120,16 +133,14 @@ class TurnGitMetadata:
         return {f"{PR_PREFIX if pr else WORK_PREFIX}{call_id}": observation.model_dump()}
 
     async def work_evidence(
-        self, before: dict[str, JsonValue] | None, call_id: str, observed_at: int
+        self, before: GitSnapshot | None, call_id: str, observed_at: int
     ) -> dict[str, JsonValue]:
         if before is None or (after := await self.snapshot()) is None:
             return {}
-        targets = GitSnapshot.model_validate(after).changes_since(
-            GitSnapshot.model_validate(before)
-        )
-        return self.evidence(targets, call_id, observed_at=observed_at)
+        return self.evidence(after.changes_since(before), call_id, observed_at=observed_at)
 
     async def reconcile(self, state: Mapping[str, object]) -> dict[str, JsonValue]:
+        """Select the earliest work target, preferring the repository's exact PR head ref."""
         metadata = self.actor
         observations: list[tuple[bool, GitObservation]] = []
         for key, value in state.items():
@@ -138,9 +149,12 @@ class TurnGitMetadata:
                 and isinstance(value, dict)
                 and value.get("invocation") == self.config.invocation_id
             ):
-                observations.append(
-                    (key.startswith(PR_PREFIX), GitObservation.model_validate(value))
-                )
+                try:
+                    observation = GitObservation.model_validate(value)
+                except ValidationError:
+                    logger.warning("Ignoring invalid git observation", exc_info=True)
+                    continue
+                observations.append((key.startswith(PR_PREFIX), observation))
         observations.sort(key=lambda item: item[1].observed_at)
         observed: list[GitTarget] = []
         pr_branches: dict[str, list[str]] = {}
@@ -151,14 +165,10 @@ class TurnGitMetadata:
                     pr_branches.setdefault(target.repo, []).append(target.branch)
         baseline = state.get(BASELINE)
         if isinstance(baseline, dict) and baseline.get("invocation") == self.config.invocation_id:
-            before = baseline.get("snapshot")
+            before = GitSnapshot.parse(baseline.get("snapshot"))
             after = await self.snapshot()
-            if isinstance(before, dict) and after is not None:
-                observed.extend(
-                    GitSnapshot.model_validate(after).changes_since(
-                        GitSnapshot.model_validate(before)
-                    )
-                )
+            if before is not None and after is not None:
+                observed.extend(after.changes_since(before))
         targets: dict[tuple[str, str], None] = {}
         for target in observed:
             branches = pr_branches.get(target.repo, [])
@@ -172,4 +182,4 @@ class TurnGitMetadata:
             metadata["ls_git_repo"] = repo
             if branch:
                 metadata["ls_git_branch"] = branch
-        return _json.validate_python(metadata)
+        return metadata

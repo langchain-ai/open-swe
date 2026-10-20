@@ -33,7 +33,8 @@ from openswe.dashboard.workspace_settings import (
 from openswe.database import postgres
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
-    _run_user,
+    TURN_ATTRIBUTION_FIELDS,
+    _run_user_metadata,
     create_durable_run,
     dispatch_agent_run,
 )
@@ -1060,18 +1061,8 @@ async def _enrich_run_start_command(
             **{
                 key: value
                 for key, value in run_metadata.items()
-                if key
-                not in {
-                    "visibility",
-                    "owner_type",
-                    "owner_login",
-                    "system_authorization",
-                    "user_id",
-                    "ls_attribution_identifier",
-                    "ls_git_repo",
-                    "ls_git_branch",
-                    "open_swe_git_targets",
-                }
+                if key not in TURN_ATTRIBUTION_FIELDS
+                and key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
@@ -1091,12 +1082,9 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    user = await _run_user({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
-    run_metadata["ls_repo_provider"] = "github"
-    if user is not None:
-        run_metadata["user_id"] = str(user.id)
-        if user.github_login:
-            run_metadata["ls_attribution_identifier"] = user.github_login
+    run_metadata.update(
+        await _run_user_metadata({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
+    )
     config_metadata = client_config.get("metadata")
     if not isinstance(config_metadata, dict):
         config_metadata = {}
@@ -1104,18 +1092,7 @@ async def _enrich_run_start_command(
         **client_config,
         "configurable": merged_configurable,
         "metadata": {
-            **{
-                k: v
-                for k, v in config_metadata.items()
-                if k
-                not in {
-                    "user_id",
-                    "ls_attribution_identifier",
-                    "ls_git_repo",
-                    "ls_git_branch",
-                    "open_swe_git_targets",
-                }
-            },
+            **{k: v for k, v in config_metadata.items() if k not in TURN_ATTRIBUTION_FIELDS},
             **run_metadata,
         },
     }
