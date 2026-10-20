@@ -8,7 +8,8 @@ from openswe.run_config import RunConfig
 from openswe.tools import access as tool_access
 from openswe.tools.access import Policy, ack, resolve_access
 
-_OWN = Policy(trusted="private", actor="owner", sole=ack("id"))
+_OWN = Policy(trusted="private", actor="owner", shared=ack("id"))
+_ADMIN = Policy(trusted="admin_thread", actor="admin", shared=ack("id"))
 _SLACK = {"channel_id": "C1", "thread_ts": "1.0"}
 
 
@@ -50,10 +51,10 @@ def _cfg(**fields: object) -> RunConfig:
 
 async def test_the_only_writer_of_a_shared_thread_gets_acknowledgements(metadata: dict) -> None:
     access = await resolve_access(_cfg())
-    assert access.mode(_OWN) == "sole"
+    assert access.mode(_OWN) == "shared"
     assert access.mode(Policy(trusted="private", actor="owner")) is None
-    assert _OWN.sole is not None
-    assert _OWN.sole({"id": "x", "prompt": "secret"}) == {"ok": True, "id": "x"}
+    assert _OWN.shared is not None
+    assert _OWN.shared({"id": "x", "prompt": "secret"}) == {"ok": True, "id": "x"}
 
 
 @pytest.mark.parametrize(
@@ -72,13 +73,28 @@ async def test_another_writer_or_non_personal_thread_loses_the_tools(
     assert (await resolve_access(_cfg())).mode(_OWN) is None
 
 
+async def test_admin_tools_work_where_every_writer_is_an_admin(
+    metadata: dict, slack: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
+    monkeypatch.setattr(tool_access.User, "email_for_login", AsyncMock(return_value=None))
+    metadata["participant_logins"] = ["alice", "bob"]
+    slack.append({"user": "UB"})
+    cfg = _cfg(source="slack", slack_thread=_SLACK)
+    resolved = await resolve_access(cfg)
+    assert resolved.mode(_ADMIN) == "shared"
+    assert resolved.mode(_OWN) is None
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
+    assert (await resolve_access(cfg)).mode(_ADMIN) is None
+
+
 async def test_automatic_runs_are_never_sole_writers(metadata: dict) -> None:
     assert (await resolve_access(_cfg(schedule_id="s-1"))).mode(_OWN) is None
 
 
 async def test_slack_thread_counts_every_human_poster(metadata: dict, slack: list) -> None:
     cfg = _cfg(source="slack", slack_thread=_SLACK)
-    assert (await resolve_access(cfg)).mode(_OWN) == "sole"
+    assert (await resolve_access(cfg)).mode(_OWN) == "shared"
     slack.append({"user": "UB"})
     assert (await resolve_access(cfg)).mode(_OWN) is None
     slack[-1] = {"user": "UC", "bot_id": "B1"}

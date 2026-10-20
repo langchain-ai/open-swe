@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 _READ = Policy(trusted="admin_thread", actor="admin")
-_WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("workspace.slug", "task_id"))
+_WRITE = Policy(trusted="admin_thread", actor="admin", shared=ack("workspace.slug", "task_id"))
 
 
 # Deliberately narrower than the record: the agent has no use for authorship

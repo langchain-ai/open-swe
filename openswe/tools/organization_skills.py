@@ -9,7 +9,7 @@ from openswe.skill_store import store
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.mcp_exposure import expose_mcp
 
-_WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("name", "skill.name"))
+_WRITE = Policy(trusted="admin_thread", actor="admin", shared=ack("name", "skill.name"))
 
 
 @expose_mcp(access="admin")

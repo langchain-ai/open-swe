@@ -54,6 +54,9 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% if sole_writer %}
 
 {% include "system/sole-writer.md" +%}
+{% elif admin_writers %}
+
+{% include "system/admin-writers.md" +%}
 {% endif %}
 
 {% include "system/shared-base.md" +%}

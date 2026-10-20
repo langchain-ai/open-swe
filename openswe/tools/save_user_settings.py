@@ -12,7 +12,7 @@ from openswe.utils.json_types import as_json_object
 
 @expose_mcp()
 @audit_tool()
-@access(Policy(trusted="private", actor="owner", sole=ack(), direct=True))
+@access(Policy(trusted="private", actor="owner", shared=ack(), direct=True))
 async def save_user_settings(settings: dict[str, SettingValue]) -> dict[str, object]:
     """Implement the `save_user_settings` tool."""
     login = await resolve_github_login(as_json_object(get_config()))
