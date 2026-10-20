@@ -19,6 +19,7 @@ from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from rt.models import ModelSpec, RunModels
+from rt.sandbox import SandboxSpec
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ Hook = Literal[
     "call",
     "tool_started",
     "tool_result",
+    # The thread's box was replaced: the backend connects to the fresh one.
+    "sandbox",
 ]
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
@@ -111,6 +114,8 @@ class Catalog(BaseModel):
     also_from_code: list[str] = []
     # Tools the model labels each call of, with what the label argument tells it.
     described: dict[str, str] = {}
+    # The thread's box; None runs every file and shell tool on the backend alone.
+    sandbox: SandboxSpec | None = None
 
 
 class PhaseReply(BaseModel):
