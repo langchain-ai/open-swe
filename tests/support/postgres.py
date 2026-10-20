@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from openswe.database import postgres
+from openswe.webhooks import event_log
 
 TEST_SCHEMA = "open_swe_test"
 
@@ -80,6 +81,8 @@ async def isolated_database(uri: str, monkeypatch: pytest.MonkeyPatch) -> AsyncI
         monkeypatch.setattr(postgres, "SCHEMA", TEST_SCHEMA)
         monkeypatch.setattr(postgres, "_ENGINE", engine)
         monkeypatch.setattr(postgres, "_ENGINE_URI", postgres.uri())
+        # The process remembers rotating event_log partitions, but this database has none yet.
+        monkeypatch.setattr(event_log, "_ROTATED_AT", None)
         try:
             yield
         finally:

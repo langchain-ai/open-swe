@@ -1,6 +1,5 @@
 """Artifact comment replies"""
 
-import sqlalchemy as sa
 from alembic import op
 
 revision = "11b8f4073839"
@@ -10,14 +9,24 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("thread_plan_comment", sa.Column("parent_id", sa.Text(), nullable=True))
-    op.create_foreign_key(
-        "thread_plan_comment_parent_fk",
-        "thread_plan_comment",
-        "thread_plan_comment",
-        ["thread_id", "parent_id"],
-        ["thread_id", "id"],
-        ondelete="SET NULL (parent_id)",
+    # Idempotent: the preview database already has both from a PR build that ran this
+    # migration before it merged, and re-adding them stopped every preview revision.
+    op.execute("ALTER TABLE thread_plan_comment ADD COLUMN IF NOT EXISTS parent_id text")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'thread_plan_comment_parent_fk'
+            ) THEN
+                ALTER TABLE thread_plan_comment
+                    ADD CONSTRAINT thread_plan_comment_parent_fk
+                    FOREIGN KEY (thread_id, parent_id)
+                    REFERENCES thread_plan_comment (thread_id, id)
+                    ON DELETE SET NULL (parent_id);
+            END IF;
+        END $$
+        """
     )
 
 
