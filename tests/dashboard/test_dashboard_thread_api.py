@@ -504,20 +504,15 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
 
 
 @pytest.mark.parametrize("creating", [False, True])
-@pytest.mark.parametrize("upload_error", [None, "upload_failed"])
-async def test_video_upload_stages_bytes_without_native_model_blocks(
-    monkeypatch: pytest.MonkeyPatch, creating: bool, upload_error: str | None
+async def test_video_submission_does_not_boot_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch, creating: bool
 ) -> None:
     metadata = {"model": _TEXT_ONLY_MODEL, "effort": "high"}
     created: dict[str, object] = {} if creating else {"metadata": metadata}
     _patch_new_thread_deps(monkeypatch, profile={})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
-    upload = AsyncMock(return_value=[SimpleNamespace(error=upload_error)])
-    monkeypatch.setattr(
-        thread_runs,
-        "ensure_sandbox_for_thread",
-        AsyncMock(return_value=SimpleNamespace(aupload_files=upload)),
-    )
+    provision = AsyncMock(side_effect=RuntimeError("sandbox is unavailable"))
+    monkeypatch.setattr(thread_runs, "ensure_sandbox_for_thread", provision, raising=False)
     command = {
         "method": "run.start",
         "params": {
@@ -539,26 +534,13 @@ async def test_video_upload_stages_bytes_without_native_model_blocks(
             "config": {"configurable": {}},
         },
     }
-    if upload_error:
-        with pytest.raises(HTTPException) as failure:
-            await thread_runs._enrich_run_start_command(
-                "video-tid",
-                "octocat",
-                command,
-                metadata={} if creating else metadata,
-                creating=creating,
-            )
-        assert failure.value.status_code == 502
-        return
     enriched = await thread_runs._enrich_run_start_command(
         "video-tid", "octocat", command, metadata={} if creating else metadata, creating=creating
     )
-    [(path, data)] = upload.call_args.args[0]
-    assert path.startswith("/workspace/.open-swe/uploads/") and path.endswith(".mp4")
-    assert ".." not in path and data == b"video"
     content = enriched["params"]["input"]["messages"][-1]["content"]
-    assert path in str(content)
-    assert not any(block.get("type") == "video" for block in content)
+    assert content[-1]["type"] == "video"
+    assert base64.b64decode(content[-1]["base64"]) == b"video"
+    provision.assert_not_awaited()
     if not creating:
         assert created["metadata"]["model"] == _TEXT_ONLY_MODEL
 
@@ -1580,12 +1562,6 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     patch_thread_module(monkeypatch, "append", fake_append)
     monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: FakeClient())
 
-    upload = AsyncMock(return_value=[SimpleNamespace(error=None)])
-    monkeypatch.setattr(
-        thread_runs,
-        "ensure_sandbox_for_thread",
-        AsyncMock(return_value=SimpleNamespace(aupload_files=upload)),
-    )
     content = [{"type": "text", "text": "also check the tests"}]
     if video:
         content.append(
@@ -1645,12 +1621,9 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     assert updates[-1]["participant_logins"] == {"teammate": True}
 
     if video:
-        [(path, data)] = upload.call_args.args[0]
-        assert path.startswith("/workspace/.open-swe/uploads/") and path.endswith(".mp4")
-        assert ".." not in path
-        assert data == b"video bytes"
-        assert path in queued.content["text"]
-        assert queued.content["images"] == []
+        [block] = queued.content["images"]
+        assert block["type"] == "video"
+        assert base64.b64decode(block["base64"]) == b"video bytes"
         [attachment] = command.attachments
         assert attachment.mime_type == "video/mp4"
         assert attachment.data == b"video bytes"

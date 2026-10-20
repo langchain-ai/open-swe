@@ -48,8 +48,8 @@ from openswe.input_messages import (
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
+from openswe.middleware.video_attachments import VIDEO_EXTENSIONS
 from openswe.prompts import prompt
-from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
 from openswe.slack.client import update_slack_trace_reply_for_web_handoff
 from openswe.slack.records import lookup_slack_thread_run_mapping
 from openswe.source_context import SourceContext
@@ -111,12 +111,6 @@ DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "events",
 )
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-_VIDEO_EXTENSIONS = {
-    "video/mp4": ".mp4",
-    "video/webm": ".webm",
-    "video/quicktime": ".mov",
-    "video/mpeg": ".mpeg",
-}
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
@@ -646,7 +640,7 @@ def _transcript_attachments(
                 position=position,
                 mime_type=image.mime_type,
                 file_name=image.file_name,
-                data=image.decode(_SUPPORTED_IMAGE_MIME_TYPES | frozenset(_VIDEO_EXTENSIONS)),
+                data=image.decode(_SUPPORTED_IMAGE_MIME_TYPES | frozenset(VIDEO_EXTENSIONS)),
             )
         )
         metadata.append(
@@ -659,46 +653,12 @@ def _transcript_attachments(
     return metadata, tuple(pending)
 
 
-async def _stage_dashboard_videos(
-    content: object,
-    videos: list[DashboardAttachmentBody],
-    *,
-    thread_id: str,
-    workspace: str | None,
-) -> object:
-    if not videos:
-        return content
-    files = [
-        (
-            f"/workspace/.open-swe/uploads/{uuid.uuid7()}{_VIDEO_EXTENSIONS[video.mime_type]}",
-            video.decode(frozenset(_VIDEO_EXTENSIONS)),
-        )
-        for video in videos
-    ]
-    backend = await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace)
-    results = await backend.aupload_files(files)
-    if len(results) != len(files) or any(result.error for result in results):
-        raise HTTPException(502, "could not stage video attachments in the sandbox")
-    blocks = (
-        [block for block in content if not isinstance(block, dict) or block.get("type") != "video"]
-        if isinstance(content, list)
-        else []
-    )
-    blocks.append(
-        {
-            "type": "text",
-            "text": prompt("runs/video-attachments", paths=[path for path, _ in files]),
-        }
-    )
-    return blocks
-
-
 def _command_videos(content: object, image_count: int) -> list[DashboardAttachmentBody]:
     videos = _dashboard_attachments_from_content(content, kind="video")
     if len(videos) + image_count > _MAX_DASHBOARD_IMAGES:
         raise HTTPException(422, "at most 5 attachments are supported")
     for video in videos:
-        video.decode(frozenset(_VIDEO_EXTENSIONS))
+        video.decode(frozenset(VIDEO_EXTENSIONS))
     return videos
 
 
@@ -978,9 +938,6 @@ async def _enrich_run_start_command(
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
 
-    content = await _stage_dashboard_videos(
-        content, command_videos, thread_id=thread_id, workspace=metadata.get("workspace")
-    )
     structured, injected, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
@@ -1215,9 +1172,6 @@ async def steer_running_thread(
     current_model = run_model if isinstance(run_model, str) else thread_model_choice(metadata)[0]
     image_blocks = _image_blocks(command_images, model_id=current_model)
 
-    content = await _stage_dashboard_videos(
-        content, command_videos, thread_id=thread_id, workspace=metadata.get("workspace")
-    )
     structured, _, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
@@ -1264,7 +1218,13 @@ async def steer_running_thread(
 
     payload: dict[str, Any] = {
         "text": _command_prompt_text(content),
-        "images": list(image_blocks),
+        "images": [
+            *image_blocks,
+            *[
+                {"type": "video", "base64": video.base64, "mime_type": video.mime_type}
+                for video in command_videos
+            ],
+        ],
         "sender": {
             "id": f"github:{login}",
             "platform": "github",

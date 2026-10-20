@@ -140,6 +140,7 @@ from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_
 from openswe.middleware.stale_workspace import warn_stale_workspace
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware
+from openswe.middleware.video_attachments import VideoAttachmentsMiddleware
 from openswe.model_request import (
     ModelSelectionDecision,
     infer_requested_model,
@@ -2087,6 +2088,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 if stop_summary_mode
                 else [check_message_queue_before_model, deliver_event_matches_before_model]
             ),
+            VideoAttachmentsMiddleware(agent_backend),
             RequireUserReplyMiddleware(
                 _registered_tool_name(slack_reply),
                 _registered_tool_name(slack_no_reply_needed),
