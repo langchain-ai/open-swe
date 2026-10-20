@@ -4,6 +4,7 @@ import logging
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from time import time_ns
 from typing import Final
 
 from langchain_core.runnables import RunnableConfig
@@ -17,12 +18,36 @@ from openswe.sandboxes.state import get_sandbox_backend
 logger = logging.getLogger(__name__)
 BASELINE: Final = "git_trace_baseline"
 PR_PREFIX: Final = "git_trace_pr:"
+WORK_PREFIX: Final = "git_trace_work:"
+OBSERVED_TOOLS: Final = frozenset({"execute", "write_file", "edit_file", "delete"})
 _json = TypeAdapter(dict[str, JsonValue])
 
 
 class GitTarget(BaseModel):
     repo: str
     branch: str
+
+
+class GitCheckout(GitTarget):
+    head: str = ""
+    dirty: str = ""
+
+
+class GitSnapshot(BaseModel):
+    repos: dict[str, GitCheckout] = {}
+
+    def changes_since(self, before: GitSnapshot) -> list[GitTarget]:
+        return [
+            GitTarget(repo=checkout.repo, branch=checkout.branch)
+            for path, checkout in self.repos.items()
+            if checkout != before.repos.get(path)
+        ]
+
+
+class GitObservation(BaseModel):
+    invocation: str | None
+    observed_at: int = 0
+    targets: list[GitTarget]
 
 
 _pr_targets: ContextVar[list[GitTarget] | None] = ContextVar("git_trace_pr_targets", default=None)
@@ -77,54 +102,74 @@ class TurnGitMetadata:
             BASELINE: {"invocation": self.config.invocation_id, "snapshot": await self.snapshot()}
         }
 
-    def pr_evidence(self, targets: list[GitTarget], call_id: str) -> dict[str, JsonValue]:
+    def evidence(
+        self,
+        targets: list[GitTarget],
+        call_id: str,
+        *,
+        pr: bool = False,
+        observed_at: int | None = None,
+    ) -> dict[str, JsonValue]:
         if not targets:
             return {}
-        return {
-            f"{PR_PREFIX}{call_id}": {
-                "invocation": self.config.invocation_id,
-                "targets": [target.model_dump() for target in targets],
-            }
-        }
+        observation = GitObservation(
+            invocation=self.config.invocation_id,
+            observed_at=observed_at if observed_at is not None else time_ns(),
+            targets=targets,
+        )
+        return {f"{PR_PREFIX if pr else WORK_PREFIX}{call_id}": observation.model_dump()}
+
+    async def work_evidence(
+        self, before: dict[str, JsonValue] | None, call_id: str, observed_at: int
+    ) -> dict[str, JsonValue]:
+        if before is None or (after := await self.snapshot()) is None:
+            return {}
+        targets = GitSnapshot.model_validate(after).changes_since(
+            GitSnapshot.model_validate(before)
+        )
+        return self.evidence(targets, call_id, observed_at=observed_at)
 
     async def reconcile(self, state: Mapping[str, object]) -> dict[str, JsonValue]:
         metadata = self.actor
-        targets: set[tuple[str, str]] = set()
+        observations: list[tuple[bool, GitObservation]] = []
         for key, value in state.items():
             if (
-                key.startswith(PR_PREFIX)
+                key.startswith((PR_PREFIX, WORK_PREFIX))
                 and isinstance(value, dict)
                 and value.get("invocation") == self.config.invocation_id
             ):
-                for target in TypeAdapter(list[GitTarget]).validate_python(value.get("targets")):
-                    targets.add((target.repo, target.branch))
-        pr_repos = {repo for repo, _ in targets}
+                observations.append(
+                    (key.startswith(PR_PREFIX), GitObservation.model_validate(value))
+                )
+        observations.sort(key=lambda item: item[1].observed_at)
+        observed: list[GitTarget] = []
+        pr_branches: dict[str, list[str]] = {}
+        for pr, observation in observations:
+            observed.extend(observation.targets)
+            if pr:
+                for target in observation.targets:
+                    pr_branches.setdefault(target.repo, []).append(target.branch)
         baseline = state.get(BASELINE)
         if isinstance(baseline, dict) and baseline.get("invocation") == self.config.invocation_id:
             before = baseline.get("snapshot")
             after = await self.snapshot()
             if isinstance(before, dict) and after is not None:
-                old = before.get("repos")
-                new = after.get("repos")
-                if isinstance(old, dict) and isinstance(new, dict):
-                    for path, checkout in new.items():
-                        if not isinstance(checkout, dict) or checkout == old.get(path):
-                            continue
-                        repo, branch = checkout.get("repo"), checkout.get("branch")
-                        if (
-                            isinstance(repo, str)
-                            and isinstance(branch, str)
-                            and repo not in pr_repos
-                        ):
-                            targets.add((repo, branch))
+                observed.extend(
+                    GitSnapshot.model_validate(after).changes_since(
+                        GitSnapshot.model_validate(before)
+                    )
+                )
+        targets: dict[tuple[str, str], None] = {}
+        for target in observed:
+            branches = pr_branches.get(target.repo, [])
+            branch = target.branch if not branches or target.branch in branches else branches[0]
+            targets.setdefault((target.repo, branch), None)
         if targets:
             metadata["open_swe_git_targets"] = [
-                {"repo": repo, "branch": branch} for repo, branch in sorted(targets)
+                {"repo": repo, "branch": branch} for repo, branch in targets
             ]
-        repos = {repo for repo, _ in targets}
-        if len(repos) == 1:
-            metadata["ls_git_repo"] = next(iter(repos))
-            branches = {branch for _, branch in targets}
-            if len(branches) == 1 and (branch := next(iter(branches))):
+            repo, branch = next(iter(targets))
+            metadata["ls_git_repo"] = repo
+            if branch:
                 metadata["ls_git_branch"] = branch
         return _json.validate_python(metadata)

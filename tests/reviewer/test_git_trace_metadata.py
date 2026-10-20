@@ -34,7 +34,7 @@ async def test_actual_checkout_wins_over_configured_repo(
     monkeypatch.setattr(git, "snapshot", AsyncMock(side_effect=[before, after]))
     state = await git.begin()
     state.update(
-        git.pr_evidence([GitTarget(repo="org/actual", branch="exact/PR-head")], "call")
+        git.evidence([GitTarget(repo="org/actual", branch="exact/PR-head")], "call", pr=True)
         if pr
         else {}
     )
@@ -50,24 +50,70 @@ async def test_actual_checkout_wins_over_configured_repo(
 
 
 @pytest.mark.parametrize(
-    ("targets", "expected_repo"),
+    "targets",
     [
-        ([], None),
-        ([GitTarget(repo="org/a", branch="one"), GitTarget(repo="org/b", branch="two")], None),
-        ([GitTarget(repo="org/a", branch="one"), GitTarget(repo="org/a", branch="two")], "org/a"),
+        [],
+        [GitTarget(repo="org/z", branch="first"), GitTarget(repo="org/a", branch="later")],
+        [GitTarget(repo="org/a", branch="z-first"), GitTarget(repo="org/a", branch="a-later")],
     ],
 )
-async def test_no_arbitrary_scalar_for_unchanged_or_ambiguous_turns(
-    monkeypatch: pytest.MonkeyPatch, targets: list[GitTarget], expected_repo: str | None
+async def test_first_target_populates_single_valued_git_keys(
+    monkeypatch: pytest.MonkeyPatch, targets: list[GitTarget]
 ) -> None:
     git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}})
     snapshot = {"repos": {"/workspace/a": {"repo": "org/a", "branch": "unchanged"}}}
     monkeypatch.setattr(git, "snapshot", AsyncMock(return_value=snapshot))
-    state = {**await git.begin(), **git.pr_evidence(targets, "call")}
+    state = {**await git.begin(), **git.evidence(targets, "call", pr=True)}
     result = await git.reconcile(state)
-    assert result.get("ls_git_repo") == expected_repo
-    assert "ls_git_branch" not in result
+    assert result.get("ls_git_repo") == (targets[0].repo if targets else None)
+    assert result.get("ls_git_branch") == (targets[0].branch if targets else None)
     assert result.get("open_swe_git_targets", []) == [target.model_dump() for target in targets]
+
+
+async def test_work_order_wins_over_snapshot_order_pr_order_and_completion_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}})
+    before: dict[str, JsonValue] = {
+        "repos": {
+            "/workspace/a": {"repo": "org/a", "branch": "main", "head": "old"},
+            "/workspace/z": {"repo": "org/z", "branch": "local", "head": "old"},
+        }
+    }
+    first: dict[str, JsonValue] = {
+        "repos": {
+            "/workspace/a": {"repo": "org/a", "branch": "main", "head": "old"},
+            "/workspace/z": {"repo": "org/z", "branch": "local", "head": "new"},
+        }
+    }
+    later: dict[str, JsonValue] = {
+        "repos": {
+            "/workspace/a": {"repo": "org/a", "branch": "later", "head": "new"},
+            "/workspace/z": {"repo": "org/z", "branch": "local", "head": "new"},
+        }
+    }
+    monkeypatch.setattr(git, "snapshot", AsyncMock(side_effect=[before, first, later, later]))
+    baseline = await git.begin()
+    first_work = await git.work_evidence(before, "first", 10)
+    later_work = await git.work_evidence(first, "later", 20)
+    state = {
+        **baseline,
+        **git.evidence(
+            [GitTarget(repo="org/a", branch="Later/head")], "pr-a", pr=True, observed_at=30
+        ),
+        **git.evidence(
+            [GitTarget(repo="org/z", branch="Exact/first-head")], "pr-z", pr=True, observed_at=40
+        ),
+        **later_work,
+        **first_work,
+    }
+    result = await git.reconcile(state)
+    assert result["ls_git_repo"] == "org/z"
+    assert result["ls_git_branch"] == "Exact/first-head"
+    assert result["open_swe_git_targets"] == [
+        {"repo": "org/z", "branch": "Exact/first-head"},
+        {"repo": "org/a", "branch": "Later/head"},
+    ]
 
 
 def test_snapshot_detects_more_edits_to_an_already_dirty_checkout(tmp_path: Path) -> None:

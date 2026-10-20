@@ -183,24 +183,46 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     from langsmith import Client, tracing_context
     from rt.tracing import TurnTrace
 
+    from openswe.remote_runtime.git_metadata import GitTarget, TurnGitMetadata
+
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     actor = {"ls_repo_provider": "github", "ls_attribution_identifier": "trigger"}
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
     backend = OpenSweBackend("secret-token")
+    git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}, "metadata": actor})
 
     @tool
     async def nested_call(text: str) -> str:
         """Call a nested runnable."""
-        TurnTrace.record_evidence({"git_trace_pr:nested": {"invocation": "turn", "targets": []}})
+        TurnTrace.record_evidence(
+            {
+                **git.evidence(
+                    [GitTarget(repo="org/actual", branch="local")], "work", observed_at=1
+                ),
+                **git.evidence(
+                    [GitTarget(repo="org/later", branch="later/head")],
+                    "pr-later",
+                    pr=True,
+                    observed_at=2,
+                ),
+                **git.evidence(
+                    [GitTarget(repo="org/actual", branch=final["ls_git_branch"])],
+                    "pr-first",
+                    pr=True,
+                    observed_at=3,
+                ),
+            }
+        )
         return await RunnableLambda(lambda value: value).ainvoke(text)
 
     async def phase(name: str, body: dict[str, object]) -> PhaseReply:
         if name == "before_model":
             await nested_call.ainvoke({"text": "nested"})
         if name == "after_agent":
-            assert body["state"] == {"git_trace_pr:nested": {"invocation": "turn", "targets": []}}
-        return PhaseReply(trace_metadata=final if name == "after_agent" else {})
+            assert isinstance(state := body["state"], dict)
+            return PhaseReply(trace_metadata=await git.reconcile(state))
+        return PhaseReply()
 
     monkeypatch.setattr(backend, "phase", phase)
     client = MagicMock(spec=Client)
@@ -238,6 +260,10 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     for run_id in attributed:
         metadata = reconciled[run_id]["extra"]["metadata"]
         assert metadata.items() >= final.items()
+        assert metadata["open_swe_git_targets"] == [
+            {"repo": "org/actual", "branch": "Exact/PR-head"},
+            {"repo": "org/later", "branch": "later/head"},
+        ]
         assert metadata["existing_key"] == "preserved"
     assert len({run["trace_id"] for run in created.values()}) == 1
     previous_update_count = len(updates)

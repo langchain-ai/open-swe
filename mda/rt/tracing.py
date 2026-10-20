@@ -50,9 +50,13 @@ class TurnTrace:
 
     @staticmethod
     def record_evidence(update: Mapping[str, JsonValue]) -> None:
-        evidence = {key: value for key, value in update.items() if key.startswith("git_trace_pr:")}
+        evidence = {
+            key: value
+            for key, value in update.items()
+            if key.startswith(("git_trace_pr:", "git_trace_work:"))
+        }
         if evidence and (root := TurnTrace.current_root()) is not None:
-            held = root.metadata.setdefault("open_swe_git_pr_evidence", {})
+            held = root.metadata.setdefault("open_swe_git_evidence", {})
             if isinstance(held, dict):
                 held.update(evidence)
 
@@ -61,7 +65,7 @@ class TurnTrace:
         if self.root is None:
             return {}
         return TypeAdapter(dict[str, JsonValue]).validate_python(
-            self.root.metadata.get("open_swe_git_pr_evidence", {})
+            self.root.metadata.get("open_swe_git_evidence", {})
         )
 
     async def reconcile(self, metadata: Mapping[str, JsonValue]) -> None:

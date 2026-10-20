@@ -67,7 +67,7 @@ from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
-from openswe.remote_runtime.git_metadata import TurnGitMetadata, collect_pr_targets
+from openswe.remote_runtime.git_metadata import OBSERVED_TOOLS, TurnGitMetadata, collect_pr_targets
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -705,6 +705,9 @@ class RemoteGraph:
             }
         state = session.state(body)
         await in_graph_context(session.config, partial(session.join, state))
+        git = TurnGitMetadata(session.config)
+        before = await git.snapshot() if body.name in OBSERVED_TOOLS else None
+        observed_at = time.time_ns()
         try:
             with within_namespace(body.namespace), collect_pr_targets() as pr_targets:
                 result = await session.surface.run(
@@ -736,7 +739,8 @@ class RemoteGraph:
                 "messages": dump_messages(_with_ids(result.messages)),
                 "update": {
                     **_json_state(result.update),
-                    **TurnGitMetadata(session.config).pr_evidence(pr_targets, body.tool_call_id),
+                    **git.evidence(pr_targets, body.tool_call_id, pr=True, observed_at=observed_at),
+                    **await git.work_evidence(before, body.tool_call_id, observed_at),
                 },
                 "events": [_json_or_text(e) for e in result.events],
             }
