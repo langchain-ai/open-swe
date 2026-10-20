@@ -52,10 +52,19 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
     assert "Alice" in result["formatted"]
     assert result["formatted"].index("First message") < result["formatted"].index("Second message")
     assert slack_api.calls == [
-        ("conversations.replies", {"channel": "C1", "ts": "1.0", "limit": "200"}),
         (
             "conversations.replies",
-            {"channel": "C1", "ts": "1.0", "limit": "200", "cursor": "page2"},
+            {"channel": "C1", "ts": "1.0", "limit": "200", "include_all_metadata": "1"},
+        ),
+        (
+            "conversations.replies",
+            {
+                "channel": "C1",
+                "ts": "1.0",
+                "limit": "200",
+                "cursor": "page2",
+                "include_all_metadata": "1",
+            },
         ),
         ("users.info", {"user": "U1"}),
     ]

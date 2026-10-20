@@ -874,6 +874,8 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         dispatched_timestamps=cast(set, kwargs.get("dispatched_timestamps", set())),
         run_described_person_ids=cast(set, kwargs.get("run_described_person_ids", set())),
         explicit_mention=bool(kwargs.get("explicit_mention", False)),
+        thread_id="this-thread",
+        reply_root_ts=cast(str, kwargs.get("reply_root_ts", "")),
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
 
@@ -1036,6 +1038,39 @@ def test_slack_context_never_replays_open_swes_own_replies(
     assert not any("system:open-swe" in text for text in contents)
     assert not any('sender="slack:UBOT"' in text for text in contents)
     assert any("please fix it" in text for text in contents)
+
+
+def _stamped(author: str) -> dict[str, object]:
+    return {"event_type": "open_swe_post", "event_payload": {"agent_thread_id": author}}
+
+
+@pytest.mark.parametrize("author", ["", "other-thread"])
+def test_a_reply_to_a_post_this_thread_did_not_write_arrives_with_that_post(author: str) -> None:
+    card = {
+        "ts": "1.0",
+        "user": "UBOT",
+        "bot_id": "B1",
+        "text": "Review the PR carefully yourself before clicking Mark ready for review.",
+        "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "Fix the login bug"}}],
+        "metadata": _stamped(author),
+    }
+    own_reply = {"ts": "2.0", "user": "UBOT", "bot_id": "B1", "text": "on it"}
+    contents = _context_input(
+        [card, {**own_reply, "metadata": _stamped("this-thread")}, {**own_reply, "ts": "3.0"}],
+        reply_root_ts="1.0",
+    )
+
+    replayed = [
+        text
+        for text in contents
+        if isinstance(text, str) and 'sender="system:open-swe-posts"' in text
+    ]
+    assert len(replayed) == 1
+    assert "Mark ready for review" in replayed[0] and "Fix the login bug" in replayed[0]
+    assert ("posted_by_thread" in replayed[0]) == bool(author)
+    assert not any("on it" in str(text) for text in contents)
+    trigger = ElementTree.fromstring(cast(list, contents[-1])[0]["text"])
+    assert trigger.get("in_reply_to") == "1.0"
 
 
 def test_slack_context_does_not_treat_a_lookalike_bot_as_open_swe(

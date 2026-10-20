@@ -146,6 +146,33 @@ def is_own_slack_message(message: dict[str, Any], bot_user_id: str) -> bool:
     return bool(bot_user_id) and message.get("user") == bot_user_id
 
 
+_POST_AUTHOR_EVENT = "open_swe_post"
+
+
+def _post_author_metadata() -> dict[str, object]:
+    """Slack message metadata naming the agent thread whose run is posting, "" outside any run."""
+    from openswe.run_config import RunConfig
+
+    return {
+        "event_type": _POST_AUTHOR_EVENT,
+        "event_payload": {"agent_thread_id": RunConfig.running_thread_id()},
+    }
+
+
+def slack_post_author_thread(message: Mapping[str, object]) -> str | None:
+    """The agent thread whose run posted this message of ours.
+
+    "" when it was posted outside any run, ``None`` when it carries no record, as
+    messages posted before posts were stamped do.
+    """
+    metadata = message.get("metadata")
+    if not isinstance(metadata, Mapping) or metadata.get("event_type") != _POST_AUTHOR_EVENT:
+        return None
+    payload = metadata.get("event_payload")
+    author = payload.get("agent_thread_id") if isinstance(payload, Mapping) else None
+    return author if isinstance(author, str) else None
+
+
 def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username: str) -> str:
     """Replace Slack bot ID mention token with @username."""
     if not text:
@@ -359,6 +386,15 @@ def _slack_card_text(message: Mapping[str, object]) -> str:
     return "\n".join(texts)[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS]
 
 
+def slack_post_text(message: Mapping[str, object]) -> str:
+    """Everything a reader sees in an app message: its fallback text and its card."""
+    text = message.get("text")
+    parts = [text.strip() if isinstance(text, str) else "", _slack_card_text(message)]
+    return "\n".join(dict.fromkeys(part for part in parts if part))[
+        :SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS
+    ]
+
+
 def format_forwarded_slack_attachments(attachments: Any) -> str:
     forwarded: list[str] = []
     rendered_count = 0
@@ -556,6 +592,7 @@ async def _post_slack_message_with_ts(
                 unfurl_links=unfurl_links,
                 unfurl_media=unfurl_media,
                 blocks=blocks or None,
+                metadata=_post_author_metadata(),
                 **broadcast,
             )
         message_ts = data.get("ts")
@@ -1556,10 +1593,16 @@ async def fetch_slack_thread_messages(
         while True:
             try:
                 payload = (
-                    await client.conversations_history(channel=channel_id, limit=200, cursor=cursor)
+                    await client.conversations_history(
+                        channel=channel_id, limit=200, cursor=cursor, include_all_metadata=True
+                    )
                     if session_channel
                     else await client.conversations_replies(
-                        channel=channel_id, ts=thread_ts, limit=200, cursor=cursor
+                        channel=channel_id,
+                        ts=thread_ts,
+                        limit=200,
+                        cursor=cursor,
+                        include_all_metadata=True,
                     )
                 )
             except SLACK_REQUEST_ERRORS as exc:

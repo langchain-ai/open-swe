@@ -28,6 +28,7 @@ Every `agent`, `reviewer` and `review-scout` thread runs on Managed Deep Agents,
 - Structured logging: static message, values in `extra`. Avoid standard `LogRecord` field names in `extra`.
 - Prefer exposing UI write operations as authorized agent tools. Destructive or sensitive actions may stay human-only. Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
 - A person's concierge DM thread must see everything in their DM with the bot: every post from outside its own run and every button click there must reach its context.
+- Every bot post records the agent thread whose run made it in Slack message metadata, and dispatch shows a thread any post of ours it did not write, so a reply to a card or DM arrives with what it replies to. Post only through `openswe/slack/client.py`, which stamps it.
 - Only the agent that owns a Slack channel thread posts in it. Background work hands it events instead: `wake_thread_owner` when it must act or report, `note_for_thread_owner` to queue informational ones for its next run. A DM sent for a thread passes `origin` to `send_dm`.
 - Use exceptions for Python failures, not `(value, error)` returns. Convert to user-facing errors only at API/tool boundaries.
 - Never discard an error: every `except` re-raises or logs what it swallowed.
