@@ -1,5 +1,7 @@
 import sys
+from contextlib import closing
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
@@ -287,6 +289,45 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
 
 
+async def test_backfill_preserves_completed_timestamps_and_does_not_finish_active_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patches: list[dict[str, object]] = []
+
+    def capture(client: Client, data: dict[str, object], **kwargs: object) -> None:
+        patches.append(deepcopy(data))
+
+    monkeypatch.setattr(Client, "_update_run", capture)
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    ended = started + timedelta(seconds=1)
+    with closing(
+        Client(api_key="test", api_url="https://trace.invalid", auto_batch_tracing=False)
+    ) as client:
+        root = RunTree(
+            name="turn",
+            run_type="chain",
+            start_time=started,
+            ls_client=client,
+            extra={"metadata": {"invocation_id": "turn"}},
+        )
+        child = root.create_child(
+            name="model",
+            run_type="llm",
+            start_time=started,
+            extra={"metadata": {"invocation_id": "turn"}},
+        )
+        child.end(outputs={"answer": "done"}, end_time=ended)
+        trace = TurnTrace()
+        trace.root = root
+        await trace.reconcile({"ls_git_repo": "org/repo", "ls_git_branch": "feature"})
+    child_patch = next(patch for patch in patches if patch["id"] == child.id)
+    assert child_patch["end_time"] == ended.isoformat()
+    assert [patch["id"] for patch in patches] == [child.id]
+    assert "outputs" not in child_patch
+    assert root.end_time is None
+    assert root.metadata["ls_git_repo"] == child.metadata["ls_git_repo"] == "org/repo"
+
+
 @pytest.mark.parametrize("failure", ["lookup", "evidence", "export"])
 async def test_optional_trace_failures_do_not_change_successful_turn_output(
     monkeypatch: pytest.MonkeyPatch, failure: str
@@ -311,7 +352,7 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
         return PhaseReply()
 
     def update(run_id: object, **kwargs: object) -> None:
-        if failure == "export" and "end_time" not in kwargs:
+        if failure == "export" and "outputs" not in kwargs:
             raise RuntimeError("metadata exporter unavailable")
 
     monkeypatch.setattr(backend, "phase", phase)
