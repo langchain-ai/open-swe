@@ -14,7 +14,6 @@ from openswe.github.sandbox_access import workspace_token
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import thread_token_repositories
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.tools.sandbox_preference import sandbox_only
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +46,6 @@ class _SearchResult(BaseModel):
 
 
 @expose_mcp()
-@sandbox_only
 async def search_pull_requests(
     query: str,
     repo: str | None = None,

@@ -80,8 +80,8 @@ sandbox-providers = [
 # or sandbox-providers extra).
 override-dependencies = ["deepagents==0.7.28", "wcmatch>=11.0"]
 constraint-dependencies = [
-    "langgraph-api>=0.16.1,<0.17",
-    "langgraph-runtime-inmem>=0.36.1,<0.37",
+    "langgraph-api>=0.16.2,<0.17",
+    "langgraph-runtime-inmem>=0.36.2,<0.37",
 ]
 
 [build-system]
@@ -98,6 +98,8 @@ packages = ["openswe"]
 line-length = 100
 # Scripts copied into sandboxes run on whatever python3 the image ships.
 per-file-target-version = { "openswe/sandbox_scripts/*.py" = "py38" }
+# Vendored upstream code keeps its own style.
+extend-exclude = ["vendor"]
 
 [tool.ruff.lint]
 # PLC2701 (private-name imports) is preview-only; explicit-preview-rules keeps every

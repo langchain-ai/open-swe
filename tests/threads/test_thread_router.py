@@ -1,6 +1,7 @@
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -524,3 +525,107 @@ async def test_under_custom_auth_only_the_backend_is_answered_from_the_index(
     # Anyone else's call reaches the Agent Server, whose rules show ada only her own threads.
     assert harness.reached_here == ([] if from_index else [f"/threads/{THREAD}"])
     assert (isinstance(read, dict) and read.get("metadata") == {"owner_login": "bob"}) is from_index
+
+
+_CHANNEL_CONVERSATION: list[dict[str, JsonValue]] = [
+    {"type": "human", "id": "h1", "content": "Fix MYT-18"},
+    {
+        "type": "ai",
+        "id": "a1",
+        "content": "",
+        "tool_calls": [{"id": "call-1", "name": "open_pr", "args": {}}],
+    },
+    {"type": "tool", "id": "t1", "tool_call_id": "call-1", "content": "PR #7 opened"},
+    {"type": "ai", "id": "a2", "content": "Opened PR #7."},
+]
+
+
+@pytest.mark.parametrize("channel", ["linear", "github"])
+async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
+    monkeypatch: pytest.MonkeyPatch, secret: None, channel: str
+) -> None:
+    """A review on a PR a channel conversation opened runs on the PR's own thread,
+    through the real router, starting with the conversation: the channel's thread
+    refuses the backend's runs (409)."""
+    from langgraph_sdk.client import LangGraphClient
+
+    from openswe import dispatch
+    from openswe.github import webhook
+    from openswe.thread_ids import pr_comment_thread_id
+    from openswe.users import User
+    from openswe.webhooks import common
+
+    harness = _Harness(monkeypatch)
+    await router.adopt_channel_run(THREAD, channel)
+
+    def reads(request: httpx.Request) -> httpx.Response:
+        harness.read.append((request.method, request.url.path))
+        if request.url.path == f"/threads/{THREAD}/state":
+            return httpx.Response(200, json={"values": {"messages": _CHANNEL_CONVERSATION}})
+        return httpx.Response(200, json={"values": {}})
+
+    harness.runtimes.mda_runtime._read_http = httpx.AsyncClient(
+        base_url=harness.runtimes.mda_runtime.url, transport=httpx.MockTransport(reads)
+    )
+    # MDA creates the PR's thread as the backend's own, through the recorded transport.
+    mda = harness.runtimes.mda_runtime
+    monkeypatch.setattr(mda, "sdk", lambda: LangGraphClient(mda._http))
+    backend = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=harness.router), base_url="http://backend"
+    )
+    monkeypatch.setattr(common, "get_client", lambda **kwargs: LangGraphClient(backend))
+    monkeypatch.setattr(dispatch, "get_client", lambda **kwargs: LangGraphClient(backend))
+    # GitHub itself stands in: the PR, its review, and who wrote it.
+    monkeypatch.setattr(
+        common,
+        "extract_pr_context",
+        AsyncMock(
+            return_value=(
+                {"owner": "o", "name": "r"},
+                7,
+                f"open-swe/{THREAD}",
+                "ada",
+                "https://github.com/o/r/pull/7",
+                42,
+                None,
+            )
+        ),
+    )
+    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="ada@example.com"))
+    monkeypatch.setattr(User, "known_logins", AsyncMock(return_value=frozenset({"ada"})))
+    monkeypatch.setattr(common, "get_or_resolve_thread_github_token", AsyncMock(return_value="t"))
+    review = {"body": "Rename the helper", "author": "ada", "type": "review"}
+    monkeypatch.setattr(common, "fetch_pr_event_comments", AsyncMock(return_value=[review]))
+    react = AsyncMock()
+    monkeypatch.setattr(common, "react_to_github_comment", react)
+
+    await webhook.process_github_pr_comment(
+        {
+            "action": "submitted",
+            "sender": {"login": "ada", "id": 1},
+            "review": {
+                "body": "Rename the helper",
+                "user": {"login": "ada"},
+                "state": "changes_requested",
+                "submitted_at": "2026-01-01T00:00:00Z",
+            },
+        },
+        "pull_request_review",
+        agent_thread_id=THREAD,
+    )
+
+    pr_thread = pr_comment_thread_id("o", "r", 7)
+    runs = [body for path, body in harness.forwarded if path.endswith("/runs")]
+    assert [path for path, _ in harness.forwarded if path.endswith("/runs")] == [
+        f"/threads/{pr_thread}/runs"
+    ]
+    input = runs[0]["input"]
+    assert isinstance(input, dict) and isinstance(messages := input["messages"], list)
+    # The conversation first, then the review.
+    assert messages[: len(_CHANNEL_CONVERSATION)] == _CHANNEL_CONVERSATION
+    assert "Rename the helper" in json.dumps(messages[len(_CHANNEL_CONVERSATION) :])
+    pr_metadata = (await index.get(pr_thread)).metadata  # type: ignore[union-attr]
+    assert pr_metadata["continues_thread"] == THREAD
+    # The channel's thread got no run, and the review its 👀 only once one started.
+    assert all(f"/threads/{THREAD}/runs" not in path for path, _ in harness.forwarded)
+    react.assert_awaited_once()
