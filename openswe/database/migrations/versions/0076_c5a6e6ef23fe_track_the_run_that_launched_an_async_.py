@@ -9,10 +9,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE task_delegation ADD COLUMN launch_run_id text")
-    op.execute("ALTER TABLE task_delegation ADD COLUMN launch_settled_at timestamptz")
+    op.execute("ALTER TABLE task_delegation ADD COLUMN IF NOT EXISTS launch_run_id text")
+    op.execute("ALTER TABLE task_delegation ADD COLUMN IF NOT EXISTS launch_settled_at timestamptz")
     op.execute(
-        "CREATE INDEX task_delegation_unsettled_launch ON task_delegation(launch_run_id) "
+        "CREATE INDEX IF NOT EXISTS task_delegation_unsettled_launch ON task_delegation(launch_run_id) "
         "WHERE launch_run_id IS NOT NULL AND launch_settled_at IS NULL"
     )
 
