@@ -248,7 +248,9 @@ async def test_cancelled_worker_only_reports_interruption_without_restarting_owe
     from openswe.tasks import service
 
     monkeypatch.setattr(
-        store.TaskDelegation, "get", AsyncMock(return_value=SimpleNamespace(cancelled=True))
+        store.TaskDelegation,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(cancelled=True, silenced=False)),
     )
     notify = AsyncMock()
     monkeypatch.setattr(service, "notify", notify)

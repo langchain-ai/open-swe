@@ -23,6 +23,7 @@ const workerSchema = z.object({
   instructions: z.string(),
   state: z.string(),
   run_status: z.string().nullish(),
+  error: z.string().nullish(),
   active: z.boolean(),
 })
 

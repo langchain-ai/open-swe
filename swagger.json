@@ -7836,6 +7836,17 @@
             "title": "Active",
             "type": "boolean"
           },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
           "instructions": {
             "title": "Instructions",
             "type": "string"
@@ -20486,7 +20497,7 @@
     },
     "/dashboard/api/threads/{thread_id}/workers/cancel": {
       "post": {
-        "description": "Cancel every worker of the thread's task that is still running.",
+        "description": "Stop every worker of the thread's task that is still running, without it reporting back.",
         "operationId": "api_cancel_thread_workers_dashboard_api_threads__thread_id__workers_cancel_post",
         "parameters": [
           {

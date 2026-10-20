@@ -223,7 +223,8 @@ async def record_event(
     content: str,
     *,
     task_event: TaskEventMetadata | None = None,
-) -> None:
+) -> bool:
+    """Record a message for the recipient; false when its sender was silenced and owes nothing."""
     config = await recipient_config(recipient_thread_id)
     workspace = config.get("workspace")
     if workspace and workspace != task.workspace.slug:
@@ -240,6 +241,19 @@ async def record_event(
         delegation = await session.get(store.TaskDelegation, recipient_thread_id)
         if delegation is not None and delegation.cancelled:
             raise ValueError("This worker was cancelled; create a new worker for further work")
+        # Checked under the recipient's lock, which a silencing stop takes to withdraw the
+        # sender's messages, so a report racing that stop is either withdrawn or never recorded.
+        sender = (
+            await session.get(store.TaskDelegation, str(task_event.sender_thread_id))
+            if task_event is not None
+            else None
+        )
+        if sender is not None and sender.silenced:
+            logger.info(
+                "Dropped a message from a silenced worker",
+                extra={"worker_thread_id": sender.worker_thread_id, "delivery_id": delivery_id},
+            )
+            return False
         await TaskMessage(
             thread_id=recipient_thread_id,
             task_id=task.id,
@@ -248,6 +262,7 @@ async def record_event(
             run_config=config,
             task_event=task_event.model_dump(mode="json") if task_event is not None else None,
         ).record(session)
+        return True
 
 
 async def notify(
@@ -258,8 +273,8 @@ async def notify(
     *,
     task_event: TaskEventMetadata | None = None,
 ) -> None:
-    await record_event(task, recipient_thread_id, delivery_id, content, task_event=task_event)
-    await TaskMessage.deliver(recipient_thread_id, "enqueue")
+    if await record_event(task, recipient_thread_id, delivery_id, content, task_event=task_event):
+        await TaskMessage.deliver(recipient_thread_id, "enqueue")
 
 
 async def owned_worker(
@@ -612,17 +627,22 @@ async def live_runs(thread_id: str) -> list[str]:
     return run_ids
 
 
-async def cancel_worker(worker_thread_id: str) -> None:
-    """Stop a worker for good: its live runs, the messages owed to it, and its wake-ups."""
+async def cancel_worker(worker_thread_id: str, *, silently: bool = False) -> None:
+    """Stop a worker for good: its live runs, the messages owed to it, and its wake-ups.
+
+    A worker cancelled ``silently`` also owes its coordinator nothing: what it has yet to
+    deliver is withdrawn, and its later reports, the interruption included, are dropped.
+    """
     async with postgres.session() as session:
         await session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
             {"key": f"event_match:{worker_thread_id}"},
         )
-        await session.execute(
+        coordinator_thread_id = await session.scalar(
             update(store.TaskDelegation)
             .where(store.TaskDelegation.worker_thread_id == worker_thread_id)
-            .values(cancelled=True)
+            .values(cancelled=True, **({"silenced": True} if silently else {}))
+            .returning(store.TaskDelegation.coordinator_thread_id)
         )
         await EventSubscription.forget(worker_thread_id, session=session)
         try:
@@ -638,6 +658,8 @@ async def cancel_worker(worker_thread_id: str) -> None:
                 thread_id=worker_thread_id, run_ids=run_ids, action="interrupt"
             )
     await TaskMessage.forget(worker_thread_id)
+    if silently and coordinator_thread_id is not None:
+        await TaskMessage.withdraw(coordinator_thread_id, sender_thread_id=worker_thread_id)
     await interrupt_transcript_turns(worker_thread_id, run_ids)
     await cancel_thread_wakeups(worker_thread_id)
 

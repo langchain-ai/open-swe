@@ -60,7 +60,12 @@ async def worker_finished(
     from openswe.tasks.service import notify
 
     delegation = await store.TaskDelegation.get(thread_id)
-    if delegation is not None and delegation.cancelled and status != "interrupted":
+    # A coordinator that cancels a worker still learns it was interrupted; a silenced one is gone.
+    if (
+        delegation is not None
+        and delegation.cancelled
+        and (status != "interrupted" or delegation.silenced)
+    ):
         logger.info(
             "Suppressed a cancelled worker's run outcome",
             extra={"worker_thread_id": thread_id, "run_id": run_id, "run_status": status},

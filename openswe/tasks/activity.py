@@ -22,8 +22,8 @@ from openswe.utils.thread_ops import langgraph_client
 
 type WorkerState = Literal["starting", "running", "reporting", "done", "failed", "cancelled"]
 
-# How long a hand-off to the coordinator may keep it unsettled before it counts as lost.
-HANDOFF_GRACE = timedelta(minutes=5)
+# How long a worker may take to start, or a hand-off to reach the coordinator, before it is lost.
+LOST_AFTER = timedelta(minutes=5)
 _LIVE_RUN_STATUSES = frozenset({"pending", "running"})
 
 
@@ -33,6 +33,7 @@ class WorkerActivity(BaseModel):
     instructions: str
     state: WorkerState
     run_status: str | None = None
+    error: str | None = None
 
     @computed_field
     @property
@@ -50,13 +51,16 @@ class WorkerActivity(BaseModel):
         if delegation.cancelled:
             return worker
         if delegation.launch_error:
-            worker.state = "failed"
-            return worker
+            return worker.failed(delegation.launch_error)
         try:
             runs = await langgraph_client().runs.list(delegation.worker_thread_id, limit=1)
         except NotFoundError:
-            return worker
+            runs = []
         if not runs:
+            if delegation.created_at < datetime.now(UTC) - LOST_AFTER:
+                return worker.failed(
+                    f"The worker did not start within {LOST_AFTER.seconds // 60} minutes."
+                )
             return worker
         latest = Run.model_validate(runs[0])
         worker.run_status = latest.status
@@ -68,13 +72,18 @@ class WorkerActivity(BaseModel):
             worker.state = "reporting"
         return worker
 
+    def failed(self, error: str) -> Self:
+        self.state = "failed"
+        self.error = error
+        return self
+
     @staticmethod
     async def _reported(delegation: store.TaskDelegation, run: Run) -> bool:
         """Whether the run's outcome reached the coordinator, or can no longer be expected to."""
         if run.updated_at is None:
             return True
         ended = run.updated_at if run.updated_at.tzinfo else run.updated_at.replace(tzinfo=UTC)
-        if ended < datetime.now(UTC) - HANDOFF_GRACE:
+        if ended < datetime.now(UTC) - LOST_AFTER:
             return True
         return await TaskMessage.recorded(
             delegation.coordinator_thread_id,
@@ -115,12 +124,13 @@ class CoordinatorActivity(BaseModel):
         return cls(
             run_id=run_ids[0] if run_ids else None,
             awaiting_delivery=await TaskMessage.awaiting_delivery(
-                thread_id, since=datetime.now(UTC) - HANDOFF_GRACE
+                thread_id, since=datetime.now(UTC) - LOST_AFTER
             ),
             workers=[await WorkerActivity.of(delegation) for delegation in delegations],
         )
 
-    async def cancel_workers(self) -> None:
+    async def stop_workers(self) -> None:
+        """Cancel the workers still active, as a person stopping the task: they report nothing."""
         for worker in self.workers:
             if worker.active:
-                await cancel_worker(worker.worker_thread_id)
+                await cancel_worker(worker.worker_thread_id, silently=True)

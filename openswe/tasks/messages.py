@@ -245,6 +245,23 @@ class TaskMessage(Base):
             return True
 
     @classmethod
+    async def withdraw(cls, thread_id: str, *, sender_thread_id: str) -> None:
+        """Discard what one sender still owes the thread."""
+        async with postgres.session() as session:
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                {"key": f"event_match:{thread_id}"},
+            )
+            await session.execute(
+                delete(cls).where(
+                    cls.thread_id == thread_id,
+                    cls.delivered_at.is_(None),
+                    func.jsonb_extract_path_text(cls.task_event, "sender_thread_id")
+                    == sender_thread_id,
+                )
+            )
+
+    @classmethod
     async def forget(cls, thread_id: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(cls).where(cls.thread_id == thread_id))

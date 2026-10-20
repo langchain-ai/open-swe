@@ -85,8 +85,8 @@ function workerProgress(): (activity: TaskActivity) => void {
       const previous = states.get(worker.worker_thread_id)
       if (previous === worker.state) continue
       states.set(worker.worker_thread_id, worker.state)
-      const outcome =
-        !worker.active && worker.run_status ? ` (${worker.run_status})` : ""
+      const reason = worker.error ?? worker.run_status
+      const outcome = !worker.active && reason ? ` (${reason})` : ""
       const instructions = worker.instructions.split("\n")[0] ?? ""
       const preview =
         previous === undefined
