@@ -342,6 +342,7 @@ ENV.var(
 )
 ENV.var("NOTION_STATUS_IN_PROGRESS", "Task status once work starts.", default="In progress")
 ENV.var("NOTION_STATUS_IN_REVIEW", "Task status once a PR is open.", default="In review")
+ENV.var("NOTION_STATUS_DONE", "Task status once its PR merges.", default="Done")
 ENV.var("NOTION_DESIGN_PROPERTY", "Relation from a task to its design documents.", default="Design")
 ENV.var("NOTION_DESIGN_STATUS_PROPERTY", "Status property of a design document.", default="Status")
 ENV.var(

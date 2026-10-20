@@ -4,7 +4,9 @@ Every model ignores fields it does not declare: Notion adds fields freely, and a
 page must not fail to parse because of a property type this module never uses.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from openswe.notion.settings import normalize_notion_id
 
@@ -182,6 +184,7 @@ class SchemaProperty(_NotionModel):
     status: SchemaOptions | None = None
     select: SchemaOptions | None = None
     multi_select: SchemaOptions | None = None
+    unique_id: UniqueId | None = None
 
     def option_names(self) -> set[str]:
         options = self.status or self.select or self.multi_select
@@ -196,6 +199,15 @@ class PageMarkdown(_NotionModel):
 class NotionDataSource(_NotionModel):
     id: str
     properties: dict[str, SchemaProperty] = Field(default_factory=dict)
+
+    def unique_id_filters(self, text: str) -> list[JsonValue]:
+        """Query filters for the pages whose ids, such as ``DIG-78``, ``text`` names."""
+        for name, prop in self.properties.items():
+            if prop.type == "unique_id" and prop.unique_id and prop.unique_id.prefix:
+                pattern = rf"\b{re.escape(prop.unique_id.prefix)}-(\d+)\b"
+                numbers = dict.fromkeys(int(n) for n in re.findall(pattern, text, re.IGNORECASE))
+                return [{"property": name, "unique_id": {"equals": n}} for n in numbers]
+        return []
 
 
 class PageList(_NotionModel):

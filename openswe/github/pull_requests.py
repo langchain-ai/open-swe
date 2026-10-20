@@ -565,6 +565,7 @@ class PullRequest(Base):
 
 class PullRequestPayload(BaseModel):
     number: int | None = None
+    html_url: str = ""
     title: str = ""
     body: str | None = None
     state: str = ""

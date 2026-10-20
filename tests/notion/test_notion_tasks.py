@@ -470,6 +470,29 @@ async def test_recording_the_task_s_current_pr_again_is_quiet(harness: Harness) 
     assert harness.notion.comment_writes() == []
 
 
+async def test_merged_pr_moves_its_linked_and_named_tasks_to_done(harness: Harness) -> None:
+    pr_url = "https://github.com/aeteq/sportsbook/pull/30"
+    linked = task_page(TASK, status="In review", number=78)
+    linked["properties"]["Pull Request URL"]["url"] = pr_url  # type: ignore[index]
+    named = task_page(OTHER_TASK, status="In progress", number=79, assignees=[ALICE])
+    blocked_id = "1111aaaa-0000-0000-0000-000000000003"
+    blocked = task_page(blocked_id, status="Blocked", number=80)
+    blocked["properties"]["Pull Request URL"]["url"] = pr_url  # type: ignore[index]
+    for page in (linked, named, blocked):
+        harness.notion.add(page)
+
+    await notifications.record_pull_request_merged(pr_url, "feat: show app version (dig-79)")
+
+    moved = [
+        path.rsplit("/", 1)[-1]
+        for method, path, _ in harness.notion.writes
+        if method == "PATCH" and path.startswith("/v1/pages/")
+    ]
+    assert moved == [TASK, OTHER_TASK]
+    assert harness.notion.property_writes() == [{"Status": {"status": {"name": "Done"}}}] * 2
+    assert harness.notion.comment_writes() == [f"🎉 Pull request merged: {pr_url}"] * 2
+
+
 async def test_notion_outage_does_not_raise_from_write_back(harness: Harness) -> None:
     harness.notion.add(task_page(TASK, status="In progress"))
     harness.notion.fail_writes = True

@@ -45,6 +45,7 @@ class NotionSettings:
     startable_statuses: frozenset[str]
     status_in_progress: str
     status_in_review: str
+    status_done: str
     design_property: str
     design_status_property: str
     design_approved_status: str
@@ -88,6 +89,7 @@ def notion_settings() -> NotionSettings:
         startable_statuses=_name_set(ENV.NOTION_STARTABLE_STATUSES.get()),
         status_in_progress=ENV.NOTION_STATUS_IN_PROGRESS.get(),
         status_in_review=ENV.NOTION_STATUS_IN_REVIEW.get(),
+        status_done=ENV.NOTION_STATUS_DONE.get(),
         design_property=ENV.NOTION_DESIGN_PROPERTY.get(),
         design_status_property=ENV.NOTION_DESIGN_STATUS_PROPERTY.get(),
         design_approved_status=ENV.NOTION_DESIGN_APPROVED_STATUS.get(),

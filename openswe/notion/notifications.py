@@ -12,7 +12,7 @@ from pydantic import JsonValue
 from openswe.notion.client import NOTION_ERRORS, notion_client, notion_writer
 from openswe.notion.models import NotionDataSource, NotionPage
 from openswe.notion.properties import people_ids, status_name, status_patch, url_patch
-from openswe.notion.settings import NotionSettings, notion_settings
+from openswe.notion.settings import NotionSettings, normalize_notion_id, notion_settings
 
 logger = logging.getLogger(__name__)
 
@@ -112,3 +112,36 @@ async def record_pull_request(
     if not already_recorded:
         verb = "opened" if opened else "linked"
         await post_notion_comment(page_id, f"✅ Pull request {verb}: {pr_url}")
+
+
+async def record_pull_request_merged(pr_url: str, pr_title: str) -> None:
+    """Move each open task the merged PR is linked from, or names in its title, to done."""
+    settings = notion_settings()
+    if not settings.api_key or not settings.task_data_source_ids:
+        return
+    tasks: dict[str, tuple[NotionPage, NotionDataSource]] = {}
+    try:
+        async with notion_client() as client:
+            for data_source_id in sorted(settings.task_data_source_ids):
+                schema = await client.get_data_source(data_source_id)
+                linked: JsonValue = {"property": settings.pr_property, "url": {"equals": pr_url}}
+                filter_: dict[str, JsonValue] = {
+                    "or": [linked, *schema.unique_id_filters(pr_title)]
+                }
+                for page in await client.query_data_source(data_source_id, filter_):
+                    tasks[normalize_notion_id(page.id)] = (page, schema)
+    except NOTION_ERRORS as exc:
+        logger.warning(
+            "Could not find the Notion tasks of a merged PR",
+            extra={"pr_url": pr_url, "error_type": type(exc).__name__},
+        )
+        return
+
+    # A task someone moved elsewhere by hand, such as blocked or cancelled, keeps its status.
+    open_statuses = settings.startable_statuses | {settings.status_in_review}
+    for page, schema in tasks.values():
+        if status_name(page, settings.status_property) not in open_statuses:
+            continue
+        patch = status_patch(page, settings.status_property, settings.status_done, schema)
+        if await update_task_properties(page, patch or {}):
+            await post_notion_comment(page.id, f"🎉 Pull request merged: {pr_url}")
