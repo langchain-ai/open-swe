@@ -230,7 +230,7 @@ test.describe("review page", () => {
     expect(await offset()).toBeCloseTo(collapsed, 1);
   });
 
-  test("renders human input above the description and the changes", async ({
+  test("collapses human input above the description and the changes", async ({
     page,
   }) => {
     const seeded = await page.request.post("/control/walkthrough", {
@@ -243,12 +243,17 @@ test.describe("review page", () => {
     expect(seeded.ok(), await seeded.text()).toBeTruthy();
 
     await openReview(page, pr);
-    const guidance = page.getByRole("region", {
+    const guidance = page.getByRole("group", {
       name: "Requested behavior",
     });
-    await expect(guidance).toContainText(
+    const request = guidance.getByText(
       "Asked to keep the constants in flat modules",
     );
+    await expect(guidance).toBeVisible();
+    await expect(request).toBeHidden();
+    const toggle = guidance.locator("summary");
+    await toggle.click();
+    await expect(request).toBeVisible();
 
     const description = await page.getByText(DESCRIPTION).boundingBox();
     const card = await guidance.boundingBox();
@@ -260,6 +265,8 @@ test.describe("review page", () => {
     expect(description!.y + description!.height).toBeLessThanOrEqual(
       changes!.y,
     );
+    await toggle.press("Enter");
+    await expect(request).toBeHidden();
   });
 
   test("dismissing a walkthrough reports whether there was one", async ({
