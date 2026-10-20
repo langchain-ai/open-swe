@@ -82,7 +82,11 @@ impl Blueprint {
 }
 
 /// A messaging channel `mda init --channel` can scaffold into a new project.
-pub use crate::channel::ChannelKind as InitChannel;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InitChannel {
+    /// Slack, written as `channels/slack.{ts,py}`.
+    Slack,
+}
 
 /// The durable memory a scaffolded `memory.ts` / `memory.py` declares.
 ///
@@ -257,8 +261,12 @@ fn add_requested_channels(summary: &mut InitSummary, blueprint: &Blueprint) -> R
         if added.contains(channel) {
             continue;
         }
-        let relative = crate::channel::init_channel(&summary.root, *channel)?;
-        summary.files.push(summary.root.join(&relative));
+        match channel {
+            InitChannel::Slack => {
+                let relative = crate::channel::init_slack(&summary.root)?;
+                summary.files.push(summary.root.join(&relative));
+            }
+        }
         added.push(*channel);
     }
     Ok(())
@@ -895,26 +903,6 @@ mod tests {
         let contents = fs::read_to_string(summary.root.join("channels/slack.ts")).unwrap();
 
         assert!(contents.contains("export const channel = channels.slack({});"));
-    }
-
-    #[test]
-    fn init_with_github_channel_writes_the_channel_file_and_readme_entry() {
-        let root = tempfile::tempdir().unwrap();
-        let requested = Blueprint {
-            channels: vec![InitChannel::GitHub],
-            ..blueprint(Language::TypeScript)
-        };
-
-        let summary = init(root.path(), &requested).unwrap();
-        let contents = fs::read_to_string(summary.root.join("channels/github.ts")).unwrap();
-        let readme = fs::read_to_string(summary.root.join("README.md")).unwrap();
-
-        assert!(contents.contains("export const channel = channels.github({"));
-        assert!(summary
-            .files
-            .iter()
-            .any(|file| file.ends_with("channels/github.ts")));
-        assert!(readme.contains("channels/github.ts"), "{readme}");
     }
 
     #[test]

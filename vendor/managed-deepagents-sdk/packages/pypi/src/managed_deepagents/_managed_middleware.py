@@ -110,9 +110,7 @@ def managed_middleware_overrides(
     if isinstance(config, Mapping) and isinstance(configurable, Mapping):
         sanitized = sanitize_configurable(configurable)
         if len(sanitized) != len(configurable):
-            overrides["config"] = cast(
-                "RunnableConfig", {**dict(config), "configurable": sanitized}
-            )
+            overrides["config"] = {**dict(config), "configurable": sanitized}
     elif hasattr(runtime, "configurable") and isinstance(configurable, Mapping):
         sanitized = sanitize_configurable(configurable)
         if len(sanitized) != len(configurable):

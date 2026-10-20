@@ -197,7 +197,13 @@ async def _context(owner: ScheduleOwner, configurable: Mapping[str, object]) -> 
         raise ValueError("Schedules require a deployment ID")
     if identity is None:
         raise ValueError("Schedules require an authenticated runtime")
-    owner_id = resolve_owner_id(selected, identity, deployment)
+    owner_id = resolve_owner_id(
+        {"type": "agent"}
+        if selected["type"] == "agent"
+        else {"type": "user", **({"id": selected["id"]} if "id" in selected else {})},
+        identity,
+        deployment,
+    )
     execution: ExecutionUser
     if selected["type"] == "agent":
         execution = {

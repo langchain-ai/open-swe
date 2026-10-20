@@ -61,21 +61,6 @@ pub(crate) struct AgentStaticConfig {
     /// `disable_memory` knob (any value). Memory moved to `memory.{ts,py}`, so
     /// its presence is a migration error rather than an opt-out.
     pub declares_disable_memory: bool,
-    /// Subagents marked `"async": True`, each built as its own graph.
-    pub async_subagents: Vec<AsyncSubagentGraph>,
-    /// Subagent entries MDA cannot read statically (helper calls, spreads, imports).
-    pub unreadable_subagents: usize,
-}
-
-/// An async subagent and the graph MDA builds for it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AsyncSubagentGraph {
-    /// Authored subagent `name`.
-    pub name: String,
-    /// Graph key in `langgraph.json`: `<assistant_id>--<normalized name>`.
-    pub graph_id: String,
-    /// Python export of its graph factory in the generated entry.
-    pub export: String,
 }
 
 /// Fields extracted before `name` validation (shared by language extractors).
@@ -86,8 +71,6 @@ struct AgentConfigFields {
     is_factory: bool,
     declares_disable_memory: bool,
     unsupported_keys: Vec<String>,
-    async_subagents: Vec<AgentNameValue>,
-    unreadable_subagents: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,8 +80,6 @@ struct PythonAgentExtract {
     is_factory: bool,
     declares_disable_memory: bool,
     unsupported_keys: Vec<String>,
-    async_subagents: Vec<AgentNameValue>,
-    unreadable_subagents: usize,
 }
 
 /// Read the agent file once and extract graph identity and static build metadata.
@@ -106,52 +87,12 @@ pub(crate) fn read_agent_static_config(project: &Project) -> Result<AgentStaticC
     let file_label = project.agent_file.display().to_string();
     let fields = read_agent_config_fields(project)?;
     let assistant_id = resolve_assistant_id(fields.name, &file_label, project.language)?;
-    let async_subagents =
-        resolve_async_subagents(fields.async_subagents, &assistant_id, &file_label)?;
     Ok(AgentStaticConfig {
         assistant_id,
         model: fields.model,
         is_factory: fields.is_factory,
         declares_disable_memory: fields.declares_disable_memory,
-        async_subagents,
-        unreadable_subagents: fields.unreadable_subagents,
     })
-}
-
-fn resolve_async_subagents(
-    values: Vec<AgentNameValue>,
-    assistant_id: &str,
-    file_label: &str,
-) -> Result<Vec<AsyncSubagentGraph>> {
-    let mut graphs: Vec<AsyncSubagentGraph> = Vec::new();
-    for value in values {
-        let AgentNameValue::Static(name) = value else {
-            return Err(categorized(
-                ErrorCategory::Project,
-                format!(
-                    "async subagents in {file_label} must set `name` and `\"async\": True` \
-                     as literals so MDA can build a graph for each one."
-                ),
-            ));
-        };
-        let normalized = normalize_name(&name)
-            .with_context(|| format!("invalid async subagent name {name:?} in {file_label}"))?;
-        let graph_id = format!("{assistant_id}--{normalized}");
-        validate_assistant_id(&graph_id, file_label)?;
-        if graphs.iter().any(|graph| graph.graph_id == graph_id) {
-            bail!(
-                "async subagent {name:?} in {file_label} has the same graph id as another \
-                 subagent ({graph_id}); names are compared after normalization"
-            );
-        }
-        let export = format!("agent__{}", normalized.replace('-', "_"));
-        graphs.push(AsyncSubagentGraph {
-            name,
-            graph_id,
-            export,
-        });
-    }
-    Ok(graphs)
 }
 
 /// Whether the authored agent still sets the retired memory opt-out.
@@ -299,8 +240,6 @@ fn extract_agent_config_typescript(source: &str, file_name: &str) -> Result<Agen
             is_factory: true,
             declares_disable_memory: false,
             unsupported_keys: Vec::new(),
-            async_subagents: Vec::new(),
-            unreadable_subagents: 0,
         });
     }
 
@@ -313,8 +252,6 @@ fn extract_agent_config_typescript(source: &str, file_name: &str) -> Result<Agen
             is_factory: false,
             declares_disable_memory: false,
             unsupported_keys: Vec::new(),
-            async_subagents: Vec::new(),
-            unreadable_subagents: 0,
         });
     };
 
@@ -328,18 +265,10 @@ fn extract_agent_config_typescript(source: &str, file_name: &str) -> Result<Agen
             is_factory: false,
             declares_disable_memory: false,
             unsupported_keys: Vec::new(),
-            async_subagents: Vec::new(),
-            unreadable_subagents: 0,
         });
     }
 
     let config = first_object_argument(call);
-    if config.is_some_and(object_declares_async_subagent) {
-        return Err(categorized(
-            ErrorCategory::Project,
-            format!("{file_name}: async subagents (`async: true`) are only supported in Python projects"),
-        ));
-    }
     Ok(AgentConfigFields {
         name: config
             .map(|object| object_name_property(object, &bindings))
@@ -352,20 +281,6 @@ fn extract_agent_config_typescript(source: &str, file_name: &str) -> Result<Agen
             .filter(|key| config.is_some_and(|object| object_property(object, key).is_some()))
             .map(str::to_string)
             .collect(),
-        async_subagents: Vec::new(),
-        unreadable_subagents: 0,
-    })
-}
-
-fn object_declares_async_subagent(object: &ObjectExpression<'_>) -> bool {
-    let Some(Expression::ArrayExpression(subagents)) = object_property(object, "subagents") else {
-        return false;
-    };
-    subagents.elements.iter().any(|element| {
-        matches!(
-            element.as_expression(),
-            Some(Expression::ObjectExpression(spec)) if object_property(spec, "async").is_some()
-        )
     })
 }
 
@@ -550,8 +465,6 @@ fn extract_agent_config_python(source: &str, file_label: &str) -> Result<AgentCo
         is_factory: extracted.is_factory,
         declares_disable_memory: extracted.declares_disable_memory,
         unsupported_keys: extracted.unsupported_keys,
-        async_subagents: extracted.async_subagents,
-        unreadable_subagents: extracted.unreadable_subagents,
     })
 }
 
@@ -679,8 +592,6 @@ mod tests {
                 is_factory: true,
                 declares_disable_memory: false,
                 unsupported_keys: Vec::new(),
-                async_subagents: Vec::new(),
-                unreadable_subagents: 0,
             }
         );
     }
@@ -903,154 +814,6 @@ mod tests {
 
     fn ts_name(source: &str) -> AgentNameValue {
         extract_name_from_typescript(source, "agent.ts").unwrap()
-    }
-
-    #[test]
-    fn typescript_async_subagents_are_rejected() {
-        let error = extract_agent_config_typescript(
-            "export const agent = defineDeepAgent({ name: 'lead', subagents: [{ name: 'r', async: true }] });\n",
-            "agent.ts",
-        )
-        .unwrap_err();
-
-        assert!(
-            error.to_string().contains("only supported in Python"),
-            "{error}"
-        );
-    }
-
-    fn py_async_subagents(source: &str) -> Vec<AgentNameValue> {
-        extract_agent_config_python(source, "agent.py")
-            .unwrap()
-            .async_subagents
-    }
-
-    #[test]
-    fn python_async_subagents_are_read_from_inline_and_bound_dicts() {
-        if !python3_available() {
-            return;
-        }
-        let names = py_async_subagents(concat!(
-            "writer = {'name': 'writer', 'description': 'd', 'async': True}\n",
-            "agent = define_deep_agent(name='lead', subagents=[\n",
-            "    {'name': 'researcher', 'description': 'd', 'async': True},\n",
-            "    writer,\n",
-            "    {'name': 'helper', 'description': 'd'},\n",
-            "    {'name': 'off', 'description': 'd', 'async': False},\n",
-            "    make_subagent(),\n",
-            "])\n",
-        ));
-
-        assert_eq!(
-            names,
-            [
-                AgentNameValue::Static("researcher".to_string()),
-                AgentNameValue::Static("writer".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn python_async_subagents_are_read_from_annotated_and_list_bindings() {
-        if !python3_available() {
-            return;
-        }
-        let names = py_async_subagents(concat!(
-            "researcher: ManagedAsyncSubAgent = {'name': 'researcher', 'description': 'd', 'async': True}\n",
-            "SUBAGENTS = [researcher]\n",
-            "agent = define_deep_agent(name='lead', subagents=SUBAGENTS)\n",
-        ));
-
-        assert_eq!(names, [AgentNameValue::Static("researcher".to_string())]);
-    }
-
-    #[test]
-    fn python_subagent_type_calls_and_none_are_not_unreadable() {
-        if !python3_available() {
-            return;
-        }
-        for source in [
-            concat!(
-                "helper = SubAgent(name='h', description='d', system_prompt='p')\n",
-                "agent = define_deep_agent(name='lead', subagents=[\n",
-                "    helper,\n",
-                "    SubAgent(name='s', description='d', system_prompt='p'),\n",
-                "    deepagents.CompiledSubAgent(name='c', description='d', runnable=graph),\n",
-                "])\n",
-            ),
-            "agent = define_deep_agent(name='lead', subagents=None)\n",
-        ] {
-            let fields = extract_agent_config_python(source, "agent.py").unwrap();
-            assert_eq!(fields.unreadable_subagents, 0, "{source}");
-            assert!(fields.async_subagents.is_empty(), "{source}");
-        }
-    }
-
-    #[test]
-    fn python_async_subagents_are_read_from_factories() {
-        if !python3_available() {
-            return;
-        }
-        let names = py_async_subagents(concat!(
-            "def agent(ctx):\n",
-            "    researcher = {'name': 'researcher', 'description': 'd', 'async': True}\n",
-            "    return define_deep_agent(name='lead', subagents=[researcher])\n",
-        ));
-
-        assert_eq!(names, [AgentNameValue::Static("researcher".to_string())]);
-    }
-
-    #[test]
-    fn python_async_subagents_with_computed_fields_are_dynamic() {
-        if !python3_available() {
-            return;
-        }
-        let names = py_async_subagents(concat!(
-            "agent = define_deep_agent(name='lead', subagents=[\n",
-            "    {'name': NAME, 'async': True},\n",
-            "    {'name': 'researcher', 'async': ENABLED},\n",
-            "])\n",
-        ));
-
-        assert_eq!(names, [AgentNameValue::Dynamic, AgentNameValue::Dynamic]);
-    }
-
-    #[test]
-    fn async_subagents_resolve_to_graphs_under_the_assistant() {
-        let graphs = resolve_async_subagents(
-            vec![AgentNameValue::Static("Deep Researcher".to_string())],
-            "lead",
-            "agent.py",
-        )
-        .unwrap();
-
-        assert_eq!(
-            graphs,
-            [AsyncSubagentGraph {
-                name: "Deep Researcher".to_string(),
-                graph_id: "lead--deep-researcher".to_string(),
-                export: "agent__deep_researcher".to_string(),
-            }]
-        );
-    }
-
-    #[test]
-    fn async_subagents_reject_dynamic_and_duplicate_names() {
-        let dynamic = resolve_async_subagents(vec![AgentNameValue::Dynamic], "lead", "agent.py");
-        assert!(dynamic.unwrap_err().to_string().contains("as literals"));
-
-        let duplicate = resolve_async_subagents(
-            vec![
-                AgentNameValue::Static("researcher".to_string()),
-                AgentNameValue::Static("Researcher".to_string()),
-            ],
-            "lead",
-            "agent.py",
-        );
-        assert!(duplicate
-            .unwrap_err()
-            .to_string()
-            .contains("names are compared after normalization"));
     }
 
     fn py_name(source: &str) -> Result<AgentNameValue> {

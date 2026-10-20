@@ -265,6 +265,15 @@ pub(in crate::compile) fn find_memory_entry(project: &Project) -> Option<PathBuf
         .find(|candidate| project.files.contains(candidate))
 }
 
+/// Locate the root `browser.py` that exports the named `browser` declaration,
+/// if the project opts into browser use. Python only: the TypeScript SDK has
+/// no browser tools.
+pub(in crate::compile) fn find_browser_entry(project: &Project) -> Option<PathBuf> {
+    let candidate = PathBuf::from("browser.py");
+    (project.language == Language::Python && project.files.contains(&candidate))
+        .then_some(candidate)
+}
+
 /// Read `sandbox/setup.sh`, if present.
 pub(crate) fn read_setup_script(project: &Project) -> Result<Option<String>> {
     let rel = PathBuf::from(SANDBOX_DIR).join(SANDBOX_SETUP_FILE);

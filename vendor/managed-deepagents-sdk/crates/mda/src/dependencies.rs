@@ -110,7 +110,7 @@ const TYPESCRIPT_MANAGED: &[Dependency] = &[
 const PYTHON_MANAGED: &[Dependency] = &[
     Dependency {
         name: "deepagents",
-        version: ">=0.7.27,<1",
+        version: ">=0.7.13,<1",
     },
     Dependency {
         name: "langchain[mcp]",
@@ -159,6 +159,15 @@ const PYTHON_MANAGED: &[Dependency] = &[
         version: ">=0.10.17",
     },
 ];
+
+/// PyPI package that drives a LangSmith browser from the deployment, for
+/// projects that declare one in `browser.py`. Pinned: the browser
+/// loads the extension from the same Stagehand release (`browser.py`'s
+/// `STAGEHAND_VERSION`).
+pub const PYTHON_BROWSER: Dependency = Dependency {
+    name: "stagehand",
+    version: "==4.3.0",
+};
 
 /// npm package that provides the local LangGraph in-memory dev server.
 ///
@@ -704,6 +713,17 @@ fn pyproject_entries_for_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_dependency_matches_the_runtime_stagehand_version() {
+        let runtime = include_str!("../../../packages/pypi/src/managed_deepagents/browser.py");
+        let version = runtime
+            .lines()
+            .find_map(|line| line.strip_prefix("STAGEHAND_VERSION = \""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap();
+        assert_eq!(PYTHON_BROWSER.version, format!("=={version}"));
+    }
 
     #[test]
     fn every_dependency_has_a_name_and_version() {

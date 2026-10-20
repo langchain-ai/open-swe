@@ -40,3 +40,16 @@ async def test_concurrent_claims_never_exceed_the_limit(registry_db) -> None:  #
     )
 
     assert sorted(outcomes) == ["claimed", "claimed", "limited", "limited", "limited"]
+
+
+async def test_cooldown_extends_never_shortens_and_expires(registry_db: None) -> None:
+    assert await event_claims.remaining("test", "cooldown") == 0
+    await asyncio.gather(
+        event_claims.defer("test", "cooldown", ttl=timedelta(seconds=30)),
+        event_claims.defer("test", "cooldown", ttl=timedelta(seconds=60)),
+    )
+    await event_claims.defer("test", "cooldown", ttl=timedelta(seconds=1))
+    assert 50 < await event_claims.remaining("test", "cooldown") <= 60
+    async with transaction() as conn:
+        await conn.execute(text("UPDATE event_claim SET expires_at = clock_timestamp()"))
+    assert await event_claims.remaining("test", "cooldown") == 0

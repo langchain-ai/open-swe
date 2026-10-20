@@ -50,7 +50,20 @@ const IGNORED_DIRS: &[&str] = &[
 ];
 
 /// Files never carried into the compiled output.
-const IGNORED_FILES: &[&str] = &[".env", ".DS_Store", "Thumbs.db", "desktop.ini"];
+///
+/// Other lockfiles would override the installer and the lock generated for
+/// the rewritten `package.json`.
+const IGNORED_FILES: &[&str] = &[
+    ".env",
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    "npm-shrinkwrap.json",
+];
 
 /// Candidate agent entry files paired with their language, in priority order.
 const AGENT_ENTRYPOINTS: &[(&str, Language)] = &[
@@ -422,6 +435,32 @@ mod tests {
         assert!(!project.files.contains(&PathBuf::from(".env.local")));
         assert!(!project.files.contains(&PathBuf::from(".DS_Store")));
         assert!(!project.files.contains(&PathBuf::from("Thumbs.db")));
+    }
+
+    #[test]
+    fn load_skips_other_package_manager_lockfiles() {
+        let root = tempfile::tempdir().unwrap();
+        write_stub_file(root.path(), "agent.ts");
+        write_stub_file(root.path(), "package-lock.json");
+        let lockfiles = [
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            "bun.lockb",
+            "npm-shrinkwrap.json",
+        ];
+        for name in lockfiles {
+            write_stub_file(root.path(), name);
+        }
+
+        let project = load(root.path()).unwrap();
+
+        assert!(project.files.contains(&PathBuf::from("package-lock.json")));
+        let kept: Vec<_> = lockfiles
+            .into_iter()
+            .filter(|name| project.files.contains(&PathBuf::from(name)))
+            .collect();
+        assert!(kept.is_empty(), "discovered foreign lockfiles: {kept:?}");
     }
 
     #[test]

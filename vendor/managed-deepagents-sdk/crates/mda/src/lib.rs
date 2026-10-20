@@ -20,7 +20,6 @@ pub mod deploy;
 pub mod dev;
 pub mod error;
 pub mod eval;
-pub(crate) mod github;
 pub(crate) mod http;
 pub mod init;
 pub mod install;

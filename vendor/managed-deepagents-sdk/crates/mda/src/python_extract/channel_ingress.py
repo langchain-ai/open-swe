@@ -1,11 +1,8 @@
 # Runs after python_extract/prelude.py, which binds `tree` to the parsed source.
-# Prints `INGRESS <provider>` when the module-level `channel` binding is a
-# first-party `channels.slack(...)`, `channels.github(...)` or
-# `channels.linear(...)` call, which mounts Events ingress, and a bare `INGRESS`
-# when the binding cannot be resolved.
+# Prints INGRESS when the module-level `channel` binding is a first-party
+# `channels.slack(...)` call, which mounts Events ingress.
 
 CHANNELS = "channels"
-INGRESS_PROVIDERS = {"slack", "github", "linear"}
 aliases = {CHANNELS}
 namespaces = set()
 bindings = {}
@@ -35,20 +32,18 @@ for node in tree.body:
         bind_assign([node.target], node.value)
 
 
-def ingress_factory_provider(func):
-    if not isinstance(func, ast.Attribute) or func.attr not in INGRESS_PROVIDERS:
-        return None
+def is_slack_factory(func):
+    if not isinstance(func, ast.Attribute) or func.attr != "slack":
+        return False
     obj = func.value
     if isinstance(obj, ast.Name) and obj.id in aliases:
-        return func.attr
-    if (
+        return True
+    return (
         isinstance(obj, ast.Attribute)
         and obj.attr == CHANNELS
         and isinstance(obj.value, ast.Name)
         and obj.value.id in namespaces
-    ):
-        return func.attr
-    return None
+    )
 
 
 def resolve(node, depth=0):
@@ -59,21 +54,19 @@ def resolve(node, depth=0):
     return node
 
 
-UNRESOLVED = ""
+def call_declares_ingress(call):
+    return is_slack_factory(call.func)
 
 
-def value_ingress(value, depth=0):
-    """Return the ingress provider, UNRESOLVED, or None for non-ingress values."""
+def value_declares_ingress(value, depth=0):
     if depth > 8:
-        return UNRESOLVED
+        return True
     value = resolve(value, depth)
     if value is None:
-        return UNRESOLVED
+        return True
     if isinstance(value, ast.Call):
-        return ingress_factory_provider(value.func)
-    if isinstance(value, ast.Name):
-        return UNRESOLVED
-    return None
+        return call_declares_ingress(value)
+    return isinstance(value, ast.Name)
 
 
 for node in ast.iter_child_nodes(tree):
@@ -84,9 +77,6 @@ for node in ast.iter_child_nodes(tree):
     else:
         continue
     names = {target.id for target in targets if isinstance(target, ast.Name)}
-    if "channel" not in names:
-        continue
-    provider = value_ingress(value)
-    if provider is not None:
-        print(f"INGRESS {provider}".rstrip())
+    if "channel" in names and value_declares_ingress(value):
+        print("INGRESS")
         break

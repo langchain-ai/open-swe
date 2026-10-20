@@ -649,9 +649,8 @@ mda delete
 
 `mda delete` (alias `mda destroy`) removes the LangSmith deployment, the tracing
 project created alongside it, the deployment's Context Hub repo (plus any legacy
-per-user or org child memory repos left from older runtimes), the managed
-sandboxes the deployment created, and the Agent Auth connections its channels
-set up. It asks for confirmation first; pass `--yes`
+per-user or org child memory repos left from older runtimes), and the managed
+sandboxes the deployment created. It asks for confirmation first; pass `--yes`
 to skip the prompt in scripts. Agent memory and thread history are not
 recoverable afterwards.
 
@@ -677,7 +676,8 @@ Before running `mda deploy`, make sure you have:
 - The package installed from the dev channel: `managed-deepagents@dev` or
   `uv tool install --prerelease allow managed-deepagents`.
 - `npm` on `PATH` for TypeScript deploys, because the CLI generates a lockfile
-  for the remote build.
+  for the remote build. Other lockfiles (`pnpm-lock.yaml`, `yarn.lock`,
+  `bun.lock`) are left out of the build.
 - `LANGSMITH_API_KEY` in your environment or project `.env`. If neither is set,
   `mda deploy` prompts for a key or let you press Enter to sign
   in with the browser; browser sign-in mints a 2-hour personal access token

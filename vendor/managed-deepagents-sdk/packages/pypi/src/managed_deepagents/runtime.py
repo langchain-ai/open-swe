@@ -54,11 +54,6 @@ from deepagents.backends.protocol import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph as CompiledAgent
 
-from managed_deepagents._async_subagents import (
-    async_subagent_definition,
-    reject_async_subagents,
-    route_async_subagents,
-)
 from managed_deepagents._channel import (
     Channel,
     collect_channels,
@@ -160,6 +155,7 @@ if TYPE_CHECKING:
     from managed_deepagents._managed_tools import RuntimeBackendFactory
     from managed_deepagents._sandbox_proxy import SandboxProxyConfigSync
     from managed_deepagents.agent_entry import AgentEntry
+    from managed_deepagents.define_browser import BrowserDefinition
     from managed_deepagents.define_deep_agent import DeepAgentSubAgent, DeepAgentTool
     from managed_deepagents.define_memory import MemoryDefinition, MemoryDefinitionLike
     from managed_deepagents.identity import (
@@ -556,6 +552,7 @@ class _ManagedCompileOptions(TypedDict):
     channels: list[Channel] | None
     identity: IdentityDefinitionLike | None
     memory: MemoryDefinitionLike | None
+    browser: BrowserDefinition | None
     trial_root_dir: str | None
 
 
@@ -599,6 +596,7 @@ def compile_managed_agent(
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
     memory: MemoryDefinitionLike | None = None,
+    browser: BrowserDefinition | None = None,
     trial_root_dir: str | None = None,
     runtime: ServerRuntime[ManagedRunContext] | None = None,
     run_context: object = None,
@@ -620,6 +618,7 @@ def compile_managed_agent(
             channels=channels,
             identity=identity,
             memory=memory,
+            browser=browser,
             trial_root_dir=trial_root_dir,
             runtime=runtime,
             run_context=run_context,
@@ -643,19 +642,14 @@ async def compile_managed_agent_async(
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
     memory: MemoryDefinitionLike | None = None,
+    browser: BrowserDefinition | None = None,
     trial_root_dir: str | None = None,
     runtime: ServerRuntime[ManagedRunContext] | None = None,
     run_context: object = None,
     is_run: bool = True,
     report_telemetry: bool = True,
-    async_subagent_graphs: Mapping[str, str] | None = None,
-    async_subagent: str | None = None,
 ) -> CompiledAgent:
-    """Resolve one entry and compile it with the current managed run context.
-
-    Generated entries pass `async_subagent_graphs` to the lead, and
-    `async_subagent` to build that async subagent's own graph instead.
-    """
+    """Resolve one entry and compile it with the current managed run context."""
     if runtime is not None:
         execution = runtime.execution_runtime
         is_run = execution is not None
@@ -680,10 +674,6 @@ async def compile_managed_agent_async(
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
     definition = await resolve_agent_definition(entry, factory_runtime)
-    if async_subagent is not None:
-        definition = async_subagent_definition(definition, async_subagent)
-    else:
-        definition = route_async_subagents(definition, async_subagent_graphs or {})
     return await _compile_resolved_managed_agent_async(
         definition,
         config,
@@ -697,6 +687,7 @@ async def compile_managed_agent_async(
         channels=channels,
         identity=identity,
         memory=memory,
+        browser=browser,
         trial_root_dir=trial_root_dir,
         run_context=run_context,
         is_run=is_run,
@@ -720,6 +711,7 @@ async def _compile_resolved_managed_agent_async(
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
     memory: MemoryDefinitionLike | None = None,
+    browser: BrowserDefinition | None = None,
     trial_root_dir: str | None = None,
     run_context: object = None,
     is_run: bool = True,
@@ -763,6 +755,7 @@ async def _compile_resolved_managed_agent_async(
         "channels": channels,
         "identity": identity,
         "memory": run_memory,
+        "browser": browser,
         "trial_root_dir": trial_root_dir,
     }
     context_schema = definition.config.get("context_schema")
@@ -859,6 +852,7 @@ def _compile_managed_agent(
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
     memory: MemoryDefinitionLike | None = None,
+    browser: BrowserDefinition | None = None,
     trial_root_dir: str | None = None,
     user_access: UserMemoryAccess,
     allow_agent: bool,
@@ -964,6 +958,8 @@ def _compile_managed_agent(
     # Save files and checkpoint their paths before credential interrupts;
     # resume deliveries do not include the original file event.
     _prepend_slack_files_middleware(merged, channels)
+    # Before the seam, so the browser's tools get the thread's sandbox backend.
+    _append_browser_middleware(merged, browser)
     _apply_runtime_seam(merged, backend_factory)
 
     # Connectors: run each connector's ``tools`` hook and append the results to
@@ -1219,7 +1215,7 @@ def _declared_memory_layers(memory: MemoryDefinitionLike | None) -> MemoryLayers
     scope = config.get("scope")
     # Dynamic boundary: the declaration is imported from the author's module, so
     # its shape is checked here rather than trusted.
-    return cast("MemoryLayers", list(scope)) if isinstance(scope, list) else []
+    return list(scope) if isinstance(scope, list) else []
 
 
 def _select_system_prompt(
@@ -1275,7 +1271,6 @@ def compile_managed_agent_for_eval(
     The model override is applied to a copied definition so normal dev/deploy
     behavior remains unchanged.
     """
-    reject_async_subagents(definition)
     eval_definition = _prepare_eval_definition(definition, config, model_override)
 
     return compile_managed_agent(
@@ -1313,7 +1308,6 @@ async def compile_agent_factory_for_eval_async(
     definition = await resolve_agent_definition(
         entry, _internal_server_runtime(config, context, is_run=True)
     )
-    reject_async_subagents(definition)
     eval_definition = _prepare_eval_definition(definition, config, model_override)
     return await _compile_resolved_managed_agent_async(
         eval_definition,
@@ -1414,9 +1408,6 @@ def _wrap_declarative_subagents(
 
 def _prepend_schedule_delivery_middleware(merged: dict[str, object]) -> None:
     """Install schedule channel delivery middleware ahead of authored hooks."""
-    from managed_deepagents._channels.http.reply import (  # noqa: PLC0415
-        create_channel_reply_middleware,
-    )
     from managed_deepagents._channels.schedule_delivery import (  # noqa: PLC0415
         create_schedule_delivery_middleware,
     )
@@ -1426,8 +1417,7 @@ def _prepend_schedule_delivery_middleware(merged: dict[str, object]) -> None:
     authored = (
         list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
     )
-    # An HTTP channel run posts its own answer, before authored hooks as in TS.
-    merged["middleware"] = [schedule_mw, create_channel_reply_middleware(), *authored]
+    merged["middleware"] = [schedule_mw, *authored]
 
 
 def _prepend_credential_gate_middleware(
@@ -1508,6 +1498,21 @@ def _prepend_slack_files_middleware(
             SlackFileTransferMiddleware(),
             *(cast("Iterable[object]", authored_middleware) if authored_middleware else []),
         ]
+
+
+def _append_browser_middleware(
+    merged: dict[str, object], browser: BrowserDefinition | None
+) -> None:
+    """Give the agent a browser when the project declares one in ``browser.py``."""
+    if browser is None:
+        return
+    from managed_deepagents.browser import BrowserMiddleware  # noqa: PLC0415
+
+    authored_middleware = merged.get("middleware")
+    merged["middleware"] = [
+        *(cast("Iterable[object]", authored_middleware) if authored_middleware else []),
+        BrowserMiddleware(scope=browser.scope, idle_ttl_seconds=browser.idle_ttl_seconds),
+    ]
 
 
 def _append_channel_response_format_middleware(merged: dict[str, object]) -> None:
@@ -2279,7 +2284,7 @@ def _config_value(config: Mapping[str, object] | None, key: str) -> str | None:
     return None
 
 
-def _managed_deployment_name(env: Mapping[str, str] | None = None) -> str | None:
+def _managed_deployment_name() -> str | None:
     """Deployment this runtime belongs to, used to name the sandboxes it creates.
 
     ``MDA_DEPLOYMENT_NAME`` is injected by ``mda deploy``;
@@ -2287,12 +2292,10 @@ def _managed_deployment_name(env: Mapping[str, str] | None = None) -> str | None
     when present. ``None`` under local ``mda dev``, where sandboxes stay unnamed
     and LangSmith generates a name.
     """
-    values = os.environ if env is None else env
     return (
-        _string_option(values.get("LANGSMITH_DEPLOYMENT_NAME"))
-        or _string_option(values.get("MDA_DEPLOYMENT_NAME"))
-        # Sandboxes only: a link built from a given env (Studio's) names the deployment.
-        or (_local_dev_deployment_name() if env is None else None)
+        _string_option(os.environ.get("LANGSMITH_DEPLOYMENT_NAME"))
+        or _string_option(os.environ.get("MDA_DEPLOYMENT_NAME"))
+        or _local_dev_deployment_name()
     )
 
 

@@ -6,10 +6,9 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::json;
 
-use crate::agent_config::AsyncSubagentGraph;
 use crate::project::Language;
 
-use super::{IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
+use super::{BROWSER_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
 
 /// Encode `value` as a string literal valid in both TypeScript and Python.
 ///
@@ -61,8 +60,9 @@ pub(super) struct EntryInputs<'a> {
     /// Module specifier for the root `memory` declaration, if the project opts
     /// into durable memory. Absent means the runtime mounts nothing.
     pub(super) memory_import: Option<&'a str>,
-    /// Async subagents that get their own graph factory (served Python only).
-    pub(super) async_subagents: &'a [AsyncSubagentGraph],
+    /// Module specifier for the root `browser` declaration (Python only), if
+    /// the project opts into browser use.
+    pub(super) browser_import: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -320,6 +320,11 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
             "from {memory_import} import {MEMORY_EXPORT} as _memory\n"
         ));
     }
+    if let Some(browser_import) = inputs.browser_import {
+        out.push_str(&format!(
+            "from {browser_import} import {BROWSER_EXPORT} as _browser\n"
+        ));
+    }
     out.push('\n');
 
     // Keyword arguments handed to the runtime.
@@ -390,33 +395,10 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     if inputs.memory_import.is_some() {
         kwargs.push("memory=_memory".to_string());
     }
-    out.push('\n');
-
-    let subagents = inputs.async_subagents;
-    // Async subagents run with the lead's managed kwargs; channels stay with the lead.
-    let mut subagent_kwargs: Vec<String> = kwargs
-        .iter()
-        .filter(|kwarg| !kwarg.starts_with("channels="))
-        .cloned()
-        .collect();
-    subagent_kwargs.push("runtime=runtime".to_string());
-    if !subagents.is_empty() {
-        let entries: Vec<String> = subagents
-            .iter()
-            .map(|subagent| {
-                format!(
-                    "{}: {}",
-                    encode_string_literal(&subagent.name),
-                    encode_string_literal(&subagent.graph_id)
-                )
-            })
-            .collect();
-        out.push_str(&format!(
-            "_async_subagent_graphs = {{{}}}\n",
-            entries.join(", ")
-        ));
-        kwargs.push("async_subagent_graphs=_async_subagent_graphs".to_string());
+    if inputs.browser_import.is_some() {
+        kwargs.push("browser=_browser".to_string());
     }
+    out.push('\n');
 
     let await_prefix = if matches!(inputs.context, RuntimeContext::Eval { .. }) {
         if inputs.factory {
@@ -442,14 +424,6 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
         out.push_str(&format!(
             "    return {await_prefix}{compile_fn}(_definition, config, {})\n",
             kwargs.join(", ")
-        ));
-    }
-    for subagent in subagents {
-        out.push_str(&format!(
-            "\n\nasync def {}(config, runtime: ServerRuntime):\n    return await {compile_fn}(_definition, config, {}, async_subagent={})\n",
-            subagent.export,
-            subagent_kwargs.join(", "),
-            encode_string_literal(&subagent.name)
         ));
     }
     out
@@ -611,8 +585,6 @@ pub(super) fn generate_managed_http_module(
                 out.push_str(&format!(
                     "import {{ channels }} from \"{channels_import}\";\n"
                 ));
-                // Channels read project files (an app icon) relative to the build.
-                out.push_str("import { fileURLToPath } from \"node:url\";\n");
             }
             let mut fields: Vec<&str> = Vec::new();
             if identity_import.is_some() {
@@ -623,7 +595,6 @@ pub(super) fn generate_managed_http_module(
             }
             if channels_import.is_some() {
                 fields.push("channels");
-                fields.push("root: fileURLToPath(new URL(\".\", import.meta.url))");
             }
             out.push_str(&format!(
                 "\nexport const app = buildManagedHttpApp({{ {} }});\n",
@@ -653,8 +624,6 @@ pub(super) fn generate_managed_http_module(
                 out.push_str(&format!(
                     "from {channels_import} import channels as _channels\n"
                 ));
-                // Channels read project files (an app icon) relative to the build.
-                out.push_str("from pathlib import Path as _Path\n");
             }
             let mut args: Vec<&str> = Vec::new();
             if identity_import.is_some() {
@@ -665,7 +634,6 @@ pub(super) fn generate_managed_http_module(
             }
             if channels_import.is_some() {
                 args.push("channels=_channels");
-                args.push("root=str(_Path(__file__).resolve().parent)");
             }
             out.push_str(&format!(
                 "\napp = build_managed_http_app({})\n",
@@ -770,8 +738,6 @@ pub(super) struct LanggraphManifestInputs<'a> {
     /// Local package directories that Python deploys install separately.
     pub(super) local_packages: &'a [String],
     pub(super) disable_studio_auth: bool,
-    /// Extra `(graph key, export specifier)` pairs, one per async subagent.
-    pub(super) extra_graphs: &'a [(String, String)],
 }
 
 pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> Result<String> {
@@ -786,7 +752,6 @@ pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> R
         include_vendored_runtime,
         local_packages,
         disable_studio_auth,
-        extra_graphs,
     } = *inputs;
     // The LangGraph manifest keys the runtime on `node_version` (LangGraph.js)
     // or `python_version` (LangGraph Python); the rest of the shape is shared.
@@ -795,9 +760,6 @@ pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> R
     // binding.
     let mut graphs = serde_json::Map::new();
     graphs.insert(assistant_id.to_string(), json!(graph));
-    for (key, export) in extra_graphs {
-        graphs.insert(key.clone(), json!(export));
-    }
 
     // Prefer `_INTERNAL_docker_tag` over `api_version`: Cloud SaaS has been
     // observed to ignore rc `api_version` pins and keep the newest stable
@@ -904,7 +866,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                async_subagents: &[],
+                browser_import: None,
             };
             for (language, check) in [
                 (
@@ -951,7 +913,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                async_subagents: &[],
+                browser_import: None,
             };
             for language in [Language::TypeScript, Language::Python] {
                 let entry = generate_entry(language, &inputs);
@@ -979,7 +941,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                async_subagents: &[],
+                browser_import: None,
             },
         );
 
@@ -1014,7 +976,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
-                async_subagents: &[],
+                browser_import: None,
             },
         );
 
@@ -1068,7 +1030,6 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
-            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1107,7 +1068,6 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
-            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1136,7 +1096,6 @@ mod tests {
             include_vendored_runtime: true,
             local_packages: &[],
             disable_studio_auth: false,
-            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1161,7 +1120,6 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
-            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1187,7 +1145,6 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
-            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1216,7 +1173,6 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: true,
-            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1238,7 +1194,6 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
-            extra_graphs: &[],
         })
         .unwrap();
 
