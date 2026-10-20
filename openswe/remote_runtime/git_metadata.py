@@ -139,10 +139,7 @@ class TurnGitMetadata:
             return {}
         return self.evidence(after.changes_since(before), call_id, observed_at=observed_at)
 
-    async def reconcile(self, state: Mapping[str, object]) -> dict[str, JsonValue]:
-        """Select the earliest work target, preferring the repository's exact PR head ref."""
-        metadata = self.actor
-        observations: list[tuple[bool, GitObservation]] = []
+    def observations(self, state: Mapping[str, object]) -> Iterator[tuple[bool, GitObservation]]:
         for key, value in state.items():
             if (
                 key.startswith((PR_PREFIX, WORK_PREFIX))
@@ -154,8 +151,21 @@ class TurnGitMetadata:
                 except ValidationError:
                     logger.warning("Ignoring invalid git observation", exc_info=True)
                     continue
-                observations.append((key.startswith(PR_PREFIX), observation))
-        observations.sort(key=lambda item: item[1].observed_at)
+                yield key.startswith(PR_PREFIX), observation
+
+    def work_baseline(self, state: Mapping[str, object]) -> GitSnapshot | None:
+        """Observe only until the first work target, without another pre-tool scan."""
+        if any(observation.targets for _, observation in self.observations(state)):
+            return None
+        baseline = state.get(BASELINE)
+        if isinstance(baseline, dict) and baseline.get("invocation") == self.config.invocation_id:
+            return GitSnapshot.parse(baseline.get("snapshot"))
+        return None
+
+    async def reconcile(self, state: Mapping[str, object]) -> dict[str, JsonValue]:
+        """Select the earliest work target, preferring the repository's exact PR head ref."""
+        metadata = self.actor
+        observations = sorted(self.observations(state), key=lambda item: item[1].observed_at)
         observed: list[GitTarget] = []
         pr_branches: dict[str, list[str]] = {}
         for pr, observation in observations:

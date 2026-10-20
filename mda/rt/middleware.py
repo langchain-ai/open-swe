@@ -57,7 +57,10 @@ DISPLAY_DESCRIPTION: Final = "display_description"
 def _merge(
     left: dict[str, JsonValue] | None, right: dict[str, JsonValue] | None
 ) -> dict[str, JsonValue]:
-    return {**(left or {}), **(right or {})}
+    held = left or {}
+    if right is not None and "git_trace_baseline" in right:
+        held = {key: value for key, value in held.items() if not key.startswith("git_trace_")}
+    return {**held, **(right or {})}
 
 
 class ModelCall(BaseModel):
@@ -93,6 +96,7 @@ def _decode(value: object) -> object:
 
 
 def _apply(reply: PhaseReply) -> dict[str, object]:
+    TurnTrace.record_evidence(reply.update)
     for event in reply.events:
         get_stream_writer()(event)
     update: dict[str, object] = {}
@@ -249,6 +253,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self._trace.start(self._trace_metadata)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
+            self._trace.record_evidence(state.get(STATE_KEY, {}))
             return None
         sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
         update = await self._phase("prepare", state, sandbox_id=sandbox_id)

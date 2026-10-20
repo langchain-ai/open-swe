@@ -16,6 +16,7 @@ from langchain_core.messages import ToolMessage, message_to_dict
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from langsmith import Client, tracing_context
 from langsmith.run_trees import RunTree
@@ -29,6 +30,7 @@ from rt.backend import (
     BackendUnavailableError,
     OpenSweBackend,
     PhaseReply,
+    ToolReply,
     ToolSpec,
 )
 from rt.middleware import BackendRunMiddleware
@@ -194,11 +196,19 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     backend = OpenSweBackend("secret-token")
     git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}, "metadata": actor})
 
-    @tool
-    async def nested_call(text: str) -> str:
-        """Call a nested runnable."""
-        TurnTrace.record_evidence(
-            {
+    validate_shared = True
+
+    async def call(body: dict[str, object]) -> ToolReply:
+        if validate_shared:
+            assert isinstance(held := body["state"], dict)
+            assert held["git_trace_baseline"]["invocation"] == "turn"
+            if body["tool_call_id"] == "second":
+                assert "git_trace_work:work" in held
+        return ToolReply(
+            message=message_to_dict(
+                ToolMessage(content="done", tool_call_id=str(body["tool_call_id"]))
+            ),
+            update={
                 **git.evidence(
                     [GitTarget(repo="org/actual", branch="local")], "work", observed_at=1
                 ),
@@ -214,16 +224,47 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
                     pr=True,
                     observed_at=3,
                 ),
-            }
+            },
         )
+
+    monkeypatch.setattr(backend, "tool", call)
+    served = backend_tool(
+        ToolSpec(name="execute", description="Execute", parameters={"type": "object"}), backend
+    )
+
+    @tool
+    async def nested_call(text: str) -> str:
+        """Call a backend tool with isolated subagent state, then a nested runnable."""
+        for call_id in ("first", "second"):
+            await served.coroutine(
+                runtime=ToolRuntime(
+                    state={"messages": []},
+                    context=None,
+                    config={},
+                    stream_writer=lambda event: None,
+                    tool_call_id=call_id,
+                    store=None,
+                )
+            )
         return await RunnableLambda(lambda value: value).ainvoke(text)
 
     async def phase(name: str, body: dict[str, object]) -> PhaseReply:
+        if name == "prepare":
+            return PhaseReply(update=await git.begin())
         if name == "before_model":
+            assert isinstance(state := body["state"], dict)
+            assert "git_trace_work:previous" not in state
             await nested_call.ainvoke({"text": "nested"})
+            return PhaseReply(
+                update=git.evidence(
+                    [GitTarget(repo="org/actual", branch="local")], "work", observed_at=1
+                )
+            )
         if name == "after_agent":
             assert isinstance(state := body["state"], dict)
-            return PhaseReply(trace_metadata=await git.reconcile(state))
+            return PhaseReply(
+                trace_metadata=await git.reconcile(state), update={"git_trace_baseline": None}
+            )
         return PhaseReply()
 
     monkeypatch.setattr(backend, "phase", phase)
@@ -240,15 +281,26 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     graph = create_deep_agent(
         model=FakeListChatModel(responses=["done"]),
         middleware=[BackendRunMiddleware(backend, "turn", trace_metadata=actor)],
+        checkpointer=InMemorySaver(),
     )
+    config = {
+        "configurable": {"thread_id": "trace-test"},
+        "callbacks": [tracer],
+        "metadata": {"invocation_id": "turn", "existing_key": "preserved"},
+    }
     with tracing_context(enabled=True, parent=parent):
         await graph.ainvoke(
-            {"messages": [("user", "hello")]},
             {
-                "callbacks": [tracer],
-                "metadata": {"invocation_id": "turn", "existing_key": "preserved"},
+                "messages": [("user", "hello")],
+                "open_swe_state": {
+                    "kept": True,
+                    "git_trace_work:previous": {"invocation": "previous", "targets": []},
+                },
             },
+            config,
         )
+    saved = await graph.aget_state(config)
+    assert saved.values["open_swe_state"] == {"kept": True, "git_trace_baseline": None}
     assert "ls_git_repo" not in parent.metadata
     created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
     assert any(run["run_type"] == "llm" for run in created.values())
@@ -274,6 +326,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         assert metadata["existing_key"] == "preserved"
     assert len({run["trace_id"] for run in created.values()}) == 1
     previous_update_count = len(updates)
+    validate_shared = False
     final["ls_git_branch"] = "Next/turn"
     if not next_trace_available:
 
@@ -284,7 +337,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     with tracing_context(enabled=True, parent=parent):
         await graph.ainvoke(
             {"messages": [("user", "next turn")]},
-            {"callbacks": [tracer], "metadata": {"invocation_id": "turn"}},
+            {**config, "metadata": {"invocation_id": "turn"}},
         )
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
 

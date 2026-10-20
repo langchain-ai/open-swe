@@ -67,7 +67,12 @@ from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
-from openswe.remote_runtime.git_metadata import OBSERVED_TOOLS, TurnGitMetadata, collect_pr_targets
+from openswe.remote_runtime.git_metadata import (
+    BASELINE,
+    OBSERVED_TOOLS,
+    TurnGitMetadata,
+    collect_pr_targets,
+)
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -630,6 +635,7 @@ class RemoteGraph:
                 reply["update"].update(await git.begin())
             elif phase == "after_agent":
                 reply["trace_metadata"] = await git.reconcile(state)
+                reply["update"][BASELINE] = None
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
                 fallback = fallback_model_choice(model.model_id)
@@ -706,7 +712,7 @@ class RemoteGraph:
         state = session.state(body)
         await in_graph_context(session.config, partial(session.join, state))
         git = TurnGitMetadata(session.config)
-        before = await git.snapshot() if body.name in OBSERVED_TOOLS else None
+        before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
         observed_at = time.time_ns()
         try:
             with within_namespace(body.namespace), collect_pr_targets() as pr_targets:

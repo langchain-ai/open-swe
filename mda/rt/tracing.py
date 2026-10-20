@@ -62,24 +62,39 @@ class TurnTrace:
         evidence = {
             key: value
             for key, value in update.items()
-            if key.startswith(("git_trace_pr:", "git_trace_work:"))
+            if key == "git_trace_baseline" or key.startswith(("git_trace_pr:", "git_trace_work:"))
         }
         try:
             if evidence and (root := TurnTrace.current_root()) is not None:
                 held = root.metadata.setdefault("open_swe_git_evidence", {})
                 if isinstance(held, dict):
+                    if "git_trace_baseline" in evidence:
+                        held.clear()
                     held.update(evidence)
         except Exception:
             logger.warning("Could not record turn git evidence", exc_info=True)
 
+    @staticmethod
+    def _evidence(root: RunTree | None) -> dict[str, JsonValue]:
+        if root is None:
+            return {}
+        return TypeAdapter(dict[str, JsonValue]).validate_python(
+            root.metadata.get("open_swe_git_evidence", {})
+        )
+
+    @staticmethod
+    def current_evidence() -> dict[str, JsonValue]:
+        """Share the parent's observation budget with subagents that have their own state."""
+        try:
+            return TurnTrace._evidence(TurnTrace.current_root())
+        except Exception:
+            logger.warning("Could not read current turn git evidence", exc_info=True)
+            return {}
+
     @property
     def evidence(self) -> dict[str, JsonValue]:
-        if self.root is None:
-            return {}
         try:
-            return TypeAdapter(dict[str, JsonValue]).validate_python(
-                self.root.metadata.get("open_swe_git_evidence", {})
-            )
+            return self._evidence(self.root)
         except Exception:
             logger.warning("Ignoring invalid turn git evidence", exc_info=True)
             return {}
