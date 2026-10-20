@@ -1,0 +1,19 @@
+openswe/utils/langsmith.py
+  s_30a39b9625d194::t_6a675c5a33fcb7 14,463-466,468-477,484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3465b7d6eedee2a00bf36693223ced52f64f6718",
+  "prompts": {},
+  "sessions": {
+    "s_30a39b9625d194": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfdce3a1-d304-41eb-bba0-703a4018521b",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}

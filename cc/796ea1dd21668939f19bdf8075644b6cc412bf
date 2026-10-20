@@ -1,0 +1,27 @@
+pyproject.toml
+  s_30a39b9625d194::t_f8a1466f524210 22
+openswe/remote_runtime/proxy.py
+  s_30a39b9625d194::t_66318fca5bae64 35,203
+openswe/utils/tracing.py
+  s_30a39b9625d194::t_66318fca5bae64 1,7
+openswe/utils/langsmith.py
+  s_30a39b9625d194::t_66318fca5bae64 10,14,18,165-169,172,175-176,178,180,182,185
+uv.lock
+  s_30a39b9625d194::t_aa381d570ccf4f 2,2113,2131,2133,2556
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cc796ea1dd21668939f19bdf8075644b6cc412bf",
+  "prompts": {},
+  "sessions": {
+    "s_30a39b9625d194": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfdce3a1-d304-41eb-bba0-703a4018521b",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}

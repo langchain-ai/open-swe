@@ -1,0 +1,24 @@
+openswe/utils/tracing.py
+  s_30a39b9625d194::t_f7e23e8fca4efd 5,22,32-40
+  s_30a39b9625d194::t_f866b5631647e5 4,23-27,29,31
+openswe/threads/runtimes.py
+  s_30a39b9625d194::t_f866b5631647e5 26,151-153
+docs/INSTALLATION.md
+  s_30a39b9625d194::t_c141ce427ff140 86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "23ab880dd8fac3068c3d667e85ccb21425d33479",
+  "prompts": {},
+  "sessions": {
+    "s_30a39b9625d194": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfdce3a1-d304-41eb-bba0-703a4018521b",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}

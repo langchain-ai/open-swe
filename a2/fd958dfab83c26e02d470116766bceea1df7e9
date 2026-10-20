@@ -1,0 +1,103 @@
+AGENTS.md
+  s_9bea6febbf0405::t_b1655180302c3f 11
+Dockerfile
+  s_9bea6febbf0405::t_ddd221c02fb2f9 9
+Makefile
+  s_9bea6febbf0405::t_0632634add6ce7 22,140
+docs/DEVELOPMENT.md
+  s_9bea6febbf0405::t_04d2cc814a73d0 92,109,267
+docs/INSTALLATION.md
+  s_9bea6febbf0405::t_a81abf4bfb4ab2 278
+langgraph.json
+  s_9bea6febbf0405::t_03abf45a4ddae7 8
+mda/README.md
+  s_9bea6febbf0405::t_5b67121473a2de 3,18,24,26,40,46
+mda/agent.py
+  s_9bea6febbf0405::t_fd4868d485d652 1,3-4,11-12,31,39,81-83,86-90,92,96-110,179
+mda/rt/backend.py
+  s_9bea6febbf0405::t_ecf0f094e90c65 19,72-81,112-113,123,184-193,239-243
+mda/rt/middleware.py
+  s_9bea6febbf0405::t_d402bf8996ed9c 46,59-60,108-109,121-127,129,133-213,242
+openswe/config.py
+  s_9bea6febbf0405::t_55ceac5713f97e 386-390
+openswe/dashboard/workspace_settings.py
+  s_9bea6febbf0405::t_01ac6fe8a7615a 627,636
+openswe/database/postgres.py
+  s_9bea6febbf0405::t_4772d6a9e52e71 83-84
+openswe/remote_runtime/client.py
+  s_9bea6febbf0405::t_caa55043863207 1,3,8,19-20,26,50,83,92,95
+openswe/remote_runtime/graph.py
+  s_9bea6febbf0405::t_8363619f1dc6b9 11-13,59,69,94-95,203-210,335-337,386-394,400,404-405,417-428,598
+openswe/remote_runtime/hosted.py
+  s_9bea6febbf0405::t_c5e9b5276bfc97 1,3-4,6,9-13,15
+openswe/remote_runtime/review_scout.py
+  s_9bea6febbf0405::t_ffa266966b7ad7 1,3,5-6,8-10,12,14,16,19-20,23-24,27-36
+openswe/remote_runtime/server.py
+  s_9bea6febbf0405::t_297594b1706dbb 38,40,74,78-81
+openswe/resources/prompts/system/task-execution.md
+  s_9bea6febbf0405::t_4e32329921da33 13-14
+openswe/resources/prompts/tools/display-description.md
+  s_9bea6febbf0405::t_d40a9d108ac489 1
+openswe/review_scout/graph.py
+  s_9bea6febbf0405::t_2cdd2e81d0b837 62,273-293,295-301,318,320,328-347,366,368-379
+openswe/run_config.py
+  s_9bea6febbf0405::t_c38435f108c9f3 21
+openswe/threads/router.py
+  s_9bea6febbf0405::t_c848276da37598 256
+tests/e2e/README.md
+  s_9bea6febbf0405::t_32c5bec3454725 36,50
+tests/e2e/dev-mock.sh
+  s_9bea6febbf0405::t_ef94639f708d6d 64
+tests/e2e/e2e_env.py
+  s_9bea6febbf0405::t_304c1d7d5c684d 41
+tests/e2e/fake_llm.py
+  s_9bea6febbf0405::t_28f13b995cbc1f 44,278,1096-1128,1550-1553,1642,1649-1654,1676-1677
+tests/e2e/langgraph.e2e.json
+  s_9bea6febbf0405::t_d38f5e3af07561 7
+tests/e2e/mda-dev.sh
+  s_9bea6febbf0405::t_8abd3d74124a38 2
+tests/e2e/patches.py
+  s_9bea6febbf0405::t_d35f2200c3a881 71,74,322
+tests/e2e/playwright.config.ts
+  s_9bea6febbf0405::t_fb080bceb25640 64
+tests/e2e/tests/eval_descriptions.spec.ts
+  s_9bea6febbf0405::t_0964ca00b94107 1-46
+tests/e2e/tests/review_page_chat.spec.ts
+  s_9bea6febbf0405::t_6a6a8f5b853488 324-325,327-332,337-339
+tests/reviewer/test_factory_config_isolation.py
+  s_9bea6febbf0405::t_a7e30842951a0b 1,12-15
+tests/reviewer/test_mda_tools.py
+  s_9bea6febbf0405::t_ada26895d8e245 13,65-78
+tests/reviewer/test_remote_runtime.py
+  s_9bea6febbf0405::t_a9033e6a30612e 55-94,122-124
+tests/reviewer/test_review_api.py
+  s_9bea6febbf0405::t_eb1a1efaa57dc9 88-101
+tests/runtime/test_bindable_config.py
+  s_9bea6febbf0405::t_9fc50c21c59b6e 3,37
+tests/threads/test_thread_router.py
+  s_9bea6febbf0405::t_78d72340b41f6c 246-248,250,308-312
+ui/src/features/agents/components/chat/toolExecutionDisplay.ts
+  s_9bea6febbf0405::t_64ad8b1bf1ea29 100-102,104-119
+ui/src/features/reviews/page/diffEntries.ts
+  s_9bea6febbf0405::t_b822ee10d09074 81
+ui/src/features/settings/components/ManagedToolsSection.test.tsx
+  s_9bea6febbf0405::t_f243a5f0eee137 1-5,7-8,10,12-23,25-29,31-38,40-44,46-49,51-64,66-72,74-82,84-88
+ui/src/features/settings/components/ManagedToolsSection.tsx
+  s_9bea6febbf0405::t_e106661d513a76 52,57-61,63,69-70,83-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a2fd958dfab83c26e02d470116766bceea1df7e9",
+  "prompts": {},
+  "sessions": {
+    "s_9bea6febbf0405": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7db27352-288e-41e0-b3b5-f2975383eefa",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
