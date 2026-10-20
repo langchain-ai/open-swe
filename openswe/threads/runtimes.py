@@ -128,9 +128,9 @@ class MdaRuntime:
         self._mda_threads.add(thread_id)
 
     async def run_payload(
-        self, thread_id: str, payload: dict[str, JsonValue]
+        self, thread_id: str, payload: dict[str, JsonValue], *, graph_id: str = MDA_GRAPH_ID
     ) -> dict[str, JsonValue]:
-        """Rewrite a run-create body for the ``open-swe`` graph: configurable becomes context."""
+        """Rewrite a run-create body for the thread's MDA graph: configurable becomes context."""
         raw_metadata = payload.get("metadata")
         run_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         config = payload.get("config")
@@ -152,7 +152,7 @@ class MdaRuntime:
         if streaming:
             # Context replaces configurable on the server, so the stream marker rides in it.
             context[_V3_STREAMING_KEY] = True
-        rewritten = {**payload, "assistant_id": MDA_GRAPH_ID, "context": context}
+        rewritten = {**payload, "assistant_id": graph_id, "context": context}
         if not payload.get("langsmith_tracer"):
             # Traced into this deployment's project, beside its in-process runs.
             rewritten["langsmith_tracer"] = {"project_name": get_tracer_project()}
@@ -163,7 +163,12 @@ class MdaRuntime:
         return _object.validate_python(rewritten)
 
     async def start_command_run(
-        self, thread_id: str, command: Mapping[str, JsonValue], params: Mapping[str, JsonValue]
+        self,
+        thread_id: str,
+        command: Mapping[str, JsonValue],
+        params: Mapping[str, JsonValue],
+        *,
+        graph_id: str = MDA_GRAPH_ID,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
 
@@ -196,7 +201,7 @@ class MdaRuntime:
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
         await self.ensure_remote_thread(thread_id)
-        rewritten = await self.run_payload(thread_id, payload)
+        rewritten = await self.run_payload(thread_id, payload, graph_id=graph_id)
         response = await self.http.post(f"/threads/{thread_id}/runs", json=rewritten)
         if response.is_error:
             logger.warning(

@@ -9,8 +9,11 @@ from openswe.remote_runtime.server import RunTokenMiddleware
 from openswe.remote_runtime.tokens import (
     RemoteRun,
     RuntimeTokenError,
+    WorkerGrant,
     sign_runtime_token,
+    sign_worker_grant,
     verify_runtime_token,
+    verify_worker_grant,
 )
 
 RUN = RemoteRun(
@@ -301,6 +304,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
     from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.remote_runtime.graph import RemoteGraph
     from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
 
@@ -326,7 +330,6 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
                 "read_file",
                 "manage_thread",
                 "slack_reply",
-                "spawn_worker",
                 "message_task_thread",
                 "load_integration_tools",
             )
@@ -334,6 +337,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         middleware: list[AgentMiddleware] = [
             surface.dynamic,
             CodeInterpreterMiddleware(ptc=[integration("mcp_search")]),
+            TaskCoordinationMiddleware(RUN.thread_id, True, None),
         ]
         surface.graph = create_agent(
             FakeListChatModel(responses=[]), tools=core, middleware=middleware
@@ -355,10 +359,13 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     names = {tool["name"] for tool in tools if isinstance(tool, dict)}
     assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
     # The sandbox's tool channel never offers task coordination; the model does.
-    assert {"spawn_worker", "message_task_thread"} <= names
+    assert "message_task_thread" in names
     assert "eval" not in names
     excluded = catalog["excluded"]
     assert isinstance(excluded, list) and "load_integration_tools" in excluded
+    # A coordinator launches async workers; their task tools track them, not deepagents'.
+    assert "start_async_task" not in excluded
+    assert {"check_async_task", "update_async_task", "cancel_async_task"} <= set(excluded)
     search = next(tool for tool in tools if isinstance(tool, dict) and tool["name"] == "mcp_search")
     assert isinstance(search, dict)
     expected = {
@@ -373,3 +380,162 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     assert catalog["also_from_code"] == ["read_file"]
+
+
+async def _hook_status(
+    monkeypatch: pytest.MonkeyPatch, token: str, hook: str
+) -> tuple[int, list[tuple[str, str]]]:
+    """Call ``hook`` with ``token`` and report the status and what served it, as whom."""
+    from openswe.remote_runtime import server
+
+    served: list[tuple[str, str]] = []
+
+    async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
+        if called not in {"catalog", "prepare", "before_model", "call", "after_agent"}:
+            raise server.UnknownHookError(called)
+        served.append((called, run.thread_id))
+        return {}
+
+    async def adopt(grant: WorkerGrant, body: object) -> dict[str, object]:
+        served.append(("adopt", grant.coordinator.thread_id))
+        return {}
+
+    monkeypatch.setattr(server, "_graphs", lambda: {"agent": graph})
+    monkeypatch.setattr(server, "_grant_hooks", lambda: {"adopt": adopt})
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": f"/remote-runtime/hooks/{hook}",
+        "path_params": {"hook": hook},
+        "headers": [(b"authorization", f"Bearer {token}".encode())],
+    }
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"{}"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await server.HOOKS(scope, receive, send)
+    return sent[0]["status"], served
+
+
+async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_else(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
+    grant = sign_worker_grant(WorkerGrant(coordinator=coordinator, request_id="call-1"))
+    with pytest.raises(RuntimeTokenError):
+        verify_runtime_token(grant)
+    with pytest.raises(RuntimeTokenError):
+        verify_worker_grant(sign_runtime_token(coordinator))
+
+    assert await _hook_status(monkeypatch, grant, "catalog") == (
+        200,
+        [("catalog", "coordinator")],
+    )
+    assert await _hook_status(monkeypatch, grant, "adopt") == (200, [("adopt", "coordinator")])
+    for hook in ("prepare", "before_model", "call", "after_agent", "launch_worker"):
+        assert await _hook_status(monkeypatch, grant, hook) == (403, [])
+    # A run token never adopts: only a launched worker's grant does.
+    status, _ = await _hook_status(monkeypatch, sign_runtime_token(coordinator), "adopt")
+    assert status == 404
+
+
+async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from openswe.prompts import prompt
+    from openswe.remote_runtime import async_workers, hosted
+    from openswe.remote_runtime.runs import ModelSpec, RunModels
+
+    coordinator = RemoteRun(
+        thread_id="coordinator", assistant_id="agent", configurable={"github_login": "owner"}
+    )
+    grant = WorkerGrant(coordinator=coordinator, request_id="call-1")
+    register = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(async_workers.service, "register_async_worker", register)
+    monkeypatch.setattr(
+        async_workers.service,
+        "recipient_config",
+        AsyncMock(return_value={"thread_id": "worker", "github_login": "owner"}),
+    )
+    monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
+    joined: list[tuple[str, str]] = []
+    monkeypatch.setattr(async_workers, "_join", lambda *key: joined.append(key))
+    spec = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
+    graph = MagicMock(
+        start_models=AsyncMock(
+            return_value=RunModels(model=spec, subagent_model=spec, use_gateway=False)
+        )
+    )
+    monkeypatch.setattr(hosted, "hosted_graphs", lambda: {"agent": graph})
+
+    # The worker's first message: the assignment its launch rendered.
+    assignment = prompt(
+        "tasks/assignment", coordinator_thread_id="coordinator", instructions="Fix it"
+    )
+    reply = await async_workers.adopt(
+        grant, {"thread_id": "worker", "run_id": "run-1", "instructions": assignment}
+    )
+
+    assert isinstance(reply, dict)
+    token = reply["run_token"]
+    assert isinstance(token, str)
+    adopted = verify_runtime_token(token)
+    assert adopted.thread_id == "worker"
+    assert adopted.configurable["thread_id"] == "worker"
+    register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
+    assert joined == [("worker", "run-1")]
+
+
+async def test_a_launched_worker_run_without_a_webhook_is_settled_once_it_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    import httpx
+
+    from openswe import completion
+    from openswe.remote_runtime import async_workers
+    from openswe.threads import runtimes
+
+    client = MagicMock()
+    client.runs.get = AsyncMock(
+        side_effect=[
+            {"run_id": "run-1", "status": "running"},
+            # A transient failure is retried, never the end of the wait.
+            httpx.ConnectError("dropped"),
+            {"run_id": "run-1", "status": "running"},
+            {
+                "run_id": "run-1",
+                "status": "error",
+                "metadata": {"subagent_name": "general-purpose"},
+            },
+        ]
+    )
+    # A long run outlasts one join; the wait goes on.
+    client.runs.join = AsyncMock(side_effect=[httpx.ReadTimeout("still running"), {}])
+    client.threads.get_state = AsyncMock(return_value={"values": {"messages": []}})
+    mda = MagicMock(client=client)
+    monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
+    monkeypatch.setattr(async_workers.asyncio, "sleep", AsyncMock())
+    # Settling is not safe to repeat: a failure is logged, never retried.
+    settle = AsyncMock(side_effect=RuntimeError("delegation gone"))
+    monkeypatch.setattr(completion, "handle_run_completion", settle)
+
+    await async_workers._settle_when_done("worker", "run-1")
+
+    settle.assert_awaited_once_with(
+        {
+            "thread_id": "worker",
+            "run_id": "run-1",
+            "status": "error",
+            "metadata": {"subagent_name": "general-purpose"},
+            "values": {"messages": []},
+            "error": None,
+        }
+    )

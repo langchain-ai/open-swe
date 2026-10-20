@@ -66,6 +66,7 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
+from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.runs import (
@@ -94,6 +95,18 @@ logger = logging.getLogger(__name__)
 
 # MDA's own deep agent runs subagents and code.
 _MDA_TOOLS: Final = frozenset({"task", "eval"})
+# deepagents' async subagent tools. Open SWE launches a task worker with the first,
+# wherever the thread may delegate; its task tools track the worker from then on.
+_LAUNCH_WORKER_TOOL: Final = "start_async_task"
+_ASYNC_TASK_TOOLS: Final = frozenset(
+    {
+        _LAUNCH_WORKER_TOOL,
+        "check_async_task",
+        "update_async_task",
+        "cancel_async_task",
+        "list_async_tasks",
+    }
+)
 # Tools the model labels each call of, for the dashboard to show in place of a bare name.
 _DESCRIBED_TOOLS: Final = ("eval",)
 # Model-call middleware that is MDA's own, or that observes rather than shapes a call.
@@ -328,7 +341,10 @@ class RunSession:
                 ],
                 "models": self.start_models().model_dump(),
                 # Hidden from the model, as the in-process graph hides them.
-                "excluded": sorted((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS),
+                "excluded": sorted(
+                    (self.surface.excluded | EXCLUDED_TOOLS | self._unoffered_async_tools())
+                    - _MDA_TOOLS
+                ),
                 # Called from MDA's code mode, never offered to the model as schemas.
                 "code_only": sorted(
                     name
@@ -372,6 +388,14 @@ class RunSession:
             github_proxy_repositories=repositories if reviewing else None,
             github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
         )
+
+    def _unoffered_async_tools(self) -> frozenset[str]:
+        if any(
+            isinstance(middleware, TaskCoordinationMiddleware) and middleware.can_delegate
+            for middleware in self.surface.middleware
+        ):
+            return _ASYNC_TASK_TOOLS - {_LAUNCH_WORKER_TOOL}
+        return _ASYNC_TASK_TOOLS
 
     def start_models(self) -> RunModels:
         return RunModels(

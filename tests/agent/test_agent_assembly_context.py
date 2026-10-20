@@ -128,65 +128,51 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
 
 
 @pytest.mark.parametrize(
-    ("enabled", "binding", "available"),
+    ("binding", "available"),
     [
-        (False, {}, False),
-        (True, {}, True),
-        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True),
-        (True, {"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False),
-        (True, {"sandbox_id": "bridge:legacy-cli"}, False),
+        ({}, True),
+        ({"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True),
+        ({"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False),
+        ({"sandbox_id": "bridge:legacy-cli"}, False),
     ],
 )
-async def test_task_tools_require_owner_opt_in_and_supported_sandbox(
-    saved_thread_scope: dict[str, object],
-    enabled: bool,
-    binding: dict[str, str],
-    available: bool,
+async def test_task_tools_require_supported_sandbox(
+    saved_thread_scope: dict[str, object], binding: dict[str, str], available: bool
 ) -> None:
-    from openswe.users import User, UserPreferences
-
     saved_thread_scope.update(owner_type="user", owner_login="owner")
     saved_thread_scope.update(binding)
 
-    async def preferences(login: str) -> UserPreferences:
-        return UserPreferences(experimental_task_coordination=enabled if login == "owner" else True)
-
-    with patch.object(User, "preferences_for_login", side_effect=preferences):
-        captured = await _capture_create_deep_agent_kwargs()
+    captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     names = {_registered_tool_name(tool) for tool in tools}
-    assert ("spawn_worker" in names) is available
     assert ("control_worker" in names) is available
 
 
 @pytest.mark.parametrize("role", ["coordinator", "worker"])
-async def test_existing_task_keeps_controls_after_opt_out(
+async def test_existing_task_keeps_controls_without_delegation(
     saved_thread_scope, role: Literal["coordinator", "worker"]
 ):
     from openswe.tasks.store import Task, TaskContext, TaskMembership
-    from openswe.users import User, UserPreferences
     from openswe.workspaces.rows import WorkspaceRow
 
-    saved_thread_scope.update(owner_type="user", owner_login="owner")
+    saved_thread_scope.update(
+        owner_type="user", owner_login="owner", sandbox_id="bridge:cli", sandbox_bridge_client="cli"
+    )
     workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
         coordinator_thread_id="coordinator", title="Existing task", workspace_id=workspace.id
     )
     task.workspace = workspace
     context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
-    with (
-        patch.object(User, "preferences_for_login", return_value=UserPreferences()),
-        patch(
-            "openswe.middleware.task_coordination.TaskMembership.context_for_thread",
-            return_value=context,
-        ),
+    with patch(
+        "openswe.middleware.task_coordination.TaskMembership.context_for_thread",
+        return_value=context,
     ):
         captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     names = {_registered_tool_name(tool) for tool in tools}
-    assert "spawn_worker" not in names
     assert {"control_worker", "message_task_thread", "task_status"} <= names
 
 

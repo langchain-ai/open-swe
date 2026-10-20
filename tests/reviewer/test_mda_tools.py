@@ -7,8 +7,11 @@ import httpx2
 import pytest
 from langchain.agents import create_agent
 from langchain.tools import ToolRuntime
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import ToolMessage, message_to_dict
+from langchain_core.language_models.fake_chat_models import (
+    FakeListChatModel,
+    GenericFakeChatModel,
+)
+from langchain_core.messages import AIMessage, ToolMessage, message_to_dict
 from langgraph.types import Command
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
@@ -169,3 +172,152 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
 
     with pytest.raises(BackendCallError, match="prepare failed: RuntimeError: no sandbox provider"):
         await OpenSweBackend("secret-token").phase("prepare", {})
+
+
+class _ToolCallingModel(GenericFakeChatModel):
+    def bind_tools(self, tools: object, **kwargs: object) -> _ToolCallingModel:
+        return self
+
+
+async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from deepagents.middleware import async_subagents
+    from rt.middleware import AsyncWorkerLaunchMiddleware
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = OpenSweBackend("coordinator-token")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def call(hook: str, body: dict[str, object], **kwargs: object) -> dict[str, object]:
+        calls.append((hook, dict(body)))
+        if hook == "launch_worker":
+            return {"grant": "worker-grant", "assignment": "Your assignment: Fix login"}
+        return {"worker": {"worker_thread_id": body["worker_thread_id"], "task_id": "task-1"}}
+
+    monkeypatch.setattr(backend, "call", call)
+    launches = async_subagents.AsyncSubAgentMiddleware(
+        async_subagents=[
+            {
+                "name": "general-purpose",
+                "description": "A task worker.",
+                "graph_id": "open-swe--general-purpose",
+            }
+        ]
+    )
+    client = MagicMock()
+    client.threads.create = AsyncMock(return_value={"thread_id": "worker-thread"})
+    client.runs.create = AsyncMock(return_value={"run_id": "worker-run"})
+    # The launch's in-process LangGraph client, the deployment's own Agent Server.
+    monkeypatch.setattr(async_subagents._ClientCache, "get_async", lambda self, name: client)
+    model = _ToolCallingModel(
+        messages=iter(
+            [
+                AIMessage(
+                    "",
+                    tool_calls=[
+                        {
+                            "name": "start_async_task",
+                            "args": {
+                                "description": "Fix login",
+                                "subagent_type": "general-purpose",
+                            },
+                            "id": "launch-1",
+                        },
+                        {
+                            "name": "check_async_task",
+                            "args": {"task_id": "worker-thread"},
+                            "id": "check-1",
+                        },
+                        # An update would interrupt the worker; Open SWE queues messages instead.
+                        {
+                            "name": "update_async_task",
+                            "args": {"task_id": "worker-thread", "message": "Stop"},
+                            "id": "update-1",
+                        },
+                    ],
+                ),
+                AIMessage("Launched."),
+            ]
+        )
+    )
+    graph = create_agent(model, middleware=[AsyncWorkerLaunchMiddleware(backend), launches])
+
+    values = await graph.ainvoke(
+        {"messages": [("user", "fix login in the background")]},
+        {
+            "configurable": {"thread_id": "coordinator-thread", "assistant_id": "open-swe"},
+            "metadata": {"assistant_id": "open-swe"},
+        },
+        context={"graph": "agent", "__run_token": "coordinator-token"},
+    )
+
+    launch = client.runs.create.await_args.kwargs
+    assert launch["context"] == {"graph": "agent", "__worker_grant": "worker-grant"}
+    assert launch["input"] == {
+        "messages": [{"role": "user", "content": "Your assignment: Fix login"}]
+    }
+    assert "coordinator-token" not in repr(client.runs.create.await_args)
+    # No parent assistant, so the worker never wakes the coordinator on MDA's own.
+    assert client.threads.create.await_args.kwargs["metadata"] == {
+        "subagent_name": "general-purpose",
+        "parent_thread_id": "coordinator-thread",
+    }
+    assert calls == [
+        ("launch_worker", {"tool_call_id": "launch-1", "instructions": "Fix login"}),
+        (
+            "worker_launched",
+            {
+                "tool_call_id": "launch-1",
+                "instructions": "Fix login",
+                "worker_thread_id": "worker-thread",
+                "run_id": "worker-run",
+            },
+        ),
+    ]
+    # Open SWE's task messages report the worker; deepagents does not poll it too.
+    assert not values.get("async_tasks")
+    results = {m.tool_call_id: m for m in values["messages"] if isinstance(m, ToolMessage)}
+    assert "worker-thread" in str(results["launch-1"].content)
+    assert results["check-1"].status == results["update-1"].status == "error"
+    client.runs.create.assert_awaited_once()
+
+
+async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "worker-run")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    seen: list[tuple[str, str]] = []
+
+    async def post(
+        url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
+    ) -> httpx2.Response:
+        hook = url.rsplit("/", 1)[-1]
+        seen.append((hook, headers["Authorization"]))
+        if hook == "adopt":
+            assert json == {
+                "thread_id": "worker-thread",
+                "run_id": "worker-run",
+                "instructions": "Fix login",
+            }
+            return httpx2.Response(200, request=request, json={"run_token": "worker-token"})
+        return httpx2.Response(200, request=request, json={})
+
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(side_effect=post)
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    backend = OpenSweBackend(None, worker_grant="worker-grant")
+    graph = create_agent(
+        model=FakeListChatModel(responses=["done"]),
+        middleware=[BackendRunMiddleware(backend, None)],
+    )
+
+    await graph.ainvoke(
+        {"messages": [("user", "Fix login")]}, {"configurable": {"thread_id": "worker-thread"}}
+    )
+
+    assert seen[0] == ("adopt", "Bearer worker-grant")
+    assert [hook for hook, _ in seen[1:3]] == ["catalog", "prepare"]
+    assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])

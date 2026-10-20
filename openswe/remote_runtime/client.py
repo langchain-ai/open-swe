@@ -5,6 +5,7 @@ plays. Dispatch stamps a signed run token into that context, and the deployment
 calls back with it for the graph's tools and run hooks.
 """
 
+from collections.abc import Mapping
 from typing import Final, Literal, NotRequired, TypedDict, get_args
 from urllib.parse import urlsplit
 
@@ -16,6 +17,12 @@ from openswe.run_config import RunConfig
 
 # The graph id `mda build` derives from the project's agent name.
 MDA_GRAPH_ID: Final = "open-swe"
+# The graph `mda build` adds for the agent's async general-purpose subagent, which
+# async task workers run on, assignment and follow-ups alike.
+MDA_WORKER_GRAPH_ID: Final = f"{MDA_GRAPH_ID}--general-purpose"
+# Thread metadata naming the MDA graph a thread's runs go to, when not MDA_GRAPH_ID.
+MDA_GRAPH_METADATA_KEY: Final = "mda_graph_id"
+_MDA_GRAPHS: Final = frozenset({MDA_GRAPH_ID, MDA_WORKER_GRAPH_ID})
 HostedGraph = Literal["agent", "reviewer", "review-scout"]
 HOSTED_GRAPHS: Final[frozenset[str]] = frozenset(get_args(HostedGraph))
 # Thread metadata naming where a thread's runs and checkpoints live.
@@ -64,6 +71,12 @@ def mda_runtime_url() -> str:
 def validate_mda_startup_config() -> None:
     """Refuse to start without the Managed Deep Agents deployment every agent run needs."""
     mda_runtime_url()
+
+
+def mda_graph_for(metadata: Mapping[str, JsonValue]) -> str:
+    """The MDA graph a thread's runs go to."""
+    graph = metadata.get(MDA_GRAPH_METADATA_KEY)
+    return graph if isinstance(graph, str) and graph in _MDA_GRAPHS else MDA_GRAPH_ID
 
 
 def mda_runtime_api_key() -> str | None:

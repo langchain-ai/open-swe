@@ -460,7 +460,7 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
         async with postgres.session() as session:
             await message.record(session)
     context = await store.TaskMembership.context_for_thread(thread_id)
-    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, "owner", True, context)
+    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, True, context)
     monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
 
     delivered = await middleware.abefore_model({"messages": []}, Runtime())
@@ -494,7 +494,7 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", lookup)
     monkeypatch.setattr(postgres, "configured", lambda: False)
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", enabled, None)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
     received: list[ModelRequest] = []
 
@@ -518,7 +518,9 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     state["messages"] = add_messages(
         state["messages"],
         [
-            AIMessage(content="", tool_calls=[{"name": "spawn_worker", "args": {}, "id": "spawn"}]),
+            AIMessage(
+                content="", tool_calls=[{"name": "start_async_task", "args": {}, "id": "spawn"}]
+            ),
             ToolMessage(content="Worker started", tool_call_id="spawn"),
         ],
     )
@@ -541,7 +543,7 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
         ],
     )
     assert await middleware.abefore_model(state, Runtime()) is None
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", enabled, None)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     assert await middleware.abefore_model(state, Runtime()) is None
     await model_call()
     for previous, current in zip(received, received[1:], strict=False):
@@ -564,7 +566,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
     )
     monkeypatch.setattr(postgres, "configured", lambda: False)
     state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", False, context)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
     initial = await middleware.abefore_model(state, Runtime())
     assert initial is not None
     state["messages"] = add_messages(state["messages"], initial["messages"])
@@ -597,9 +599,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         assert visible[:-1] == visible_before
         assert visible[-1].content == original_context.content
         assert visible[-1].id != original_context.id
-        middleware = task_coordination.TaskCoordinationMiddleware(
-            _COORDINATOR, "owner", False, context
-        )
+        middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
         assert await middleware.abefore_model(state, Runtime()) is None
 
 

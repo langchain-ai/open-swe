@@ -10,9 +10,14 @@ with every call.
 Subagents run here too. Their replies and the tools this runtime runs itself,
 such as ``task``, go to the backend as well, so its transcript records them
 under the subagent, as an in-process run does.
+
+A task worker can run here as an async subagent of its coordinator: launched with
+``start_async_task``, it is an Open SWE worker thread with its own run token.
 """
 
 import asyncio
+import dataclasses
+import json
 import logging
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping, Sequence
 from typing import Annotated, Final, NotRequired
@@ -25,10 +30,16 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
-from langchain_core.messages import SystemMessage, ToolMessage, messages_from_dict
+from langchain_core.messages import (
+    HumanMessage,
+    SystemMessage,
+    ToolCall,
+    ToolMessage,
+    messages_from_dict,
+)
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
-from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import BaseModel, JsonValue
@@ -51,6 +62,12 @@ logger = logging.getLogger(__name__)
 _MDA_STATE_KEYS: Final = frozenset({"_summarization_event"})
 _MESSAGE_KEY: Final = "__lc_message__"
 DISPLAY_DESCRIPTION: Final = "display_description"
+LAUNCH_WORKER_TOOL: Final = "start_async_task"
+# deepagents' tools for the tasks it tracks; Open SWE's task tools track its workers.
+_TRACKED_BY_OPEN_SWE: Final = frozenset(
+    {"check_async_task", "update_async_task", "cancel_async_task", "list_async_tasks"}
+)
+WORKER_GRANT_KEY: Final = "__worker_grant"
 
 
 def _merge(
@@ -116,9 +133,20 @@ class ServedToolsMiddleware(AgentMiddleware):
     backend names the ones its middleware hides from each call.
     """
 
-    def __init__(self, tools: Sequence[BaseTool], hidden: frozenset[str]) -> None:
+    def __init__(
+        self, tools: Sequence[BaseTool], hidden: frozenset[str], backend: OpenSweBackend
+    ) -> None:
         self._tools = [tool for tool in tools if tool.name not in hidden]
         self._hidden = hidden
+        self._backend = backend
+
+    def _withheld(self) -> frozenset[str]:
+        """What a launched worker was declared with from its coordinator's catalog but lacks itself."""
+        adopted = self._backend.adopted
+        if adopted is None:
+            return frozenset()
+        own = {spec.name for spec in adopted.tools}
+        return frozenset(adopted.excluded) | {t.name for t in self._tools if t.name not in own}
 
     async def awrap_model_call(
         self,
@@ -126,10 +154,14 @@ class ServedToolsMiddleware(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         call = request.state.get("open_swe_call")
-        hidden = self._hidden | (
-            frozenset(ModelCall.model_validate(call).hidden_tools)
-            if isinstance(call, Mapping)
-            else frozenset()
+        hidden = (
+            self._hidden
+            | self._withheld()
+            | (
+                frozenset(ModelCall.model_validate(call).hidden_tools)
+                if isinstance(call, Mapping)
+                else frozenset()
+            )
         )
         offered = [t for t in request.tools if getattr(t, "name", None) not in hidden]
         names = {getattr(tool, "name", None) for tool in offered}
@@ -241,6 +273,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
+        if self._backend.awaiting_adoption:
+            # A worker never acts on its grant: it has no identity until it adopts one.
+            thread_id = _RunConfigurable.model_validate(get_config().get("configurable", {}))
+            assignment = next(
+                (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
+            )
+            await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
             return None
@@ -378,6 +417,118 @@ class RuntimeToolsMiddleware(AgentMiddleware):
             await call
         except BackendCallError:
             logger.warning("The backend did not record a runtime tool call", exc_info=True)
+
+
+class _Launched(BaseModel):
+    thread_id: str
+    run_id: str
+
+
+class AsyncWorkerLaunchMiddleware(AgentMiddleware):
+    """Launch task workers with deepagents' ``start_async_task``, each an Open SWE worker.
+
+    The launch would hand the worker this run's context, run token included, so the
+    worker would act as this run; and deepagents would wake this agent with the
+    worker's context when the worker ends. Instead the worker gets a worker grant to
+    adopt a run token of its own, and no assistant of this agent's to wake. Open SWE
+    registers it under this agent's task and returns its results as task messages,
+    so deepagents does not track the task here, and its own task tools stay unused.
+    """
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        call = request.tool_call
+        tool_call_id = call.get("id") or ""
+        if call["name"] in _TRACKED_BY_OPEN_SWE:
+            return _refused(
+                call["name"],
+                tool_call_id,
+                "Open SWE tracks its workers itself: use task_status, message_task_thread "
+                "or control_worker instead.",
+            )
+        if call["name"] != LAUNCH_WORKER_TOOL:
+            return await handler(request)
+        description = call["args"].get("description")
+        instructions = description if isinstance(description, str) else ""
+        body: dict[str, JsonValue] = {"tool_call_id": tool_call_id, "instructions": instructions}
+        try:
+            reply = await self._backend.call("launch_worker", body)
+            if (worker := reply.get("worker")) is not None:
+                # A replay of a launch that already made its worker.
+                return _worker_message(worker, tool_call_id)
+            grant, assignment = reply.get("grant"), reply.get("assignment")
+            if not isinstance(grant, str) or not isinstance(assignment, str):
+                raise BackendCallError("launch_worker returned no grant")
+            # The worker is told its assignment as Open SWE words it, not the bare description.
+            launch = ToolCall(
+                name=call["name"],
+                args={**call["args"], "description": assignment},
+                id=call.get("id"),
+            )
+            result = await handler(
+                request.override(tool_call=launch, runtime=_launch_runtime(request.runtime, grant))
+            )
+        except BackendCallError as exc:
+            return _refused(call["name"], tool_call_id, str(exc))
+        launched = _launched_task(result)
+        if launched is None:
+            return result
+        try:
+            registered = await self._backend.call(
+                "worker_launched",
+                {**body, "worker_thread_id": launched.thread_id, "run_id": launched.run_id},
+            )
+        except BackendCallError:
+            # The worker is running and registers itself when it adopts its run token;
+            # reporting a failed launch would only start a second worker.
+            logger.warning("The backend did not register a launched worker", exc_info=True)
+            return _worker_message({"worker_thread_id": launched.thread_id}, tool_call_id)
+        return _worker_message(registered.get("worker"), tool_call_id)
+
+
+def _launch_runtime(runtime: ToolRuntime, grant: str) -> ToolRuntime:
+    """The tool runtime the launch sees: a worker grant for context, no assistant to wake."""
+    config = runtime.config
+    unwakeable = {
+        **config,
+        "metadata": {
+            k: v for k, v in (config.get("metadata") or {}).items() if k != "assistant_id"
+        },
+        "configurable": {
+            k: v for k, v in (config.get("configurable") or {}).items() if k != "assistant_id"
+        },
+    }
+    return dataclasses.replace(
+        runtime, context={"graph": "agent", WORKER_GRANT_KEY: grant}, config=unwakeable
+    )
+
+
+def _launched_task(result: ToolMessage | Command) -> _Launched | None:
+    """The thread and run ``start_async_task`` launched, from the task it would track."""
+    update = result.update if isinstance(result, Command) else None
+    tasks = update.get("async_tasks") if isinstance(update, Mapping) else None
+    if not isinstance(tasks, Mapping) or len(tasks) != 1:
+        return None
+    [task] = tasks.values()
+    return _Launched.model_validate(task)
+
+
+def _worker_message(worker: object, tool_call_id: str) -> ToolMessage:
+    return ToolMessage(
+        content=json.dumps(worker), tool_call_id=tool_call_id, name=LAUNCH_WORKER_TOOL
+    )
+
+
+def _refused(name: str, tool_call_id: str, reason: str) -> ToolMessage:
+    return ToolMessage(
+        content=f"Error: {reason}", tool_call_id=tool_call_id, name=name, status="error"
+    )
 
 
 def _tool_message(result: ToolMessage | Command, tool_call_id: str) -> ToolMessage:
