@@ -130,9 +130,15 @@ jobs:
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
           TREE_SHA: ${{ needs.build.outputs.sha }}
+          # `1` gives the coding agent a LangSmith browser (mda/README.md).
+          OPEN_SWE_BROWSER: ${{ vars.OPEN_SWE_BROWSER_PREVIEW }}
         run: |
-          # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
+          # The project .env is forwarded as the deployment's secrets: the backend it calls back
+          # and, when set, the browser switch.
           printf 'OPEN_SWE_BACKEND_URL=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" >mda/.env
+          if [[ -n "$OPEN_SWE_BROWSER" ]]; then
+            printf 'OPEN_SWE_BROWSER=%s\n' "$OPEN_SWE_BROWSER" >>mda/.env
+          fi
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name open-swe-mda-preview \
             --deployment-type prod \
