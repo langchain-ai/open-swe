@@ -4,7 +4,7 @@ One dated file per change we make in [`../managed-deepagents-sdk`](../managed-de
 
 - **What** we changed, and in which vendored files.
 - **Why** Open SWE needs it.
-- **Upstream:** what MDA needs before we can drop the change, and the upstream PR or issue for it.
+- **Upstream:** what MDA needs before we can drop the change.
 
 The verdict is one of two:
 

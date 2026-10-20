@@ -14,4 +14,4 @@ When `mda build`, `mda dev` or `mda deploy` swaps the project's `managed-deepage
 
 ## Upstream
 
-Propose this edit unchanged: the CLI drops the runtime's own source entry whenever it substitutes the bundled runtime. Not yet proposed; first written in #4203.
+The edit as it stands: the CLI drops the runtime's own source entry whenever it substitutes the bundled runtime.
