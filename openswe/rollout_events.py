@@ -19,6 +19,7 @@ from openswe.database import configured
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.repositories import Repository
+from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
@@ -113,13 +114,7 @@ def _delivery_id(target: str, commits: list[str]) -> str:
 
 
 def _instructions(sha: str) -> str:
-    return (
-        f"This deployment includes merge commit {sha}. "
-        "The event names the target that finished syncing. "
-        "Confirm the fix and look for regressions on that target. "
-        "Cancel this subscription with listen_events after every target "
-        "expected for this change has included the commit."
-    )
+    return prompt("runs/rollout-check", sha=sha)
 
 
 def _copy_config(config: dict[str, JsonValue], values: dict[str, object]) -> None:

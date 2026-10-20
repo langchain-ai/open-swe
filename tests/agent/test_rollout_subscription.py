@@ -69,7 +69,7 @@ async def test_subscribe_merged_thread_listens_for_the_merge_commit(
     assert subscription.run_config["github_login"] == "octo"
     assert subscription.run_config["user_email"] == "octo@example.com"
     assert subscription.run_config["slack_thread"] == {"channel_id": "C1", "thread_ts": "1.2"}
-    assert "every target" in subscription.instructions
+    assert _SHA in subscription.instructions
 
 
 @pytest.mark.asyncio
