@@ -51,6 +51,7 @@ export interface PlanComment {
   body: string
   created_at: string
   anchor: PlanTextAnchor | null
+  parent_id?: string | null
 }
 
 export class PlanApiError extends DashboardRequestError {
@@ -115,11 +116,12 @@ export async function getPlanComments(
 export function addPlanComment(
   threadId: string,
   body: string,
-  anchor: PlanTextAnchor | null
+  anchor: PlanTextAnchor | null,
+  parentId?: string
 ): Promise<PlanComment> {
   return req(`/plan/${encodeURIComponent(threadId)}/comments`, {
     method: "POST",
-    body: JSON.stringify({ body, anchor }),
+    body: JSON.stringify({ body, anchor, parent_id: parentId }),
   })
 }
 

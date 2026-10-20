@@ -304,8 +304,9 @@ test.describe("transcript rendering", () => {
         }>;
         const config = runs[0]?.kwargs?.context?.__run_config;
         if (!config) return undefined;
-        return (JSON.parse(config) as { agent_model_id?: string })
-          .agent_model_id;
+        return (
+          JSON.parse(config) as { configurable?: { agent_model_id?: string } }
+        ).configurable?.agent_model_id;
       })
       .toBe("anthropic:claude-opus-5-5");
   });

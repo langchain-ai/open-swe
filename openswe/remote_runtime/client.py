@@ -22,7 +22,7 @@ HOSTED_GRAPHS: Final[frozenset[str]] = frozenset(get_args(HostedGraph))
 RUNTIME_METADATA_KEY: Final = "runtime"
 MDA_RUNTIME: Final = "mda"
 
-_configurable = TypeAdapter(dict[str, JsonValue])
+_json_object = TypeAdapter(dict[str, JsonValue])
 _hosted_graph = TypeAdapter(HostedGraph)
 
 
@@ -74,12 +74,16 @@ def mda_runtime_api_key() -> str | None:
 
 
 async def remote_run_context(
-    configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
+    configurable: dict[str, JsonValue],
+    *,
+    metadata: dict[str, JsonValue],
+    thread_id: str,
+    assistant_id: str,
 ) -> RemoteRunContext:
     """Everything an MDA run needs, since a run takes either context or configurable.
 
-    The configurable rides beside the token that signs its hash; the deployment
-    calls back with both rather than reading either.
+    The configurable and the hooks' metadata ride beside the token that signs their
+    hash; the deployment calls back with both rather than reading either.
     """
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
@@ -87,7 +91,8 @@ async def remote_run_context(
     run = RemoteRun(
         thread_id=thread_id,
         assistant_id=assistant_id,
-        configurable=_configurable.validate_python(configurable),
+        configurable=_json_object.validate_python(configurable),
+        metadata=_json_object.validate_python(metadata),
     )
     # The webapp must not import the agent stack at startup.
     from openswe.remote_runtime.hosted import hosted_graphs

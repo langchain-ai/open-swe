@@ -27,6 +27,7 @@ from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
 from openswe.github.org_membership import team_members
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.slack.availability import SlackUserInfo
 from openswe.slack.client import get_slack_user_info
 from openswe.users import User
 
@@ -56,21 +57,16 @@ class _Commit(BaseModel):
 _COMMITS = TypeAdapter(list[_Commit])
 
 
-class _SlackProfile(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    tz: str = ""
-
-
 def _is_bot(login: str) -> bool:
     return login.lower().endswith("[bot]")
 
 
 @dataclass(frozen=True, slots=True)
-class WorkHours:
-    """Mon–Fri ``WORK_START``–``WORK_END`` in ``zone``; an unknown zone is always on shift."""
+class ReviewerAvailability:
+    """Slack out-of-office status and Mon–Fri working hours in the person's timezone."""
 
     zone: ZoneInfo | None
+    out_of_office: bool | None = False
 
     @property
     def zone_name(self) -> str:
@@ -99,17 +95,21 @@ class WorkHours:
         if not user.slack_user_id:
             return cls(None)
         info = await get_slack_user_info(user.slack_user_id)
-        name = _SlackProfile.model_validate(info).tz if info else ""
+        if info is None:
+            return cls(None, None)
+        profile = SlackUserInfo.model_validate(info)
+        away = await profile.out_of_office(datetime.now(UTC))
+        name = profile.tz
         if not name:
-            return cls(None)
+            return cls(None, away)
         try:
-            return cls(ZoneInfo(name))
+            return cls(ZoneInfo(name), away)
         except ZoneInfoNotFoundError, ValueError:
             logger.warning(
                 "Unknown Slack timezone; treating the person as always on shift",
                 extra={"slack_user_id": user.slack_user_id, "slack_timezone": name},
             )
-            return cls(None)
+            return cls(None, away)
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,6 +354,24 @@ async def _choose_reviewer(
             skipped[login] = "missed_pick"
         else:
             people[login] = user
+    hours = dict(
+        zip(
+            people,
+            await asyncio.gather(
+                *(ReviewerAvailability.for_user(user) for user in people.values())
+            ),
+            strict=True,
+        )
+    )
+    for login in list(people):
+        if hours[login].out_of_office is True:
+            skipped[login] = "out_of_office"
+            del people[login]
+        elif hours[login].out_of_office is None:
+            logger.warning(
+                "Reviewer availability is unknown; retaining candidate for normal eligibility checks",
+                extra={**extra, "github_login": login},
+            )
     logger.info(
         "Filtered reviewer candidates",
         extra={**extra, "eligible": sorted(people), "skipped": skipped},
@@ -378,13 +396,6 @@ async def _choose_reviewer(
         return None
     loads = await HumanReviewRequest.open_review_counts(
         [user.id for user in people.values()], excluding=request.id
-    )
-    hours = dict(
-        zip(
-            people,
-            await asyncio.gather(*(WorkHours.for_user(user) for user in people.values())),
-            strict=True,
-        )
     )
     ranked = Candidate.rank(
         [

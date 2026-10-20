@@ -33,6 +33,9 @@ _V3_STREAMING_KEY: Final = "__event_streaming_v2"
 # The protocol v2 stream modes `run.start` uses, minus protocol-only channels the
 # REST run-create schema rejects.
 _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
+# The run metadata the graph's hooks read. Only these ride with the run, which
+# echoes them back on every hook call.
+_HOOK_METADATA_KEYS: Final = ("event_match_ids",)
 
 _object = TypeAdapter(dict[str, JsonValue])
 
@@ -95,11 +98,6 @@ class _SdkThreads:
         failure = _ErroredThread.model_validate(thread or {}).error
         return (failure.describe() or None) if failure else None
 
-    async def has_history(self, thread_id: str) -> bool:
-        """Whether runs already left checkpoints here, which keeps the thread on this runtime."""
-        thread = await self.get(thread_id)
-        return thread is not None and bool(thread.get("values") or thread.get("status") != "idle")
-
 
 class MdaRuntime:
     """The MDA deployment, reached for the runs of threads the index marks ``mda``."""
@@ -133,6 +131,8 @@ class MdaRuntime:
         self, thread_id: str, payload: dict[str, JsonValue]
     ) -> dict[str, JsonValue]:
         """Rewrite a run-create body for the ``open-swe`` graph: configurable becomes context."""
+        raw_metadata = payload.get("metadata")
+        run_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         config = payload.get("config")
         config = dict(config) if isinstance(config, dict) else {}
         raw_configurable = config.pop("configurable", None)
@@ -142,7 +142,12 @@ class MdaRuntime:
         if not isinstance(assistant_id, str):
             raise ValueError("A run needs an assistant_id")
         context = dict(
-            await remote_run_context(configurable, thread_id=thread_id, assistant_id=assistant_id)
+            await remote_run_context(
+                configurable,
+                metadata={k: run_metadata[k] for k in _HOOK_METADATA_KEYS if k in run_metadata},
+                thread_id=thread_id,
+                assistant_id=assistant_id,
+            )
         )
         if streaming:
             # Context replaces configurable on the server, so the stream marker rides in it.

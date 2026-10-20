@@ -354,6 +354,7 @@ class SlackChannelContext(SlackPayload):
     is_pending_ext_shared: bool | None = None
     is_im: bool | None = None
     is_mpim: bool | None = None
+    lookup_retry_after: int | None = Field(default=None, exclude=True)
 
     def dump(self) -> JsonObject:
         """The JSON value to store in thread metadata."""
