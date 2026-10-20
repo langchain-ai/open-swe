@@ -324,3 +324,28 @@ class TestRequireUserReplyMiddleware:
             "reply_surface": WEB_REPLY_SURFACE,
             "reply_nudges": 0,
         }
+
+
+class TestRecordsTheTurnAnswer:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("surface", "recorded"),
+        [(WEB_REPLY_SURFACE, ["the answer"]), (SLACK_REPLY_SURFACE, [])],
+    )
+    async def test_records_only_a_web_answer(
+        self, monkeypatch: pytest.MonkeyPatch, surface: str, recorded: list[str]
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("openswe.middleware.require_user_reply.LastReply.record", record)
+
+        await _middleware().aafter_agent(
+            _state(
+                HumanMessage(content="what is up"),
+                AIMessage(content="the answer"),
+                AIMessage(content=""),
+                reply_surface=surface,
+            ),
+            _runtime(),
+        )
+
+        assert [call.args[0] for call in record.await_args_list] == recorded

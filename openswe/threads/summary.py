@@ -22,6 +22,7 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
+from openswe.threads.last_reply import LastReply
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -524,6 +525,11 @@ async def _thread_summary(
         ),
         "resolved": _is_thread_resolved(metadata),
         "attentionReason": _metadata_string(metadata, "attention_reason"),
+        "lastReply": (
+            reply.summary()
+            if (reply := LastReply.for_run(metadata, _thread_run_id(metadata, latest_run_id)))
+            else None
+        ),
         "resolvedAt": (
             int(metadata["resolved_at_ms"])
             if isinstance(metadata.get("resolved_at_ms"), (int, float))

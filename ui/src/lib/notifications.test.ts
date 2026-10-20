@@ -7,6 +7,7 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   NOTIFICATIONS_PREF_KEY,
+  runNotificationContent,
   showRunNotification,
 } from "@/lib/notifications"
 
@@ -59,7 +60,7 @@ describe("showRunNotification", () => {
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {})
     const openThread = vi.fn()
 
-    showRunNotification(thread, openThread)
+    showRunNotification({ ...thread, status: "running" }, thread, openThread)
 
     expect(FakeNotification.instances).toHaveLength(1)
     const notification = FakeNotification.instances[0]
@@ -70,6 +71,43 @@ describe("showRunNotification", () => {
     expect(openThread).toHaveBeenCalledOnce()
     expect(openThread).toHaveBeenCalledWith("thread-123")
     expect(notification.close).toHaveBeenCalledOnce()
+  })
+})
+
+describe("runNotificationContent", () => {
+  const running: AgentThread = { ...thread, status: "running" }
+
+  it("says what the run answered and which PR it opened", () => {
+    const content = runNotificationContent(running, {
+      ...thread,
+      pr: {
+        number: 42,
+        title: "Better notifications",
+        state: "draft",
+        headRef: "open-swe/notify",
+        baseRef: "main",
+        url: "https://github.com/langchain-ai/open-swe/pull/42",
+      },
+      diffStats: { files: 2, additions: 30, deletions: 4 },
+      lastReply: {
+        text: "Should I also **email** you? See [the plan](https://x.dev).",
+        awaitingChoice: true,
+      },
+    })
+
+    expect(content).toEqual({
+      body: "Needs your decision · Opened PR #42 (+30 −4)\nShould I also email you? See the plan.",
+      requireInteraction: true,
+    })
+  })
+
+  it("stays quiet when the run decided nobody needed a reply", () => {
+    expect(
+      runNotificationContent(running, {
+        ...thread,
+        lastReply: { text: null, awaitingChoice: false },
+      })
+    ).toBeNull()
   })
 })
 
