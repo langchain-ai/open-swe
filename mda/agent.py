@@ -24,6 +24,7 @@ from managed_deepagents import (
     ManagedServerRuntime,
     define_deep_agent,
 )
+from managed_deepagents.browser import BrowserMiddleware
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
 from rt.managed_sandbox import ReplaceSandboxMiddleware, definition, opened_sandbox
@@ -97,8 +98,7 @@ def _browser(graph: Graph) -> list[AgentMiddleware]:
     """The coding agent's browser, a LangSmith browser per thread, when this deployment offers one.
 
     Off unless ``OPEN_SWE_BROWSER`` is set: the LangSmith browser is a beta each
-    workspace must have enabled, and ``BrowserMiddleware`` ships in
-    managed-deepagents 0.10, so it is imported only when turned on.
+    workspace must have enabled.
     """
     if graph != "agent" or os.environ.get("OPEN_SWE_BROWSER", "").strip().lower() not in {
         "1",
@@ -106,8 +106,6 @@ def _browser(graph: Graph) -> list[AgentMiddleware]:
         "yes",
     }:
         return []
-    from managed_deepagents.browser import BrowserMiddleware  # noqa: PLC0415
-
     return [BrowserMiddleware()]
 
 
