@@ -2,13 +2,17 @@
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 
 from openswe.github.http import GitHubAppUnavailable
+from openswe.prompts import prompt
 from openswe.rollout_events import ask_to_monitor_rollout, subscribe_merged_thread
+from openswe.run_config import RunConfig
+from openswe.tools.request_rollout_check import request_rollout_check
+from openswe.webhooks.event_subscriptions import EventSummary
 
 _SHA = "ab" * 20
 
@@ -87,6 +91,67 @@ async def test_subscribe_merged_thread_does_not_listen_twice(
         "thread-1", owner="lc", repo="repo", number=7, sha=_SHA, metadata={}
     )
     assert created == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "destination", "reports_to_slack"),
+    [
+        ("slack", {"channel_id": "C1", "thread_ts": "1.2"}, True),
+        ("dashboard", {"channel_id": "C1", "thread_ts": "1.2"}, False),
+        ("slack", {"channel_id": "C1"}, False),
+        ("slack", None, False),
+    ],
+)
+async def test_rollout_request_destination_survives_web_follow_up(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    destination: dict[str, str] | None,
+    reports_to_slack: bool,
+) -> None:
+    created = _ready(monkeypatch)
+    metadata: dict[str, object] = {"source": source}
+
+    async def update(thread_id: str, flag: dict[str, object]) -> SimpleNamespace:
+        metadata.update(flag)
+        return SimpleNamespace(thread_id=thread_id, runtime="mda", metadata=metadata)
+
+    with (
+        patch(
+            "openswe.tools.request_rollout_check.RunConfig.from_runtime",
+            return_value=RunConfig.parse(
+                {
+                    "thread_id": "thread-1",
+                    "source": source,
+                    "github_login": "octo",
+                    "slack_thread": destination,
+                }
+            ),
+        ),
+        patch("openswe.tools.request_rollout_check.index.get", AsyncMock(return_value=True)),
+        patch("openswe.tools.request_rollout_check.index.update", update),
+        patch("openswe.tools.request_rollout_check.RUNTIMES.copies", return_value=[]),
+    ):
+        await request_rollout_check()
+    metadata["source"] = "dashboard"
+    await subscribe_merged_thread(
+        "thread-1", owner="lc", repo="repo", number=7, sha=_SHA, metadata=metadata
+    )
+    subscription = created[0]
+    event_turn = prompt(
+        "runs/event-subscription",
+        summary=EventSummary(source="deployment", event_type="deployed"),
+        details="Target: production",
+        instructions=subscription.instructions,
+        subscription_id="subscription-1",
+        one_shot=False,
+    )
+    assert ("slack_reply" in event_turn) is reports_to_slack
+    if reports_to_slack:
+        assert "C1" in event_turn and "1.2" in event_turn and "dashboard" in event_turn
+        assert subscription.run_config["slack_thread"] == destination
+    else:
+        assert "slack_thread" not in subscription.run_config
 
 
 def _skill_file(
