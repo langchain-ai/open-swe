@@ -6,7 +6,7 @@ import re
 from time import time_ns
 from typing import Literal, TypedDict, cast
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, HTTPException, Response
 
 from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
@@ -296,6 +296,56 @@ async def _launch_slack_automations(
         )
 
 
+async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
+    event = envelope.event
+    if event is None or event.type not in {"message", "app_mention"}:
+        return False
+    if event.subtype not in {"", "file_share", "thread_broadcast", "bot_message"}:
+        return False
+    if (
+        not isinstance(event.user, str)
+        or not (event.user or event.bot_id)
+        or event.text is None
+        or not event.ts
+    ):
+        return False
+    bot_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
+    leading = re.match(r"\s*<@([^>]+)>", event.text)
+    if event.user == bot_id or (leading and leading.group(1) != bot_id):
+        return False
+    if event.is_from_bot:
+        if (
+            not bot_id
+            or f"<@{bot_id}>" not in event.text
+            or (event.app_id and event.app_id == envelope.api_app_id)
+        ):
+            return False
+        return (
+            await resolve_allowed_slack_bot(
+                envelope.team_id or event.team,
+                event.bot_id,
+                user_id=event.user,
+                app_id=event.app_id,
+            )
+            is not None
+        )
+    if event.type == "app_mention" or (bot_id and f"<@{bot_id}>" in event.text):
+        return True
+    channel_id = event.resolve_channel_id()
+    if event.channel_type == "im" or await common.is_code_channel(channel_id):
+        return True
+    if await is_kitchen_channel(channel_id):
+        return True
+    return bool(event.thread_ts) and await allow_solo_thread_followup(
+        get_langgraph_client(),
+        channel_id=channel_id,
+        thread_ts=event.thread_ts,
+        message_ts=event.ts,
+        user_id=event.user,
+        explicit_mention=False,
+    )
+
+
 @router.post("/webhooks/slack")
 async def slack_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
@@ -306,7 +356,7 @@ async def slack_webhook(
 
     payload = parse_json_object(body)
     envelope = SlackEventEnvelope.parse(payload) if payload is not None else None
-    await EventLog.record(
+    logged = await EventLog.record(
         request,
         body,
         "slack",
@@ -348,11 +398,87 @@ async def slack_webhook(
         or (event.type == "message" and event.subtype == "channel_archive")
     ):
         background_tasks.add_task(close_guide_for_channel, channel_id)
+    if await common.slack_event_already_seen(event_id):
+        return ignored("Duplicate Slack event delivery")
+    if event.type not in {
+        "message",
+        "app_mention",
+        "reaction_added",
+        "reaction_removed",
+        "agent_session_stopped",
+        "code_channel_action",
+    }:
+        return ignored("Event does not need agent handling")
+    if event.type in {"reaction_added", "reaction_removed"} and event.reaction not in {
+        *common.FEEDBACK_REACTIONS,
+        *({"x", SUMMON_REACTION} if event.type == "reaction_added" else set()),
+    }:
+        return ignored("Reaction not tracked for feedback")
+
+    watched = (
+        event.type == "message" and bool(channel_id) and await _slack_channel_watched(channel_id)
+    )
+    bot_user_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
+    is_message_update = event.type == "message" and event.subtype == "message_changed"
+    updated_message = event.message if is_message_update else event
+    allowed_bot = None
+    rejected_bot = False
+    if updated_message is not None and (
+        event.is_from_bot
+        or updated_message.is_from_bot
+        or (bot_user_id and updated_message.user == bot_user_id)
+    ):
+        bot_text = updated_message.text
+        rejected_bot = (
+            is_message_update
+            or event.type not in {"message", "app_mention"}
+            or event.subtype not in {"", "bot_message"}
+            or bot_text is None
+            or not bot_user_id
+            or f"<@{bot_user_id}>" not in bot_text
+            or updated_message.user == bot_user_id
+            or bool(event.app_id and event.app_id == envelope.api_app_id)
+        )
+        if not rejected_bot:
+            allowed_bot = await resolve_allowed_slack_bot(
+                team_id,
+                updated_message.bot_id,
+                user_id=updated_message.user if isinstance(updated_message.user, str) else "",
+                app_id=updated_message.app_id,
+            )
+            rejected_bot = allowed_bot is None
+        if rejected_bot and not watched:
+            return ignored("Event from a bot")
+
     channel_context: SlackChannelContext | None = None
     if channel_id:
         channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
+        if not logged:
+            await EventLog.record(
+                request,
+                body,
+                "slack",
+                event_type=envelope.kind,
+                delivery_id=event_id,
+                refs=EventRefs.slack(envelope),
+            )
         if not channel_context.allows_operations:
             is_external = channel_context.is_ext_shared is True
+            if (
+                not is_external
+                and channel_context.is_pending_ext_shared is not True
+                and channel_context.lookup_retry_after is not None
+                and await _retry_channel_verification(envelope)
+            ):
+                common.logger.warning(
+                    "Slack channel verification unavailable; requesting event redelivery",
+                    extra={"slack_channel_id": channel_id, "slack_event_id": event_id},
+                )
+                raise HTTPException(
+                    503,
+                    "Slack channel verification is temporarily unavailable.",
+                    headers={"Retry-After": str(channel_context.lookup_retry_after)},
+                )
             event_ts = event.event_ts or event.ts
             thread_ts = event.thread_ts or event.ts
             if (
@@ -377,12 +503,7 @@ async def slack_webhook(
             )
             return ignored("Slack channel is not eligible")
 
-    if (
-        event.type == "message"
-        and channel_id
-        and channel_context is not None
-        and await _slack_channel_watched(channel_id)
-    ):
+    if event.type == "message" and channel_id and channel_context is not None and watched:
         # Independent of the handling below: a watched channel's messages fire
         # automations whether or not they address Open SWE.
         background_tasks.add_task(_launch_slack_automations, envelope, channel_context)
@@ -435,20 +556,11 @@ async def slack_webhook(
         return ignored("Reaction not tracked for feedback")
 
     if event.type == "agent_session_stopped":
-        background_tasks.add_task(common.process_agent_session_stopped, raw_event, event_id)
+        background_tasks.add_task(
+            common.process_agent_session_stopped, raw_event, event_id, team_id
+        )
         return accepted("Session stop queued")
 
-    retry_num = request.headers.get("X-Slack-Retry-Num", "")
-    if retry_num and await common.slack_event_already_seen(event_id):
-        common.logger.info(
-            "Ignoring Slack retry %s of already-handled event %s", retry_num, event_id
-        )
-        return ignored("Duplicate Slack event delivery")
-
-    bot_user_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
-
-    is_message_update = event.type == "message" and event.subtype == "message_changed"
-    updated_message = event.message if is_message_update else event
     if updated_message is None:
         return ignored("Invalid updated message")
     event_ts = event.event_ts or event.ts
@@ -458,27 +570,8 @@ async def slack_webhook(
     user_id = updated_message.user if isinstance(updated_message.user, str) else ""
     text = updated_message.text
     attachments = updated_message.attachments
-    allowed_bot = None
-    if event.is_from_bot or updated_message.is_from_bot:
-        if (
-            is_message_update
-            or event.type not in {"message", "app_mention"}
-            or event.subtype not in {"", "bot_message"}
-            or text is None
-            or not bot_user_id
-            or f"<@{bot_user_id}>" not in text
-            or user_id == bot_user_id
-            or (event.app_id and event.app_id == envelope.api_app_id)
-        ):
-            return ignored("Event from a bot")
-        allowed_bot = await resolve_allowed_slack_bot(
-            team_id,
-            updated_message.bot_id,
-            user_id=user_id,
-            app_id=updated_message.app_id,
-        )
-        if allowed_bot is None:
-            return ignored("Event from a bot")
+    if rejected_bot:
+        return ignored("Event from a bot")
     if not (
         channel_id and event_ts and original_message_ts and thread_ts and (user_id or allowed_bot)
     ) or (text is None):

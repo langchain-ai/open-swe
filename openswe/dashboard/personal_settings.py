@@ -22,6 +22,7 @@ SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
 PROFILE_SETTING_KEYS = frozenset(
     {
         "default_repo",
+        "workspace_default_repos",
         "base_branch",
         "branch_prefix",
         "auto_fix_ci",
@@ -38,7 +39,7 @@ PREFERENCE_SETTING_KEYS = frozenset(
         "follow_up_behavior",
     }
 )
-type SettingValue = str | bool | None
+type SettingValue = str | bool | dict[str, str] | None
 
 
 async def patch_personal_settings(

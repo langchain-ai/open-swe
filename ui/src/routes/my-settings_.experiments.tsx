@@ -33,14 +33,9 @@ function ExperimentsPage() {
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
         />
         <ProfileSwitchRow
-          field="experimental_mcp_ptc"
-          label="Code Mode (Experimental)"
-          description="Let the agent call integrations and supported tools from JavaScript, combining calls and filtering results before they enter its context. Separate from sandbox tool routing; not available for local runs. Applies on the next run."
-        />
-        <ProfileSwitchRow
-          field="prefer_tools_in_sandbox"
-          label="Prefer tools through the sandbox"
-          description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint so it can filter their output. Applies to threads you start afterwards."
+          field="experimental_monitor"
+          label="Monitors (experimental)"
+          description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
         />
         <ProfileSwitchRow
           field="experimental_act_as_approval"

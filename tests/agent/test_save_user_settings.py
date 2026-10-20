@@ -106,6 +106,22 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     assert {key: saved_prefs[key] for key in prefs} == {**prefs, "default_workspace": "new"}
 
 
+async def test_workspace_repo_patch_preserves_global_and_rejects_invalid_maps(
+    user_records: FakeUserRecords,
+    requester: dict[str, object],
+    saved_scope: dict[str, object],
+) -> None:
+    user_records.seed("profile", "Alice", {"default_repo": "org/global"})
+    result = await save_user_settings({"workspace_default_repos": {"selected": "org/scoped"}})
+    assert result["ok"] is True
+    assert user_records.get("profile", "Alice")["default_repo"] == "org/global"
+    before = deepcopy(user_records.items)
+    result = await save_user_settings({"workspace_default_repos": {"selected": "invalid"}})
+    assert result["ok"] is False
+    assert user_records.items == before
+    assert (await save_user_settings({"workspace_default_repos": {}}))["ok"] is True
+
+
 @pytest.mark.parametrize(
     ("config_patch", "metadata_patch"),
     [
@@ -265,6 +281,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
 ) -> None:
     ordinary = {
         "default_repo": "org/private",
+        "workspace_default_repos": {"mine": "org/scoped"},
         "base_branch": "develop",
         "branch_prefix": "alice/",
     }
@@ -292,7 +309,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "concierge_mode": False,
                 "pr_review_links": False,
                 "pr_failure_reactions": False,
-                "prefer_tools_in_sandbox": False,
                 "experimental_task_coordination": False,
             },
             "preferences": {

@@ -36,7 +36,7 @@ def _linear_person(author: dict[str, Any]) -> PersonIdentity:
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
-    issue_data: dict[str, Any], repo_config: dict[str, str]
+    issue_data: dict[str, Any], repo_config: dict[str, str], *, workspace: str | None = None
 ) -> None:
     """Process a Linear issue by creating a new LangGraph thread and run.
 
@@ -189,9 +189,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # A follow-up stays in its thread's workspace; a new issue lands in the
     # repository's preferred one. Either way its default model and Fable flag
     # are the ones the vision fallback checks.
-    workspace = await common.get_thread_workspace(
-        thread_id
-    ) or await common.workspace_for_repo_config(repo_config)
+    workspace = (
+        await common.get_thread_workspace(thread_id)
+        or workspace
+        or await common.workspace_for_repo_config(repo_config)
+    )
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:

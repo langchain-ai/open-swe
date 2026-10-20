@@ -1,3 +1,4 @@
+import json
 import time
 
 import jwt
@@ -286,14 +287,19 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
-async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
+async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
+    # A provider MDA declares no box for, so the catalog reads no thread metadata.
+    monkeypatch.setenv("SANDBOX_TYPE", "local")
     from langchain.agents import create_agent
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
+    from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.remote_runtime.graph import RemoteGraph
     from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
@@ -305,10 +311,26 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
         return StructuredTool.from_function(coroutine=run, name=name, description=name)
 
     async def build(config: object, surface: ToolSurface) -> None:
-        surface.dynamic = DynamicToolMiddleware(
-            {"MCP": [integration("mcp_search"), integration("mcp.dotted")]}
-        )
-        core = [integration(name) for name in ("read_file", "manage_thread", "slack_reply")]
+        search = integration("mcp_search")
+        search.metadata = {
+            "mcp_provenance": MCPToolProvenance(
+                connection_name="lmt", scope="managed", overridden_scopes=["instance", "user"]
+            ),
+            "headers": {"Authorization": "private-token"},
+            "namespace": ["managed_tools", "private-owner", "private-gateway"],
+        }
+        surface.dynamic = DynamicToolMiddleware({"MCP": [search, integration("mcp.dotted")]})
+        core = [
+            integration(name)
+            for name in (
+                "read_file",
+                "manage_thread",
+                "slack_reply",
+                "spawn_worker",
+                "message_task_thread",
+                "load_integration_tools",
+            )
+        ]
         middleware: list[AgentMiddleware] = [
             surface.dynamic,
             CodeInterpreterMiddleware(ptc=[integration("mcp_search")]),
@@ -332,6 +354,22 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     assert isinstance(tools, list)
     names = {tool["name"] for tool in tools if isinstance(tool, dict)}
     assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
+    # The sandbox's tool channel never offers task coordination; the model does.
+    assert {"spawn_worker", "message_task_thread"} <= names
     assert "eval" not in names
+    excluded = catalog["excluded"]
+    assert isinstance(excluded, list) and "load_integration_tools" in excluded
+    search = next(tool for tool in tools if isinstance(tool, dict) and tool["name"] == "mcp_search")
+    assert isinstance(search, dict)
+    expected = {
+        "connection_name": "lmt",
+        "scope": "managed",
+        "overridden_scopes": ["instance", "user"],
+    }
+    assert search["mcp_provenance"] == expected
+    assert json.dumps(expected, separators=(",", ":")) in str(search["description"])
+    assert "private-token" not in str(catalog)
+    assert "private-owner" not in str(catalog)
+    assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     assert catalog["also_from_code"] == ["read_file"]

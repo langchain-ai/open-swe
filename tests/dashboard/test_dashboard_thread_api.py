@@ -93,6 +93,34 @@ async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> N
     access.assert_awaited_once_with("octocat", "acme/oss")
 
 
+@pytest.mark.parametrize("explicit_repo", [None, "acme/explicit"])
+async def test_create_session_uses_selected_workspace_personal_default(
+    monkeypatch, registry_db, explicit_repo: str | None
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(
+        monkeypatch,
+        profile={
+            "default_repo": "acme/oss",
+            "workspace_default_repos": {"selected": "acme/scoped"},
+        },
+    )
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    monkeypatch.setattr(thread_runs, "require_repo_access_for_user", AsyncMock())
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss", "acme/scoped"]), "octocat"
+    )
+    await WORKSPACES.create(WorkspaceCreate(name="Selected"), "octocat")
+    await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="Fix login", repo=explicit_repo, workspace="selected"),
+        "octocat",
+    )
+    metadata = created["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["repo_name"] == ("explicit" if explicit_repo else "scoped")
+    assert metadata["workspace"] == "selected"
+
+
 def _image() -> thread_runs.DashboardImageBody:
     return thread_runs.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),
@@ -919,7 +947,7 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     run_list_calls = 0
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             offsets.append(offset)
             assert select == thread_listing._THREAD_LIST_SELECT
             return threads[offset : offset + limit]
@@ -1154,7 +1182,7 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
     searches: list[dict[str, object]] = []
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             searches.append(metadata)
             return threads[offset : offset + limit]
 
@@ -1178,11 +1206,7 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
         surfaced_only=True,
     )
 
-    # The legacy owner filter rides along until pre-participant threads age out.
-    assert searches == [
-        {"participant_logins": {"other-user": True}},
-        {"github_login": "other-user"},
-    ]
+    assert searches == [{"participant_logins": {"other-user": True}}]
     assert [item["id"] for item in result["items"]] == ["surfaced"]
 
 
@@ -1199,7 +1223,7 @@ async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch
     }
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             return threads[offset : offset + limit]
 
     class FakeRuns:
@@ -1242,7 +1266,7 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     run_list_thread_ids: list[str] = []
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             return threads[offset : offset + limit]
 
         async def update(self, *, thread_id, metadata):

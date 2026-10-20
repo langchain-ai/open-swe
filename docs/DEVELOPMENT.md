@@ -7,6 +7,7 @@ Run Open SWE on your machine: the backend and the dashboard on `http://localhost
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync`)
 - Node 22.22.2+ and [pnpm](https://pnpm.io/) for the dashboard
+- Rust (`cargo`, e.g. via [rustup](https://rustup.rs/)): `make dev-mda` builds the `mda` CLI from the vendored Managed Deep Agents SDK ([vendor/README.md](../vendor/README.md))
 - A free [ngrok](https://ngrok.com/) account, so GitHub and Slack can reach your local backend (step 3)
 - A Slack workspace where you may create apps, and a GitHub account or organization where you may create a GitHub App
 
@@ -265,6 +266,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 |---|---|
 | `make dev` | `langgraph dev` on port 2024: graphs, webhooks, dashboard API, and the bundled dashboard when a build exists |
 | `make dev-mda` | `mda dev` on port 2025: the Managed Deep Agents runtime every Open SWE thread runs on |
+| `make mda-cli` | Build the `mda` CLI from the vendored SDK (`make dev-mda` does it first) |
 | `make dev-ui` | `make web` and `make dev` together, the backend fronting Vite so the UI hot-reloads on port 2024 |
 | `make web` | The Vite dev server alone on port 3000 |
 | `make build-dashboard` | Installs the dashboard's dependencies and builds it into `ui/.output/public` |
@@ -274,7 +276,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 | `make install` | `uv sync --extra dev` |
 | `make test [TEST_FILE=tests/…]` | `pytest -vvv` on `tests/` or the given path |
 | `make lint`, `make format`, `make format-check` | ruff check and format (`format` rewrites files) |
-| `make typecheck` | `ty check agent tests` |
+| `make typecheck` | `ty check openswe tests` |
 
 ## Troubleshooting
 

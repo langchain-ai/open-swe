@@ -26,6 +26,7 @@ from managed_deepagents import (
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
+from rt.managed_sandbox import ReplaceSandboxMiddleware, definition, opened_sandbox
 from rt.middleware import (
     BackendRunMiddleware,
     DescribedToolsMiddleware,
@@ -148,6 +149,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         else [by_name[name] for name in subagent.tools if name in by_name]
         for subagent in catalog.subagents
     }
+    replace_sandbox = (
+        [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
+    )
     return define_deep_agent(
         name="open-swe",
         model=model,
@@ -156,7 +160,13 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # and shell tools: the backend runs them in the thread's sandbox. Code-only
         # tools stay callable by name, as in-process, though no request offers them.
         tools=tools,
-        sandbox=None,
+        # The thread's box, for MDA's own use of it such as the browser's screenshots;
+        # the backend's tools run in the same box.
+        sandbox=(
+            definition(catalog.sandbox.create, catalog.sandbox.thread_id)
+            if catalog.sandbox is not None
+            else None
+        ),
         subagents=[
             {
                 "name": subagent.name,
@@ -166,6 +176,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 "tools": subagent_tools[subagent.name],
                 "middleware": [
                     *_backend_reports(backend, by_name.keys()),
+                    *replace_sandbox,
                     ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
                     ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ],
@@ -173,7 +184,12 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             for subagent in catalog.subagents
         ],
         middleware=[
-            BackendRunMiddleware(backend, context.invocation_id),
+            BackendRunMiddleware(
+                backend,
+                context.invocation_id,
+                opened_sandbox if catalog.sandbox is not None else None,
+            ),
+            *replace_sandbox,
             *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(offered, excluded | code_only),
             *_code_mode(context.graph, from_code, catalog.described),
