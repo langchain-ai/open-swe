@@ -302,3 +302,89 @@ async def test_code_channel_external_select_returns_registered_suggestions(
 
     assert result == {"options": options}
     get_suggestions.assert_awaited_once_with("C-code", "V-plan", "repository", "open")
+
+
+@pytest.mark.parametrize("surface", ["web", "slack"])
+@pytest.mark.parametrize("first_approved", [True, False])
+@pytest.mark.parametrize("action", ["approve", "reject"])
+async def test_workflow_push_decision_is_terminal(
+    monkeypatch: pytest.MonkeyPatch, surface: str, first_approved: bool, action: str
+) -> None:
+    from copy import deepcopy
+
+    from openswe.threads import workflow_approval, workflow_approval_api
+
+    metadata: dict[str, object] = {
+        "visibility": "public",
+        "owner_type": "user",
+        "owner_login": "alice",
+        "source": "dashboard",
+        "workflow_push_approvals": {"fp": {"fingerprint": "fp", "status": "pending"}},
+    }
+
+    async def update(thread_id: str, metadata: dict[str, object]) -> None:
+        stored.update(deepcopy(metadata))
+
+    stored = deepcopy(metadata)
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(side_effect=lambda _: {"metadata": deepcopy(stored)}),
+            update=AsyncMock(side_effect=update),
+        )
+    )
+    monkeypatch.setattr(workflow_approval, "get_client", lambda: client)
+    monkeypatch.setattr(
+        workflow_approval_api, "fetch_thread_metadata", AsyncMock(return_value=metadata)
+    )
+    dispatch = AsyncMock(return_value={"run_id": "retry"})
+    monkeypatch.setattr(workflow_approval_api, "dispatch_followup", dispatch)
+    session = {"sub": "alice"}
+    first_handler = (
+        workflow_approval_api.approve_workflow_push
+        if first_approved
+        else workflow_approval_api.reject_workflow_push
+    )
+    await first_handler("thread-1", "fp", session=session)
+    decided = deepcopy(stored)
+    status = "approved" if first_approved else "rejected"
+
+    process = AsyncMock()
+    reply = AsyncMock()
+    monkeypatch.setattr(slack_routes.service, "process_slack_mention", process)
+    monkeypatch.setattr(slack_routes.common, "post_slack_thread_reply", reply)
+    if surface == "web":
+        handler = (
+            workflow_approval_api.approve_workflow_push
+            if action == "approve"
+            else workflow_approval_api.reject_workflow_push
+        )
+        result = await handler("thread-1", "fp", session={"sub": "bob"})
+        assert result["status"] == f"already_{status}"
+    else:
+        payload = _option_payload()
+        payload["actions"][0]["value"] = json.dumps(
+            {"type": "workflow_push_approval", "fingerprint": "fp", "action": action}
+        )
+        monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+        monkeypatch.setattr(
+            slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
+        )
+        monkeypatch.setattr(
+            slack_routes.common,
+            "resolve_slack_channel_context",
+            AsyncMock(
+                return_value=SlackChannelContext(
+                    name="proj-open-swe", is_ext_shared=False, is_pending_ext_shared=False
+                )
+            ),
+        )
+        background_tasks = BackgroundTasks()
+        result = await slack_routes.slack_interactivity(_request(payload), background_tasks)
+        await background_tasks()
+        assert result == {"status": "accepted", "message": f"Workflow push already {status}"}
+
+    assert stored == decided
+    assert client.threads.update.await_count == 1
+    assert dispatch.await_count == int(first_approved)
+    process.assert_not_awaited()
+    reply.assert_not_awaited()

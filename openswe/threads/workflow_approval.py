@@ -164,17 +164,19 @@ async def decide_workflow_push_approval(
     *,
     approved: bool,
     actor: str,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, object], bool] | None:
     approvals = await get_workflow_push_approvals(thread_id)
     record = approvals.get(fingerprint)
     if not record:
         return None
+    if record.get("status") in _TERMINAL_STATUSES:
+        return record, False
     record["status"] = WORKFLOW_APPROVAL_APPROVED if approved else WORKFLOW_APPROVAL_REJECTED
     record["decided_at"] = now_iso()
     record["decided_by"] = actor
     approvals[fingerprint] = record
     await _save_approvals(thread_id, approvals)
-    return record
+    return record, True
 
 
 async def _save_approvals(thread_id: str, approvals: dict[str, dict[str, Any]]) -> None:
