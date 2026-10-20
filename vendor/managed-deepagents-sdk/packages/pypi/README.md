@@ -266,17 +266,31 @@ agent = define_deep_agent(
 ```
 
 The subagent runs under the caller's identity and uses the project's sandbox,
-identity, and connector declarations; its sandbox is separate from the agent's.
-When it leaves `model`, `tools`, `permissions`, or `interrupt_on` unset, it uses
-the agent's. It does not inherit the agent's middleware, skills, or memory.
+identity, and connector declarations. When it leaves `model`, `tools`,
+`permissions`, or `interrupt_on` unset, it uses the agent's. It does not inherit
+the agent's middleware, skills, or memory.
+
+When the project has a sandbox, the subagent works in the sandbox of the agent
+that started it, so both see the same files. MDA first checks that the subagent
+run's caller owns the starting agent's thread (a Slack conversation or a user),
+so a run can't name another caller's sandbox. The subagent only refreshes
+credentials in the shared sandbox; it never reruns workspace setup there or
+deletes it. If the starting agent hasn't created its sandbox yet, the subagent
+creates it, and the starting agent then uses that same sandbox.
 
 When the subagent pauses for approval, the agent sees the task as waiting.
 Answer the approval in the subagent's own thread, and the task continues.
 
+With tracing on, a subagent's runs appear in the starting agent's trace, under
+the call that started it. Nesting follows the trace headers on the request, so
+any caller allowed to start runs on this deployment can place its run inside
+another trace in the same workspace.
+
 Each async subagent is its own graph, so any caller allowed to start runs on
 this deployment can also run it directly, as themselves. It doesn't get the
 agent's middleware, so don't rely on the agent's middleware to guard the tools
-it shares with a subagent.
+it shares with a subagent, and don't give it looser `interrupt_on` or permissions
+than the agent that starts it.
 
 Write async subagents in `agent.py` as dict literals, or names bound to one, so
 the build can find them without running your code. `mda build` warns about

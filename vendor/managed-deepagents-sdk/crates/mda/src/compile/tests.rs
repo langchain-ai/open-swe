@@ -1295,7 +1295,9 @@ fn compile_builds_a_graph_per_async_subagent() {
         "{entry}"
     );
     assert!(
-        entry.contains("async def agent__researcher(config, runtime: ServerRuntime):"),
+        entry.contains(
+            "@asynccontextmanager\nasync def agent__researcher(config, runtime: ServerRuntime):\n    async with parent_run(config):"
+        ),
         "{entry}"
     );
     assert!(entry.contains("async_subagent=\"researcher\")"), "{entry}");

@@ -22,12 +22,22 @@ import secrets
 import socket
 import threading
 import time
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
+from contextlib import asynccontextmanager, contextmanager, suppress
+from contextvars import ContextVar
 from functools import partial
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from deepagents import FilesystemPermission, create_deep_agent
 from deepagents.backends import (
@@ -51,8 +61,13 @@ from deepagents.backends.protocol import (
     SandboxBackendProtocol,
     WriteResult,
 )
+from deepagents.middleware.async_subagents import _NEST_UNDER_PARENT
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph as CompiledAgent
+from langgraph_sdk import get_client
+from langsmith import tracing_context
+from langsmith.run_trees import RunTree
+from langsmith.utils import tracing_is_enabled
 
 from managed_deepagents._async_subagents import (
     async_subagent_definition,
@@ -68,6 +83,7 @@ from managed_deepagents._channels.binding import resolve_channel_provider
 from managed_deepagents._channels.messaging_registry import register_channel_messaging
 from managed_deepagents._connector import (
     Connector,
+    SandboxMode,
     collect_connectors,
     has_sandbox_connectors,
     load_connector_tools,
@@ -192,6 +208,7 @@ __all__ = [
     "compile_managed_agent_for_eval",
     "has_sandbox_connectors",
     "load_connector_tools",
+    "parent_run",
     "requirements_from_channels",
     "requirements_from_connectors",
     "run_connector_sandbox_hooks",
@@ -631,6 +648,90 @@ def compile_managed_agent(
             report_telemetry=report_telemetry,
         )
     )
+
+
+@asynccontextmanager
+async def parent_run(config: Mapping[str, object]) -> AsyncIterator[None]:
+    """Set up a run for async subagents: verify its lead, then nest its trace.
+
+    The generated entry holds this open for the whole run. For a run that
+    deepagents launched from another run, the Agent Server is asked once whether
+    this run's caller may access the launching (lead) thread, under MDA's usual
+    thread ownership. Only then may the run share the lead's sandbox.
+    """
+    token = _VERIFIED_LEAD_THREAD.set(await _accessible_lead_thread(config))
+    try:
+        with _parent_trace(config):
+            yield
+    finally:
+        # The Agent Server enters and exits the entry in one task; tolerate otherwise.
+        with suppress(ValueError):
+            _VERIFIED_LEAD_THREAD.reset(token)
+
+
+@contextmanager
+def _parent_trace(config: Mapping[str, object]) -> Iterator[None]:
+    """Nest this run's trace under the async subagent call that launched it.
+
+    Only acts on runs deepagents marked as launched by an async subagent tool,
+    and only when tracing is on.
+    """
+    configurable = config.get("configurable")
+    parent = _launching_parent(configurable) if isinstance(configurable, Mapping) else None
+    if parent is None or not tracing_is_enabled():
+        yield
+        return
+    with tracing_context(parent=parent):
+        yield
+
+
+def _launching_parent(configurable: Mapping[str, object]) -> RunTree | None:
+    """Rebuild the launching span from the trace headers the Agent Server kept, if marked."""
+    trace = configurable.get("langsmith-trace")
+    metadata = configurable.get("langsmith-metadata")
+    if not isinstance(trace, str) or not trace or not isinstance(metadata, Mapping):
+        return None
+    if metadata.get(_NEST_UNDER_PARENT) is not True:
+        return None
+    project = configurable.get("langsmith-project")
+    baggage = f"langsmith-project={quote(project)}" if isinstance(project, str) else ""
+    try:
+        return RunTree.from_headers({"langsmith-trace": trace, "baggage": baggage})
+    except ValueError:
+        _LOG.warning("Ignoring a malformed langsmith-trace; the run keeps its own trace")
+        return None
+
+
+async def _accessible_lead_thread(config: Mapping[str, object]) -> str | None:
+    """Return the lead's thread when this run's caller owns it, else ``None``.
+
+    Reads the thread in process under the caller's identity, then requires its
+    ``owner`` to be the caller's owner key, MDA's rule for changing a thread.
+    Being able to read it isn't enough: Studio callers can read every thread.
+    A thread without an owner (no managed identity) only needs to be readable.
+    """
+    lead_thread = _lead_thread(config)
+    if lead_thread is None:
+        return None
+    try:
+        thread = await get_client().threads.get(lead_thread)
+    except Exception:  # noqa: BLE001 — missing or not allowed: keep this run's own sandbox
+        _LOG.warning("[mda] lead thread not accessible to this run; using its own sandbox")
+        return None
+    owner = (thread.get("metadata") or {}).get("owner")
+    if owner is not None and owner != _caller_owner_key(config):
+        _LOG.warning("[mda] lead thread belongs to another caller; using this run's own sandbox")
+        return None
+    return lead_thread
+
+
+def _caller_owner_key(config: Mapping[str, object]) -> str | None:
+    """The thread owner key MDA stamps for this run's caller, if it's authenticated."""
+    from managed_deepagents._identity_auth import _thread_owner_key  # noqa: PLC0415
+
+    configurable = resolve_runtime_configurable(config)
+    user = configurable.get("langgraph_auth_user") if configurable is not None else None
+    return _thread_owner_key(user) if user is not None else None
 
 
 async def compile_managed_agent_async(
@@ -1861,6 +1962,9 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return
         source = self._source
         config = self._config()
+        if _parent_sandbox_scope(config, source.selection_fingerprint) is not None:
+            # The lead recovers its own sandbox; helpers must not recreate it.
+            return
         previous_name = _peek_managed_host_name(
             _sandbox_scope_key(source.sandbox, config, source.selection_fingerprint)
         )
@@ -2012,7 +2116,10 @@ def _resolve_managed_sandbox(
             entry = _managed_sandboxes.get(key)
 
         if entry is not None:
-            if has_sandbox and thread_key in entry.synced_threads:
+            # A helper sharing its lead's sandbox only refreshes credentials: the
+            # lead's workspace is already set up.
+            helper = _parent_sandbox_scope(config, selection_fingerprint) is not None
+            if has_sandbox and (thread_key in entry.synced_threads or helper):
                 # Same thread: refresh credentials / CLI wiring without re-cloning.
                 run_connector_sandbox_hooks(
                     connectors,
@@ -2034,13 +2141,17 @@ def _resolve_managed_sandbox(
 
         # Cold create/provision while holding only the per-key lock. Do not hold
         # ``_managed_sandbox_lock`` here — websocket retries can take tens of
-        # seconds and would wedge every other Host worker.
+        # seconds and would wedge every other Host worker. A helper adopting its
+        # lead's sandbox only refreshes credentials; one whose lead hasn't
+        # created it yet creates it under the lead's scope for the lead to adopt.
+        helper = _parent_sandbox_scope(config, selection_fingerprint) is not None
         backend, host_name, sandbox_id = _create_langsmith_sandbox(
             sandbox,
             config=config,
             connectors=connectors,
             identity=identity,
             sandbox_mode="create",
+            adopted_mode="credentials" if helper else "reuse",
             scope_key=key,
             selection_fingerprint=selection_fingerprint,
         )
@@ -2289,9 +2400,62 @@ def _thread_scope_key(
     config: ManagedRunConfig | None,
     selection_fingerprint: str | None = None,
 ) -> str:
-    """Derive the process-level reuse key for a thread and optional selection."""
+    """Derive the process-level reuse key for a thread and optional selection.
+
+    An async subagent sharing its lead's sandbox uses the lead's sandbox scope,
+    so both resolve, sync, and never invalidate the same sandbox.
+    """
+    if (shared := _parent_sandbox_scope(config, selection_fingerprint)) is not None:
+        return shared
     thread_key = f"thread:{_thread_id_from_config(config)}"
     return f"{thread_key}:sandbox:{selection_fingerprint}" if selection_fingerprint else thread_key
+
+
+#: ``configurable`` key where deepagents puts an async subagent run's parent reference.
+_PARENT_REFERENCE_KEY = "deepagents_parent"
+#: Run metadata key (copied from the task thread) naming an async subagent's lead thread.
+_PARENT_THREAD_METADATA_KEY = "parent_thread_id"
+#: The lead thread this run's caller may access, set once per run by ``parent_run``.
+_VERIFIED_LEAD_THREAD: ContextVar[str | None] = ContextVar("mda_verified_lead_thread", default=None)
+
+
+def _lead_thread(config: ManagedRunConfig | Mapping[str, object] | None) -> str | None:
+    """The thread of the agent that launched this async subagent run, if deepagents sent it.
+
+    Read from deepagents' parent reference, or else from the task thread's
+    ``parent_thread_id`` metadata, which the Agent Server copies into every run
+    on the thread, including runs deepagents didn't start (such as a resume).
+    """
+    configurable = config.get("configurable") if isinstance(config, Mapping) else None
+    reference = (
+        configurable.get(_PARENT_REFERENCE_KEY) if isinstance(configurable, Mapping) else None
+    )
+    thread_id = reference.get("thread_id") if isinstance(reference, Mapping) else None
+    if thread_id is None:
+        metadata = config.get("metadata") if isinstance(config, Mapping) else None
+        thread_id = (
+            metadata.get(_PARENT_THREAD_METADATA_KEY) if isinstance(metadata, Mapping) else None
+        )
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+def _parent_sandbox_scope(
+    config: ManagedRunConfig | Mapping[str, object] | None,
+    selection_fingerprint: str | None = None,
+) -> str | None:
+    """Return the lead's sandbox scope when this run may share the lead's sandbox.
+
+    MDA keys and names sandboxes by thread scope, so the lead's thread is enough
+    to find its sandbox: the same process's cache, or the same deterministic
+    name in LangSmith. Requires ``parent_run`` to have verified that this run's
+    caller owns the lead's thread; otherwise the run keeps its own sandbox.
+    Called on every sandbox operation, so it doesn't log.
+    """
+    lead_thread = _lead_thread(config)
+    if lead_thread is None or _VERIFIED_LEAD_THREAD.get() != lead_thread:
+        return None
+    scope = f"thread:{lead_thread}"
+    return f"{scope}:sandbox:{selection_fingerprint}" if selection_fingerprint else scope
 
 
 def _thread_id_from_config(config: ManagedRunConfig | None) -> str:
@@ -2605,6 +2769,7 @@ def _create_langsmith_sandbox(
     connectors: list[Connector] | None = None,
     identity: IdentityDefinitionLike | None = None,
     sandbox_mode: Literal["create", "reuse"] = "create",
+    adopted_mode: SandboxMode = "reuse",
     scope_key: str,
     selection_fingerprint: str | None = None,
     recovery_name: str | None = None,
@@ -2665,7 +2830,7 @@ def _create_langsmith_sandbox(
         backend=resolved,
         # An adopted sandbox already ran create-time connector hooks in an
         # earlier process, so treat it as a reuse for connector purposes.
-        mode="reuse" if adopted else sandbox_mode,
+        mode=adopted_mode if adopted else sandbox_mode,
         config=config,
         identity=identity,
     )
