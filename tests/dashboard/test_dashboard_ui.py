@@ -112,6 +112,45 @@ def test_serving_under_a_mount_prefix(build_dir: Path) -> None:
     assert client.get("/", headers=HTML).status_code == 404
 
 
+def test_mcp_consent_keeps_branding_on_root_auth_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastmcp.server.auth.providers.github import GitHubProvider
+    from key_value.aio.stores.memory import MemoryStore
+
+    from openswe.mcp import server
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example/open-swe")
+    auth = GitHubProvider(
+        client_id="test-client",
+        client_secret="test-secret",
+        base_url="http://localhost/dashboard/api/auth",
+        client_storage=MemoryStore(),
+    )
+    monkeypatch.setattr(server, "_auth", lambda: auth)
+    monkeypatch.setattr(app_module, "AGENT_MCP", server.build_mount())
+    client = TestClient(app_module.create_app(), base_url="http://localhost")
+    registration = client.post(
+        "/dashboard/api/auth/register",
+        json={"client_name": "Claude Code", "redirect_uris": ["http://localhost:65199/callback"]},
+    )
+    assert registration.status_code == 201
+    response = client.get(
+        "/dashboard/api/auth/authorize",
+        params={
+            "client_id": registration.json()["client_id"],
+            "redirect_uri": "http://localhost:65199/callback",
+            "response_type": "code",
+            "code_challenge": "a" * 43,
+            "code_challenge_method": "S256",
+        },
+    )
+    assert response.status_code == 200
+    assert 'src="https://dashboard.example/open-swe/logo-mark.png"' in response.text
+    assert 'href="https://dashboard.example/open-swe"' in response.text
+    assert "Open SWE" in response.text
+
+
 # --- Vite dev server proxy -------------------------------------------------------------
 
 
