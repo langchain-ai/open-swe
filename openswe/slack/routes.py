@@ -550,7 +550,7 @@ async def slack_webhook(
         person_post
         and event.subtype in {"", "file_share"}
         and not reply_thread_ts
-        and "/pull/" in text
+        and ("/pull/" in text or "/agents/reviews/" in text)
     ):
         background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
     reviewable_link = (
