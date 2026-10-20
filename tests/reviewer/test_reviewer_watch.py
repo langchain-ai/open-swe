@@ -8,6 +8,11 @@ import pytest
 from openswe.github import webhook as github_webhooks
 
 
+@pytest.fixture(autouse=True)
+def _approval_mode_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(github_webhooks, "approval_mode_for", AsyncMock(return_value="off"))
+
+
 def _push_payload(
     *,
     ref: str,
@@ -174,19 +179,34 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
 
 
 @pytest.mark.asyncio
-async def test_push_event_triggers_re_review_run_when_watching() -> None:
+@pytest.mark.parametrize("fork", [False, True])
+@pytest.mark.parametrize(
+    "approval_mode,unchanged_diff", [("off", False), ("approve", True), ("dry_run", True)]
+)
+async def test_head_update_triggers_re_review_run_when_watching(
+    fork: bool,
+    unchanged_diff: bool,
+    approval_mode: str,
+) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
         "number": 7,
         "html_url": "https://github.com/lc/repo/pull/7",
         "title": "T",
-        "head": {"sha": "newsha", "ref": "feat-x"},
+        "head": {"sha": "newsha", "ref": "feat-x", "repo": {"id": 456 if fork else 123}},
         "base": {"sha": "basesha", "ref": "main"},
     }
+    payload["repository"]["id"] = 123
+    payload["pull_request"] = pr
+    if fork:
+        payload.pop("ref")
+        payload.pop("after")
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
 
     with (
+        patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
+        patch("openswe.webhooks.common.enforce_public_repo_org_gate", AsyncMock(return_value=None)),
         patch(
             "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
@@ -206,7 +226,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             "openswe.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
-        ),
+        ) as fetch_pr,
         patch(
             "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
@@ -219,7 +239,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
         patch(
             "openswe.webhooks.common._fetch_compare_diff",
             new_callable=AsyncMock,
-            side_effect=["old diff", "new diff"],
+            side_effect=["same diff", "same diff"] if unchanged_diff else ["old diff", "new diff"],
         ),
         patch(
             "openswe.webhooks.common.ensure_thread_exists_for_metadata",
@@ -238,7 +258,9 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
         ) as create_check,
         patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
-        await github_webhooks.process_github_push_event(payload)
+        if not fork:
+            await github_webhooks.process_github_push_event(payload)
+        await github_webhooks.process_github_pr_synchronize(payload)
 
     fake_client.runs.create.assert_awaited_once()
     assert fake_client.runs.create.await_args is not None
@@ -248,6 +270,9 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
     assert configurable["re_review"] is True
     assert configurable["last_reviewed_sha"] == "oldsha"
     assert configurable["head_sha"] == "newsha"
+    assert configurable["repo"] == {"owner": "lc", "name": "repo"}
+    if fork:
+        fetch_pr.assert_not_awaited()
     # The live head is persisted to thread metadata so a re-review queued into
     # an in-flight run can resolve it despite the run's frozen config.
     head_sha_writes = [
@@ -267,6 +292,44 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
         if "review_check_run_id" in (c.kwargs.get("extra") or {})
     ]
     assert 99 in check_id_writes
+    assert not any("last_reviewed_sha" in c.kwargs for c in set_meta.await_args_list)
+
+
+@pytest.mark.parametrize("gate", ["disabled", "unauthorized", "unwatched", "draft"])
+async def test_fork_head_update_preserves_review_gates(
+    gate: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload: dict[str, object] = {
+        "repository": {"id": 123, "owner": {"login": "lc"}, "name": "repo"},
+        "pull_request": {
+            "number": 7,
+            "draft": gate == "draft",
+            "head": {"sha": "newsha", "ref": "feat-x", "repo": {"id": 456}},
+            "base": {"sha": "basesha", "ref": "main"},
+        },
+    }
+    common = github_webhooks.common
+    monkeypatch.setattr(
+        common,
+        "enforce_public_repo_org_gate",
+        AsyncMock(return_value={"status": "ignored"} if gate == "unauthorized" else None),
+    )
+    monkeypatch.setattr(
+        common, "is_repo_auto_review_enabled", AsyncMock(return_value=gate != "disabled")
+    )
+    monkeypatch.setattr(common, "reviewer_token_for_repo", AsyncMock(return_value=("token", None)))
+    monkeypatch.setattr(
+        common,
+        "get_thread_metadata_safe",
+        AsyncMock(return_value={"kind": "reviewer", "watch": gate != "unwatched"}),
+    )
+    monkeypatch.setattr(common, "draft_review_enabled_for_author", AsyncMock(return_value=False))
+    dispatch = AsyncMock()
+    monkeypatch.setattr(common, "dispatch_agent_run", dispatch)
+
+    await github_webhooks.process_github_pr_synchronize(payload)
+
+    dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -360,19 +423,23 @@ async def test_push_re_review_targets_pushed_head_and_supersedes_previous_check(
 
 
 @pytest.mark.asyncio
-async def test_push_event_idempotent_when_head_unchanged() -> None:
+@pytest.mark.parametrize("fork", [False, True])
+async def test_head_update_idempotent_when_head_already_reviewed(fork: bool) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="samesha")
     pr = {
         "number": 7,
         "html_url": "https://github.com/lc/repo/pull/7",
         "title": "T",
-        "head": {"sha": "samesha", "ref": "feat-x"},
+        "head": {"sha": "samesha", "ref": "feat-x", "repo": {"id": 456 if fork else 123}},
         "base": {"sha": "basesha", "ref": "main"},
     }
+    payload["repository"]["id"] = 123
+    payload["pull_request"] = pr
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
 
     with (
+        patch("openswe.webhooks.common.enforce_public_repo_org_gate", AsyncMock(return_value=None)),
         patch(
             "openswe.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
@@ -399,7 +466,10 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
         ),
         patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
-        await github_webhooks.process_github_push_event(payload)
+        if fork:
+            await github_webhooks.process_github_pr_synchronize(payload)
+        else:
+            await github_webhooks.process_github_push_event(payload)
     fake_client.runs.create.assert_not_called()
 
 

@@ -1058,16 +1058,27 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
     assert "Do not retry" in result["note"]
 
 
+@pytest.mark.parametrize("is_re_review", [False, True])
 @pytest.mark.parametrize(
-    "prepared_policy,mode,current_head,expected_event,has_assessment",
+    "prepared_policy,mode,current_head,expected_event,has_assessment,eligible,open_finding",
     [
-        (None, "approve", True, "COMMENT", False),
-        ("Docs only", "off", True, "COMMENT", False),
-        ("Docs only", "dry_run", True, "COMMENT", True),
-        ("Docs only", "approve", False, "COMMENT", True),
-        ("Docs only", "approve", True, "APPROVE", True),
+        (None, "approve", True, "COMMENT", False, True, False),
+        ("Docs only", "off", True, "COMMENT", False, True, False),
+        ("Docs only", "dry_run", True, "COMMENT", True, True, False),
+        ("Docs only", "approve", False, "COMMENT", True, True, False),
+        ("Docs only", "approve", True, "APPROVE", True, True, False),
+        ("Docs only", "approve", True, "COMMENT", True, False, False),
+        ("Docs only", "approve", True, "COMMENT", True, True, True),
     ],
-    ids=["no-policy", "switched-off", "dry-run", "head-moved", "approve"],
+    ids=[
+        "no-policy",
+        "switched-off",
+        "dry-run",
+        "head-moved",
+        "approve",
+        "ineligible",
+        "open-finding",
+    ],
 )
 async def test_publication_respects_the_base_policy_and_current_mode(
     prepared_policy: str | None,
@@ -1075,6 +1086,9 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     current_head: bool,
     expected_event: str,
     has_assessment: bool,
+    eligible: bool,
+    open_finding: bool,
+    is_re_review: bool,
     registry_db: None,
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
@@ -1086,7 +1100,14 @@ async def test_publication_respects_the_base_policy_and_current_mode(
             "openswe.tools.publish_review.approval_allowed_for_head",
             AsyncMock(return_value=current_head),
         ),
-        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "openswe.tools.publish_review.list_findings_async",
+            AsyncMock(
+                return_value=[_f(first_seen_sha="oldsha", github_review_comment_ids=[8])]
+                if open_finding
+                else []
+            ),
+        ),
         patch(
             "openswe.tools.publish_review.post_pull_request_review",
             AsyncMock(return_value={"id": 77}),
@@ -1109,11 +1130,18 @@ async def test_publication_respects_the_base_policy_and_current_mode(
             head_sha="a" * 40,
             token="t",
             severity_threshold="medium",
-            is_re_review=False,
-            assessment=_assessment(),
+            is_re_review=is_re_review,
+            assessment=_assessment().model_copy(
+                update={"decision": "would_approve" if eligible else "needs_human_review"}
+            ),
             state={"review_approval_policy": prepared_policy},
         )
     assert result["success"] is True
+    if is_re_review and not has_assessment:
+        post.assert_not_awaited()
+        assert result["skipped_empty_re_review"] is True
+        assert await PublishedAssessment.get(77) is None
+        return
     assert post.await_args is not None
     assert post.await_args.kwargs["event"] == expected_event
     body = post.await_args.kwargs["body"]

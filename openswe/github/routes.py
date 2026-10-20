@@ -123,6 +123,7 @@ async def github_webhook(
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
         if action == "synchronize":
             background_tasks.add_task(notify_pr_updated, payload)
+            background_tasks.add_task(service.process_github_pr_synchronize, payload)
         if action == "opened" or action in common.GH_PR_AGENT_STATE_ACTIONS:
             try:
                 await common.update_agent_pr_usage_from_webhook(payload, delivery_id=delivery_id)
