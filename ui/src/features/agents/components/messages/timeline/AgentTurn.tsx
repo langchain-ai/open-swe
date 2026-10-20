@@ -21,8 +21,7 @@ import {
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
-import { ShellEntryBody } from "./entryBodies"
-import { ToolResultBody } from "./ToolResultBody"
+import { CodeEntryBody, ShellEntryBody } from "./entryBodies"
 import type { ReactNode } from "react"
 import type { RenderItem, TurnSegment } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
@@ -68,10 +67,7 @@ function EditWorkEntry({
   )
 }
 
-/**
- * A code-mode `eval` call, open on the tool calls its code made. Its own output
- * mostly repeats what those returned, so it shows only when the code failed.
- */
+/** A code-mode call with its source, nested tools and output. */
 function CodeWorkEntry({
   chunk,
   calls,
@@ -82,29 +78,22 @@ function CodeWorkEntry({
   calls: ReactNode
   repoPath?: string
 }) {
-  const entry = describeWorkEntry(chunk, repoPath)
-  if (calls == null) {
-    return <WorkEntryRow entry={entry} timestamp={chunk.timestamp} />
-  }
-  const failed = chunk.status === "error"
-  // Keyed apart from the plain row: calls arrive after the row first renders,
-  // and only a fresh row opens by default.
+  const hasCalls = calls != null
   return (
     <WorkEntryRow
-      key="calls"
-      entry={failed ? entry : { ...entry, loadExpandedText: null }}
+      key={hasCalls ? "calls" : "plain"}
+      entry={describeWorkEntry(chunk, repoPath)}
       timestamp={chunk.timestamp}
       body={({ loadedText, loadError }) => (
-        <div className="space-y-space-2">
-          <div>{calls}</div>
-          {failed && (
-            <ToolResultBody
-              value={loadError ?? loadedText ?? entry.expandedText ?? ""}
-            />
-          )}
-        </div>
+        <CodeEntryBody
+          chunk={chunk}
+          calls={calls}
+          callCount={chunk.calls?.length ?? 0}
+          loadedText={loadedText}
+          loadError={loadError}
+        />
       )}
-      defaultExpanded
+      defaultExpanded={hasCalls}
     />
   )
 }
