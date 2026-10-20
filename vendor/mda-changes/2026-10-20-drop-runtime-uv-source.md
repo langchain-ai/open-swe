@@ -1,5 +1,7 @@
 # Drop the runtime's uv source from vendored builds
 
+**Verdict: upstream as-is.** A bug fix any project that installs `managed-deepagents` from a path or git source needs.
+
 **Changed:** `crates/mda/src/compile/manifest.rs` (`rewrite_py_runtime_dep`), with a test in `crates/mda/src/compile/tests.rs`.
 
 ## What
@@ -12,4 +14,4 @@ When `mda build`, `mda dev` or `mda deploy` swaps the project's `managed-deepage
 
 ## Upstream
 
-A bug fix, not an Open SWE option: any project that installs `managed-deepagents` from a local path or git source hits it. The CLI should drop the runtime's own source entry whenever it substitutes the bundled runtime. Not yet proposed upstream; first written in #4203.
+Propose this edit unchanged: the CLI drops the runtime's own source entry whenever it substitutes the bundled runtime. Not yet proposed; first written in #4203.
