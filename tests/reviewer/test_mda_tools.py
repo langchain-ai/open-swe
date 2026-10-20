@@ -26,7 +26,7 @@ from rt.tools import backend_tool
 
 @pytest.mark.parametrize(
     ("failure", "failures", "attempts"),
-    [("connect", 10, 11), ("connect", 11, 11), (503, 11, 11), (504, 1, 1)],
+    [("connect", 10, 11), ("connect", 11, 11), (503, 1, 1), (504, 1, 1)],
 )
 async def test_a_tool_call_the_backend_never_answered(
     monkeypatch: pytest.MonkeyPatch, failure: str | int, failures: int, attempts: int
@@ -72,7 +72,7 @@ async def test_a_tool_call_the_backend_never_answered(
         ("prepare", 504),
         ("before_model", 502),
         ("before_model", 504),
-        ("after_model", 502),
+        ("after_model", 503),
         ("after_agent", 504),
     ],
 )

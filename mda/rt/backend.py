@@ -47,14 +47,17 @@ Hook = Literal[
     # The thread's box was replaced: the backend connects to the fresh one.
     "sandbox",
 ]
-# Waits before resending a call the backend never received, for as long as a backend
-# rollout takes. A refused connection never reached it, and neither did a 503: the
-# hooks never answer 503 themselves, so it is the gateway finding no ready backend.
-# A 502 can also come after the backend took the call, so only ``catalog``, which
-# only reads, and ``prepare``, which a restarted run makes again anyway, are resent
-# after one. A 504 is never resent: the backend may still be running the call.
+# Waits before resending a call, for as long as a backend rollout takes. A refused
+# connection never reached the backend, so every hook is resent after one. A gateway
+# 502 or 503 usually means no backend was ready, but can also follow a backend that
+# took the call and died, so only calls that are safe to repeat are resent after
+# one: ``catalog`` only reads, and ``prepare``, which a restarted run makes again
+# anyway. ``before_model`` only builds the next model call, so it is also resent
+# after a 503, the answer a rollout gives it. A tool call is never resent: it may
+# have run. Nor is anything after a 504: the backend may still be running the call.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
 _REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare"})
+_RESENT_AFTER_503: Final[frozenset[Hook]] = _REPEATABLE_HOOKS | {"before_model"}
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
@@ -256,7 +259,7 @@ class OpenSweBackend:
                     raise BackendCallError(f"{hook} failed: {failure.describe()}") from exc
                 unreached = (
                     isinstance(exc, httpx2.ConnectError)
-                    or status == 503
+                    or (status == 503 and hook in _RESENT_AFTER_503)
                     or (status == 502 and hook in _REPEATABLE_HOOKS)
                 )
                 if unreached and (wait := next(waits, None)) is not None:
