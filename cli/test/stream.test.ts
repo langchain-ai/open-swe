@@ -73,6 +73,7 @@ describe("parseCliResult", () => {
     expect(parseCliResult({ stdout: "ok\n", exit_code: 3 })).toEqual({
       stdout: "ok\n",
       exitCode: 3,
+      unchanged: false,
     })
   })
 
@@ -130,7 +131,7 @@ describe("RunCollector", () => {
     expect(collector.handle(lifecycle("run-1", "completed"))).toEqual({
       status: "completed",
       error: null,
-      result: { stdout: "second", exitCode: 0 },
+      result: { stdout: "second", exitCode: 0, unchanged: false },
     })
   })
 
@@ -187,7 +188,7 @@ describe("followRun", () => {
     expect(outcome).toEqual({
       status: "completed",
       error: null,
-      result: { stdout: "done", exitCode: 0 },
+      result: { stdout: "done", exitCode: 0, unchanged: false },
     })
     expect(reconnects).toEqual([1])
   })
@@ -330,35 +331,56 @@ describe("followTask", () => {
     expect(outcome).toEqual({
       status: "completed",
       error: null,
-      result: { stdout: "worker done; tests fail", exitCode: 1 },
+      result: {
+        stdout: "worker done; tests fail",
+        exitCode: 1,
+        unchanged: false,
+      },
     })
     expect(cursors).toEqual(["run-1", "run-1", "run-2"])
   })
 
-  test("keeps the answer when a later run has nothing new to say", async () => {
-    const quiet = [
-      ...replay,
-      lifecycle("run-3", "running"),
-      resultCall({ stdout: "", exit_code: 0 }),
-      lifecycle("run-3", "completed"),
-    ]
-    const polls = [
-      activity(["run-2"], "done"),
-      activity(["run-3"], "done", true),
-      activity([], "done", true),
-    ]
-    const outcome = await followTask(
+  const followRuns = (runs: string[][], frames: unknown[]) =>
+    followTask(
       {
-        events: async () => sse(quiet),
-        activity: async () => polls.shift() ?? null,
+        events: async () => sse(frames as never),
+        activity: async () => {
+          const next = runs.shift()
+          return next === undefined ? null : activity(next, "done", true)
+        },
         stop: async () => undefined,
       },
       "run-1",
-      { sleep: noSleep }
+      { sleep: async () => undefined }
+    )
+  const wake = (result: Record<string, unknown>) => [
+    ...replay,
+    lifecycle("run-3", "running"),
+    resultCall(result),
+    lifecycle("run-3", "completed"),
+  ]
+
+  test("keeps the answer when a later run reports nothing new", async () => {
+    const outcome = await followRuns(
+      [["run-2"], ["run-3"], []],
+      wake({ stdout: "", exit_code: 0, unchanged: true })
     )
     expect(outcome.result).toEqual({
       stdout: "worker done; tests fail",
       exitCode: 1,
+      unchanged: false,
+    })
+  })
+
+  test("an empty answer replaces an interim status", async () => {
+    const outcome = await followRuns(
+      [["run-2"], ["run-3"], []],
+      wake({ stdout: "", exit_code: 0 })
+    )
+    expect(outcome.result).toEqual({
+      stdout: "",
+      exitCode: 0,
+      unchanged: false,
     })
   })
 
@@ -379,6 +401,7 @@ describe("followTask", () => {
     expect(outcome.result).toEqual({
       stdout: "waiting on a worker",
       exitCode: 0,
+      unchanged: false,
     })
     expect(polled).toBe(1)
   })

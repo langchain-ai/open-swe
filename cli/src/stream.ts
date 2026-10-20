@@ -6,6 +6,7 @@ import {
 } from "./api.ts"
 import { CredentialError } from "./credentials.ts"
 import {
+  booleanAt,
   errorMessage,
   isRecord,
   numberAt,
@@ -76,6 +77,8 @@ export type RunStatus = "completed" | "failed" | "interrupted" | "closed"
 export interface CliResult {
   stdout: string
   exitCode: number
+  /** The run had nothing new: the terminal keeps the answer it already has. */
+  unchanged: boolean
 }
 
 export interface RunOutcome {
@@ -106,19 +109,13 @@ export function lifecycleRunId(eventId: string | null): string | null {
   return runId && (parts[2] ?? "").startsWith("lc|") ? runId : null
 }
 
-/**
- * The result the terminal should end with once `next` is reported after
- * `previous`. An empty, successful result is the coordinator having nothing new
- * to say, as on a run a worker's report woke, so it never replaces an answer.
- */
+/** The result the terminal should end with once `next` is reported after `previous`. */
 export function laterResult(
   previous: CliResult | null,
   next: CliResult | null
 ): CliResult | null {
   if (next === null) return previous
-  if (previous !== null && next.stdout === "" && next.exitCode === 0)
-    return previous
-  return next
+  return next.unchanged && previous !== null ? previous : next
 }
 
 export function parseCliResult(input: unknown): CliResult | null {
@@ -128,7 +125,11 @@ export function parseCliResult(input: unknown): CliResult | null {
   if (stdout === null || exitCode === null) return null
   if (!Number.isInteger(exitCode) || exitCode < 0 || exitCode > MAX_EXIT_CODE)
     return null
-  return { stdout, exitCode }
+  return {
+    stdout,
+    exitCode,
+    unchanged: booleanAt(record, "unchanged") ?? false,
+  }
 }
 
 /**
