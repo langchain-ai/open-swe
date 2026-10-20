@@ -687,6 +687,15 @@ fn compile_inner(
             "async subagents are not supported in eval: there is no Agent Server to launch them on"
         );
     }
+    // Served Python agents also get an async general-purpose subagent; eval has no
+    // Agent Server to launch it on, and TypeScript doesn't build async subagents.
+    let async_subagents = if project.language == Language::Python
+        && !matches!(context, RuntimeContext::Eval { .. })
+    {
+        agent.served_async_subagents()
+    } else {
+        agent.async_subagents.clone()
+    };
     let local_packages = find_local_packages(project)?;
     prepare_out_dir(&project.root, out_dir, mode)?;
 
@@ -921,7 +930,7 @@ fn compile_inner(
             identity_import: identity_import.as_deref(),
             memory_import: memory_import.as_deref(),
             browser_import: browser_import.as_deref(),
-            async_subagents: &agent.async_subagents,
+            async_subagents: &async_subagents,
         },
     );
     write_if_changed(&out_dir.join(&entry_file), entry_source.as_bytes())
@@ -971,8 +980,7 @@ fn compile_inner(
         };
 
     let graph = format!("./{}:agent", to_unix_path(&entry_file));
-    let extra_graphs: Vec<(String, String)> = agent
-        .async_subagents
+    let extra_graphs: Vec<(String, String)> = async_subagents
         .iter()
         .map(|subagent| {
             let export = &subagent.export;

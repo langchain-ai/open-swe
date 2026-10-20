@@ -126,7 +126,8 @@ def define_deep_agent(
     graph. Unset ``model``, ``tools``, ``permissions``, and ``interrupt_on``
     inherit from this agent; middleware and memory do not. Like a sync subagent,
     it loads only the skill sources its ``skills`` names (``["/skills/"]`` for
-    this agent's skills).
+    this agent's skills). Served agents also get a background copy of the
+    general-purpose subagent.
 
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so

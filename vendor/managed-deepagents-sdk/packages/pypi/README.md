@@ -247,6 +247,15 @@ memory.
 
 ## Async subagents
 
+Every Python agent can run its general-purpose subagent either way: blocking
+through `task`, or in the background through `start_async_task`. The agent
+picks per task, so there's nothing to declare. MDA builds the background copy
+as an extra graph, `<agent>--general-purpose`, from your own `general-purpose`
+subagent if you declare one (not a fork), keeping its `skills`, or else from the
+Deep Agents default, which loads the agent's skills. Like any async subagent, it can also be run directly as its own assistant, with
+the agent's tools but not its instructions or middleware. `mda eval` runs the
+blocking one only.
+
 Mark a subagent with `"async": True` to run it in the background. MDA builds it
 as its own graph in the same deployment, and the agent starts it, checks on it,
 and reads its result while it keeps working:

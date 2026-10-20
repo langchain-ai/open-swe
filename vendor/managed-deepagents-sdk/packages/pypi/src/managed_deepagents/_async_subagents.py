@@ -7,6 +7,11 @@ from typing import TypeGuard, cast
 
 from managed_deepagents.define_deep_agent import DeepAgentDefinition
 
+#: The general-purpose subagent, which served Python agents also get async.
+GENERAL_PURPOSE = "general-purpose"
+# The agent's skills, which deepagents' default general-purpose subagent loads.
+_AGENT_SKILLS = "/skills/"
+
 # Spec keys that override the lead's value; unset ones inherit it, like a sync subagent.
 _INHERITED_KEYS = ("model", "tools", "permissions", "interrupt_on")
 # Spec keys the lead never passes down, like a sync subagent.
@@ -19,6 +24,41 @@ SUBAGENT_SKILLS_KEY = "subagent_skills"
 def is_async_subagent(spec: object) -> TypeGuard[Mapping[str, object]]:
     """Whether `spec` is a subagent dict marked `"async": True`."""
     return isinstance(spec, Mapping) and spec.get("async") is True
+
+
+def with_async_general_purpose(definition: DeepAgentDefinition) -> DeepAgentDefinition:
+    """Add an async general-purpose subagent, unless one is declared already.
+
+    It copies a declared sync general-purpose subagent, or else deepagents'
+    default, so the lead can run the same agent blocking or in the background.
+    """
+    subagents = list(_subagents(definition))
+    if any(is_async_subagent(spec) and spec.get("name") == GENERAL_PURPOSE for spec in subagents):
+        return definition
+    declared = next(
+        (
+            spec
+            for spec in subagents
+            if _is_declarative(spec) and spec.get("name") == GENERAL_PURPOSE
+        ),
+        None,
+    )
+    # A declared one keeps its own `skills`; the default loads the agent's, like deepagents'.
+    spec = (
+        dict(declared)
+        if declared is not None
+        else {**_default_general_purpose(), "skills": [_AGENT_SKILLS]}
+    )
+    return DeepAgentDefinition(
+        {**definition.config, "subagents": [*subagents, {**spec, "async": True}]}
+    )
+
+
+def _default_general_purpose() -> dict[str, object]:
+    # Imported here so a deepagents rename breaks only this feature, not the runtime.
+    from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT  # noqa: PLC0415
+
+    return dict(GENERAL_PURPOSE_SUBAGENT)
 
 
 def route_async_subagents(
@@ -73,9 +113,23 @@ def _route(spec: Mapping[str, object], graphs: Mapping[str, str]) -> dict[str, o
     return {"name": name, "description": spec.get("description", ""), "graph_id": graph_id}
 
 
-def _find(definition: DeepAgentDefinition, name: str) -> Mapping[str, object]:
+def _subagents(definition: DeepAgentDefinition) -> Sequence[object]:
     subagents = definition.config.get("subagents")
-    for spec in subagents if isinstance(subagents, Sequence) else ():
+    return subagents if isinstance(subagents, Sequence) else ()
+
+
+def _is_declarative(spec: object) -> TypeGuard[Mapping[str, object]]:
+    """A sync spec MDA can copy: not prebuilt (`runnable`), async, or a fork of the lead."""
+    return (
+        isinstance(spec, Mapping)
+        and not {"runnable", "graph_id"} & spec.keys()
+        and spec.get("mode") != "fork"
+        and not is_async_subagent(spec)
+    )
+
+
+def _find(definition: DeepAgentDefinition, name: str) -> Mapping[str, object]:
+    for spec in _subagents(definition):
         if is_async_subagent(spec) and spec.get("name") == name:
             return spec
     msg = f"async subagent {name!r} is not declared in define_deep_agent(subagents=[...])"

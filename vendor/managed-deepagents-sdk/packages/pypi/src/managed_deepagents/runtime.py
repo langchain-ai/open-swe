@@ -70,10 +70,12 @@ from langsmith.run_trees import RunTree
 from langsmith.utils import tracing_is_enabled
 
 from managed_deepagents._async_subagents import (
+    GENERAL_PURPOSE,
     SUBAGENT_SKILLS_KEY,
     async_subagent_definition,
     reject_async_subagents,
     route_async_subagents,
+    with_async_general_purpose,
 )
 from managed_deepagents._channel import (
     Channel,
@@ -787,6 +789,8 @@ async def compile_managed_agent_async(
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
     definition = await resolve_agent_definition(entry, factory_runtime)
+    if GENERAL_PURPOSE in (async_subagent_graphs or {}) or async_subagent == GENERAL_PURPOSE:
+        definition = with_async_general_purpose(definition)
     if async_subagent is not None:
         definition = async_subagent_definition(definition, async_subagent)
     else:

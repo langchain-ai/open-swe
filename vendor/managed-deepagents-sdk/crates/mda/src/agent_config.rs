@@ -67,6 +67,27 @@ pub(crate) struct AgentStaticConfig {
     pub unreadable_subagents: usize,
 }
 
+/// Name of the general-purpose subagent, which MDA also runs async on served Python builds.
+pub(crate) const GENERAL_PURPOSE_SUBAGENT: &str = "general-purpose";
+
+impl AgentStaticConfig {
+    /// Async subagents to build for a served Python agent: the declared ones,
+    /// plus the general-purpose subagent unless one is declared async already.
+    pub(crate) fn served_async_subagents(&self) -> Vec<AsyncSubagentGraph> {
+        let mut graphs = self.async_subagents.clone();
+        let graph_id = format!("{}--{GENERAL_PURPOSE_SUBAGENT}", self.assistant_id);
+        // Compare graph ids: a declared `general_purpose` normalizes to the same one.
+        if !graphs.iter().any(|graph| graph.graph_id == graph_id) {
+            graphs.push(AsyncSubagentGraph {
+                name: GENERAL_PURPOSE_SUBAGENT.to_string(),
+                graph_id,
+                export: "agent__general_purpose".to_string(),
+            });
+        }
+        graphs
+    }
+}
+
 /// An async subagent and the graph MDA builds for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AsyncSubagentGraph {
@@ -1093,6 +1114,61 @@ mod tests {
                 graph_id: "lead--deep-researcher".to_string(),
                 export: "agent__deep_researcher".to_string(),
             }]
+        );
+    }
+
+    fn static_config(async_subagents: Vec<AsyncSubagentGraph>) -> AgentStaticConfig {
+        AgentStaticConfig {
+            assistant_id: "lead".to_string(),
+            model: None,
+            is_factory: false,
+            declares_disable_memory: false,
+            async_subagents,
+            unreadable_subagents: 0,
+        }
+    }
+
+    #[test]
+    fn served_agents_also_get_an_async_general_purpose_subagent() {
+        let graphs = static_config(Vec::new()).served_async_subagents();
+
+        assert_eq!(
+            graphs,
+            [AsyncSubagentGraph {
+                name: "general-purpose".to_string(),
+                graph_id: "lead--general-purpose".to_string(),
+                export: "agent__general_purpose".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_declared_async_general_purpose_subagent_is_not_added_twice() {
+        let declared = resolve_async_subagents(
+            vec![AgentNameValue::Static("general-purpose".to_string())],
+            "lead",
+            "agent.py",
+        )
+        .unwrap();
+
+        assert_eq!(
+            static_config(declared.clone()).served_async_subagents(),
+            declared
+        );
+    }
+
+    #[test]
+    fn a_declared_subagent_named_like_general_purpose_is_not_added_twice() {
+        let declared = resolve_async_subagents(
+            vec![AgentNameValue::Static("General Purpose".to_string())],
+            "lead",
+            "agent.py",
+        )
+        .unwrap();
+
+        assert_eq!(
+            static_config(declared.clone()).served_async_subagents(),
+            declared
         );
     }
 
