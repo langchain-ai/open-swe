@@ -96,9 +96,6 @@ jobs:
           # own key and count against the workspace's gateway spend cap.
           # Each secret is named, so the runner gets only the one this deployment uses.
           LANGSMITH_GATEWAY_API_KEY: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_GATEWAY_API_KEY_PROD || matrix.environment == 'staging' && secrets.LANGSMITH_GATEWAY_API_KEY_STAGING || '' }}
-          # `1` gives the coding agent a LangSmith browser (mda/README.md). Set per deployment,
-          # so it can be tried on preview or staging before prod.
-          OPEN_SWE_BROWSER: ${{ matrix.environment == 'prod' && vars.OPEN_SWE_BROWSER_PROD || matrix.environment == 'staging' && vars.OPEN_SWE_BROWSER_STAGING || matrix.environment == 'preview' && vars.OPEN_SWE_BROWSER_PREVIEW || '' }}
         run: |
           case "$ENVIRONMENT" in
             preview) backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" ;;
@@ -111,11 +108,8 @@ jobs:
             exit 1
           fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
-          # the gateway key it calls models with and, when set, the browser switch.
+          # and the gateway key it calls models with.
           printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" >mda/.env
-          if [[ -n "$OPEN_SWE_BROWSER" ]]; then
-            printf 'OPEN_SWE_BROWSER=%s\n' "$OPEN_SWE_BROWSER" >>mda/.env
-          fi
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \

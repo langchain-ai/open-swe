@@ -8,7 +8,6 @@ graph's tools, subagents and models from the backend's catalog for the run, and
 middleware there. The run token in the context authenticates every call.
 """
 
-import os
 from collections.abc import Collection, Mapping, Sequence
 from typing import Final, Literal
 
@@ -95,18 +94,11 @@ def _code_mode(
 
 
 def _browser(graph: Graph) -> list[AgentMiddleware]:
-    """The coding agent's browser, a LangSmith browser per thread, when this deployment offers one.
+    """The coding agent's browser, a LangSmith browser per thread.
 
-    Off unless ``OPEN_SWE_BROWSER`` is set: the LangSmith browser is a beta each
-    workspace must have enabled.
+    The deployment's workspace needs the LangSmith browser beta.
     """
-    if graph != "agent" or os.environ.get("OPEN_SWE_BROWSER", "").strip().lower() not in {
-        "1",
-        "true",
-        "yes",
-    }:
-        return []
-    return [BrowserMiddleware()]
+    return [BrowserMiddleware()] if graph == "agent" else []
 
 
 # `mda build` reads the agent's name without running this factory, so its body
