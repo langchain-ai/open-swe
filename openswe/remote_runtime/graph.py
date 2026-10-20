@@ -94,7 +94,8 @@ from openswe.utils.model import provider_model_kwargs
 logger = logging.getLogger(__name__)
 
 # MDA's own deep agent runs subagents and code.
-_MDA_TOOLS: Final = frozenset({"task", "eval"})
+_SYNC_SUBAGENT_TOOL: Final = "task"
+_MDA_TOOLS: Final = frozenset({_SYNC_SUBAGENT_TOOL, "eval"})
 # deepagents' async subagent tools. Open SWE launches a task worker with the first,
 # wherever the thread may delegate; its task tools track the worker from then on.
 _LAUNCH_WORKER_TOOL: Final = "start_async_task"
@@ -337,13 +338,13 @@ class RunSession:
                         if subagent.tools is None
                         else [name for name in subagent.tools if name in tools],
                     }
-                    for subagent in self.surface.subagents
+                    for subagent in (() if self._delegates else self.surface.subagents)
                 ],
                 "models": self.start_models().model_dump(),
                 # Hidden from the model, as the in-process graph hides them.
                 "excluded": sorted(
-                    (self.surface.excluded | EXCLUDED_TOOLS | self._unoffered_async_tools())
-                    - _MDA_TOOLS
+                    ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
+                    | self._unoffered_delegation_tools()
                 ),
                 # Called from MDA's code mode, never offered to the model as schemas.
                 "code_only": sorted(
@@ -389,12 +390,18 @@ class RunSession:
             github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
         )
 
-    def _unoffered_async_tools(self) -> frozenset[str]:
-        if any(
+    @property
+    def _delegates(self) -> bool:
+        return any(
             isinstance(middleware, TaskCoordinationMiddleware) and middleware.can_delegate
             for middleware in self.surface.middleware
-        ):
-            return _ASYNC_TASK_TOOLS - {_LAUNCH_WORKER_TOOL}
+        )
+
+    def _unoffered_delegation_tools(self) -> frozenset[str]:
+        if self._delegates:
+            # A coordinator delegates only through its workers: no synchronous subagents,
+            # not even the general-purpose one deepagents adds to any agent without them.
+            return (_ASYNC_TASK_TOOLS - {_LAUNCH_WORKER_TOOL}) | {_SYNC_SUBAGENT_TOOL}
         return _ASYNC_TASK_TOOLS
 
     def start_models(self) -> RunModels:

@@ -19,9 +19,21 @@ import asyncio
 import dataclasses
 import json
 import logging
-from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping, Sequence
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+    Iterator,
+    Mapping,
+    Sequence,
+)
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Annotated, Final, NotRequired
 
+import httpx
+from deepagents.middleware import async_subagents
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
@@ -42,6 +54,7 @@ from langgraph.config import get_config, get_stream_writer
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue
 
 from rt.backend import (
@@ -68,6 +81,8 @@ _TRACKED_BY_OPEN_SWE: Final = frozenset(
     {"check_async_task", "update_async_task", "cancel_async_task", "list_async_tasks"}
 )
 WORKER_GRANT_KEY: Final = "__worker_grant"
+# Waits before launching again a worker MDA failed to start for a reason that may pass.
+_LAUNCH_RETRY_SECONDS: Final = (4.0, 12.0)
 
 
 def _merge(
@@ -424,6 +439,44 @@ class _Launched(BaseModel):
     run_id: str
 
 
+class _LaunchErrors(logging.Filter):
+    """What ``start_async_task`` failed with: deepagents logs the exception, then answers with text."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._caught: ContextVar[list[BaseException] | None] = ContextVar(
+            "open_swe_launch_errors", default=None
+        )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        caught = self._caught.get()
+        if caught is not None and isinstance(record.args, tuple):
+            caught.extend(arg for arg in record.args if isinstance(arg, BaseException))
+        return True
+
+    @contextmanager
+    def catching(self) -> Iterator[list[BaseException]]:
+        caught: list[BaseException] = []
+        token = self._caught.set(caught)
+        try:
+            yield caught
+        finally:
+            self._caught.reset(token)
+
+
+_LAUNCH_ERRORS: Final = _LaunchErrors()
+logging.getLogger(async_subagents.__name__).addFilter(_LAUNCH_ERRORS)
+
+
+def _transient(error: BaseException) -> bool:
+    """Whether MDA may start the worker if asked again: it did not answer, or was overloaded or failing."""
+    if isinstance(error, APIStatusError):
+        return error.status_code == 429 or error.status_code >= 500
+    return isinstance(
+        error, httpx.TransportError | APIConnectionError | TimeoutError | ConnectionError
+    )
+
+
 class AsyncWorkerLaunchMiddleware(AgentMiddleware):
     """Launch task workers with deepagents' ``start_async_task``, each an Open SWE worker.
 
@@ -433,6 +486,11 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
     adopt a run token of its own, and no assistant of this agent's to wake. Open SWE
     registers it under this agent's task and returns its results as task messages,
     so deepagents does not track the task here, and its own task tools stay unused.
+
+    A launch MDA failed to start for a reason that may pass is made again, for the
+    same tool call, with a grant for that same call: a worker an earlier attempt
+    started after all is returned, and of two such threads only the first to register
+    becomes the worker, the other refused and stopped.
     """
 
     def __init__(self, backend: OpenSweBackend) -> None:
@@ -458,6 +516,20 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
         instructions = description if isinstance(description, str) else ""
         body: dict[str, JsonValue] = {"tool_call_id": tool_call_id, "instructions": instructions}
         try:
+            return await self._launch(request, handler, body)
+        except BackendCallError as exc:
+            return _refused(call["name"], tool_call_id, str(exc))
+
+    async def _launch(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+        body: dict[str, JsonValue],
+    ) -> ToolMessage:
+        call = request.tool_call
+        tool_call_id = call.get("id") or ""
+        waits = iter(_LAUNCH_RETRY_SECONDS)
+        while True:
             reply = await self._backend.call("launch_worker", body)
             if (worker := reply.get("worker")) is not None:
                 # A replay of a launch that already made its worker.
@@ -471,14 +543,27 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
                 args={**call["args"], "description": assignment},
                 id=call.get("id"),
             )
-            result = await handler(
-                request.override(tool_call=launch, runtime=_launch_runtime(request.runtime, grant))
-            )
-        except BackendCallError as exc:
-            return _refused(call["name"], tool_call_id, str(exc))
-        launched = _launched_task(result)
-        if launched is None:
-            return result
+            with _LAUNCH_ERRORS.catching() as errors:
+                result = await handler(
+                    request.override(
+                        tool_call=launch, runtime=_launch_runtime(request.runtime, grant)
+                    )
+                )
+            if (launched := _launched_task(result)) is not None:
+                return await self._register(body, launched, tool_call_id)
+            if any(map(_transient, errors)) and (wait := next(waits, None)) is not None:
+                logger.warning(
+                    "MDA did not start a task worker; launching it again",
+                    extra={"tool_call_id": tool_call_id, "wait_seconds": wait},
+                    exc_info=errors[-1],
+                )
+                await asyncio.sleep(wait)
+                continue
+            return _refused(call["name"], tool_call_id, _not_launched(result, tool_call_id))
+
+    async def _register(
+        self, body: dict[str, JsonValue], launched: _Launched, tool_call_id: str
+    ) -> ToolMessage:
         try:
             registered = await self._backend.call(
                 "worker_launched",
@@ -517,6 +602,14 @@ def _launched_task(result: ToolMessage | Command) -> _Launched | None:
         return None
     [task] = tasks.values()
     return _Launched.model_validate(task)
+
+
+def _not_launched(result: ToolMessage | Command, tool_call_id: str) -> str:
+    cause = _tool_message(result, tool_call_id).text.strip() or "MDA started no worker."
+    return (
+        f"The worker did not launch. {cause} Calling start_async_task again is safe: "
+        "one launch never starts more than one worker."
+    )
 
 
 def _worker_message(worker: object, tool_call_id: str) -> ToolMessage:

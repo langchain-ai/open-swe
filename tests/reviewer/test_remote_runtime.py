@@ -306,7 +306,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.remote_runtime.graph import RemoteGraph
-    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from openswe.sandboxes.tool_runtime import (
+        ModelChoice,
+        SurfaceModels,
+        SurfaceSubagent,
+        ToolSurface,
+    )
 
     def integration(name: str) -> StructuredTool:
         async def run(query: str) -> str:
@@ -344,6 +349,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         )
         surface.code_mode = True
         surface.middleware = middleware
+        surface.subagents = [SurfaceSubagent("general-purpose", "helper", "instructions")]
         choice = ModelChoice("openai:gpt-6.1-sol", {})
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
@@ -366,6 +372,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     # A coordinator launches async workers; their task tools track them, not deepagents'.
     assert "start_async_task" not in excluded
     assert {"check_async_task", "update_async_task", "cancel_async_task"} <= set(excluded)
+    # And delegates only through them: no synchronous subagents, nor deepagents' default.
+    assert catalog["subagents"] == []
+    assert "task" in excluded
     search = next(tool for tool in tools if isinstance(tool, dict) and tool["name"] == "mcp_search")
     assert isinstance(search, dict)
     expected = {
