@@ -1245,7 +1245,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", marker = "extra == 'test'", specifier = ">=50.0.1" },
-    { name = "deepagents", specifier = ">=0.7.13,<1" },
+    { name = "deepagents", specifier = ">=0.7.27,<1" },
     { name = "fastmcp", marker = "extra == 'test'", specifier = ">=4.0.10,<5" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "langchain", specifier = ">=1.4.6,<2" },

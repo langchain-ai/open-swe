@@ -682,6 +682,11 @@ fn compile_inner(
 ) -> Result<CompileSummary> {
     // Validate first: prepare_out_dir clears existing files during a full build.
     let agent = agent_config::read_agent_static_config(project)?;
+    if matches!(context, RuntimeContext::Eval { .. }) && !agent.async_subagents.is_empty() {
+        bail!(
+            "async subagents are not supported in eval: there is no Agent Server to launch them on"
+        );
+    }
     let local_packages = find_local_packages(project)?;
     prepare_out_dir(&project.root, out_dir, mode)?;
 
@@ -807,6 +812,20 @@ fn compile_inner(
     if let Some(warning) = sandbox_recipe::legacy_thread_scope_warning(project)? {
         warnings.push(warning);
     }
+    if agent.unreadable_subagents > 0 {
+        warnings.push(format!(
+            "{} subagent entr{} in {} could not be read without running it. An async \
+             subagent (`\"async\": True`) must be a dict literal, or a name bound to one, \
+             in `subagents=[...]`.",
+            agent.unreadable_subagents,
+            if agent.unreadable_subagents == 1 {
+                "y"
+            } else {
+                "ies"
+            },
+            project.agent_file.display()
+        ));
+    }
 
     let channel_scan = scan_exported_channels(project)?;
     let channel_entries = channel_scan.entries;
@@ -901,6 +920,7 @@ fn compile_inner(
             identity_import: identity_import.as_deref(),
             memory_import: memory_import.as_deref(),
             browser_import: browser_import.as_deref(),
+            async_subagents: &agent.async_subagents,
         },
     );
     write_if_changed(&out_dir.join(&entry_file), entry_source.as_bytes())
@@ -950,6 +970,17 @@ fn compile_inner(
         };
 
     let graph = format!("./{}:agent", to_unix_path(&entry_file));
+    let extra_graphs: Vec<(String, String)> = agent
+        .async_subagents
+        .iter()
+        .map(|subagent| {
+            let export = &subagent.export;
+            (
+                subagent.graph_id.clone(),
+                format!("./{}:{export}", to_unix_path(&entry_file)),
+            )
+        })
+        .collect();
     let schedule_crons = read_schedule_crons(
         project,
         ScheduleReadContext {
@@ -1005,6 +1036,7 @@ fn compile_inner(
             context,
             RuntimeContext::Local { .. } | RuntimeContext::Eval { .. }
         ),
+        extra_graphs: &extra_graphs,
     })?;
     // Avoid bumping mtime when the manifest is unchanged so `mda dev` watch
     // does not restart LangGraph on every source-only refresh.

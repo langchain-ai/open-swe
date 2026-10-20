@@ -6,6 +6,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::json;
 
+use crate::agent_config::AsyncSubagentGraph;
 use crate::project::Language;
 
 use super::{BROWSER_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
@@ -63,6 +64,8 @@ pub(super) struct EntryInputs<'a> {
     /// Module specifier for the root `browser` declaration (Python only), if
     /// the project opts into browser use.
     pub(super) browser_import: Option<&'a str>,
+    /// Async subagents that get their own graph factory (served Python only).
+    pub(super) async_subagents: &'a [AsyncSubagentGraph],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -400,6 +403,32 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     }
     out.push('\n');
 
+    let subagents = inputs.async_subagents;
+    // Async subagents run with the lead's managed kwargs; channels stay with the lead.
+    let mut subagent_kwargs: Vec<String> = kwargs
+        .iter()
+        .filter(|kwarg| !kwarg.starts_with("channels="))
+        .cloned()
+        .collect();
+    subagent_kwargs.push("runtime=runtime".to_string());
+    if !subagents.is_empty() {
+        let entries: Vec<String> = subagents
+            .iter()
+            .map(|subagent| {
+                format!(
+                    "{}: {}",
+                    encode_string_literal(&subagent.name),
+                    encode_string_literal(&subagent.graph_id)
+                )
+            })
+            .collect();
+        out.push_str(&format!(
+            "_async_subagent_graphs = {{{}}}\n",
+            entries.join(", ")
+        ));
+        kwargs.push("async_subagent_graphs=_async_subagent_graphs".to_string());
+    }
+
     let await_prefix = if matches!(inputs.context, RuntimeContext::Eval { .. }) {
         if inputs.factory {
             out.push_str("\nasync def agent(config):\n");
@@ -424,6 +453,14 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
         out.push_str(&format!(
             "    return {await_prefix}{compile_fn}(_definition, config, {})\n",
             kwargs.join(", ")
+        ));
+    }
+    for subagent in subagents {
+        out.push_str(&format!(
+            "\n\nasync def {}(config, runtime: ServerRuntime):\n    return await {compile_fn}(_definition, config, {}, async_subagent={})\n",
+            subagent.export,
+            subagent_kwargs.join(", "),
+            encode_string_literal(&subagent.name)
         ));
     }
     out
@@ -738,6 +775,8 @@ pub(super) struct LanggraphManifestInputs<'a> {
     /// Local package directories that Python deploys install separately.
     pub(super) local_packages: &'a [String],
     pub(super) disable_studio_auth: bool,
+    /// Extra `(graph key, export specifier)` pairs, one per async subagent.
+    pub(super) extra_graphs: &'a [(String, String)],
 }
 
 pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> Result<String> {
@@ -752,6 +791,7 @@ pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> R
         include_vendored_runtime,
         local_packages,
         disable_studio_auth,
+        extra_graphs,
     } = *inputs;
     // The LangGraph manifest keys the runtime on `node_version` (LangGraph.js)
     // or `python_version` (LangGraph Python); the rest of the shape is shared.
@@ -760,6 +800,9 @@ pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> R
     // binding.
     let mut graphs = serde_json::Map::new();
     graphs.insert(assistant_id.to_string(), json!(graph));
+    for (key, export) in extra_graphs {
+        graphs.insert(key.clone(), json!(export));
+    }
 
     // Prefer `_INTERNAL_docker_tag` over `api_version`: Cloud SaaS has been
     // observed to ignore rc `api_version` pins and keep the newest stable
@@ -867,6 +910,7 @@ mod tests {
                 identity_import: None,
                 memory_import: None,
                 browser_import: None,
+                async_subagents: &[],
             };
             for (language, check) in [
                 (
@@ -914,6 +958,7 @@ mod tests {
                 identity_import: None,
                 memory_import: None,
                 browser_import: None,
+                async_subagents: &[],
             };
             for language in [Language::TypeScript, Language::Python] {
                 let entry = generate_entry(language, &inputs);
@@ -942,6 +987,7 @@ mod tests {
                 identity_import: None,
                 memory_import: None,
                 browser_import: None,
+                async_subagents: &[],
             },
         );
 
@@ -977,6 +1023,7 @@ mod tests {
                 identity_import: None,
                 memory_import: None,
                 browser_import: None,
+                async_subagents: &[],
             },
         );
 
@@ -1030,6 +1077,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1068,6 +1116,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1096,6 +1145,7 @@ mod tests {
             include_vendored_runtime: true,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1120,6 +1170,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1145,6 +1196,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1173,6 +1225,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: true,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1194,6 +1247,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 

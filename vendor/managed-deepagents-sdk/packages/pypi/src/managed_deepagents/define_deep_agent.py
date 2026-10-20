@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Never
+from typing import TYPE_CHECKING, Any, ClassVar, Never, TypedDict
 
 from managed_deepagents._managed_composition import (
     OMITTED,
@@ -39,8 +39,15 @@ if TYPE_CHECKING:
 
     #: Same tool union accepted by ``create_deep_agent`` / ``SubAgent``.
     DeepAgentTool = BaseTool | Callable[..., Any] | dict[str, Any]
-    #: Declarative, compiled, or async subagent specs from deepagents.
-    DeepAgentSubAgent = SubAgent | CompiledSubAgent | AsyncSubAgent
+    # `async` is a keyword, so the flag needs the functional TypedDict form.
+    _AsyncFlag = TypedDict("_AsyncFlag", {"async": bool})
+
+    class ManagedAsyncSubAgent(SubAgent, _AsyncFlag):
+        """A declarative subagent that MDA builds as its own graph."""
+
+    #: Declarative, compiled, or async subagent specs from deepagents, plus
+    #: declarative specs marked `"async": True`.
+    DeepAgentSubAgent = SubAgent | ManagedAsyncSubAgent | CompiledSubAgent | AsyncSubAgent
     DeepAgentMiddleware = AgentMiddleware
     DeepAgentInterruptOn = bool | InterruptOnConfig
     DeepAgentResponseFormat = ResponseFormat[Any] | type[Any] | dict[str, Any]
@@ -115,6 +122,10 @@ def define_deep_agent(
     ``create_deep_agent`` (``BaseTool``, ``SubAgent``, ``AgentMiddleware``,
     ``FilesystemPermission``, …) so authoring stays aligned with the harness.
 
+    A subagent dict with ``"async": True`` runs as a background task in its own
+    graph. Unset ``model``, ``tools``, ``permissions``, and ``interrupt_on``
+    inherit from this agent; middleware, skills, and memory do not.
+
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
     keys such as prompt provenance land on the **root** LangSmith run.
@@ -139,6 +150,7 @@ def define_deep_agent(
         )
     if metadata is not None and not isinstance(metadata, Mapping):
         raise TypeError("metadata must be a mapping")
+    _validate_async_subagents(subagents or ())
 
     config: dict[str, object] = {
         "name": name,
@@ -167,6 +179,28 @@ def define_deep_agent(
     config.update(copy_managed_selections(instructions, mcp, sandbox, skills, memory))
 
     return DeepAgentDefinition(config)
+
+
+_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode", "skills")
+
+
+def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
+    for spec in subagents:
+        if not isinstance(spec, Mapping) or "async" not in spec:
+            continue
+        if not isinstance(spec["async"], bool):
+            raise TypeError('subagent "async" must be True or False')
+        if not spec["async"]:
+            continue
+        if not isinstance(spec.get("description"), str):
+            raise TypeError('subagent "async": True requires a `description`')
+        unsupported = [key for key in _ASYNC_SUBAGENT_UNSUPPORTED_KEYS if key in spec]
+        if unsupported:
+            msg = (
+                f'subagent "async": True cannot set `{unsupported[0]}`: MDA builds and '
+                "launches its graph itself"
+            )
+            raise TypeError(msg)
 
 
 __all__ = [

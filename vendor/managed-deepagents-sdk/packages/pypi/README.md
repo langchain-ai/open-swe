@@ -245,6 +245,44 @@ The agent layer is mounted at `/memories/agent/`. The user layer requires
 overwrites existing memories. A project without `memory.py` mounts no durable
 memory.
 
+## Async subagents
+
+Mark a subagent with `"async": True` to run it in the background. MDA builds it
+as its own graph in the same deployment, and the agent starts it, checks on it,
+and reads its result while it keeps working:
+
+```python
+agent = define_deep_agent(
+    name="lead",
+    subagents=[
+        {
+            "name": "researcher",
+            "description": "Researches a topic in the background",
+            "system_prompt": "You research topics thoroughly.",
+            "async": True,
+        }
+    ],
+)
+```
+
+The subagent runs under the caller's identity and uses the project's sandbox,
+identity, and connector declarations; its sandbox is separate from the agent's.
+When it leaves `model`, `tools`, `permissions`, or `interrupt_on` unset, it uses
+the agent's. It does not inherit the agent's middleware, skills, or memory.
+
+When the subagent pauses for approval, the agent sees the task as waiting.
+Answer the approval in the subagent's own thread, and the task continues.
+
+Each async subagent is its own graph, so any caller allowed to start runs on
+this deployment can also run it directly, as themselves. It doesn't get the
+agent's middleware, so don't rely on the agent's middleware to guard the tools
+it shares with a subagent.
+
+Write async subagents in `agent.py` as dict literals, or names bound to one, so
+the build can find them without running your code. `mda build` warns about
+subagent entries it can't read. Async subagents are Python only, and are not
+supported in `mda eval`.
+
 ## Run context and channels
 
 The runtime separates application data, trusted caller information, and the

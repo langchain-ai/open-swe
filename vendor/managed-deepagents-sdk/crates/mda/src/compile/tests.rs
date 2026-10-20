@@ -1251,6 +1251,116 @@ fn compile_generates_a_python_entry() {
 }
 
 #[test]
+fn compile_builds_a_graph_per_async_subagent() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        concat!(
+            "agent = define_deep_agent(name=\"lead\", subagents=[\n",
+            "    {\"name\": \"researcher\", \"description\": \"d\", \"async\": True},\n",
+            "    {\"name\": \"helper\", \"description\": \"d\"},\n",
+            "])\n",
+        ),
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+    let out_dir = root.path().join("build");
+
+    with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["graphs"],
+        serde_json::json!({
+            "lead": "./_mda_entry.py:agent",
+            "lead--researcher": "./_mda_entry.py:agent__researcher",
+        })
+    );
+    let entry = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
+    assert!(
+        entry.contains("_async_subagent_graphs = {\"researcher\": \"lead--researcher\"}"),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("async_subagent_graphs=_async_subagent_graphs"),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("async def agent__researcher(config, runtime: ServerRuntime):"),
+        "{entry}"
+    );
+    assert!(entry.contains("async_subagent=\"researcher\")"), "{entry}");
+}
+
+#[test]
+fn eval_rejects_async_subagents() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\", subagents=[{\"name\": \"r\", \"description\": \"d\", \"async\": True}])\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+
+    let error = compile_for_eval(&project, &root.path().join("build")).unwrap_err();
+
+    assert!(
+        error.to_string().contains("not supported in eval"),
+        "{error}"
+    );
+}
+
+#[test]
+fn compile_warns_about_subagents_it_cannot_read() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\", subagents=[make_subagent()])\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+
+    let summary = with_py_runtime(root.path(), || {
+        compile(&project, &root.path().join("build"))
+    })
+    .unwrap();
+
+    assert!(
+        summary
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("1 subagent entry")),
+        "{:?}",
+        summary.warnings
+    );
+}
+
+#[test]
 fn compile_ignores_python_config_for_typescript() {
     // A TypeScript manifest keys the runtime on `node_version`, so Python
     // configuration is irrelevant to it. An unparseable `requires-python` at the

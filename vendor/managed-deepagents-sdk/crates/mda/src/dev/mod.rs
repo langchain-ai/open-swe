@@ -346,6 +346,7 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
         has_skills: summary.has_skills,
         needs_developer_principal,
         schedule_crons: summary.schedule_crons,
+        graphs_changed: false,
     };
     let mut classify_ctx = WatchClassifyContext::from_agent_file(&project.agent_file);
     let mut hub_fingerprint = hub_inputs_fingerprint(&project.root, &classify_ctx);
@@ -426,11 +427,18 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
                 // The running server needs the newly staged developer principal.
                 let gained_developer_principal =
                     !needed_developer_principal && features.needs_developer_principal;
+                let graphs_changed = std::mem::take(&mut features.graphs_changed);
                 if gained_developer_principal || restaged_env {
                     // Both CLIs inherit the loopback URL from the parent process.
                     // Node's dotenv loader preserves that value across worker
                     // reloads, so an env restage must replace the parent too.
                     let _ = log::info("Restarting LangGraph server for updated .env");
+                    restart_langgraph_dev(&mut child, &command, &project, &out_dir)?;
+                    if let Some(sync) = schedules.as_mut() {
+                        sync.restarted();
+                    }
+                } else if graphs_changed {
+                    let _ = log::info("Restarting LangGraph server for updated graphs");
                     restart_langgraph_dev(&mut child, &command, &project, &out_dir)?;
                     if let Some(sync) = schedules.as_mut() {
                         sync.restarted();
@@ -829,6 +837,22 @@ struct DevWatchFeatures {
     needs_developer_principal: bool,
     /// What the last successful compile produced from `schedules/`.
     schedule_crons: compile::schedules::ScheduleCrons,
+    /// A rebuild added or removed a graph, which `langgraph dev` only reads at
+    /// startup.
+    graphs_changed: bool,
+}
+
+/// Graph keys in a `langgraph.json` manifest.
+fn langgraph_graph_keys(manifest: Option<&[u8]>) -> Vec<String> {
+    manifest
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+        .and_then(|value| {
+            value
+                .get("graphs")?
+                .as_object()
+                .map(|graphs| graphs.keys().cloned().collect())
+        })
+        .unwrap_or_default()
 }
 
 fn apply_watch_action(
@@ -923,6 +947,10 @@ fn apply_watch_action(
             features.has_skills = summary.has_skills;
             features.schedule_crons = summary.schedule_crons.clone();
             *hub_fingerprint = hub_inputs_fingerprint(&project.root, classify_ctx);
+            // Only Python builds async subagent graphs, so only Python graph sets change.
+            features.graphs_changed = project.language == Language::Python
+                && langgraph_graph_keys(prior_langgraph.as_deref())
+                    != langgraph_graph_keys(fs::read(&langgraph_path).ok().as_deref());
 
             // TypeScript: if deps are stale, stash the freshly written
             // langgraph.json and restore the previous one immediately so
@@ -2248,6 +2276,17 @@ mod tests {
 
     use super::*;
     use crate::error::category_of;
+
+    #[test]
+    fn langgraph_graph_keys_reads_the_graphs_map() {
+        let manifest = br#"{"graphs": {"lead": "a", "lead--researcher": "b"}}"#;
+        assert_eq!(
+            langgraph_graph_keys(Some(manifest)),
+            ["lead", "lead--researcher"]
+        );
+        assert!(langgraph_graph_keys(None).is_empty());
+        assert!(langgraph_graph_keys(Some(b"not json")).is_empty());
+    }
 
     const TEST_ASSISTANT_ID: &str = "test-agent";
 

@@ -54,6 +54,11 @@ from deepagents.backends.protocol import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph as CompiledAgent
 
+from managed_deepagents._async_subagents import (
+    async_subagent_definition,
+    reject_async_subagents,
+    route_async_subagents,
+)
 from managed_deepagents._channel import (
     Channel,
     collect_channels,
@@ -648,8 +653,14 @@ async def compile_managed_agent_async(
     run_context: object = None,
     is_run: bool = True,
     report_telemetry: bool = True,
+    async_subagent_graphs: Mapping[str, str] | None = None,
+    async_subagent: str | None = None,
 ) -> CompiledAgent:
-    """Resolve one entry and compile it with the current managed run context."""
+    """Resolve one entry and compile it with the current managed run context.
+
+    Generated entries pass `async_subagent_graphs` to the lead, and
+    `async_subagent` to build that async subagent's own graph instead.
+    """
     if runtime is not None:
         execution = runtime.execution_runtime
         is_run = execution is not None
@@ -674,6 +685,10 @@ async def compile_managed_agent_async(
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
     definition = await resolve_agent_definition(entry, factory_runtime)
+    if async_subagent is not None:
+        definition = async_subagent_definition(definition, async_subagent)
+    else:
+        definition = route_async_subagents(definition, async_subagent_graphs or {})
     return await _compile_resolved_managed_agent_async(
         definition,
         config,
@@ -1271,6 +1286,7 @@ def compile_managed_agent_for_eval(
     The model override is applied to a copied definition so normal dev/deploy
     behavior remains unchanged.
     """
+    reject_async_subagents(definition)
     eval_definition = _prepare_eval_definition(definition, config, model_override)
 
     return compile_managed_agent(
@@ -1308,6 +1324,7 @@ async def compile_agent_factory_for_eval_async(
     definition = await resolve_agent_definition(
         entry, _internal_server_runtime(config, context, is_run=True)
     )
+    reject_async_subagents(definition)
     eval_definition = _prepare_eval_definition(definition, config, model_override)
     return await _compile_resolved_managed_agent_async(
         eval_definition,
