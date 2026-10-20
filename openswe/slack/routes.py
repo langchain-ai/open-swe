@@ -11,6 +11,7 @@ from fastapi import APIRouter, Response
 from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import offer as review_offer
+from openswe.human_review import request_modal as review_request_modal
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
 from openswe.review_guide.advance import advance
@@ -910,6 +911,11 @@ async def slack_interactivity(
         return expedited_review.handle_picker_submission(interaction, background_tasks)
     if (
         interaction.type == "view_submission"
+        and interaction.view.callback_id == review_request_modal.CALLBACK_ID
+    ):
+        return await review_request_modal.handle_submission(interaction, background_tasks)
+    if (
+        interaction.type == "view_submission"
         and interaction.view.callback_id in human_review.PICK_MODALS
     ):
         return await human_review.handle_pick_modal_submission(interaction, background_tasks)
@@ -1009,7 +1015,19 @@ async def slack_interactivity(
             return await expedited_review.handle_button(interaction, button, background_tasks)
         if button.type == human_review.BUTTON_TYPE:
             return await human_review.handle_button(interaction, button, background_tasks)
+        if button.type == review_request_modal.BUTTON_TYPE:
+            return await review_request_modal.handle_button(interaction, button.subject)
         if button.type == suggested_actions.BUTTON_TYPE:
+            if button.kind == review_offer.GET_REVIEWED.kind and button.action == "accept":
+                return await review_request_modal.handle_button(
+                    interaction,
+                    review_request_modal.ReviewRequestContext(
+                        pr_url=button.subject,
+                        user_id=user_id,
+                        channel_id=channel_id,
+                        thread_ts=button.thread_ts,
+                    ).model_dump_json(),
+                )
             return await suggested_actions.handle_button(interaction, button, background_tasks)
 
         if button.type == act_as.BUTTON_TYPE:

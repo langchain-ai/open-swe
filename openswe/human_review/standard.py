@@ -309,14 +309,18 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
     )
 
 
-async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
+async def _resummarize(
+    active: HumanReviewRequest, tldr: str, *, human: bool = False
+) -> RequestResult:
     """Whoever asked replaces their own card's summary."""
-    if tldr == active.tldr:
+    if tldr == active.tldr and (not human or active.run_config.get("human_description")):
         return await _existing(active)
     async with HumanReviewRequest.locked(active.id) as (_, row):
         if row is None or row.state != "open":
             return _failure("This review request closed before its summary could change.")
         row.tldr = tldr
+        if human:
+            row.run_config = {**row.run_config, "human_description": True}
         # Under the lock, so a concurrent dismissal waits and renders its closed card last.
         await ReviewCard(row).refresh()
     current = await HumanReviewRequest.get(active.id)
@@ -349,16 +353,27 @@ async def record_pull_request(
 
 
 async def request_review(
-    pr_ref: GitHubPrRef, origin: Origin, *, channel: str = "", inline_summary: str | None = None
+    pr_ref: GitHubPrRef,
+    origin: Origin,
+    *,
+    channel: str = "",
+    inline_summary: str | None = None,
+    human_description: str | None = None,
 ) -> RequestResult:
-    """Post a standard review card for ``pr_ref``, or return the one already open.
-
-    ``inline_summary`` is the card's summary; ``None`` shows the start of the PR description.
-    """
+    """Post or reuse a review card, preserving a submitted human description verbatim."""
+    if human_description is not None and (
+        not human_description.strip() or len(human_description) > 1500
+    ):
+        return _failure("A human review description must contain 1–1,500 characters.")
     try:
         async with PullRequestClient.as_app(pr_ref.owner, pr_ref.repo, pr_ref.number) as pull:
             return await _request_review(
-                pr_ref, pull, origin, channel=channel, inline_summary=inline_summary
+                pr_ref,
+                pull,
+                origin,
+                channel=channel,
+                inline_summary=inline_summary,
+                human_description=human_description,
             )
     except GitHubAppUnavailable:
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
@@ -371,11 +386,19 @@ async def _request_review(
     *,
     channel: str,
     inline_summary: str | None,
+    human_description: str | None = None,
 ) -> RequestResult:
     # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None:
-        if active.kind == "standard" and inline_summary is not None and origin.asked(active):
+        if active.kind == "standard" and human_description is not None and origin.asked(active):
+            return await _resummarize(active, human_description, human=True)
+        if (
+            active.kind == "standard"
+            and inline_summary is not None
+            and origin.asked(active)
+            and not active.run_config.get("human_description")
+        ):
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
 
@@ -407,9 +430,13 @@ async def _request_review(
             head_sha=details.head_sha,
             kind="standard",
             thread_id=origin.thread_id,
-            run_config=origin.run_config,
+            run_config={**origin.run_config, "human_description": True}
+            if human_description is not None
+            else origin.run_config,
             requested_by_user_id=origin.requester.id if origin.requester is not None else None,
-            tldr=summary_line(details.body or "" if inline_summary is None else inline_summary),
+            tldr=human_description
+            if human_description is not None
+            else summary_line(details.body or "" if inline_summary is None else inline_summary),
             slack_channel_id=target.id,
             slack_thread_ts=origin.slack_thread_ts if in_thread else "",
             slack_broadcast=in_thread,
