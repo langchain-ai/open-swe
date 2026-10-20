@@ -231,6 +231,7 @@ from openswe.tools import (
     request_human_review,
     request_pr_review,
     request_rollout_check,
+    run_sql,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -1802,7 +1803,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *((cli_result,) if cli_result_required else ()),
         *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
         read_only_sql,
-        *((write_database_rows,) if ENV.OPENSWE_ENV.optional() in {"preview", "staging"} else ()),
+        *(
+            (write_database_rows, run_sql)
+            if ENV.OPENSWE_ENV.optional() in {"preview", "staging"}
+            else ()
+        ),
         manage_feature_flags,
         manage_review_approval_mode,
         manage_review_repos,

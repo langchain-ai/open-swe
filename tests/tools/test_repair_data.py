@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import Column, Integer, MetaData, Table
 
-from openswe.tools.repair_data import write_database_rows
+from openswe.tools.repair_data import run_sql, write_database_rows
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +38,8 @@ async def test_environment_gate_blocks_repairs(monkeypatch, environment):
     monkeypatch.setenv("OPENSWE_ENV", environment)
     with pytest.raises(ValueError, match="only enabled"):
         await write_database_rows("users", "insert", {"id": 1}, confirm=True)
+    with pytest.raises(ValueError, match="only enabled"):
+        await run_sql("DELETE FROM users", confirm=True)
 
 
 @pytest.mark.asyncio
@@ -55,6 +57,8 @@ async def test_access_gate_blocks_writes(admin_context, monkeypatch, change):
         )
         monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
     result = await write_database_rows("users", "insert", {"id": 1}, confirm=True)
+    assert result["ok"] is False
+    result = await run_sql("DELETE FROM users", confirm=True)
     assert result["ok"] is False
 
 

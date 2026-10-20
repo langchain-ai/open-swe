@@ -3,6 +3,7 @@
 import json
 import logging
 import math
+from collections.abc import Sequence
 from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
@@ -15,8 +16,8 @@ from openswe.tools.mcp_exposure import expose_mcp
 
 logger = logging.getLogger(__name__)
 
-_MAX_QUERY_CHARS = 200_000
-_MAX_ROWS = 1_000
+MAX_QUERY_CHARS = 200_000
+MAX_ROWS = 1_000
 _MAX_OUTPUT_BYTES = 1_000_000
 _STATEMENT_TIMEOUT_MS = 60_000
 
@@ -46,10 +47,10 @@ async def read_only_sql(query: str) -> dict[str, object]:
     query = query.strip()
     if not query:
         return {"ok": False, "error": "Query cannot be empty."}
-    if len(query) > _MAX_QUERY_CHARS:
+    if len(query) > MAX_QUERY_CHARS:
         return {
             "ok": False,
-            "error": f"Query exceeds the {_MAX_QUERY_CHARS:,}-character limit.",
+            "error": f"Query exceeds the {MAX_QUERY_CHARS:,}-character limit.",
         }
 
     try:
@@ -57,7 +58,7 @@ async def read_only_sql(query: str) -> dict[str, object]:
             await conn.execute(text(f"SET LOCAL statement_timeout = {_STATEMENT_TIMEOUT_MS}"))
             result = await conn.stream(text(query))
             columns = [str(column) for column in result.keys()]
-            fetched = await result.fetchmany(_MAX_ROWS + 1)
+            fetched = await result.fetchmany(MAX_ROWS + 1)
     except Exception as exc:
         logger.warning(
             "Read-only SQL query failed",
@@ -65,16 +66,20 @@ async def read_only_sql(query: str) -> dict[str, object]:
         )
         return {"ok": False, "error": "The database rejected the read-only query."}
 
+    return rows_response(columns, fetched)
+
+
+def rows_response(columns: Sequence[str], fetched: Sequence[Sequence[object]]) -> dict[str, object]:
+    """``columns`` and up to ``MAX_ROWS`` of ``fetched`` as JSON; one row past it marks truncation."""
     rows: list[list[object]] = []
-    truncated = len(fetched) > _MAX_ROWS
     response: dict[str, object] = {
         "ok": True,
-        "columns": columns,
+        "columns": list(columns),
         "rows": rows,
         "row_count": 0,
-        "truncated": truncated,
+        "truncated": len(fetched) > MAX_ROWS,
     }
-    for record in fetched[:_MAX_ROWS]:
+    for record in fetched[:MAX_ROWS]:
         row = [_json_value(value) for value in record]
         rows.append(row)
         response["row_count"] = len(rows)
@@ -85,5 +90,4 @@ async def read_only_sql(query: str) -> dict[str, object]:
             response["row_count"] = len(rows)
             response["truncated"] = True
             break
-
     return response
