@@ -1,9 +1,8 @@
 import os
 from pathlib import Path
 
-from deepagents.backends import LocalShellBackend
-
 from agent.config import ENV
+from agent.sandboxes.local_execution import AsyncLocalShellBackend as LocalShellBackend
 
 SANDBOX_GITCONFIG = ".gitconfig-sandbox"
 LOCAL_SHELL_ENV_EXCLUDE = {

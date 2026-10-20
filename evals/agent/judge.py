@@ -1,36 +1,35 @@
-"""Deterministic test-based evaluator for the agent eval.
-
-No LLM judge: an instance is resolved when every ``fail_to_pass`` test passes
-and every ``pass_to_pass`` test still passes after applying the agent's patch —
-and the benchmark's ``test_patch`` — to a clean checkout at ``base_commit``.
-That is the same definition SWE-bench uses, so numbers are comparable to
-published leaderboards.
-
-The judge shells out to ``git`` and ``pytest`` in a temp directory. It assumes a
-POSIX runner with network access to github.com; CI should run it on a durable
-runner, the same way the reviewer eval does.
-"""
+"""Deterministic patch grading with explicit execution and correctness failures."""
 
 import asyncio
 import logging
 import os
 import re
+import signal
+import sys
 import tempfile
+import time
+from collections.abc import Mapping
 from pathlib import Path
+from statistics import median
 from threading import Lock
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
+from langsmith.evaluation import EvaluationResult
+from langsmith.evaluation.evaluator import EvaluationResults
 from langsmith.schemas import Example, Run
+from pydantic import ValidationError
+
+from agent.prompts import render_prompt
+from evals.agent.models import FailureStage, GradingSpec, TargetResult
+
+if TYPE_CHECKING:
+    from agent.sandboxes.windows_job import WindowsJob
 
 logger = logging.getLogger(__name__)
-
 DEFAULT_TEST_TIMEOUT_SECONDS = 1800
 _FENCE_RE = re.compile(r"```(?:diff|patch)?\s*\n(.*?)```", re.DOTALL)
 _TEST_LINE_RE = re.compile(r"^(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\s+(\S+)", re.MULTILINE)
 _SUMMARY_TAIL_CHARS = 4000
-
-_records: list[dict[str, Any]] = []
-_records_lock = Lock()
 
 
 class InstanceResult(TypedDict):
@@ -40,346 +39,455 @@ class InstanceResult(TypedDict):
     patch_applied: bool
     fail_to_pass_rate: float
     pass_to_pass_rate: float
-    steps: int
+    steps: int | None
     wall_clock_seconds: float
     error: str
+    failure_stage: NotRequired[FailureStage]
+    diagnostic_output: NotRequired[str]
+    failed_test_ids: NotRequired[list[str]]
+    errored_test_ids: NotRequired[list[str]]
+    missing_test_ids: NotRequired[list[str]]
+    test_exit_code: NotRequired[int | None]
+    timed_out: NotRequired[bool]
+    phase_seconds: NotRequired[dict[str, float]]
+    thread_id: NotRequired[str]
+    input_tokens: NotRequired[int | None]
+    output_tokens: NotRequired[int | None]
+    usage_complete: NotRequired[bool]
+    execution_environment: NotRequired[dict[str, object] | None]
+
+
+_records: list[InstanceResult] = []
+_records_lock = Lock()
+
+
+def reset_results() -> None:
+    with _records_lock:
+        _records.clear()
+
+
+def get_results() -> list[InstanceResult]:
+    with _records_lock:
+        return list(_records)
 
 
 def test_timeout_seconds() -> int:
-    """Per-command timeout the runner configured, in seconds."""
     raw = os.getenv("AGENT_EVAL_TEST_TIMEOUT_SECONDS", str(DEFAULT_TEST_TIMEOUT_SECONDS))
     try:
         return max(1, int(raw))
     except ValueError:
+        logger.warning("Invalid agent eval test timeout; using default", extra={"configured": raw})
         return DEFAULT_TEST_TIMEOUT_SECONDS
 
 
 def python_command() -> str:
-    """Interpreter the judge uses for pytest.
-
-    The judge spawns the repo's tests in a fresh checkout, so it needs an
-    interpreter with pytest installed. Pin it when bare ``python`` on PATH is
-    not the one you mean (Windows Store stubs, pyenv shims, a specific venv).
-    """
-    return os.getenv("AGENT_EVAL_PYTHON", "python")
+    return os.getenv("AGENT_EVAL_PYTHON") or sys.executable
 
 
 def extract_patch(text: str) -> str:
-    """Pull a raw diff out of a model message.
-
-    Prefers the largest fenced block (models often wrap diffs in ```diff);
-    falls back to the whole message when it already looks like a diff. Prose
-    without a diff yields ``""`` — a no-change run, which scores zero.
-    """
     if not text:
         return ""
     blocks = _FENCE_RE.findall(text)
     if blocks:
         return max(blocks, key=len).strip()
     stripped = text.strip()
-    if stripped.startswith(("diff --git", "--- ", "@@ ")):
-        return stripped
-    return ""
+    return stripped if stripped.startswith(("diff --git", "--- ", "@@ ")) else ""
 
 
 def parse_test_outcomes(output: str) -> dict[str, str]:
-    """Per-test outcomes from ``pytest -rA`` short-summary lines."""
     return {test_id: outcome for outcome, test_id in _TEST_LINE_RE.findall(output)}
 
 
 def resolution_from_outcomes(
-    outcomes: dict[str, str],
-    fail_to_pass: list[str],
-    pass_to_pass: list[str],
+    outcomes: Mapping[str, str], fail_to_pass: list[str], pass_to_pass: list[str]
 ) -> tuple[bool, float, float]:
-    """Resolved, fail_to_pass rate, pass_to_pass rate for one instance."""
-
     def rate(test_ids: list[str]) -> float:
         if not test_ids:
             return 1.0
-        passed = sum(1 for test_id in test_ids if outcomes.get(test_id) == "PASSED")
-        return passed / len(test_ids)
+        return sum(outcomes.get(test_id) == "PASSED" for test_id in test_ids) / len(test_ids)
 
-    fail_to_pass_rate = rate(fail_to_pass)
-    pass_to_pass_rate = rate(pass_to_pass)
-    resolved = fail_to_pass_rate == 1.0 and pass_to_pass_rate == 1.0
-    return resolved, fail_to_pass_rate, pass_to_pass_rate
+    fail_rate, pass_rate = rate(fail_to_pass), rate(pass_to_pass)
+    return bool(fail_to_pass) and fail_rate == 1.0 and pass_rate == 1.0, fail_rate, pass_rate
 
 
 class _CommandResult(TypedDict):
     returncode: int
     output: str
+    timed_out: NotRequired[bool]
+
+
+async def _communicate(
+    process: asyncio.subprocess.Process, timeout: int, job: WindowsJob | None = None
+) -> _CommandResult:
+    communication = asyncio.create_task(process.communicate())
+    finished = False
+    try:
+        stdout, _ = await asyncio.wait_for(asyncio.shield(communication), timeout=timeout)
+        finished = True
+    except TimeoutError:
+        await _terminate(process, job)
+        stdout, _ = await communication
+        return {
+            "returncode": -1,
+            "output": stdout.decode("utf-8", "replace") + f"\nCommand timed out after {timeout}s",
+            "timed_out": True,
+        }
+    except BaseException:
+        await _terminate(process, job)
+        await communication
+        raise
+    finally:
+        if job is not None:
+            await job.aclose(terminate=not finished)
+    return {"returncode": process.returncode or 0, "output": stdout.decode("utf-8", "replace")}
+
+
+async def _terminate(process: asyncio.subprocess.Process, job: WindowsJob | None = None) -> None:
+    if os.name == "nt":
+        if job is not None:
+            await job.aclose()
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                logger.debug("Eval process already exited", extra={"process_id": process.pid})
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            logger.debug("Eval process already exited", extra={"process_id": process.pid})
+    await process.wait()
 
 
 async def _run(command: list[str], cwd: Path, timeout: int) -> _CommandResult:
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=cwd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    try:
-        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        return {"returncode": -1, "output": f"command timed out after {timeout}s: {command}"}
-    return {"returncode": process.returncode or 0, "output": stdout.decode("utf-8", "replace")}
+    process, job = await _spawn(command, cwd)
+    return await _communicate(process, timeout, job)
 
 
 async def _run_shell(
     command: str, cwd: Path, timeout: int, env: dict[str, str] | None = None
 ) -> _CommandResult:
-    process = await asyncio.create_subprocess_shell(
-        command,
-        cwd=cwd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        env=env,
-    )
+    process, job = await _spawn(command, cwd, env)
+    return await _communicate(process, timeout, job)
+
+
+async def _spawn(
+    command: list[str] | str, cwd: Path, env: dict[str, str] | None = None
+) -> tuple[asyncio.subprocess.Process, WindowsJob | None]:
+    job: WindowsJob | None = None
+    if os.name == "nt":
+        from agent.sandboxes.windows_job import WindowsJob
+
+        job = WindowsJob()
+    process: asyncio.subprocess.Process | None = None
     try:
-        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        return {"returncode": -1, "output": f"command timed out after {timeout}s: {command}"}
-    return {"returncode": process.returncode or 0, "output": stdout.decode("utf-8", "replace")}
+        if isinstance(command, str):
+            process = await asyncio.create_subprocess_shell(
+                command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+                start_new_session=os.name != "nt",
+            )
+        else:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+                start_new_session=os.name != "nt",
+            )
+        if job is not None and process.returncode is None:
+            await job.attach(process.pid)
+    except BaseException:
+        if process is not None:
+            await _terminate(process, job)
+        elif job is not None:
+            await job.aclose()
+        raise
+    return process, job
 
 
 def _install_env() -> dict[str, str]:
-    """Environment for a repo's install commands.
-
-    When ``AGENT_EVAL_PYTHON`` names an interpreter by absolute path (a venv),
-    that interpreter's bin directory goes on PATH so a bare ``pip install``
-    resolves to the same environment the judge runs pytest in. Without this,
-    ``pip`` is frequently not on PATH at all and every install fails.
-    """
     env = dict(os.environ)
     interpreter = python_command()
-    # Any anchored path has a directory worth putting on PATH; a bare name
-    # ("python") resolves through PATH as usual and has nothing to add.
     if Path(interpreter).anchor:
         env["PATH"] = str(Path(interpreter).parent) + os.pathsep + env.get("PATH", "")
     return env
 
 
 async def _prepare_checkout(
-    repo: str,
-    base_commit: str,
-    workdir: Path,
-    timeout: int,
-    *,
-    clone_url: str | None = None,
+    repo: str, base_commit: str, workdir: Path, timeout: int, *, clone_url: str | None = None
 ) -> str | None:
-    """Clone ``repo`` at ``base_commit`` into ``workdir``. Returns an error string."""
     workdir.mkdir(parents=True, exist_ok=True)
-    remote_url = clone_url or f"https://github.com/{repo}.git"
-    init = await _run(["git", "init", "-q"], workdir, 300)
-    if init["returncode"] != 0:
-        return f"git init failed: {init['output'][-_SUMMARY_TAIL_CHARS:]}"
-    remote = await _run(["git", "remote", "add", "origin", remote_url], workdir, 300)
-    if remote["returncode"] != 0:
-        return f"git remote add failed: {remote['output'][-_SUMMARY_TAIL_CHARS:]}"
-    fetch = await _run(
-        ["git", "fetch", "-q", "--depth", "1", "origin", base_commit], workdir, timeout
+    commands = (
+        ["git", "init", "-q"],
+        ["git", "remote", "add", "origin", clone_url or f"https://github.com/{repo}.git"],
+        ["git", "fetch", "-q", "--depth", "1", "origin", base_commit],
+        ["git", "checkout", "-q", "FETCH_HEAD"],
     )
-    if fetch["returncode"] != 0:
-        return f"git fetch {base_commit} failed: {fetch['output'][-_SUMMARY_TAIL_CHARS:]}"
-    checkout = await _run(["git", "checkout", "-q", "FETCH_HEAD"], workdir, 300)
-    if checkout["returncode"] != 0:
-        return f"git checkout failed: {checkout['output'][-_SUMMARY_TAIL_CHARS:]}"
+    for command in commands:
+        result = await _run(command, workdir, timeout)
+        if result["returncode"] != 0:
+            return f"{' '.join(command[:2])} failed: {result['output']}"
     return None
 
 
 async def _apply_patch(patch: str, workdir: Path) -> _CommandResult:
-    # Written outside the checkout so no test suite ever sees the stray file.
     patch_file = workdir.parent / ".eval-agent.patch"
-    patch_file.write_text(patch)
+    patch_file.write_text(patch.rstrip("\n") + "\n", encoding="utf-8", newline="\n")
     return await _run(["git", "apply", "--whitespace=nowarn", str(patch_file)], workdir, 300)
+
+
+def _empty_result(inputs: Mapping[str, object]) -> InstanceResult:
+    return {
+        "instance_id": str(inputs.get("instance_id", "")),
+        "repo": str(inputs.get("repo", "")),
+        "resolved": False,
+        "patch_applied": False,
+        "fail_to_pass_rate": 0.0,
+        "pass_to_pass_rate": 0.0,
+        "steps": None,
+        "wall_clock_seconds": 0.0,
+        "error": "",
+        "failure_stage": FailureStage.NONE,
+        "diagnostic_output": "",
+        "failed_test_ids": [],
+        "errored_test_ids": [],
+        "missing_test_ids": [],
+        "test_exit_code": None,
+        "timed_out": False,
+        "phase_seconds": {},
+    }
+
+
+def _failure(
+    base: InstanceResult, stage: FailureStage, output: str, *, timed_out: bool = False
+) -> InstanceResult:
+    logger.warning(
+        "Agent evaluation stage failed",
+        extra={"instance_id": base["instance_id"], "failure_stage": stage},
+    )
+    return {
+        **base,
+        "failure_stage": stage,
+        "error": output[-_SUMMARY_TAIL_CHARS:],
+        "diagnostic_output": output,
+        "timed_out": timed_out,
+    }
 
 
 async def _evaluate_instance(
     *,
     patch: str,
-    inputs: dict[str, Any],
-    outputs: dict[str, Any],
+    inputs: Mapping[str, object],
+    outputs: Mapping[str, object],
     workdir: Path,
     timeout: int,
 ) -> InstanceResult:
-    repo = str(inputs.get("repo", ""))
-    base_commit = str(inputs.get("base_commit", ""))
-    instance_id = str(inputs.get("instance_id", ""))
-    # Instances may name a mirror or self-hosted remote; github.com is the default.
-    clone_url = str(inputs.get("clone_url") or "") or None
-    fail_to_pass = [str(test_id) for test_id in outputs.get("fail_to_pass") or []]
-    pass_to_pass = [str(test_id) for test_id in outputs.get("pass_to_pass") or []]
-    test_patch = str(outputs.get("test_patch") or "")
-    install_commands = [str(command) for command in outputs.get("install_commands") or []]
-    test_command = str(outputs.get("test_command") or "pytest")
-    if test_command != "pytest":
-        logger.warning(
-            "Instance %s requests test_command %r but only pytest is wired up; "
-            "running pytest instead",
-            instance_id,
-            test_command,
+    result = _empty_result(inputs)
+    phase = FailureStage.INVALID_INSTANCE
+    phase_seconds: dict[str, float] = {}
+    result["phase_seconds"] = phase_seconds
+    try:
+        grading = GradingSpec.model_validate(outputs)
+        if grading.test_command != "pytest":
+            return _failure(result, phase, f"Unsupported test runner: {grading.test_command}")
+        phase = FailureStage.CHECKOUT
+        started = time.monotonic()
+        checkout_error = await _prepare_checkout(
+            result["repo"],
+            str(inputs.get("base_commit", "")),
+            workdir,
+            timeout,
+            clone_url=str(inputs.get("clone_url") or "") or None,
         )
+        phase_seconds[phase] = round(time.monotonic() - started, 3)
+        if checkout_error:
+            return _failure(result, phase, checkout_error)
 
-    base = InstanceResult(
-        instance_id=instance_id,
-        repo=repo,
-        resolved=False,
-        patch_applied=False,
-        fail_to_pass_rate=0.0,
-        pass_to_pass_rate=0.0,
-        steps=0,
-        wall_clock_seconds=0.0,
-        error="",
-    )
+        phase = FailureStage.INSTALL
+        started = time.monotonic()
+        for command in grading.install_commands:
+            installed = await _run_shell(command, workdir, timeout, env=_install_env())
+            if installed["returncode"] != 0:
+                phase_seconds[phase] = round(time.monotonic() - started, 3)
+                return _failure(
+                    result,
+                    phase,
+                    f"install command failed ({command}): {installed['output']}",
+                    timed_out=installed.get("timed_out", False),
+                )
+        phase_seconds[phase] = round(time.monotonic() - started, 3)
 
-    checkout_error = await _prepare_checkout(
-        repo, base_commit, workdir, timeout, clone_url=clone_url
-    )
-    if checkout_error is not None:
-        logger.warning("Checkout failed for %s: %s", instance_id, checkout_error)
-        return {**base, "error": checkout_error}
+        for phase, content in (
+            (FailureStage.AGENT_PATCH, patch),
+            (FailureStage.TEST_PATCH, grading.test_patch),
+        ):
+            started = time.monotonic()
+            if content.strip():
+                applied = await _apply_patch(content, workdir)
+                if applied["returncode"] != 0:
+                    phase_seconds[phase] = round(time.monotonic() - started, 3)
+                    return _failure(result, phase, applied["output"])
+            if phase == FailureStage.AGENT_PATCH:
+                result["patch_applied"] = True
+            phase_seconds[phase] = round(time.monotonic() - started, 3)
 
-    for command in install_commands:
-        installed = await _run_shell(command, workdir, timeout, env=_install_env())
-        if installed["returncode"] != 0:
-            message = (
-                f"install command failed ({command}): {installed['output'][-_SUMMARY_TAIL_CHARS:]}"
+        phase = FailureStage.TEST_EXECUTION
+        test_ids = list(dict.fromkeys(grading.fail_to_pass + grading.pass_to_pass))
+        started = time.monotonic()
+        pytest_result = await _run(
+            [
+                python_command(),
+                "-m",
+                "pytest",
+                "-p",
+                "no:cacheprovider",
+                "-rA",
+                "--tb=short",
+                "-q",
+                *test_ids,
+            ],
+            workdir,
+            timeout,
+        )
+        phase_seconds[phase] = round(time.monotonic() - started, 3)
+        result["test_exit_code"] = pytest_result["returncode"]
+        result["diagnostic_output"] = pytest_result["output"]
+        result["timed_out"] = pytest_result.get("timed_out", False)
+        outcomes = parse_test_outcomes(pytest_result["output"])
+        resolved, fail_rate, pass_rate = resolution_from_outcomes(
+            outcomes, grading.fail_to_pass, grading.pass_to_pass
+        )
+        missing = [test_id for test_id in test_ids if test_id not in outcomes]
+        result.update(
+            fail_to_pass_rate=fail_rate,
+            pass_to_pass_rate=pass_rate,
+            missing_test_ids=missing,
+            failed_test_ids=[test_id for test_id in test_ids if outcomes.get(test_id) == "FAILED"],
+            errored_test_ids=[test_id for test_id in test_ids if outcomes.get(test_id) == "ERROR"],
+        )
+        if (
+            result["timed_out"]
+            or pytest_result["returncode"] not in {0, 1}
+            or result["errored_test_ids"]
+            or (not outcomes and pytest_result["returncode"] != 0)
+            or (resolved and pytest_result["returncode"] != 0)
+        ):
+            return _failure(result, phase, pytest_result["output"], timed_out=result["timed_out"])
+        if missing:
+            return _failure(
+                result,
+                FailureStage.MISSING_OUTCOMES,
+                f"tests never reported an outcome: {missing}\n{pytest_result['output']}",
             )
-            logger.warning("Install failed for %s: %s", instance_id, message)
-            return {**base, "error": message}
-
-    patch_applied = True
-    if patch.strip():
-        applied = await _apply_patch(patch, workdir)
-        if applied["returncode"] != 0:
-            patch_applied = False
-            logger.info(
-                "Agent patch did not apply for %s: %s",
-                instance_id,
-                applied["output"][-_SUMMARY_TAIL_CHARS:],
+        result["resolved"] = resolved and pytest_result["returncode"] == 0
+        if not result["resolved"]:
+            result["failure_stage"] = (
+                FailureStage.NO_PATCH
+                if not patch.strip()
+                else FailureStage.REGRESSION
+                if pass_rate < 1.0
+                else FailureStage.TARGET_TESTS
             )
-    if test_patch.strip():
-        applied = await _apply_patch(test_patch, workdir)
-        if applied["returncode"] != 0:
-            message = f"test patch did not apply: {applied['output'][-_SUMMARY_TAIL_CHARS:]}"
-            logger.warning("Test patch failed for %s: %s", instance_id, message)
-            return {**base, "patch_applied": patch_applied, "error": message}
-    test_ids = fail_to_pass + pass_to_pass
-    pytest_result = await _run(
-        [
-            python_command(),
-            "-m",
-            "pytest",
-            "-p",
-            "no:cacheprovider",
-            "-rA",
-            "--tb=no",
-            "-q",
-            *test_ids,
-        ],
-        workdir,
-        timeout,
-    )
-    outcomes = parse_test_outcomes(pytest_result["output"])
-    resolved, fail_to_pass_rate, pass_to_pass_rate = resolution_from_outcomes(
-        outcomes, fail_to_pass, pass_to_pass
-    )
-    missing = [test_id for test_id in test_ids if test_id not in outcomes]
-    error = ""
-    if missing:
-        error = f"tests never reported an outcome: {missing[:5]}"
-        logger.warning("Missing outcomes for %s: %s", instance_id, missing[:5])
+        return result
+    except Exception as exc:
+        logger.exception(
+            "Agent evaluation judge failed",
+            extra={"instance_id": result["instance_id"], "failure_stage": phase},
+        )
+        return _failure(result, phase, f"{type(exc).__name__}: {exc}")
+
+
+async def evaluate_target(
+    inputs: Mapping[str, object], outputs: Mapping[str, object], run_outputs: Mapping[str, object]
+) -> InstanceResult:
+    """Grade a target output, preserving upstream failures without rerunning the judge."""
+    try:
+        target = TargetResult.model_validate(run_outputs)
+    except ValidationError as exc:
+        return _failure(_empty_result(inputs), FailureStage.AGENT_EXECUTION, str(exc))
+    if target.failure_stage != FailureStage.NONE:
+        result = _failure(_empty_result(inputs), target.failure_stage, target.error)
+    else:
+        with tempfile.TemporaryDirectory(prefix="openswe-agent-eval-") as tmp:
+            result = await _evaluate_instance(
+                patch=target.patch,
+                inputs=inputs,
+                outputs=outputs,
+                workdir=Path(tmp) / "checkout",
+                timeout=test_timeout_seconds(),
+            )
     return {
-        **base,
-        "resolved": resolved,
-        "patch_applied": patch_applied,
-        "fail_to_pass_rate": fail_to_pass_rate,
-        "pass_to_pass_rate": pass_to_pass_rate,
-        "error": error,
-    }
-
-
-async def judge_resolution(run: Run, example: Example) -> dict[str, Any]:
-    """Apply the agent's patch and run the benchmark tests."""
-    inputs = dict(example.inputs or {})
-    outputs = dict(example.outputs or {})
-    run_outputs = dict(run.outputs or {})
-    patch = str(run_outputs.get("patch") or "")
-    timeout = test_timeout_seconds()
-
-    with tempfile.TemporaryDirectory(prefix="openswe-agent-eval-") as tmp:
-        result = await _evaluate_instance(
-            patch=extract_patch(patch),
-            inputs=inputs,
-            outputs=outputs,
-            workdir=Path(tmp) / "checkout",
-            timeout=timeout,
-        )
-
-    result = {
         **result,
-        "steps": int(run_outputs.get("steps") or 0),
-        "wall_clock_seconds": float(run_outputs.get("wall_clock_seconds") or 0.0),
+        "steps": target.steps,
+        "wall_clock_seconds": target.wall_clock_seconds,
+        "thread_id": target.thread_id,
+        "input_tokens": target.input_tokens,
+        "output_tokens": target.output_tokens,
+        "usage_complete": target.usage_complete,
+        "execution_environment": (
+            target.execution_environment.model_dump() if target.execution_environment else None
+        ),
     }
+
+
+async def judge_resolution(run: Run, example: Example | None) -> EvaluationResult:
+    if example is None:
+        raise ValueError("Agent evaluation requires a dataset example")
+    run_outputs = dict(run.outputs or {})
+    if run.error:
+        run_outputs.update(failure_stage=FailureStage.AGENT_EXECUTION, error=run.error)
+    result = await evaluate_target(
+        dict(example.inputs or {}), dict(example.outputs or {}), run_outputs
+    )
     with _records_lock:
         _records.append(result)
-    return {
-        "key": "resolution",
-        "score": 1 if result["resolved"] else 0,
-        **result,
-    }
+    return EvaluationResult(
+        key="resolution",
+        score=int(result["resolved"]),
+        value=str(result.get("failure_stage", FailureStage.NONE)),
+        comment=render_prompt(
+            "evals/agent-feedback.md",
+            failure_stage=result.get("failure_stage", FailureStage.NONE),
+            error=result["error"],
+        ),
+        evaluator_info={key: value for key, value in result.items() if key != "diagnostic_output"},
+    )
 
 
-def aggregate_resolution(runs: list[Run], examples: list[Example]) -> dict[str, Any]:
-    """Summary evaluator: resolve rate and cost proxies across the experiment.
-
-    Reads the per-example results that ``judge_resolution`` stashed in the
-    process-local list. Falls back to an empty result set if the list is empty
-    (e.g. the summary evaluator ran in a different process).
-    """
-    del runs, examples
-    with _records_lock:
-        records = list(_records)
-        _records.clear()
+def summarize_results(records: list[InstanceResult]) -> dict[str, float]:
     if not records:
-        return {"results": []}
+        return {}
+    count = len(records)
+    summary: dict[str, float] = {
+        "resolve_rate": sum(r["resolved"] for r in records) / count,
+        "patch_applied_rate": sum(r["patch_applied"] for r in records) / count,
+        "error_rate": sum(bool(r["error"]) for r in records) / count,
+        "mean_fail_to_pass_rate": sum(r["fail_to_pass_rate"] for r in records) / count,
+        "mean_pass_to_pass_rate": sum(r["pass_to_pass_rate"] for r in records) / count,
+        "median_wall_clock_seconds": float(median(r["wall_clock_seconds"] for r in records)),
+        "usage_complete_rate": sum(r.get("usage_complete", False) for r in records) / count,
+    }
+    known_steps = [steps for r in records if (steps := r["steps"]) is not None]
+    if known_steps:
+        summary["median_steps"] = float(median(known_steps))
+    for stage in FailureStage:
+        if stage != FailureStage.NONE:
+            summary[f"failure_rate.{stage}"] = (
+                sum(r.get("failure_stage") == stage for r in records) / count
+            )
+    return summary
 
-    scored = len(records)
-    resolved = sum(1 for record in records if record["resolved"])
-    patch_applied = sum(1 for record in records if record["patch_applied"])
-    errored = sum(1 for record in records if record["error"])
-    steps = sorted(record["steps"] for record in records)
-    wall_clock = sorted(record["wall_clock_seconds"] for record in records)
 
-    def _mean(values: list[float]) -> float:
-        return sum(values) / len(values) if values else 0.0
-
-    def _median(values: list[float]) -> float:
-        if not values:
-            return 0.0
-        middle = len(values) // 2
-        if len(values) % 2:
-            return values[middle]
-        return (values[middle - 1] + values[middle]) / 2
-
+def aggregate_resolution(runs: list[Run], examples: list[Example]) -> EvaluationResults:
+    del runs, examples
     return {
         "results": [
-            {"key": "resolve_rate", "score": resolved / scored},
-            {"key": "patch_applied_rate", "score": patch_applied / scored},
-            {"key": "error_rate", "score": errored / scored},
-            {
-                "key": "mean_fail_to_pass_rate",
-                "score": _mean([r["fail_to_pass_rate"] for r in records]),
-            },
-            {
-                "key": "mean_pass_to_pass_rate",
-                "score": _mean([r["pass_to_pass_rate"] for r in records]),
-            },
-            {"key": "median_steps", "score": _median(steps)},
-            {"key": "median_wall_clock_seconds", "score": _median(wall_clock)},
+            EvaluationResult(key=key, score=score)
+            for key, score in summarize_results(get_results()).items()
         ]
     }

@@ -125,6 +125,7 @@ async def test_gold_patch_resolves(probe_repo, monkeypatch, tmp_path) -> None:
     assert result["resolved"] is True
     assert result["fail_to_pass_rate"] == 1.0
     assert result["pass_to_pass_rate"] == 1.0
+    assert result["failure_stage"] == "none"
 
 
 async def test_empty_patch_fails_the_target_tests(probe_repo, monkeypatch, tmp_path) -> None:
@@ -135,6 +136,7 @@ async def test_empty_patch_fails_the_target_tests(probe_repo, monkeypatch, tmp_p
     assert result["resolved"] is False
     assert result["fail_to_pass_rate"] == 0.0
     assert result["pass_to_pass_rate"] == 1.0
+    assert result["failure_stage"] == "no_patch"
 
 
 async def test_non_applying_patch_is_flagged(probe_repo, monkeypatch, tmp_path) -> None:
@@ -142,6 +144,7 @@ async def test_non_applying_patch_is_flagged(probe_repo, monkeypatch, tmp_path) 
 
     assert result["patch_applied"] is False
     assert result["resolved"] is False
+    assert result["failure_stage"] == "agent_patch"
 
 
 async def test_pass_to_pass_regression_blocks_resolution(probe_repo, monkeypatch, tmp_path) -> None:
@@ -151,6 +154,8 @@ async def test_pass_to_pass_regression_blocks_resolution(probe_repo, monkeypatch
     assert result["fail_to_pass_rate"] == 1.0
     assert result["pass_to_pass_rate"] == 0.0
     assert result["resolved"] is False
+    assert result["failure_stage"] == "regression"
+    assert result["failed_test_ids"] == ["test_calc.py::test_sub"]
 
 
 async def test_unreachable_base_commit_is_an_error_not_a_zero(
@@ -172,3 +177,4 @@ async def test_unreachable_base_commit_is_an_error_not_a_zero(
         )
     assert result["resolved"] is False
     assert "git fetch" in result["error"]
+    assert result["failure_stage"] == "checkout"

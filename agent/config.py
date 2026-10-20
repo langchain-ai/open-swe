@@ -346,6 +346,11 @@ ENV.var("ANALYTICS_ACK_OUTBOX_DAYS", "Acknowledged outbox retention.", default="
 ENV.var("ANALYTICS_RECEIPT_DAYS", "Ingestion-receipt retention.", default="90")
 
 # --- Models and tools ------------------------------------------------------------------------
+ENV.var(
+    "OPEN_SWE_RUN_TIMEOUT_SECONDS",
+    "Total model/tool execution budget per agent invocation.",
+    default="3600",
+)
 ENV.var("ANTHROPIC_API_KEY", "Anthropic API key.", secret=True)
 ENV.var("OPENAI_API_KEY", "OpenAI API key.", secret=True)
 ENV.var("OPENAI_BASE_URL", "OpenAI-compatible API base URL.", aliases=("OPENAI_API_BASE",))

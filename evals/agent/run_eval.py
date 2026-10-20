@@ -11,14 +11,16 @@ import os
 import tomllib
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from dotenv import load_dotenv
 from langgraph_sdk import get_client
 from langsmith import Client, aevaluate
 from langsmith.schemas import Example
+from pydantic import TypeAdapter
 
-from evals.agent.judge import aggregate_resolution, judge_resolution
+from evals.agent.judge import aggregate_resolution, get_results, judge_resolution, reset_results
+from evals.agent.report import write_report
 from evals.agent.target import (
     drain_thread_ids,
     get_agent_assistant_id,
@@ -75,6 +77,7 @@ DEFAULT_CONFIG: AgentEvalConfig = {
 }
 
 _INT_KEYS = {"max_concurrency", "test_timeout_seconds"}
+_CONFIG_ADAPTER = TypeAdapter(AgentEvalConfig)
 
 
 def _parse_int(value: str) -> int | None:
@@ -84,8 +87,8 @@ def _parse_int(value: str) -> int | None:
         return None
 
 
-def _coerce_config(raw: dict[str, Any]) -> AgentEvalConfig:
-    config: AgentEvalConfig = {}
+def _coerce_config(raw: Mapping[str, object]) -> AgentEvalConfig:
+    config: dict[str, str | int] = {}
     for key in _ENV_MAPPING:
         value = raw.get(key)
         if value is None or value == "":
@@ -93,10 +96,10 @@ def _coerce_config(raw: dict[str, Any]) -> AgentEvalConfig:
         if key in _INT_KEYS:
             parsed = _parse_int(str(value))
             if parsed is not None and parsed > 0:
-                config[key] = parsed  # type: ignore[literal-required]
+                config[key] = parsed
         elif isinstance(value, str):
-            config[key] = value  # type: ignore[literal-required]
-    return config
+            config[key] = value
+    return _CONFIG_ADAPTER.validate_python(config)
 
 
 def _load_config() -> AgentEvalConfig:
@@ -107,7 +110,7 @@ def _load_config() -> AgentEvalConfig:
 
 
 def _load_env_config(env: Mapping[str, str] = os.environ) -> AgentEvalConfig:
-    raw: dict[str, Any] = {}
+    raw: dict[str, object] = {}
     for config_key, env_key in _ENV_MAPPING.items():
         value = env.get(env_key)
         if value is not None and value != "":
@@ -116,7 +119,7 @@ def _load_env_config(env: Mapping[str, str] = os.environ) -> AgentEvalConfig:
 
 
 def _config_from_args(args: argparse.Namespace) -> AgentEvalConfig:
-    raw: dict[str, Any] = {}
+    raw: dict[str, object] = {}
     for key in _ENV_MAPPING:
         value = getattr(args, key, None)
         if value is not None:
@@ -182,6 +185,9 @@ async def main() -> None:
     parser.add_argument("--local-project-dir", dest="local_project_dir")
     parser.add_argument("--test-timeout-seconds", dest="test_timeout_seconds", type=int)
     parser.add_argument(
+        "--output-dir", type=Path, help="Save JSONL, summary JSON, and Markdown reports."
+    )
+    parser.add_argument(
         "--no-cleanup",
         action="store_true",
         help="Skip deleting LangGraph threads after the experiment finishes.",
@@ -213,8 +219,10 @@ async def main() -> None:
         data = dataset_name
 
     eval_error: BaseException | None = None
+    expected_instances: int | None = None
+    reset_results()
     try:
-        await aevaluate(
+        experiment = await aevaluate(
             solve_task,
             data=data,
             evaluators=[judge_resolution],
@@ -223,17 +231,35 @@ async def main() -> None:
             max_concurrency=config["max_concurrency"],
             num_repetitions=1,
         )
+        expected_instances = len(experiment)
+        if len(get_results()) != expected_instances:
+            raise RuntimeError("Some experiment runs have no evaluation result")
     except BaseException as exc:
         eval_error = exc
         raise
     finally:
+        report_error: Exception | None = None
+        if args.output_dir is not None:
+            try:
+                await write_report(
+                    args.output_dir,
+                    get_results(),
+                    config=dict(config),
+                    completed=eval_error is None,
+                    expected_instances=expected_instances,
+                )
+            except Exception as exc:
+                logger.exception("Failed to save agent evaluation report")
+                report_error = exc
         if not args.no_cleanup:
             thread_ids = drain_thread_ids()
             if thread_ids:
                 logger.info("Cleaning up %d LangGraph threads", len(thread_ids))
                 await _cleanup_threads(thread_ids)
         if eval_error is not None:
-            logger.error("Agent eval failed: %s: %s", type(eval_error).__name__, eval_error)
+            logger.error("Agent eval failed", extra={"error_type": type(eval_error).__name__})
+        elif report_error is not None:
+            raise report_error
 
 
 if __name__ == "__main__":

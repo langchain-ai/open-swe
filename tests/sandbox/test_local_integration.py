@@ -42,6 +42,7 @@ def test_create_local_sandbox_scopes_global_git_config(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCAL_SANDBOX_ROOT_DIR", str(root))
     monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     host_config = tmp_path / "home" / ".gitconfig"
     host_config.parent.mkdir()
     host_config.write_text("[user]\n\tname = Dev\n")

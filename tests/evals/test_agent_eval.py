@@ -11,7 +11,9 @@ from evals.agent.judge import (
     extract_patch,
     parse_test_outcomes,
     resolution_from_outcomes,
-    test_timeout_seconds,
+)
+from evals.agent.judge import (
+    test_timeout_seconds as judge_test_timeout_seconds,
 )
 
 _INSTANCE = {
@@ -159,11 +161,11 @@ def test_resolution_with_no_regressions_is_resolved() -> None:
 
 def test_test_timeout_seconds_defaults_and_env(monkeypatch) -> None:
     monkeypatch.delenv("AGENT_EVAL_TEST_TIMEOUT_SECONDS", raising=False)
-    assert test_timeout_seconds() == 1800
+    assert judge_test_timeout_seconds() == 1800
     monkeypatch.setenv("AGENT_EVAL_TEST_TIMEOUT_SECONDS", "600")
-    assert test_timeout_seconds() == 600
+    assert judge_test_timeout_seconds() == 600
     monkeypatch.setenv("AGENT_EVAL_TEST_TIMEOUT_SECONDS", "not-a-number")
-    assert test_timeout_seconds() == 1800
+    assert judge_test_timeout_seconds() == 1800
 
 
 def test_install_env_puts_the_pinned_interpreters_bin_dir_on_path(monkeypatch) -> None:

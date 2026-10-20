@@ -29,6 +29,7 @@ from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
+from agent.evaluation import AgentEvaluationConfig
 from agent.invocation import resolve_invocation_id
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
@@ -183,6 +184,7 @@ class RunConfig(BaseModel):
     review_style_prs_sampled: Int | None = None
 
     # Eval harness
+    agent_eval: AgentEvaluationConfig | None = None
     eval: bool | None = None
     reviewer_eval: bool | None = None
     reviewer_eval_cap: Int | None = None

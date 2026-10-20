@@ -5,13 +5,26 @@ import re
 import tempfile
 from pathlib import Path
 
-from deepagents.backends import LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
 
 from agent.config import ENV
 from agent.run_config import RunConfig
+from agent.sandboxes.local_execution import AsyncLocalShellBackend
 
-SHELL_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR")
+SHELL_ENV_KEYS = (
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "SHELL",
+    "TMPDIR",
+    "SystemRoot",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+)
 
 
 def is_desktop_run(cfg: RunConfig) -> bool:
@@ -60,8 +73,8 @@ def resolve_desktop_project(cfg: RunConfig) -> str:
     return str(project)
 
 
-def create_desktop_backend(cfg: RunConfig) -> LocalShellBackend:
-    return LocalShellBackend(
+def create_desktop_backend(cfg: RunConfig) -> AsyncLocalShellBackend:
+    return AsyncLocalShellBackend(
         root_dir=resolve_desktop_project(cfg),
         virtual_mode=False,
         env={key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))},

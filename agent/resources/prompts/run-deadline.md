@@ -1,0 +1,1 @@
+This invocation exhausted its execution time budget. No further model or tool calls may start in this invocation. Completed checkpoints are retained; inspect the thread before starting a new invocation.

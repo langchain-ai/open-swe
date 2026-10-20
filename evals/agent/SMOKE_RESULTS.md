@@ -1,5 +1,10 @@
 # Smoke Results — 2026-10-20
 
+This is the historical run before graph-state patch collection and execution
+environment guidance were added. Its two-run extraction flow and environment
+failures describe that version. Current behavior and validation are recorded in
+[LOCAL_RESULTS.md](LOCAL_RESULTS.md); no post-change model benchmark is claimed.
+
 First end-to-end run of `evals/agent/` against a live agent graph. The goal was
 to prove the pipeline, not to score well: drive the real coding agent on a real
 repository, extract its diff, and judge it deterministically.

@@ -109,16 +109,19 @@ from agent.middleware import (
     task_on_failure,
     task_retry_on,
 )
+from agent.middleware.agent_evaluation import AgentEvaluationMiddleware
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.execution_environment import ExecutionEnvironmentMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.run_deadline import RunDeadlineMiddleware
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
     construct_sender_context,
     construct_system_prompt,
     render_open_swe_shared_base,
 )
-from agent.prompts import apply_tool_descriptions, load_prompt
+from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -742,6 +745,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        cfg = RunConfig.from_config(self._config)
+        if cfg.agent_eval is not None:
+            sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+            return {
+                "work_dir": work_dir,
+                "rendered_system_prompt": render_prompt(
+                    "evals/agent-system.md",
+                    working_dir=work_dir,
+                    checkout_dir=cfg.agent_eval.checkout_dir,
+                ),
+            }
         schedule_thread_title_generation(
             thread_id=self._thread_id,
             messages=state.get("messages") or [],
@@ -901,6 +916,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
+
+    if "agent_eval" in configurable and cfg.agent_eval is None:
+        raise ValueError("Invalid agent_eval configuration")
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -1167,7 +1185,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode and not local_run and credential_scope_known:
+    if (
+        not stop_summary_mode
+        and not local_run
+        and credential_scope_known
+        and cfg.agent_eval is None
+    ):
         mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
@@ -1271,6 +1294,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
+    if cfg.agent_eval is not None:
+        static_tools = []
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
@@ -1384,6 +1409,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ConversationOffloadingMiddleware(
                     main_model, agent_backend, manual=cfg.offload_conversation is True
                 ),
+                RunDeadlineMiddleware(invocation_id=cfg.invocation_id),
                 PrepareAgentRunMiddleware(
                     credential_login=credential_login,
                     thread_id=thread_id,
@@ -1402,6 +1428,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     admin_workspaces=admin_thread,
                     model_selection=model_selection,
                     routing_defaults=routing_defaults,
+                ),
+                *(
+                    [AgentEvaluationMiddleware(backend, cfg.agent_eval)]
+                    if cfg.agent_eval is not None
+                    else []
+                ),
+                *(
+                    [ExecutionEnvironmentMiddleware(backend)]
+                    if local_run or cfg.agent_eval is not None
+                    else []
                 ),
                 *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
                 *([workspace_skills] if workspace_skills else []),
