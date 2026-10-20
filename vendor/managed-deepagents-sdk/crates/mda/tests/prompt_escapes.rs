@@ -30,6 +30,37 @@ const PROMPTS: &[(&str, usize, &str)] = &[
     ),
     ("delete/mod.rs", 1, "--yes; refuses without a terminal"),
     (
+        "deploy/channel_app.rs",
+        1,
+        "the try-again-or-skip prompt after a failed GitHub or Linear app setup step is \
+         only asked in a terminal; without one, the failure ends the deploy",
+    ),
+    (
+        "deploy/github_channel/mod.rs",
+        10,
+        "GitHub App setup prompts run only in an interactive terminal; without one, \
+         MDA_GITHUB_APP_OWNER picks the App's owner (deploy fails without it), deploy prints \
+         the setup link instead of opening a browser, GH_WEBHOOK_SECRET supplies a \
+         brought App's webhook secret, and a brought App whose webhook points elsewhere \
+         fails the deploy with how to change it on GitHub. Bringing an existing App, with \
+         moving it from another deployment and picking one of its installations, is \
+         offered only in a terminal; without one, deploy creates a new App, and a brought \
+         App without exactly one installation fails with how to finish it in a terminal",
+    ),
+    (
+        "deploy/linear_channel/mod.rs",
+        5,
+        "Linear app setup prompts run only in an interactive terminal: MDA_LINEAR_WORKSPACE \
+         answers the workspace prompt, and without a terminal MDA_LINEAR_CLIENT_ID, \
+         MDA_LINEAR_CLIENT_SECRET and MDA_LINEAR_WEBHOOK_SECRET replace the credential \
+         prompts (deploy fails with that hint and the create-app link without them), and \
+         MDA_LINEAR_WEBHOOK_SECRET alone answers the signing-secret prompt of an installed \
+         app; a \
+         failed setup fails the deploy instead of offering to try again; the redirect URI \
+         confirmation is only asked in a terminal, without one deploy prints the URI to add \
+         and goes on",
+    ),
+    (
         "deploy/mod.rs",
         3,
         "collision overwrite takes --yes; Context Hub conflicts take --context-strategy; \

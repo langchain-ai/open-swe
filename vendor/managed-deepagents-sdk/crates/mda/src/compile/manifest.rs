@@ -869,11 +869,6 @@ pub(super) fn generate_lockfile(out_dir: &Path) -> Result<()> {
     if !pkg_path.is_file() {
         return Ok(());
     }
-    // npm regenerates into an existing `npm-shrinkwrap.json`, so drop it and the
-    // marker that may vouch for a lock npm never wrote.
-    if remove_if_present(&out_dir.join("npm-shrinkwrap.json"))? {
-        remove_if_present(&out_dir.join(LOCK_INPUT_MARKER))?;
-    }
     let mut pkg =
         fs::read(&pkg_path).with_context(|| format!("failed to read {}", pkg_path.display()))?;
     for manifest in super::vendored_manifests(out_dir, "package.json") {
@@ -924,15 +919,6 @@ fn materialize_npm_lockfile(out_dir: &Path, pkg: &[u8]) -> Result<()> {
     let marker = out_dir.join(LOCK_INPUT_MARKER);
     fs::write(&marker, pkg).with_context(|| format!("failed to write {}", marker.display()))?;
     Ok(())
-}
-
-/// Delete `path` if it exists; `Ok(false)` when it was already absent.
-fn remove_if_present(path: &Path) -> Result<bool> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("failed to remove {}", path.display())),
-    }
 }
 
 #[cfg(test)]
@@ -1081,66 +1067,6 @@ mod tests {
             fs::read(out_dir.join(LOCK_INPUT_MARKER)).unwrap(),
             pkg.as_bytes()
         );
-    }
-
-    // An older CLI let npm regenerate into a copied shrinkwrap and then recorded
-    // the marker, so a matching marker can vouch for a stale package lock.
-    #[test]
-    fn generate_lockfile_regenerates_after_removing_a_stale_shrinkwrap() {
-        let dir = tempfile::tempdir().unwrap();
-        let out_dir = dir.path();
-        let pkg = r#"{"name":"x","private":true,"dependencies":{}}"#;
-        fs::write(out_dir.join("package.json"), pkg).unwrap();
-        fs::write(out_dir.join("package-lock.json"), "stale\n").unwrap();
-        fs::write(out_dir.join(LOCK_INPUT_MARKER), pkg).unwrap();
-        fs::write(
-            out_dir.join("npm-shrinkwrap.json"),
-            "{\"lockfileVersion\":3}\n",
-        )
-        .unwrap();
-
-        generate_lockfile(out_dir).unwrap();
-
-        assert!(!out_dir.join("npm-shrinkwrap.json").exists());
-        let lock = fs::read_to_string(out_dir.join("package-lock.json")).unwrap();
-        assert!(lock.contains("mda-test-stub"));
-        assert_eq!(
-            fs::read(out_dir.join(LOCK_INPUT_MARKER)).unwrap(),
-            pkg.as_bytes()
-        );
-    }
-
-    // Empty dependencies keep npm off the registry, so this live run is cheap.
-    #[test]
-    fn generate_lockfile_writes_the_package_lock_with_live_npm_after_a_shrinkwrap() {
-        if !toolchain::npm_available() {
-            return;
-        }
-        const OLD_LOCK: &str = r#"{"name":"old","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"old","version":"1.0.0"}}}"#;
-        with_live_npm_lockfile(|| {
-            for stale_lock in [Some(OLD_LOCK), None] {
-                let dir = tempfile::tempdir().unwrap();
-                let out_dir = dir.path();
-                let pkg =
-                    r#"{"name":"current","version":"2.0.0","private":true,"dependencies":{}}"#;
-                fs::write(out_dir.join("package.json"), pkg).unwrap();
-                fs::write(out_dir.join("npm-shrinkwrap.json"), OLD_LOCK).unwrap();
-                fs::write(out_dir.join(LOCK_INPUT_MARKER), pkg).unwrap();
-                if let Some(stale) = stale_lock {
-                    fs::write(out_dir.join("package-lock.json"), stale).unwrap();
-                }
-
-                generate_lockfile(out_dir).unwrap();
-
-                assert!(!out_dir.join("npm-shrinkwrap.json").exists());
-                let lock: serde_json::Value = serde_json::from_str(
-                    &fs::read_to_string(out_dir.join("package-lock.json")).unwrap(),
-                )
-                .unwrap();
-                assert_eq!(lock["name"], "current", "stale lock: {stale_lock:?}");
-                assert_eq!(lock["version"], "2.0.0", "stale lock: {stale_lock:?}");
-            }
-        });
     }
 
     #[test]

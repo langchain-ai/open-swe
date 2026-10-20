@@ -186,11 +186,7 @@ def wrap_with_managed_cors(app: AsgiApp) -> AsgiApp:
             receive: Callable[[], Awaitable[MutableMapping[str, Any]]],
             send: Callable[[MutableMapping[str, Any]], Awaitable[None]],
         ) -> None:
-            path = str(scope.get("path", ""))
-            root_path = str(scope.get("root_path", "")).rstrip("/")
-            if root_path.startswith("/") and path.startswith(f"{root_path}/"):
-                path = path[len(root_path) :]
-            if scope.get("type") != "http" or not is_managed_cors_path(path):
+            if scope.get("type") != "http" or not is_managed_cors_path(str(scope.get("path", ""))):
                 await self.app(scope, receive, send)
                 return
             await self.cors_app(scope, receive, send)

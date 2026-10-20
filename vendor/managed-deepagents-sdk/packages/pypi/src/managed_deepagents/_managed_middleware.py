@@ -103,14 +103,18 @@ def managed_middleware_overrides(
     if existing_channel is not None:
         overrides["channel"] = existing_channel
     else:
-        from_binding = resolve_runtime_channel(getattr(runtime, "context", None), configurable)
+        from_binding = resolve_runtime_channel(
+            getattr(runtime, "context", None), configurable, include_lead=True
+        )
         if from_binding is not None:
             overrides["channel"] = from_binding
     config = getattr(runtime, "config", None)
     if isinstance(config, Mapping) and isinstance(configurable, Mapping):
         sanitized = sanitize_configurable(configurable)
         if len(sanitized) != len(configurable):
-            overrides["config"] = {**dict(config), "configurable": sanitized}
+            overrides["config"] = cast(
+                "RunnableConfig", {**dict(config), "configurable": sanitized}
+            )
     elif hasattr(runtime, "configurable") and isinstance(configurable, Mapping):
         sanitized = sanitize_configurable(configurable)
         if len(sanitized) != len(configurable):

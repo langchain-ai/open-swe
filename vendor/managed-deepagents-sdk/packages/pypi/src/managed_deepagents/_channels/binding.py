@@ -44,6 +44,8 @@ class ChannelBinding(TypedDict):
 _current_channel: ContextVar[ChannelBinding | None] = ContextVar("mda_channel", default=None)
 #: Cron routing split out of a managed run's context.
 _current_routing: ContextVar[Mapping[str, object] | None] = ContextVar("mda_routing", default=None)
+#: The lead's channel in an async subagent run, for `runtime.channel` only.
+_lead_channel: ContextVar[ChannelBinding | None] = ContextVar("mda_lead_channel", default=None)
 
 
 class _TriggerTargetModel(BaseModel):
@@ -104,8 +106,12 @@ def resolve_runtime_channel(
     context: object,
     configurable: Mapping[str, object] | None,
     transport_factory: Callable[[str], object | None] | None = None,
+    *,
+    include_lead: bool = False,
 ) -> RuntimeChannel | None:
     binding = resolve_channel_binding(context, configurable)
+    if binding is None and include_lead:
+        binding = _lead_channel.get()
     if binding is None:
         return None
     transport = None

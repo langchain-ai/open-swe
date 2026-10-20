@@ -26,10 +26,15 @@
 
 mod archive;
 pub(crate) mod bake;
+pub(crate) mod channel_app;
+mod channel_icon;
+pub(crate) mod channel_setup;
 mod context_hub;
 pub(crate) mod env_file;
+pub(crate) mod github_channel;
 pub(crate) mod helpers;
 mod image;
+pub(crate) mod linear_channel;
 pub mod prepare;
 mod trigger_channels;
 mod trigger_icon;
@@ -38,6 +43,7 @@ mod upsell;
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -62,6 +68,7 @@ pub use crate::langsmith::{AgentEnvironment, DeploymentType, API_KEY_ENV};
 pub(crate) use helpers::{resolve_https_public_api_url, PublicApiUrl, MDA_HANDOFF_SECRET_ENV};
 
 use bake::{bake_recipe, RecipeSpec};
+use channel_setup::{ChannelSetup, SetupTarget};
 use context_hub::{
     apply_context_sync, link_context_repo_to_agent, prepare_context_sync, ConflictResolution,
     ContextSection,
@@ -70,12 +77,13 @@ use helpers::{
     clear_recipe_snapshot_secret, deployment_is_managed_deep_agent,
     deployment_managed_deep_agent_marker, deployment_runtime_url, deployment_status_url,
     deployment_tenant_id, ensure_assistant_id_secret, ensure_cors_allow_origins,
-    ensure_deployment_name_secret, ensure_public_api_url, ensure_recipe_snapshot_secret,
-    ensure_sandbox_api_endpoint_secret, find_agent_deployment, find_deployment_by_name,
-    find_deployment_id_by_name, is_failed_status, is_interrupted_status, is_request_timeout,
-    is_terminal_status, resolve_context_hub_base_url, resolve_langsmith_api_bases,
-    resolve_platform_api_url, secrets_from_env, set_mda_handoff_secret, set_workspace_id_secret,
-    smith_dashboard_base_url, REMOVED_WORKSPACE_ID_ENVS, RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
+    ensure_deployment_name_secret, ensure_langsmith_url_secret, ensure_public_api_url,
+    ensure_recipe_snapshot_secret, ensure_sandbox_api_endpoint_secret, find_agent_deployment,
+    find_deployment_by_name, find_deployment_id_by_name, is_failed_status, is_interrupted_status,
+    is_request_timeout, is_terminal_status, resolve_context_hub_base_url,
+    resolve_langsmith_api_bases, resolve_platform_api_url, secrets_from_env,
+    set_mda_handoff_secret, set_workspace_id_secret, smith_dashboard_base_url,
+    REMOVED_WORKSPACE_ID_ENVS, RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
 };
 
 /// Delay between revision status polls.
@@ -230,6 +238,9 @@ fn run_session(
     // Channel ingress (Slack/GitHub) invokes runs by assistant / graph id —
     // always the langgraph.json graphs key, never a `--name` override.
     ensure_assistant_id_secret(&mut secrets, &assistant_id);
+    // Channel notices link to the agent's thread in this environment's
+    // LangSmith Studio, the same UI deploy prints as the dashboard.
+    ensure_langsmith_url_secret(&mut secrets, &smith_dashboard_base_url(host_url));
     // Browser CORS is owned by LangGraph. Derive `CORS_ALLOW_ORIGINS` from the
     // configured public app URL / extra origins so the browser UI can call the
     // Agent Server without a second ACAO from the managed HTTP app.
@@ -373,13 +384,20 @@ fn run_session(
         &connector_requirements,
         &mcp_connections,
     )?;
-    let trigger_channel = trigger_channels::prepare(
+    let channel_setup = ChannelSetup::prepare(
         &channel_requirements,
         opts.wait,
         &project.root,
+        &project.files,
         project.language,
         &assistant_id,
     )?;
+    channel_setup.preflight(
+        client,
+        || find_target_deployment(client, &name, deployment_agent.as_ref()),
+        &env_vars,
+    )?;
+
     ensure_connector_requirements_secrets(
         project,
         &env_vars,
@@ -515,7 +533,7 @@ fn run_session(
         opts.wait_timeout,
     )?;
     let agent_server_url =
-        require_trigger_registration_url(agent_server_url, trigger_channel.is_some())?;
+        require_trigger_registration_url(agent_server_url, channel_setup.needs_live_url())?;
     let Some(agent_server_url) = agent_server_url else {
         return Ok(CommandCompletion::Succeeded);
     };
@@ -530,15 +548,14 @@ fn run_session(
         "HTTP channels",
         &http_link_refs,
     )?;
-    if let Some(trigger_channel) = &trigger_channel {
-        trigger_channels::register(
-            client,
-            trigger_channel,
-            &agent_server_url,
-            &deployment_id,
-            &assistant_id,
-        )?;
-    }
+    channel_setup.set_up(&SetupTarget {
+        client,
+        agent_server_url: &agent_server_url,
+        deployment_id: &deployment_id,
+        assistant_id: &assistant_id,
+        project_root: &project.root,
+        env_vars: &env_vars,
+    })?;
     match bake::delete_stale_recipe_snapshots(client, &name, active_recipe_name.as_deref()) {
         Ok(cleanup) => {
             if let Some(note) = cleanup.in_use_note() {
@@ -1363,6 +1380,34 @@ fn langsmith_api_key_from_process() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// A durable key this process put into its own environment (see
+/// [`export_langsmith_api_key`]). `mda dev` re-resolves on every watch rebuild,
+/// so without this a key first read from `.env` would later pose as a shell
+/// export and shadow an edit to `.env`.
+static SELF_EXPORTED_API_KEY: Mutex<Option<String>> = Mutex::new(None);
+
+/// A durable `LANGSMITH_API_KEY` the developer exported in the shell, as
+/// opposed to a CLI session PAT or a key this process exported itself.
+fn langsmith_api_key_from_shell(platform_api_url: &str) -> Option<String> {
+    let key = langsmith_api_key_from_process()?;
+    let self_exported = SELF_EXPORTED_API_KEY
+        .lock()
+        .is_ok_and(|exported| exported.as_deref() == Some(key.as_str()));
+    (!self_exported && !is_cli_session_api_key(&key, platform_api_url)).then_some(key)
+}
+
+/// Export `key` into this process's env so later steps and `mda dev` children
+/// see it, remembering it so it is not later mistaken for a shell export.
+fn export_langsmith_api_key(key: &str) {
+    if langsmith_api_key_from_process().as_deref() == Some(key) {
+        return;
+    }
+    if let Ok(mut exported) = SELF_EXPORTED_API_KEY.lock() {
+        *exported = Some(key.to_string());
+    }
+    std::env::set_var(API_KEY_ENV, key);
+}
+
 /// Whether a staged build `.env` entry holds a CLI session credential rather
 /// than a project-owned value.
 ///
@@ -1433,16 +1478,18 @@ fn apply_langsmith_api_key(
         env_file::set_env_key(&staged, API_KEY_ENV, key)?;
         mirror_gateway_api_key(&staged, key)?;
     }
-    std::env::set_var(API_KEY_ENV, key);
+    export_langsmith_api_key(key);
     Ok(())
 }
 
 /// Ensure the project has a LangSmith API key for local sandbox work.
 ///
-/// Resolution order matches [`resolve_api_key`]: project `.env`, process env,
-/// CLI sign-in cache, then (on a TTY when `required`) paste or browser login.
+/// Resolution order matches [`resolve_api_key`]: a shell-exported key, then
+/// staged / project `.env`, CLI sign-in cache, then (on a TTY when `required`)
+/// paste or browser login.
 ///
-/// Pasted keys and shell-exported keys are written to the project `.env`.
+/// Pasted keys are written to the project `.env`; a shell-exported key is too,
+/// but only when the project has none, so it never overwrites the project's.
 /// Device-login / cached PATs are session-scoped: process env and the staged
 /// build `.env` only, so an expired PAT cannot stick in the project file.
 pub(crate) fn ensure_project_langsmith_api_key(
@@ -1454,6 +1501,16 @@ pub(crate) fn ensure_project_langsmith_api_key(
     let mut env_vars = env_file::parse_env_file(&project_env);
     let (host_url, _) = resolve_langsmith_api_bases(&env_vars);
     let platform = resolve_platform_api_url(&host_url, &env_vars);
+
+    // The shell wins over staged and project `.env` keys, like every other CLI
+    // setting.
+    if let Some(key) = langsmith_api_key_from_shell(&platform) {
+        let project_vars = env_file::parse_env_file(&project_env);
+        crate::langsmith::warn_if_shell_shadows_env_file(API_KEY_ENV, &key, &project_vars);
+        let seed_project = !langsmith_api_key_in_map(&project_vars);
+        apply_langsmith_api_key(&key, &project_env, staged_env_dir, seed_project)?;
+        return Ok(());
+    }
 
     if let Some(out_dir) = staged_env_dir {
         let staged_path = out_dir.join(".env");
@@ -1497,19 +1554,17 @@ pub(crate) fn ensure_project_langsmith_api_key(
         }
     }
 
+    // Durable shell keys returned above; what is left in the process env is a
+    // session PAT or a key this process exported from a `.env` it no longer has.
     if let Some(key) = langsmith_api_key_from_process() {
-        if is_cli_session_api_key(&key, &platform) {
-            // Only reuse a process-exported session PAT while the cache still
-            // considers it live. An expired PAT left in the environment must
-            // not short-circuit re-login or get written to the project `.env`.
-            if Login::for_api_url(&platform).cached_api_key().as_deref() == Some(key.as_str()) {
-                note_session_api_key(&key);
-                apply_langsmith_api_key(&key, &project_env, staged_env_dir, false)?;
-                return Ok(());
-            }
-        } else {
-            // Shell-exported keys are treated as durable and seeded into `.env`.
-            apply_langsmith_api_key(&key, &project_env, staged_env_dir, true)?;
+        // Only reuse a process-exported session PAT while the cache still
+        // considers it live. An expired PAT left in the environment must
+        // not short-circuit re-login or get written to the project `.env`.
+        if is_cli_session_api_key(&key, &platform)
+            && Login::for_api_url(&platform).cached_api_key().as_deref() == Some(key.as_str())
+        {
+            note_session_api_key(&key);
+            apply_langsmith_api_key(&key, &project_env, staged_env_dir, false)?;
             return Ok(());
         }
     }
@@ -1662,7 +1717,7 @@ fn persist_api_key(env_path: &Path, key: &str) -> Result<Credential> {
     mirror_gateway_api_key(env_path, key)?;
     // So later resolve_api_key calls in this process see the key even when the
     // caller's in-memory env map was parsed before the write.
-    std::env::set_var("LANGSMITH_API_KEY", key);
+    export_langsmith_api_key(key);
     log::success(format!("Saved LANGSMITH_API_KEY to {}", env_path.display()))?;
     Ok(Credential::ApiKey(key.to_string()))
 }
@@ -1864,6 +1919,12 @@ pub(crate) fn validate_workspace_connections_for_manifest(
 fn validate_connection_ownership(requirements: &compile::ConnectorRequirements) -> Result<()> {
     let agent_slugs = compile::agent_connections_from_connector_requirements(requirements);
     let user_slugs = compile::user_connections_from_connector_requirements(requirements);
+    if let Some(error) = user_slugs
+        .iter()
+        .find_map(|slug| compile::reserved_user_connection_error(slug))
+    {
+        bail!(error);
+    }
 
     if let Some(slug) = agent_slugs
         .iter()
@@ -2415,12 +2476,7 @@ fn http_channel_links<'a>(
 ) -> Vec<(&'a str, String)> {
     requirements
         .iter()
-        .filter(|(_, manifest)| {
-            manifest
-                .get("transport")
-                .and_then(serde_json::Value::as_str)
-                != Some("trigger_server")
-        })
+        .filter(|(_, manifest)| channel_setup::lists_events_url(manifest))
         .filter_map(|(name, manifest)| {
             let path = manifest.get("eventsPath")?.as_str()?;
             Some((
@@ -3481,13 +3537,32 @@ mod tests {
 
     #[test]
     fn http_channel_links_are_empty_without_http_channels() {
-        for requirements in [json!({}), json!({"slack": {"transport": "trigger_server"}})] {
+        for requirements in [
+            json!({}),
+            json!({"slack": {"transport": "trigger_server"}}),
+            json!({"github": {"provider": "github", "eventsPath": "/channels/github/events"}}),
+        ] {
             assert!(http_channel_links(
                 "https://agent.example",
                 &serde_json::from_value(requirements).unwrap()
             )
             .is_empty());
         }
+    }
+
+    #[test]
+    fn channel_setup_requires_a_live_url() {
+        let error = require_trigger_registration_url(None, true)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("channel setup could not complete"),
+            "{error}"
+        );
+        assert_eq!(
+            require_trigger_registration_url(Some("https://agent.example".into()), true).unwrap(),
+            Some("https://agent.example".into())
+        );
     }
 
     #[test]
@@ -3656,6 +3731,129 @@ mod tests {
         assert_eq!(
             project.get("LANGSMITH_API_KEY").map(String::as_str),
             Some("lsv2_pt_from_shell")
+        );
+    }
+
+    #[test]
+    fn ensure_project_langsmith_api_key_prefers_shell_without_overwriting_project() {
+        let _lock = crate::test_support::LANGSMITH_API_KEY_ENV_LOCK
+            .lock()
+            .unwrap();
+        crate::langsmith::login::clear_session_api_keys_for_test();
+        let root = tempfile::tempdir().unwrap();
+        let out_dir = root.path().join(".mda").join("build");
+        std::fs::create_dir_all(&out_dir).unwrap();
+        std::fs::write(
+            root.path().join(".env"),
+            "LANGSMITH_API_KEY=lsv2_pt_project_file\n",
+        )
+        .unwrap();
+        std::fs::write(
+            out_dir.join(".env"),
+            "LANGSMITH_API_KEY=lsv2_pt_project_file\n",
+        )
+        .unwrap();
+
+        let previous = std::env::var("LANGSMITH_API_KEY").ok();
+        std::env::set_var("LANGSMITH_API_KEY", "lsv2_pt_shell_override");
+        let result = std::panic::catch_unwind(|| {
+            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap()
+        });
+        match previous {
+            Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
+            None => std::env::remove_var("LANGSMITH_API_KEY"),
+        }
+        result.expect("ensure_project_langsmith_api_key panicked");
+
+        let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
+        assert_eq!(
+            staged.get("LANGSMITH_API_KEY").map(String::as_str),
+            Some("lsv2_pt_shell_override")
+        );
+        let project = crate::deploy::env_file::parse_env_file(&root.path().join(".env"));
+        assert_eq!(
+            project.get("LANGSMITH_API_KEY").map(String::as_str),
+            Some("lsv2_pt_project_file")
+        );
+    }
+
+    #[test]
+    fn ensure_project_langsmith_api_key_follows_env_edit_after_exporting_it() {
+        let _lock = crate::test_support::LANGSMITH_API_KEY_ENV_LOCK
+            .lock()
+            .unwrap();
+        crate::langsmith::login::clear_session_api_keys_for_test();
+        let root = tempfile::tempdir().unwrap();
+        let out_dir = root.path().join(".mda").join("build");
+        std::fs::create_dir_all(&out_dir).unwrap();
+        std::fs::write(
+            root.path().join(".env"),
+            "LANGSMITH_API_KEY=lsv2_pt_before_edit\n",
+        )
+        .unwrap();
+        std::fs::write(out_dir.join(".env"), "OPENAI_API_KEY=test\n").unwrap();
+
+        let previous = std::env::var("LANGSMITH_API_KEY").ok();
+        std::env::remove_var("LANGSMITH_API_KEY");
+        let result = std::panic::catch_unwind(|| {
+            // Exports the `.env` key into this process, as a dev watch run does.
+            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap();
+            std::fs::write(
+                root.path().join(".env"),
+                "LANGSMITH_API_KEY=lsv2_pt_after_edit\n",
+            )
+            .unwrap();
+            std::fs::write(out_dir.join(".env"), "OPENAI_API_KEY=test\n").unwrap();
+            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap();
+        });
+        match previous {
+            Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
+            None => std::env::remove_var("LANGSMITH_API_KEY"),
+        }
+        result.expect("ensure_project_langsmith_api_key panicked");
+
+        let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
+        assert_eq!(
+            staged.get("LANGSMITH_API_KEY").map(String::as_str),
+            Some("lsv2_pt_after_edit")
+        );
+    }
+
+    #[test]
+    fn ensure_project_langsmith_api_key_follows_env_edit_after_pasted_key() {
+        let _lock = crate::test_support::LANGSMITH_API_KEY_ENV_LOCK
+            .lock()
+            .unwrap();
+        crate::langsmith::login::clear_session_api_keys_for_test();
+        let root = tempfile::tempdir().unwrap();
+        let out_dir = root.path().join(".mda").join("build");
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let project_env = root.path().join(".env");
+        std::fs::write(&project_env, "OPENAI_API_KEY=test\n").unwrap();
+        std::fs::write(out_dir.join(".env"), "OPENAI_API_KEY=test\n").unwrap();
+
+        let previous = std::env::var("LANGSMITH_API_KEY").ok();
+        std::env::remove_var("LANGSMITH_API_KEY");
+        let result = std::panic::catch_unwind(|| {
+            // What the interactive prompt does with a pasted key.
+            super::persist_api_key(&project_env, "lsv2_pt_pasted").unwrap();
+            std::fs::write(
+                &project_env,
+                "LANGSMITH_API_KEY=lsv2_pt_pasted_then_edited\n",
+            )
+            .unwrap();
+            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap();
+        });
+        match previous {
+            Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
+            None => std::env::remove_var("LANGSMITH_API_KEY"),
+        }
+        result.expect("ensure_project_langsmith_api_key panicked");
+
+        let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
+        assert_eq!(
+            staged.get("LANGSMITH_API_KEY").map(String::as_str),
+            Some("lsv2_pt_pasted_then_edited")
         );
     }
 
