@@ -3,6 +3,7 @@ from typing import Any
 import httpx2
 from markdownify import markdownify
 
+from agent.analytics.usage import record_tool_output_truncated
 from agent.utils.url_safety import request_with_safe_redirects
 
 FETCH_URL_MAX_CHARS = 100_000
@@ -33,9 +34,16 @@ async def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
             markdown_content = markdownify(response.text)
 
         if len(markdown_content) > FETCH_URL_MAX_CHARS:
+            original_chars = len(markdown_content)
             markdown_content = (
                 markdown_content[:FETCH_URL_MAX_CHARS] + "\n... [content truncated: "
                 f"{FETCH_URL_MAX_CHARS}/{len(markdown_content)} chars]\n"
+            )
+            await record_tool_output_truncated(
+                tool="fetch_url",
+                outcome="truncated",
+                original_chars=original_chars,
+                kept_chars=FETCH_URL_MAX_CHARS,
             )
 
         return {

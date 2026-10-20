@@ -4,6 +4,7 @@ from typing import Annotated, Any
 
 from langgraph.prebuilt import InjectedState
 
+from agent.analytics.usage import record_tool_output_truncated
 from agent.github.thread_token import get_github_token
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
@@ -81,6 +82,13 @@ async def add_finding(
         diff_hunk = extract_diff_hunk(diff_text, file, start_line, end_line)
 
     clipped_suggestion, suggestion_dropped = clip_suggestion(suggestion)
+    if suggestion_dropped:
+        await record_tool_output_truncated(
+            tool="add_finding",
+            outcome="truncated",
+            original_chars=len(suggestion or ""),
+            kept_chars=len(clipped_suggestion or ""),
+        )
 
     thread_id = get_thread_id_from_runtime()
     try:

@@ -1,6 +1,7 @@
 """Helpers for resolving portable writable paths inside sandboxes."""
 
 import logging
+import ntpath
 import posixpath
 import shlex
 from collections.abc import AsyncIterable, Iterable
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
 _PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox")
+_WINDOWS_PROBE_NAME = ".open-swe-write-probe"
 
 
 async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
@@ -46,6 +48,13 @@ async def _iter_work_dir_candidates(
     sandbox_backend: SandboxBackendProtocol,
 ) -> AsyncIterable[str]:
     seen: set[str] = set()
+
+    # The backend's own working directory first: local backends (Windows hosts
+    # included) know it exactly, while pwd/$HOME probes assume a POSIX shell.
+    backend_cwd = _normalize_path(str(getattr(sandbox_backend, "cwd", "") or ""))
+    if backend_cwd and backend_cwd not in seen:
+        seen.add(backend_cwd)
+        yield backend_cwd
 
     for candidate in _iter_provider_paths(sandbox_backend, "get_work_dir"):
         if candidate not in seen:
@@ -119,16 +128,34 @@ def _normalize_path(raw_path: str | None) -> str | None:
         return None
 
     path = raw_path.strip()
-    if not path or not path.startswith("/"):
+    if not path:
         return None
 
-    return posixpath.normpath(path)
+    # POSIX roots start with "/"; Windows absolute paths carry a drive letter.
+    # Without the drive-letter case, Windows sandboxes never resolve a work dir.
+    # Normalize with the matching module: os.path is platform-dependent, and a
+    # Windows host must not rewrite "/workspace" into "\workspace".
+    if path.startswith("/"):
+        return posixpath.normpath(path)
+    if len(path) >= 2 and path[1] == ":":
+        return ntpath.normpath(path)
+    return None
+
+
+def _is_windows_path(path: str) -> bool:
+    return len(path) >= 2 and path[1] == ":"
 
 
 async def _is_writable_directory(
     sandbox_backend: SandboxBackendProtocol,
     directory: str,
 ) -> bool:
+    if _is_windows_path(directory):
+        # cmd.exe has no `test`; probe by creating and removing a file. A
+        # missing directory or a read-only one fails the redirect.
+        probe = f'"{directory}\\{_WINDOWS_PROBE_NAME}"'
+        result = await sandbox_backend.aexecute(f"echo. > {probe} && del {probe}")
+        return result.exit_code == 0
     safe_directory = shlex.quote(directory)
     result = await sandbox_backend.aexecute(f"test -d {safe_directory} && test -w {safe_directory}")
     return result.exit_code == 0

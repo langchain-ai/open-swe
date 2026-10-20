@@ -20,6 +20,8 @@ from langchain_core.messages import AnyMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
+from agent.analytics.usage import record_context_offloaded
+
 _manual = ContextVar("manual_offloading", default=False)
 
 
@@ -67,6 +69,10 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
             return await super()._acreate_summary(messages_to_summarize)
         except Exception:
             self._status("failed")
+            await record_context_offloaded(
+                trigger="manual" if _manual.get() else "automatic",
+                status="failed",
+            )
             raise
 
     def _build_new_messages_with_path(
@@ -85,12 +91,18 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
         if isinstance(response, ExtendedModelResponse) and response.command:
             update = response.command.update
             if isinstance(update, dict) and (event := update.get("_summarization_event")):
+                cutoff = event.get("cutoff_index")
                 update["conversation_offloading"] = {
                     "status": "completed",
                     "trigger": "manual" if _manual.get() else "automatic",
                     "cutoff_index": event["cutoff_index"],
                     "file_path": event["file_path"],
                 }
+                await record_context_offloaded(
+                    trigger="manual" if _manual.get() else "automatic",
+                    status="completed",
+                    cutoff_index=cutoff if isinstance(cutoff, int) else None,
+                )
         return response
 
     @hook_config(can_jump_to=["end"])

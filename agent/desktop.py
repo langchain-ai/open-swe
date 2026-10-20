@@ -72,7 +72,9 @@ def _artifacts_root() -> Path:
     configured = ENV.OPEN_SWE_LOCAL_ARTIFACTS_DIR.optional()
     if configured:
         return Path(configured)
-    return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
+    # os.getuid is POSIX-only; Windows desktop builds must not crash on it.
+    user = str(os.getuid()) if hasattr(os, "getuid") else os.environ.get("USERNAME", "user")
+    return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{user}"
 
 
 async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:

@@ -19,6 +19,22 @@ class ModelOption(TypedDict):
 
 
 SUPPORTED_MODELS: list[ModelOption] = [
+    # 本地模型：Ollama 上的 Qwen3 8B（走 OpenAI 兼容 Chat Completions，
+    # 见 agent/utils/model.py 的 OPENAI_CHAT_COMPLETIONS_MODEL_IDS）
+    {
+        "id": "openai:qwen3:8b",
+        "label": "Qwen3 8B (local Ollama)",
+        "efforts": ["none", "low", "medium", "high"],
+        "default_effort": "medium",
+        "supports_images": False,
+    },
+    {
+        "id": "openai:qwen3.5:9b",
+        "label": "Qwen3.5 9B (local Ollama)",
+        "efforts": ["none", "low", "medium", "high"],
+        "default_effort": "medium",
+        "supports_images": False,
+    },
     {
         "id": "anthropic:claude-opus-5",
         "label": "Opus 5",

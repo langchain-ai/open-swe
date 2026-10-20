@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Any
 
+from agent.analytics.usage import record_tool_output_truncated
 from agent.config import ENV
 from agent.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 
@@ -50,6 +51,13 @@ async def web_search(
             )
         except Exception:
             logger.info("Web search sandbox unavailable; returning bounded inline results")
+            if len(results) > WEB_SEARCH_MAX_INLINE_CHARS:
+                await record_tool_output_truncated(
+                    tool="web_search",
+                    outcome="truncated",
+                    original_chars=len(results),
+                    kept_chars=WEB_SEARCH_MAX_INLINE_CHARS,
+                )
             return {
                 "success": True,
                 "results_path": None,
@@ -57,6 +65,13 @@ async def web_search(
                 "result_chars": len(results),
                 "error": None,
             }
+        if len(results) > WEB_SEARCH_MAX_INLINE_CHARS:
+            await record_tool_output_truncated(
+                tool="web_search",
+                outcome="offloaded",
+                original_chars=len(results),
+                kept_chars=0,
+            )
         return {
             "success": True,
             "results_path": results_path,

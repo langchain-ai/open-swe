@@ -4,6 +4,7 @@ from typing import Any
 
 import httpx2
 
+from agent.analytics.usage import record_tool_output_truncated
 from agent.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 from agent.utils.url_safety import (
     request_with_safe_redirects as _request_with_safe_redirects,
@@ -97,6 +98,12 @@ async def _offload_large_response(result: dict[str, Any]) -> dict[str, Any]:
         )
     except Exception:
         logger.exception("Failed to save oversized HTTP response to sandbox")
+        await record_tool_output_truncated(
+            tool="http_request",
+            outcome="failed",
+            original_chars=len(serialized),
+            kept_chars=0,
+        )
         return {
             "success": False,
             "status_code": result["status_code"],
@@ -106,6 +113,12 @@ async def _offload_large_response(result: dict[str, Any]) -> dict[str, Any]:
             "response_chars": len(serialized),
         }
 
+    await record_tool_output_truncated(
+        tool="http_request",
+        outcome="offloaded",
+        original_chars=len(serialized),
+        kept_chars=0,
+    )
     return {
         "success": result["success"],
         "status_code": result["status_code"],

@@ -1,4 +1,5 @@
 import json
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -7,6 +8,7 @@ import pytest
 from blockbuster import BlockBuster
 
 from agent.desktop import (
+    _artifacts_root,
     create_desktop_backend,
     desktop_artifact_routes,
     resolve_desktop_project,
@@ -96,3 +98,12 @@ async def test_artifact_routes_reject_a_traversing_thread_id(
     for backend in routes.values():
         root = Path(str(backend.cwd)).resolve()
         assert artifacts.resolve() in root.parents
+
+
+def test_artifacts_root_defaults_to_a_per_user_temp_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPEN_SWE_LOCAL_ARTIFACTS_DIR", raising=False)
+
+    root = _artifacts_root()
+
+    assert root.parent == Path(tempfile.gettempdir())
+    assert root.name.startswith("open-swe-artifacts-")

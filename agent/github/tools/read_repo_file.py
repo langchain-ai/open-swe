@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx2
 
+from agent.analytics.usage import record_tool_output_truncated
 from agent.github.checks import github_headers
 from agent.run_config import RunConfig
 
@@ -76,6 +77,13 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     raw = base64.b64decode(encoded)
     truncated = len(raw) > _MAX_FILE_BYTES
     text = raw[:_MAX_FILE_BYTES].decode("utf-8", errors="replace")
+    if truncated:
+        await record_tool_output_truncated(
+            tool="read_repo_file",
+            outcome="truncated",
+            original_chars=len(raw.decode("utf-8", errors="replace")),
+            kept_chars=len(text),
+        )
     return {
         "success": True,
         "path": clean_path,

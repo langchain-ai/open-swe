@@ -8,6 +8,7 @@ import textwrap
 import uuid
 from typing import Any
 
+from agent.analytics.usage import record_tool_output_truncated
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 
@@ -204,9 +205,11 @@ def control_script(action: str, task_id: str | None) -> str:
             try:
                 with open(state["output_path"], "rb") as handle:
                     data = handle.read()
+                state["output_chars"] = len(data.decode(errors="replace"))
                 if len(data) > {MAX_INLINE_OUTPUT_BYTES}:
                     half = {MAX_INLINE_OUTPUT_BYTES} // 2
                     data = data[:half] + f"\\n[{{len(data) - half * 2}} inline bytes omitted]\\n".encode() + data[-half:]
+                state["output_kept_chars"] = len(data.decode(errors="replace"))
                 state["output"] = data.decode(errors="replace")
             except (FileNotFoundError, KeyError):
                 state["output"] = ""
@@ -351,6 +354,15 @@ async def _control(action: str, task_id: str | None) -> dict[str, Any]:
 
 async def task_status(task_id: str) -> dict[str, Any]:
     state = await _control("status", task_id)
+    output_chars = state.get("output_chars")
+    kept_chars = state.get("output_kept_chars")
+    if isinstance(output_chars, int) and isinstance(kept_chars, int) and output_chars > kept_chars:
+        await record_tool_output_truncated(
+            tool="background_execute",
+            outcome="truncated",
+            original_chars=output_chars,
+            kept_chars=kept_chars,
+        )
     return {"kind": TASK_KIND, "output_source": "sandbox", **state}
 
 

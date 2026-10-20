@@ -43,6 +43,10 @@ yarn-error.log*
 # local sandbox git identity (never the developer's ~/.gitconfig)
 .gitconfig-sandbox
 
+# local agent-eval scratch: the desktop-surface sandbox and its allowlist
+.eval-sandbox/
+.eval-local-projects.json
+
 # local env files
 .env*.local
 .env

@@ -51,6 +51,8 @@ class EventName(StrEnum):
     FINDING_RESOLVED = "finding.resolved"
     FINDING_DISMISSED = "finding.dismissed"
     FINDING_REOPENED = "finding.reopened"
+    TOOL_OUTPUT_TRUNCATED = "tool.output_truncated"
+    CONTEXT_OFFLOADED = "context.offloaded"
 
 
 class EntryPoint(StrEnum):
@@ -171,6 +173,34 @@ class FindingStatePayload(StrictPayload):
     previous_state: Literal["open", "resolved", "dismissed", "unknown"] | None = None
 
 
+class ToolOutputTruncatedPayload(StrictPayload):
+    """A tool's output exceeded its inline budget and the agent did not get it all.
+
+    ``outcome`` distinguishes lossy truncation (content cut before the model saw
+    it) from lossless offload (full content parked in the sandbox behind a path)
+    and from failure (neither returned nor offloaded), so budget pressure can be
+    separated from actual information loss.
+    """
+
+    tool: str = Field(min_length=1, max_length=100)
+    outcome: Literal["truncated", "offloaded", "failed"]
+    original_chars: int = Field(ge=0)
+    kept_chars: int = Field(ge=0)
+
+
+class ContextOffloadedPayload(StrictPayload):
+    """Conversation compaction replaced messages with a summary.
+
+    ``cutoff_index`` is the number of leading messages the summary stands in
+    for; the offloaded history itself stays in the sandbox and is deliberately
+    not recorded here.
+    """
+
+    trigger: Literal["manual", "automatic"]
+    status: Literal["completed", "failed"]
+    cutoff_index: int | None = Field(default=None, ge=0)
+
+
 EventPayload = Annotated[
     RunStartedPayload
     | RunCompletedPayload
@@ -189,7 +219,9 @@ EventPayload = Annotated[
     | PRStatePayload
     | ReviewPublishedPayload
     | FindingSurfacedPayload
-    | FindingStatePayload,
+    | FindingStatePayload
+    | ToolOutputTruncatedPayload
+    | ContextOffloadedPayload,
     Field(union_mode="left_to_right"),
 ]
 
@@ -216,6 +248,8 @@ _PAYLOAD_MODELS: dict[EventName, type[StrictPayload]] = {
     EventName.FINDING_RESOLVED: FindingStatePayload,
     EventName.FINDING_DISMISSED: FindingStatePayload,
     EventName.FINDING_REOPENED: FindingStatePayload,
+    EventName.TOOL_OUTPUT_TRUNCATED: ToolOutputTruncatedPayload,
+    EventName.CONTEXT_OFFLOADED: ContextOffloadedPayload,
 }
 
 

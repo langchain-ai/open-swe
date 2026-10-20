@@ -14,6 +14,15 @@ from agent.utils.openai_oauth import (
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
 
+# 本地/自托管 OpenAI 兼容模型（如 Ollama）只支持 Chat Completions，
+# 不走 OpenAI Responses API。在 agent/dashboard/options.py 注册后加入此集合。
+OPENAI_CHAT_COMPLETIONS_MODEL_IDS: frozenset[str] = frozenset(
+    {
+        "openai:qwen3:8b",
+        "openai:qwen3.5:9b",
+    }
+)
+
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
 DEFAULT_MAX_RETRIES = 6
@@ -150,7 +159,9 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             or ENV.OPENAI_BASE_URL.optional()
             or OPENAI_RESPONSES_WS_BASE_URL
         )
-        model_kwargs["use_responses_api"] = True
+        model_kwargs["use_responses_api"] = (
+            model_id not in OPENAI_CHAT_COMPLETIONS_MODEL_IDS
+        )
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
     gateway_applied = False
@@ -173,6 +184,9 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     if model_id.startswith("openai:"):
         if oauth_applied:
             model_kwargs.pop("max_tokens", None)
+        if model_id in OPENAI_CHAT_COMPLETIONS_MODEL_IDS:
+            # 本地 OpenAI 兼容端点不接收 reasoning/reasoning_effort 参数
+            model_kwargs.pop("reasoning", None)
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 

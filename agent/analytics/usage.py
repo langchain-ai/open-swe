@@ -14,16 +14,19 @@ from agent import database
 from agent.analytics import directory, distance, emitter
 from agent.analytics.capture import fail_soft
 from agent.analytics.events import (
+    ContextOffloadedPayload,
     EventName,
     RunCanceledPayload,
     RunCompletedPayload,
     RunCostRecordedPayload,
     RunFailedPayload,
     StrictPayload,
+    ToolOutputTruncatedPayload,
 )
 from agent.analytics.identity import opaque_id
 from agent.database import analytics as analytics_db
 from agent.review.findings import coerce_finding, is_surfaced
+from agent.run_config import RunConfig
 from agent.utils.json_types import as_json_object
 from agent.utils.run_usage import RunUsageSummary
 
@@ -452,4 +455,69 @@ async def record_reviewer_finding_state(thread_id: str, finding: Mapping[str, An
         number=number,
         head_sha=str(finding.get("last_confirmed_sha") or ""),
         published=False,
+    )
+
+
+def _runtime_identity() -> tuple[str | None, str | None]:
+    """Invocation and thread ids of the running graph, when there is one."""
+    try:
+        cfg = RunConfig.from_runtime()
+    except Exception:  # noqa: BLE001
+        return None, None
+    return cfg.invocation_id, cfg.thread_id
+
+
+def _runtime_revision() -> int:
+    return int(datetime.now(UTC).timestamp() * 1_000_000)
+
+
+@fail_soft
+async def record_tool_output_truncated(
+    *,
+    tool: str,
+    outcome: Literal["truncated", "offloaded", "failed"],
+    original_chars: int,
+    kept_chars: int,
+) -> None:
+    """Record that a tool's output exceeded its inline budget."""
+    invocation_id, thread_id = _runtime_identity()
+    if not invocation_id and not thread_id:
+        return
+    await emitter.enqueue_event(
+        EventName.TOOL_OUTPUT_TRUNCATED,
+        f"tool:{tool}:{invocation_id or thread_id}:output:{_runtime_revision()}",
+        ToolOutputTruncatedPayload(
+            tool=tool,
+            outcome=outcome,
+            original_chars=max(0, original_chars),
+            kept_chars=max(0, kept_chars),
+        ),
+        run_id=opaque_id("run", invocation_id),
+        thread_id=opaque_id("thread", thread_id),
+        task_id=opaque_id("task", thread_id),
+    )
+
+
+@fail_soft
+async def record_context_offloaded(
+    *,
+    trigger: Literal["manual", "automatic"],
+    status: Literal["completed", "failed"],
+    cutoff_index: int | None = None,
+) -> None:
+    """Record that conversation compaction replaced messages with a summary."""
+    invocation_id, thread_id = _runtime_identity()
+    if not invocation_id and not thread_id:
+        return
+    await emitter.enqueue_event(
+        EventName.CONTEXT_OFFLOADED,
+        f"context:{invocation_id or thread_id}:offloaded:{_runtime_revision()}",
+        ContextOffloadedPayload(
+            trigger=trigger,
+            status=status,
+            cutoff_index=max(0, cutoff_index) if cutoff_index is not None else None,
+        ),
+        run_id=opaque_id("run", invocation_id),
+        thread_id=opaque_id("thread", thread_id),
+        task_id=opaque_id("task", thread_id),
     )
