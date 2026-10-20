@@ -6,8 +6,9 @@ from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import NAMESPACE_URL, UUID, uuid5, uuid7
 
+from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, JsonValue, ValidationError
-from sqlalchemy import ForeignKey, delete, func, select, text, update
+from sqlalchemy import ColumnElement, ForeignKey, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -157,14 +158,50 @@ class TaskMessage(Base):
             )
 
     @classmethod
-    async def deliver(cls, thread_id: str, strategy: Literal["enqueue", "interrupt"]) -> bool:
+    async def recorded(cls, thread_id: str, delivery_id: str) -> bool:
         async with postgres.session() as session:
-            pending = await session.scalar(
+            found = await session.scalar(
                 select(cls.id)
-                .where(cls.thread_id == thread_id, cls.delivered_at.is_(None))
+                .where(cls.thread_id == thread_id, cls.delivery_id == delivery_id)
                 .limit(1)
             )
-        if pending is None:
+        return found is not None
+
+    @classmethod
+    async def _any_undelivered(cls, thread_id: str, *conditions: ColumnElement[bool]) -> bool:
+        async with postgres.session() as session:
+            found = await session.scalar(
+                select(cls.id)
+                .where(cls.thread_id == thread_id, cls.delivered_at.is_(None), *conditions)
+                .limit(1)
+            )
+        return found is not None
+
+    @classmethod
+    async def _owed_now(cls, client: LangGraphClient, thread_id: str) -> list[Self]:
+        state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
+        return await cls.owed(thread_id, state.values.messages if state.values else [])
+
+    @classmethod
+    async def awaiting_delivery(cls, thread_id: str, *, since: datetime) -> bool:
+        """Whether a message recorded after ``since`` has yet to reach the thread's checkpoint.
+
+        A message that ran out of delivery attempts awaits nothing.
+        """
+        if not postgres.configured() or not await cls._any_undelivered(
+            thread_id, cls.matched_at >= since, cls.delivery_attempts < _MAX_ATTEMPTS
+        ):
+            return False
+        return any(
+            message.delivery_attempts < _MAX_ATTEMPTS
+            and message.matched_at is not None
+            and message.matched_at >= since
+            for message in await cls._owed_now(dispatch_client(), thread_id)
+        )
+
+    @classmethod
+    async def deliver(cls, thread_id: str, strategy: Literal["enqueue", "interrupt"]) -> bool:
+        if not await cls._any_undelivered(thread_id):
             return False
         client = dispatch_client()
         async with postgres.transaction() as lock:
@@ -179,8 +216,7 @@ class TaskMessage(Base):
                 thread = _Thread.model_validate(await client.threads.get(thread_id))
                 if thread.status == "busy":
                     return False
-            state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
-            owed = await cls.owed(thread_id, state.values.messages if state.values else [])
+            owed = await cls._owed_now(client, thread_id)
             if all(message.delivery_attempts >= _MAX_ATTEMPTS for message in owed):
                 return False
             owed_ids = [message.id for message in owed]

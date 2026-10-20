@@ -19,6 +19,11 @@ _TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 _MAX_RESULT_CHARS = 16_000
 
 
+def finished_delivery_id(worker_thread_id: str, run_id: str) -> str:
+    """The coordinator's task message reporting how a worker's run ended."""
+    return f"finished:{worker_thread_id}:{run_id}"
+
+
 async def worker_result(
     thread_id: str, run_id: str, status: str, payload: Mapping[str, object]
 ) -> str:
@@ -73,7 +78,7 @@ async def worker_finished(
     await notify(
         context.task,
         context.task.require_coordinator(),
-        f"finished:{thread_id}:{run_id}",
+        finished_delivery_id(thread_id, run_id),
         prompt(
             "tasks/finished",
             task_id=str(context.task.id),

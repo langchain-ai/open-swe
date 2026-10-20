@@ -689,7 +689,7 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
     monkeypatch.setattr(event_matches, "dispatch_client", dispatch_client)
     monkeypatch.setattr(event_matches, "create_durable_run", dispatch)
     monkeypatch.setattr(service, "owned_worker", AsyncMock(return_value=(task, delegation)))
-    monkeypatch.setattr(service, "live_worker_runs", live_runs)
+    monkeypatch.setattr(service, "live_runs", live_runs)
     monkeypatch.setattr(service, "worker_status", AsyncMock(return_value={}))
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
     monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())

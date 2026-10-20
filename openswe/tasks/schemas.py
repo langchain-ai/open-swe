@@ -1,9 +1,11 @@
+from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
 from openswe.bridge.constants import SANDBOX_ID_PREFIX
+from openswe.bridge.store import BridgeStore
 from openswe.invocation import resolve_invocation_id
 from openswe.users import User
 
@@ -51,12 +53,10 @@ class ThreadMetadata(BaseModel):
     def json_metadata(self) -> dict[str, JsonValue]:
         return _JSON_OBJECT.validate_python(self.model_dump(mode="json", exclude_unset=True))
 
-    @property
-    def delegation_supported(self) -> bool:
-        """Whether workers can outlive this thread's runs in its sandbox."""
+    async def delegation_supported(self) -> bool:
+        """Whether workers could share this thread's sandbox: a machine's only while it serves it."""
         if self.sandbox_id and self.sandbox_id.startswith(SANDBOX_ID_PREFIX):
-            # CLI bridges close when the coordinator's run ends, before workers finish.
-            return self.sandbox_bridge_client == "desktop"
+            return await BridgeStore.is_connected(self.sandbox_id)
         return True
 
     async def owner(self) -> User:
@@ -149,6 +149,7 @@ class RunPayload(BaseModel):
 class Run(BaseModel):
     run_id: str
     status: str
+    updated_at: datetime | None = None
     metadata: RunMetadata = Field(default_factory=RunMetadata)
 
 

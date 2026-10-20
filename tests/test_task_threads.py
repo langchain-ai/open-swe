@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import JsonValue
 from sqlalchemy import func, select
 
+from openswe.bridge.store import BridgeStore
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.database import postgres
 from openswe.tasks import messages as task_messages
@@ -238,24 +239,21 @@ def launch(monkeypatch: pytest.MonkeyPatch) -> Launch:
     return launch
 
 
-@pytest.mark.parametrize("bridge_client", ["cli", None])
-async def test_cli_bridge_rejects_delegation_before_reserving_a_worker(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch, bridge_client: str | None
+@pytest.mark.parametrize("connected", [True, False])
+async def test_cli_bridge_delegates_only_while_it_is_served(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, connected: bool
 ) -> None:
-    client.metadata[COORDINATOR]["sandbox_id"] = "bridge:cli"
-    if bridge_client is not None:
-        client.metadata[COORDINATOR]["sandbox_bridge_client"] = bridge_client
+    client.metadata[COORDINATOR].update(sandbox_id="bridge:cli", sandbox_bridge_client="cli")
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=None))
-    reserve = AsyncMock()
-    monkeypatch.setattr(store.Task, "reserve_worker", reserve)
+    monkeypatch.setattr(BridgeStore, "is_connected", AsyncMock(return_value=connected))
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR, OWNER)
 
-    with pytest.raises(ValueError, match="one-shot CLI bridge"):
-        await service.authorize_async_worker(
-            service.Actor(COORDINATOR, OWNER), "cli-call", "Implement"
-        )
-
-    reserve.assert_not_awaited()
-    assert not client.created_runs
+    if connected:
+        assert (await service.Delegation.authorize(actor)).metadata.sandbox_id == "bridge:cli"
+    else:
+        with pytest.raises(ValueError, match="connected"):
+            await service.Delegation.authorize(actor)
 
 
 async def test_public_thread_does_not_allow_using_owners_credentials(client: MagicMock) -> None:
@@ -590,6 +588,72 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert wake["thread_id"] == COORDINATOR
     delivered_ids = [message["id"] for message in wake["input"]["messages"] if "id" in message]
     assert delivered_ids == message_ids
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_coordinator_settles_once_every_worker_report_has_reached_it(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    from openswe.tasks import activity
+    from openswe.tasks.events import worker_finished
+
+    monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR, OWNER)
+    assert (await activity.CoordinatorActivity.of(COORDINATOR)).settled
+
+    worker_id = str((await launch(actor, "call", "Implement"))["worker_thread_id"])
+    run_id = str(uuid4())
+    run: dict[str, object] = {"thread_id": worker_id, "run_id": run_id, "status": "running"}
+    client.created_runs.append(run)
+
+    async def states() -> list[str]:
+        current = await activity.CoordinatorActivity.of(COORDINATOR)
+        assert current.settled is not any(worker.active for worker in current.workers)
+        return [worker.state for worker in current.workers]
+
+    assert await states() == ["running"]
+    run.update(status="success", updated_at=datetime.now(UTC).isoformat())
+    assert await states() == ["reporting"]
+
+    answer = {"values": {"messages": [{"type": "ai", "content": "Implemented"}]}}
+    await worker_finished(worker_id, run_id, "success", answer)
+    (wake,) = [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
+    current = await activity.CoordinatorActivity.of(COORDINATOR)
+    assert [worker.state for worker in current.workers] == ["done"]
+    assert current.run_id == wake["run_id"]
+    assert not current.settled
+
+    wake["status"] = "success"
+    assert not (await activity.CoordinatorActivity.of(COORDINATOR)).settled
+    client.threads.get_state.return_value = {"values": {"messages": wake["input"]["messages"]}}
+    assert (await activity.CoordinatorActivity.of(COORDINATOR)).settled
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_cancelling_a_coordinators_workers_spares_finished_ones(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    from openswe.tasks import activity
+
+    monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR, OWNER)
+    running = str((await launch(actor, "running", "Implement"))["worker_thread_id"])
+    finished = str((await launch(actor, "finished", "Review"))["worker_thread_id"])
+    client.created_runs += [
+        {"thread_id": running, "run_id": str(uuid4()), "status": "running"},
+        {"thread_id": finished, "run_id": str(uuid4()), "status": "success"},
+    ]
+
+    await (await activity.CoordinatorActivity.of(COORDINATOR)).cancel_workers()
+
+    current = await activity.CoordinatorActivity.of(COORDINATOR)
+    assert {worker.worker_thread_id: worker.state for worker in current.workers} == {
+        running: "cancelled",
+        finished: "done",
+    }
+    assert current.settled
 
 
 @pytest.mark.usefixtures("registry_db")
