@@ -388,14 +388,23 @@ export function AgentTurn({
   }
 
   return (
-    <div
-      className="group/turn my-space-2 min-w-0 space-y-space-2"
-      title={formatHoverTimestamp(turnEnd)}
-    >
+    <div className="group/turn my-space-2 min-w-0 space-y-space-2">
       {segments.map((segment, index) =>
-        segment.type === "reply"
-          ? renderItem(segment.item)
-          : renderWorkSegment(segment, index)
+        segment.type === "reply" ? (
+          <div
+            key={segment.item.key}
+            title={formatHoverTimestamp(
+              replyTimestamp(segment) ??
+                (!isStreaming && index === segments.length - 1
+                  ? turnEnd
+                  : undefined)
+            )}
+          >
+            {renderItem(segment.item)}
+          </div>
+        ) : (
+          renderWorkSegment(segment, index)
+        )
       )}
 
       <div className="mt-space-1 flex items-center gap-space-1">
