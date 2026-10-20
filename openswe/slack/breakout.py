@@ -9,7 +9,6 @@ from openswe.slack import webhook as service
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import mark_broken_out, notify_breakout, source_thread_line
-from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     append_slack_web_link_footer,
@@ -177,14 +176,7 @@ async def _start(
         new_ts = await post_slack_top_level_message_with_ts(
             target,
             root_text,
-            blocks=block_payload(
-                [
-                    section(root_text),
-                    *await origin_footer(
-                        request.thread_id or "", (request.channel_id, request.thread_ts)
-                    ),
-                ]
-            ),
+            blocks=block_payload([section(root_text)]),
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -204,14 +196,7 @@ async def _start(
                 target,
                 new_ts,
                 append_slack_web_link_footer(root_text, web_url),
-                blocks=block_payload(
-                    [
-                        section(append_slack_web_link_footer(root_text, web_url)),
-                        *await origin_footer(
-                            request.thread_id or "", (request.channel_id, request.thread_ts)
-                        ),
-                    ]
-                ),
+                blocks=block_payload([section(append_slack_web_link_footer(root_text, web_url))]),
                 unfurl_links=False,
                 unfurl_media=False,
             )
