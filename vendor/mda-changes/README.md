@@ -1,6 +1,6 @@
 # Our changes to the vendored Managed Deep Agents SDK
 
-One dated file per change we make in [`../managed-deepagents-sdk`](../managed-deepagents-sdk) ourselves (upstream pull requests we carry are recorded in its `UPSTREAM_PRS` instead; see [`../README.md`](../README.md)), named `YYYY-MM-DD-<slug>.md` after the day it landed. Each opens with its verdict, then says:
+One dated file per change we make in [`../managed-deepagents-sdk`](../managed-deepagents-sdk) ourselves (upstream pull requests we carry are recorded in [`../mda-upstream-prs`](../mda-upstream-prs) instead; see [`../README.md`](../README.md)), named `YYYY-MM-DD-<slug>.md` after the day it landed. Each opens with its verdict, then says:
 
 - **What** we changed, and in which vendored files.
 - **Why** Open SWE needs it.

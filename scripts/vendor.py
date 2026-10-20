@@ -12,13 +12,13 @@ installs and `make mda-cli` builds the CLI from.
     uv run scripts/vendor.py --diff    # our changes: the tree against UPSTREAM's commit
 
 UPSTREAM records the exact commit the tree comes from: its full SHA, then its date.
-UPSTREAM_PRS records the upstream pull requests the tree carries on top of it, not yet
-on main: one per line, its number, the head commit carried, then its title.
+vendor/mda-upstream-prs records the upstream pull requests the tree carries on top of it,
+not yet on main: one per line, its number, the head commit carried, then its title.
 Our changes, carried pull requests included, are edits made in the tree itself, as in a
 vendor branch. Updating takes upstream's new version of every file we left alone, and
 three-way merges upstream's changes into every file we changed (base: the recorded
 commit), leaving conflict markers where both sides changed the same lines; carried pull
-requests the new commit contains drop out of UPSTREAM_PRS. Carrying a pull request
+requests the new commit contains drop out of that record. Carrying a pull request
 three-way merges its changes into the tree the same way (base: where it branched off
 its base branch, or the head carried before). Both relock mda/.
 MDA_SDK_REPO overrides the upstream, e.g. a local checkout; pull requests are looked up
@@ -54,8 +54,8 @@ PATHS: Final = (
 # The Python runtime's own tests never run here.
 SKIPPED: Final = "packages/pypi/tests"
 RECORD: Final = "UPSTREAM"
-PRS_RECORD: Final = "UPSTREAM_PRS"
-RECORDS: Final = frozenset({RECORD, PRS_RECORD})
+# Outside the tree, so nothing mistakes it for a file upstream ships.
+PRS_RECORD: Final = ROOT / "vendor" / "mda-upstream-prs"
 # What `make mda-cli` and local tooling write into the tree: kept across updates, never compared.
 BUILD_OUTPUTS: Final = ("target", "packages/pypi/src/managed_deepagents/_binaries")
 IGNORED_NAMES: Final = frozenset({"target", "_binaries", "__pycache__"})
@@ -80,13 +80,13 @@ def _ignored(relative: Path) -> bool:
 
 
 def files(tree: Path) -> dict[str, Path]:
-    """The tree's vendored files by relative path, build outputs and the records aside."""
+    """The tree's vendored files by relative path, build outputs and the record aside."""
     if not tree.exists():
         return {}
     found: dict[str, Path] = {}
     for path in tree.rglob("*"):
         relative = path.relative_to(tree)
-        if path.is_file() and not _ignored(relative) and relative.as_posix() not in RECORDS:
+        if path.is_file() and not _ignored(relative) and relative.as_posix() != RECORD:
             found[relative.as_posix()] = path
     return found
 
@@ -113,23 +113,21 @@ class CarriedPR:
 
 
 class CarriedPRs:
-    """UPSTREAM_PRS: the upstream pull requests the tree carries, by number."""
+    """vendor/mda-upstream-prs: the upstream pull requests the tree carries, by number."""
 
     def __init__(self, prs: dict[int, CarriedPR]) -> None:
         self.prs = prs
 
     @classmethod
     def read(cls) -> CarriedPRs:
-        path = DEST / PRS_RECORD
-        lines = path.read_text().splitlines() if path.exists() else []
+        lines = PRS_RECORD.read_text().splitlines() if PRS_RECORD.exists() else []
         return cls({pr.number: pr for pr in map(CarriedPR.parse, filter(None, lines))})
 
-    def write(self, tree: Path) -> None:
-        path = tree / PRS_RECORD
+    def write(self) -> None:
         if self.prs:
-            path.write_text("".join(f"{self.prs[n].line()}\n" for n in sorted(self.prs)))
+            PRS_RECORD.write_text("".join(f"{self.prs[n].line()}\n" for n in sorted(self.prs)))
         else:
-            path.unlink(missing_ok=True)
+            PRS_RECORD.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -305,7 +303,7 @@ def merge_trees(
 def _install(tree: Path, record: str, prs: CarriedPRs, conflicts: list[str], done: str) -> str:
     """Replace the vendored tree with ``tree``, recorded as ``record`` carrying ``prs``."""
     (tree / RECORD).write_text(f"{record}\n")
-    prs.write(tree)
+    prs.write()
     # Keep build outputs, so `make mda-cli` need not start over.
     for output in BUILD_OUTPUTS:
         if (DEST / output).exists():
