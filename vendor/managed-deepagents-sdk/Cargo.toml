@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = ["crates/mda"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/langchain-ai/managed-deepagents-sdk"
+
+[workspace.lints.rust]
+# Fail the build on unused private items. Prefer deleting dead code over
+# `#[allow(dead_code)]` — that attribute still silences this lint (clap's
+# `ValueEnum` derive needs `allow`, so we cannot use `forbid` workspace-wide).
+dead_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
+nursery = { level = "allow", priority = -1 }
+redundant_clone = { level = "warn", priority = 1 }
+print_stdout = "deny"
+print_stderr = "deny"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

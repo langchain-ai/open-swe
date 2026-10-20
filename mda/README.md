@@ -64,16 +64,15 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 | `open-swe-mda-preview` | `open-swe-preview` |
 | `open-swe-mda-prod` | `open-swe-v3` |
 
-Each deployment's only configuration is `OPEN_SWE_BACKEND_URL`, in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding only that deployment's backend URL:
+Each deployment's only configuration is `OPEN_SWE_BACKEND_URL`, in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand from the repository root, with `mda/.env` holding only that deployment's backend URL:
 
 ```bash
+make mda-cli
 cd mda
 uv run --locked --python 3.13 mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
-CI and manual deploys run the CLI from this project's locked environment, so its version follows the runtime dependency without a separate install pin. Keep `managed-deepagents` and `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping them; `--locked` rejects an out-of-date lockfile.
-
-The preview can also deploy an unreleased SDK commit, for a preview-labelled PR only. The PR takes `managed-deepagents` from that commit in `[tool.uv.sources]` (`git` on `langchain-ai/managed-deepagents-sdk`, a full `rev`, `subdirectory = "packages/pypi"`), pinned to that commit's package version, and relocks. The preview workflow reads the SHA directly from the assembled tree, builds that commit's compiler, and deploys with it and its runtime (`scripts/preview_mda_source.py`); no separate approval variable is needed. Applying the `preview` label authorizes running the PR's code and its selected SDK commit, including subsequent updates while labelled, so only trusted maintainers should apply it. Sources outside that repository or package, or without a full lowercase commit SHA, fail the MDA deploy. Staging and production never build from source.
+CI and manual deploys run the CLI from this project's locked environment. `managed-deepagents` is the SDK vendored in [`vendor/managed-deepagents-sdk`](../vendor/README.md): `mda/` installs its runtime as an editable path source, and `make mda-cli` builds its CLI with cargo into that runtime, where the `mda` command runs it. Run it before `mda build`, `mda dev` or `mda deploy`: until it has, the runtime has no CLI, and it rebuilds whenever the vendored CLI changed; `mda build` and `mda deploy` bundle that runtime, so what deploys is exactly the vendored tree. Only the SDK's `main` is vendored: `uv run scripts/vendor.py [sha]` vendors main's head or a commit on it, records the exact commit in `UPSTREAM`, three-way merges upstream's changes into the files we edited there, and relocks `mda/`; `--diff` prints our changes ([`vendor/README.md`](../vendor/README.md)). Keep `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping it; `--locked` rejects an out-of-date lockfile.
 
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 
