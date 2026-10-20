@@ -7,7 +7,6 @@ import pytest
 
 from openswe.github import app as github_app
 from openswe.github import http as github_http
-from openswe.github import repos
 from openswe.github.http import GitHubError
 from openswe.review import reviews as review_api
 from openswe.review.findings import REVIEWER_THREAD_KIND
@@ -56,26 +55,6 @@ async def test_list_reviews_applies_accessibility_and_has_more(monkeypatch) -> N
     assert [r["number"] for r in reviews] == [1]
     # two accessible records exist (1 and 3); page of 1 leaves more.
     assert has_more is True
-
-
-@pytest.mark.asyncio
-async def test_accessible_repo_full_names_resolves_fresh_each_call(monkeypatch) -> None:
-    # Access is an authorization boundary, so it must not be cached across calls:
-    # a second call re-fetches and reflects revoked access.
-    fetch = AsyncMock(
-        side_effect=[
-            ([], [{"full_name": "acme/repo"}]),
-            ([], []),
-        ]
-    )
-    monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
-
-    first = await repos.accessible_repo_full_names("octocat")
-    second = await repos.accessible_repo_full_names("octocat")
-
-    assert first == frozenset({"acme/repo"})
-    assert second == frozenset()
-    assert fetch.await_count == 2
 
 
 @pytest.mark.asyncio

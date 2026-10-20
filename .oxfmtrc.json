@@ -15,6 +15,7 @@
   "ignorePatterns": [
     "**/node_modules/**",
     ".venv/**",
+    "vendor/**",
     "**/*.md",
     "**/*.json",
     "**/*.jsonc",

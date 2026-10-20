@@ -41,6 +41,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
@@ -274,6 +275,14 @@ SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
 SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
 SLACK_REPLY_SEGMENTS_MARKER = "E2E_SLACK_REPLY_SEGMENTS"
+EVAL_DESCRIPTION_MARKER = "E2E_EVAL_DESCRIPTION"
+BACKGROUND_WORK_MARKER = "E2E_BACKGROUND_WORK"
+# Long enough to outlast the spec, short enough not to linger on the host.
+BACKGROUND_WORK_COMMAND = "echo 'building assets'; sleep 110"
+BACKGROUND_WORK_MONITOR_COMMAND = (
+    'for i in $(seq 1 110); do echo "GET /health 200 ($i)"; sleep 1; done'
+)
+BACKGROUND_WORK_MONITOR_DESCRIPTION = "errors in the dev server log"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -1058,6 +1067,33 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-code-channel-followup",
         ),
     ),
+    "background_work": (
+        _tool_step(
+            "Acknowledging the background work request.",
+            "slack_reply",
+            {"message": "Starting the background work now."},
+            "call-background-work-ack",
+        ),
+        _tool_step(
+            "Building the assets in the background.",
+            "background_execute",
+            {"command": BACKGROUND_WORK_COMMAND, "timeout": 120},
+            "call-background-work-execute",
+        ),
+        _tool_step(
+            "Watching the dev server log for errors.",
+            "monitor",
+            {
+                "action": "start",
+                "command": BACKGROUND_WORK_MONITOR_COMMAND,
+                "filter": "grep -E 'ERROR|Traceback'",
+                "description": BACKGROUND_WORK_MONITOR_DESCRIPTION,
+                "timeout": 120,
+            },
+            "call-background-work-monitor",
+        ),
+        StepSpec(content="Started the build and the log monitor."),
+    ),
     "iframe": (
         _tool_step(
             "Acknowledging the iframe preview request.",
@@ -1090,6 +1126,39 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-desktop-impl",
         ),
         _dynamic_step(_desktop_reply_step),
+    ),
+    # Code-mode calls, each labeled with the description the dashboard shows.
+    "eval_description": (
+        _tool_step(
+            "Acknowledging the request.",
+            "slack_reply",
+            {"message": "On it!", "response_type": "progress"},
+            "call-eval-ack",
+        ),
+        _tool_step(
+            "Counting with code.",
+            "eval",
+            {
+                "display_description": "Count the files in the repository",
+                "code": "['greet.py', 'README.md'].length",
+            },
+            "call-eval-count",
+        ),
+        _tool_step(
+            "Checking the greeting with code.",
+            "eval",
+            {
+                "display_description": "Check the greeting the helper returns",
+                "code": "`Hello, ${'Ada'}!`",
+            },
+            "call-eval-greeting",
+        ),
+        _tool_step(
+            "Reporting back.",
+            "slack_reply",
+            {"message": "The repository has 2 files."},
+            "call-eval-reply",
+        ),
     ),
     "slack_reply_order": (
         _tool_step(
@@ -1513,6 +1582,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: SLACK_REPLY_ORDER_MARKER in ctx.first_text,
     ),
     ScriptRule(
+        "eval_description",
+        lambda ctx: ctx.human_count <= 1 and EVAL_DESCRIPTION_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
     ),
@@ -1523,6 +1596,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "code_channel",
         lambda ctx: ctx.human_count <= 1 and "E2E_CODE_CHANNEL" in ctx.first_text,
+    ),
+    ScriptRule(
+        "background_work",
+        lambda ctx: ctx.human_count <= 1 and BACKGROUND_WORK_MARKER in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
@@ -1600,12 +1677,19 @@ class FakeScriptedChatModel(BaseChatModel):
         "max_input_tokens": 128_000,
     }
     script: list[Any] = []
+    described_tool_names: list[str] = []
 
     @property
     def _llm_type(self) -> str:
         return "fake-scripted"
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
+        self.described_tool_names = [
+            spec["function"]["name"]
+            for offered in tools
+            if (spec := convert_to_openai_tool(offered)).get("type") == "function"
+            and "display_description" in spec["function"].get("parameters", {}).get("required", [])
+        ]
         return self
 
     def _generate(
@@ -1627,6 +1711,8 @@ class FakeScriptedChatModel(BaseChatModel):
             pending_text=_latest_turn_text(messages),
         )
         script = _script_for(context)
+        if EVAL_DESCRIPTION_MARKER in context.first_text:
+            assert self.described_tool_names == ["eval"], self.described_tool_names
 
         last_human = max(
             (

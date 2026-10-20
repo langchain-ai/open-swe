@@ -23,6 +23,8 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
+from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
+from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
@@ -88,6 +90,15 @@ def _sandbox_work(
 async def _background_tasks(job: Job) -> dict[str, JsonValue] | None:
     thread_id = _text(job, "thread_id")
     return None if thread_id is None else await monitor_background_tasks(thread_id)
+
+
+@_sandbox_work(MONITOR_POLL)
+async def _monitors(job: Job) -> bool:
+    thread_id = _text(job, "thread_id")
+    polling = thread_id is not None and await poll_monitors(thread_id)
+    if not polling:
+        await job.stop()
+    return polling
 
 
 @_sandbox_work(WATCH_JOB_KIND)

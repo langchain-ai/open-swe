@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
-import { cn, formatRelativeTime } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
@@ -14,6 +14,7 @@ import { ProfileLink } from "./notes/Byline"
 import { AgentMark } from "./AgentMark"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { StandingPanel } from "./Standing"
+import { RelativeTimestamp } from "./RelativeTimestamp"
 
 const CLAMP_PX = 320
 
@@ -59,16 +60,22 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
     <div className="flex w-full max-w-[920px] flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
       <StandingPanel pr={pr} />
       {detail.walkthrough?.human_input && (
-        <section
+        <details
           aria-label="Requested behavior"
-          className="rounded-xl border border-dashed border-default px-space-4 py-space-3"
+          className="group/requested rounded-xl border border-dashed border-default px-space-4 py-space-3"
         >
-          <p className="mb-space-1 flex items-center gap-space-2 text-xs font-medium text-secondary">
+          <summary className="flex cursor-pointer list-none items-center gap-space-2 text-xs font-medium text-secondary hover:text-primary [&::-webkit-details-marker]:hidden">
             <AgentMark />
             Requested behavior
-          </p>
-          <HumanInputText summary={detail.walkthrough.human_input} />
-        </section>
+            <CaretDownIcon
+              aria-hidden
+              className="ml-auto size-3 -rotate-90 group-open/requested:rotate-0"
+            />
+          </summary>
+          <div className="mt-space-1">
+            <HumanInputText summary={detail.walkthrough.human_input} />
+          </div>
+        </details>
       )}
       <Description
         pr={pr}
@@ -137,8 +144,7 @@ function Description({
           rel="noreferrer"
           className="hover:text-primary hover:underline"
         >
-          opened this{" "}
-          {createdAt ? formatRelativeTime(new Date(createdAt).getTime()) : ""}
+          opened this {createdAt && <RelativeTimestamp value={createdAt} />}
         </a>
         <span className="ml-auto">{labels}</span>
       </header>

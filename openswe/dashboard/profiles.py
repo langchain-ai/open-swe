@@ -29,6 +29,7 @@ from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users import User, UserPreferences, UserPreferencesPatch
 from openswe.users.records import UserRecords
+from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
 from openswe.utils.time import now_iso
 
@@ -43,6 +44,7 @@ RETIRED_PROFILE_KEYS = frozenset(
         "default_subagent_model",
         "subagent_reasoning_effort",
         "model_routing_enabled",
+        "experimental_mcp_ptc",
     }
 )
 
@@ -51,6 +53,11 @@ class ProfileRecords(UserRecords):
     async def allows_auto_human_review(self, login: str) -> bool:
         profile = await self.get(login) or {}
         return profile.get("auto_human_review_enabled", True) is not False
+
+    @staticmethod
+    def cache_key(login: str) -> str:
+        """Where agent runs keep this person's profile for a few seconds."""
+        return f"profile:{login}"
 
     async def put(self, login: str, value: JsonObject, key: str = "") -> None:
         await super().put(
@@ -62,6 +69,8 @@ class ProfileRecords(UserRecords):
             },
             key,
         )
+        # A setting someone just changed applies to their next run, not 30s later.
+        ttl_cache.invalidate(self.cache_key(login))
 
 
 PROFILES = ProfileRecords("profile")
@@ -78,7 +87,6 @@ class ProfileUpdate(BaseModel):
     concierge_mode: bool | None = None
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
-    prefer_tools_in_sandbox: bool | None = None
     experimental_task_coordination: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
@@ -88,7 +96,7 @@ class ProfileUpdate(BaseModel):
     experimental_background_callbacks: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    experimental_mcp_ptc: bool | None = Field(
+    experimental_monitor: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_act_as_approval: bool | None = None
@@ -146,15 +154,15 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             if update.experimental_assistant_ui is not None
             else existing.get("experimental_assistant_ui")
         ),
-        "experimental_mcp_ptc": (
-            update.experimental_mcp_ptc
-            if update.experimental_mcp_ptc is not None
-            else existing.get("experimental_mcp_ptc", False)
-        ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
             else existing.get("experimental_background_callbacks")
+        ),
+        "experimental_monitor": (
+            update.experimental_monitor
+            if update.experimental_monitor is not None
+            else existing.get("experimental_monitor")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed
@@ -394,7 +402,6 @@ async def put_my_profile(
             concierge_mode=update.concierge_mode,
             pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
-            prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
             experimental_task_coordination=update.experimental_task_coordination,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
@@ -407,7 +414,6 @@ async def put_my_profile(
         update.concierge_mode
         or update.pr_review_links
         or update.pr_failure_reactions
-        or update.prefer_tools_in_sandbox
         or update.experimental_task_coordination
         or update.experimental_act_as_approval
     ):

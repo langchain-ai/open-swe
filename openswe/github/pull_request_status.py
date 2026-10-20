@@ -830,10 +830,9 @@ class PullRequestClient:
             return result
         failed, _, _ = _normalize_checks(runs, statuses)
         failures = [_as_str(check["name"], "Unnamed check") for check in failed]
-        failures.extend(
-            _as_str(run.get("name"), "Unnamed check")
+        inconclusive = any(
+            run.get("status") == "completed" and run.get("conclusion") in {"cancelled", "stale"}
             for run in runs
-            if run.get("status") == "completed" and run.get("conclusion") in {"cancelled", "stale"}
         )
         pending = [
             _as_str(run.get("name"), "Unnamed check")
@@ -851,6 +850,8 @@ class PullRequestClient:
             if failures
             else "pending"
             if pending
+            else "unknown"
+            if inconclusive
             else "passing"
             if runs or statuses
             else "none"
