@@ -68,7 +68,7 @@ function Slots({ notes }: { notes: Array<Exclude<Note, { kind: "step" }>> }) {
 }
 
 it("keeps a half-written reply with its thread when a note is added above it", async () => {
-  vi.spyOn(api, "me").mockResolvedValue(null)
+  vi.spyOn(api, "me").mockRejectedValue(new Error("Signed out"))
   useReviewPage.getState().open(pr, null)
   const client = new QueryClient()
   const conversation: Conversation = {
