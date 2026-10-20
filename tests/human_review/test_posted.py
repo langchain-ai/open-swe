@@ -99,7 +99,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
             for method, params in slack_api.calls[start:]
             if method == "reactions.remove" and params["name"] != "white_check_mark"
         }
-        assert removed == {"x", "construction"} - expected
+        assert removed == ({"warning", "construction", "pencil2"} - expected) | {"x"}
         assert all(
             params["channel"] == "C1" and params["timestamp"] == "1.0"
             for _, params in slack_api.calls[start:]
@@ -147,13 +147,13 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     await settle_with_reactions({"construction"})
     snapshot.mergeable = None
     preferences.pr_failure_reactions = True
-    await settle_with_reactions({"x"})
+    await settle_with_reactions({"warning"})
     preferences.pr_failure_reactions = False
     await settle_with_reactions(set())
     preferences.pr_failure_reactions = True
     snapshot.mergeable = False
     snapshot.mergeable_state = "dirty"
-    await settle_with_reactions({"x", "construction"})
+    await settle_with_reactions({"warning", "construction"})
     snapshot.check_state = "success"
     await settle_with_reactions({"construction"})
     snapshot.mergeable = True
@@ -208,7 +208,9 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
         AsyncMock(return_value=UserPreferences(pr_failure_reactions=True)),
     )
     first, second = map(ReviewCard, requests)
+    reactions.add("x")
     await first.mark_approved()
+    assert "x" not in reactions
     assert "white_check_mark" not in reactions
     await second.mark_approved()
     assert "white_check_mark" in reactions
@@ -226,7 +228,7 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
         unresolved_threads=0,
     )
     await first.update_blocked_reactions(snapshot)
-    assert {"x", "construction"} <= reactions
+    assert {"warning", "construction"} <= reactions
     assert wake.await_count == 1
     args = wake.await_args.args
     assert args[:3] == ("C1", "1.0", "U1")
@@ -237,9 +239,9 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
     snapshot.mergeable_state = "clean"
     snapshot.check_state = "success"
     await second.update_blocked_reactions(snapshot)
-    assert {"x", "construction"} <= reactions
+    assert {"warning", "construction"} <= reactions
     await first.update_blocked_reactions(snapshot)
-    assert not reactions & {"x", "construction"}
+    assert not reactions & {"warning", "construction"}
     async with HumanReviewRequest.locked(requests[1].id) as (_, row):
         assert row is not None
         row.approved_at = None
@@ -249,6 +251,14 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
     await second.update_blocked_reactions(snapshot)
     assert wake.await_count == 2
     assert urls[1] in wake.await_args.args[3]
+    snapshot.draft = True
+    await second.update_blocked_reactions(snapshot)
+    assert "pencil2" in reactions
+    snapshot.draft = False
+    await first.update_blocked_reactions(snapshot)
+    assert "pencil2" in reactions
+    await second.update_blocked_reactions(snapshot)
+    assert "pencil2" not in reactions
 
 
 async def test_each_owned_path_needs_an_approval_including_team_owners(
@@ -315,6 +325,6 @@ async def test_retirement_clears_in_flight_and_stale_blockers(
         tasks.create_task(retire())
         await retiring.wait()
         release.set()
-    assert not reactions & {"x", "construction"}
+    assert not reactions & {"warning", "construction"}
     await ReviewCard(request).update_blocked_reactions(snapshot)
-    assert not reactions & {"x", "construction"}
+    assert not reactions & {"warning", "construction"}

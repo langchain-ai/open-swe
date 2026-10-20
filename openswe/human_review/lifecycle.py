@@ -789,6 +789,7 @@ class ReviewCard:
                 row.run_config = {
                     **row.run_config,
                     "posted_failure": reason if failing else "",
+                    "posted_draft": snapshot.draft,
                     "posted_conflicted": snapshot.mergeable is False
                     or snapshot.mergeable_state == "dirty",
                 }
@@ -803,8 +804,9 @@ class ReviewCard:
                 row.pull_request.url.lower() for row in rows
             }
             reactions = {
-                "x": bool(failures),
+                "warning": bool(failures),
                 "construction": any(row.run_config.get("posted_conflicted") for row in active),
+                "pencil2": any(row.run_config.get("posted_draft") for row in active),
                 "white_check_mark": complete
                 and all(
                     row.approved_at is not None and row.state in {"open", "merged"} for row in rows
@@ -812,12 +814,13 @@ class ReviewCard:
             }
             if complete and all(row.state == "merged" for row in rows):
                 reactions["merged"] = True
-            x_added = False
+            await remove_slack_reaction(request.slack_channel_id, request.slack_message_ts, "x")
+            failure_reacted = False
             for emoji, enabled in reactions.items():
                 react = add_slack_reaction if enabled else remove_slack_reaction
                 success = await react(request.slack_channel_id, request.slack_message_ts, emoji)
-                if emoji == "x":
-                    x_added = enabled and success
+                if emoji == "warning":
+                    failure_reacted = enabled and success
                 if emoji == "merged" and enabled and not success:
                     await add_slack_reaction(
                         request.slack_channel_id,
@@ -826,7 +829,7 @@ class ReviewCard:
                     )
             notice = "\n".join(failures)
             first = rows[0]
-            if notice and not x_added:
+            if notice and not failure_reacted:
                 return
             if notice and first.run_config.get("posted_failure_notice") != notice:
                 requester = first.requested_by

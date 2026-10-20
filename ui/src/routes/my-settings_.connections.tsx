@@ -36,7 +36,7 @@ function ConnectionsPage() {
             <ProfileSwitchRow
               field="pr_failure_reactions"
               label="React to failing checks"
-              description="Add ❌ to watched pull request posts when checks fail on a pull request you own."
+              description="Add ⚠️ to watched pull request posts when checks fail on a pull request you own."
             />
           </SettingsSection>
           <MCPConnectionsSection scope="user" />
