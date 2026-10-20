@@ -9,7 +9,8 @@ from langgraph.types import Command
 
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.run_config import RunConfig
-from openswe.slack.client import post_slack_ephemeral_message
+from openswe.slack.blocks import context
+from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.dm import is_concierge_thread
 from openswe.utils.langsmith import create_langsmith_feedback
 from openswe.utils.thread_ops import langgraph_client
@@ -53,12 +54,12 @@ async def switch_to_performance_model(
             source_info={"model_id": model_id, "effort": effort},
         )
     confirmation = f"Switched to {model_id} (reasoning effort: {effort or 'default'})."
-    if cfg.slack_thread and cfg.slack_thread.triggering_user_id:
-        await post_slack_ephemeral_message(
+    if cfg.slack_thread:
+        await post_slack_thread_reply_with_ts(
             cfg.slack_thread.channel_id,
-            cfg.slack_thread.triggering_user_id,
+            cfg.slack_thread.reply_thread_ts or cfg.slack_thread.thread_ts,
             confirmation,
-            thread_ts=cfg.slack_thread.reply_thread_ts or cfg.slack_thread.thread_ts,
+            blocks=[context(confirmation)],
         )
     return Command(
         update={
