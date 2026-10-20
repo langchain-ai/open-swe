@@ -319,9 +319,9 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   comments={rootComments}
                   onTextSelected={
                     canComment && !posting
-                      ? (selection) => {
-                          setReplyTo(null)
-                          setAnchor(selection)
+                      ? (next) => {
+                          if (next) setReplyTo(null)
+                          if (next || !draft.trim()) setAnchor(next)
                         }
                       : undefined
                   }

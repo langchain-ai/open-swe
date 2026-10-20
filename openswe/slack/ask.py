@@ -245,8 +245,8 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         )
     ).slug
     resolved_repo = resolution.repo
-    if resolved_repo is not None and not resolution.explicit:
-        resolved_repo = await workspace_scoped_default_repo(resolved_repo, workspace)
+    if not resolution.explicit:
+        resolved_repo = await workspace_scoped_default_repo(resolved_repo, workspace, login)
     repo = resolved_repo.model_dump() if resolved_repo else None
     slack_thread = SlackThreadRef(
         channel_id=request.channel_id,

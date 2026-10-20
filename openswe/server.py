@@ -14,6 +14,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 from openswe.config import ENV
 
@@ -408,7 +409,18 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
         return None
 
     try:
-        return (await get_workspace_settings(workspace_slug(cfg))).default_repo
+        email = cfg.user_email or (
+            cfg.slack_thread.triggering_user_email if cfg.slack_thread else None
+        )
+        user = (
+            await User.for_login("github", cfg.github_login)
+            if cfg.github_login
+            else await User.for_email(email)
+            if email
+            else None
+        )
+        personal = await user.default_repo(workspace_slug(cfg)) if user else None
+        return personal or (await get_workspace_settings(workspace_slug(cfg))).default_repo
     except Exception:
         logger.debug("Failed to load the workspace default repo for prompt", exc_info=True)
         return None
@@ -440,14 +452,18 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
-async def _user_for_login(login: str) -> User | None:
-    """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
+async def _participant_user(login: str, person_id: str | None) -> User | None:
+    """Resolve a participant by their canonical id before falling back to a surface login."""
     try:
-        return await User.for_login("github", login)
+        if person_id and person_id.startswith("user:"):
+            user = await User.get(UUID(person_id.removeprefix("user:")))
+            if user is not None:
+                return user
+        return await User.for_login("github", login) if login else None
     except Exception:
         logger.warning(
             "Could not resolve a participant; describing them from surface data",
-            extra={"participant_login": login},
+            extra={"participant_login": login, "person_id": person_id},
             exc_info=True,
         )
         return None
@@ -461,16 +477,18 @@ async def _thread_participant(
     timezone: str = "",
     slack_user_id: str = "",
 ) -> ThreadParticipant:
-    login = identity.github_login or None
-    if login is None:
+    user = await _participant_user(identity.github_login, person_id)
+    login = (user.github_login if user else "") or identity.github_login
+    if not login:
         return ThreadParticipant(
             identity=identity,
             person_id=person_id or "",
             timezone=timezone,
-            slack_user_id=slack_user_id,
+            linked=user is not None,
+            slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
         )
-    user, profile, workspace_admin, instructions = await asyncio.gather(
-        _user_for_login(login),
+    identity = replace(identity, github_login=login)
+    profile, workspace_admin, instructions = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),

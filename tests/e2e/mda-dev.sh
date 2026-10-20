@@ -10,6 +10,7 @@ E2E="$ROOT/tests/e2e"
 BUILD="$E2E/.mda-build"
 PORT="${E2E_MDA_PORT:-2025}"
 
+make -C "$ROOT" --no-print-directory mda-cli
 (cd "$ROOT/mda" && uv run --locked mda build --out "$BUILD")
 
 # The generated config, serving mda_entrypoint.py instead of the generated entry.
