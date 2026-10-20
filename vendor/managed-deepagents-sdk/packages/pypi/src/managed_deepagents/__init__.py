@@ -89,7 +89,14 @@ from managed_deepagents.run_context import (
     PromptResponse,
     SlackPromptResponse,
 )
-from managed_deepagents.sandbox import SandboxDefinition, basic, bearer
+from managed_deepagents.sandbox import (
+    SandboxDefinition,
+    SandboxReplacement,
+    basic,
+    bearer,
+    open_sandbox,
+    replace_sandbox,
+)
 from managed_deepagents.schedules import define_schedule
 
 __all__ = [
@@ -136,6 +143,7 @@ __all__ = [
     "RemoteMcpServerConfig",
     "RuntimeSchedules",
     "SandboxDefinition",
+    "SandboxReplacement",
     "ScheduleNotFoundError",
     "ScheduleOwner",
     "SchedulePage",
@@ -156,6 +164,8 @@ __all__ = [
     "define_memory",
     "define_sandbox",
     "define_schedule",
+    "open_sandbox",
+    "replace_sandbox",
     "schedules",
 ]
 

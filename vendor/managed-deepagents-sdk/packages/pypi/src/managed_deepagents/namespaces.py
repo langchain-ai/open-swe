@@ -93,7 +93,11 @@ class _LangSmithSandboxArgs(BaseModel):
     environment-variable name; MDA creates or updates the Host registry.
     Unmodeled keys pass through as LangSmith create options. MDA owns naming,
     lifecycle, ``setup.sh`` bake, and cleanup — the envelope rejects the keys
-    it owns. Reuse is always one box per thread.
+    it owns. Reuse is one box per thread and selection.
+
+    The ``_openswe_*`` arguments of :func:`define_sandbox` exist only for Open
+    SWE's vendored copy and are not MDA's API: see Open SWE's
+    vendor/mda-changes/ for why, and what MDA should offer instead.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -109,6 +113,10 @@ class _LangSmithSandboxArgs(BaseModel):
 
 def define_sandbox(
     *,
+    _openswe_per_thread: bool = False,
+    _openswe_thread_id: str | None = None,
+    _openswe_create_fields: dict[str, object] | None = None,
+    _openswe_no_manage_proxy: bool = False,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
     default_timeout: int | None = None,
@@ -133,6 +141,19 @@ def define_sandbox(
         }
     )
     dumped = parsed.model_dump(exclude_none=True)
+    # Open SWE only; pydantic would treat underscored fields as private, so they skip the model.
+    dumped.update(
+        {
+            key: value
+            for key, value in {
+                "_openswe_per_thread": _openswe_per_thread or None,
+                "_openswe_thread_id": _openswe_thread_id,
+                "_openswe_create_fields": _openswe_create_fields,
+                "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
+            }.items()
+            if value is not None
+        }
+    )
     # Pydantic serializes helper dataclasses; the unresolved template must retain them.
     if proxy_config is not None:
         dumped["proxy_config"] = proxy_config

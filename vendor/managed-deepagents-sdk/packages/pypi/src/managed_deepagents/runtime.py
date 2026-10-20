@@ -19,11 +19,13 @@ import os
 import posixpath
 import re
 import secrets
+import socket
 import threading
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from functools import partial
 from http import HTTPStatus
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast
 from urllib.parse import urlsplit
 
@@ -158,7 +160,7 @@ if TYPE_CHECKING:
     from managed_deepagents.identity import (
         IdentityDefinitionLike,
     )
-    from managed_deepagents.sandbox import SandboxDefinition
+    from managed_deepagents.sandbox import SandboxDefinition, SandboxReplacement
 
 
 class ManagedRunConfig(RunnableConfig, total=False):
@@ -412,6 +414,8 @@ def _sandbox_create_kwargs(
     selection_fingerprint: str | None = None,
 ) -> dict[str, object]:
     """Options for ``create_sandbox``."""
+    from managed_deepagents.sandbox import SandboxDefinition  # noqa: PLC0415
+
     create_kwargs = {
         key: value
         for key, value in sandbox.options.items()
@@ -422,6 +426,7 @@ def _sandbox_create_kwargs(
             "default_timeout",
             "template_name",
             *_BAKE_BASE_OPTION_KEYS,
+            *SandboxDefinition.RESOLUTION_OPTION_KEYS,
         }
     }
     from managed_deepagents._sandbox_proxy import static_sandbox_proxy_config  # noqa: PLC0415
@@ -1595,7 +1600,9 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if resolved:
             return str(resolved)
         try:
-            scope = _thread_scope_key(self._config(), self._source.selection_fingerprint)
+            scope = _sandbox_scope_key(
+                self._source.sandbox, self._config(), self._source.selection_fingerprint
+            )
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
             return "pending:sandbox"
@@ -1724,14 +1731,39 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         except TypeError:
             return await self._acall(lambda backend: backend.aexecute(command), execute=True)
 
+    async def aopen(self) -> str:
+        """Adopt or create this run's box now, as its first use would, and return its name."""
+        return (await self._abackend()).id
+
+    async def areplace(self, sandbox: SandboxDefinition | None = None) -> SandboxReplacement:
+        """Replace this run's box with a fresh one under its name, from ``sandbox``'s options."""
+        source = self._source
+        await self._abackend()
+        backend, replacement = await asyncio.to_thread(
+            _replace_managed_sandbox,
+            source.sandbox,
+            sandbox if sandbox is not None else source.sandbox,
+            self._config(),
+            source.connectors,
+            source.identity,
+            source.selection_fingerprint,
+        )
+        source.proxy_config_sync.invalidate(replacement.new_name)
+        self._resolved_backend = backend
+        return replacement
+
     def _config(self) -> ManagedRunConfig | None:
         return _effective_sandbox_run_config(
             self._source.run_config, bound_configurable=self._bound_configurable
         )
 
     async def _sync_sandbox_proxy_config(self) -> None:
+        from managed_deepagents.sandbox import manages_proxy  # noqa: PLC0415
+
+        if not manages_proxy(self._source.sandbox.options):
+            return
         config = self._config()
-        key = _thread_scope_key(config, self._source.selection_fingerprint)
+        key = _sandbox_scope_key(self._source.sandbox, config, self._source.selection_fingerprint)
         await self._source.proxy_config_sync.sync(
             self._source.sandbox,
             _peek_managed_host_name(key),
@@ -1773,7 +1805,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         source = self._source
         config = self._config()
         previous_name = _peek_managed_host_name(
-            _thread_scope_key(config, source.selection_fingerprint)
+            _sandbox_scope_key(source.sandbox, config, source.selection_fingerprint)
         )
         try:
             recovered = _recover_managed_sandbox(
@@ -1912,7 +1944,7 @@ def _resolve_managed_sandbox(
     CLI wiring can refresh without re-cloning. Provisioning (``setup.sh``)
     happens at deploy bake, not here.
     """
-    key = _thread_scope_key(config, selection_fingerprint)
+    key = _sandbox_scope_key(sandbox, config, selection_fingerprint)
     thread_key = _thread_sync_key(config)
     has_sandbox = has_sandbox_connectors(connectors)
 
@@ -1983,7 +2015,7 @@ def _recover_managed_sandbox(
 ) -> SandboxBackendProtocol:
     from langsmith.sandbox import ResourceNotFoundError  # noqa: PLC0415
 
-    key = _thread_scope_key(config, selection_fingerprint)
+    key = _sandbox_scope_key(sandbox, config, selection_fingerprint)
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
@@ -2014,6 +2046,67 @@ def _recover_managed_sandbox(
         with _managed_sandbox_lock:
             _managed_sandboxes[key] = replacement
         return backend
+
+
+def _replace_managed_sandbox(
+    sandbox: SandboxDefinition,
+    replacement: SandboxDefinition,
+    config: ManagedRunConfig | None,
+    connectors: list[Connector] | None = None,
+    identity: IdentityDefinitionLike | None = None,
+    selection_fingerprint: str | None = None,
+) -> tuple[SandboxBackendProtocol, SandboxReplacement]:
+    """Create a fresh box under the thread's box name; keep the old one, stopped and renamed.
+
+    Renaming frees the name for the fresh box, while the old box stays until its
+    lifecycle deletes it, under a name that keeps the deployment prefix.
+    """
+    from managed_deepagents.sandbox import SandboxReplacement  # noqa: PLC0415
+
+    key = _sandbox_scope_key(sandbox, config, selection_fingerprint)
+    with _sandbox_key_lock(key):
+        with _managed_sandbox_lock:
+            entry = _managed_sandboxes.get(key)
+        if entry is None or entry.host_name is None:
+            raise RuntimeError("This run's sandbox has no name to replace it under")
+        name = entry.host_name
+        client = _sandbox_client_for(replacement)
+        suffix = f"-old-{secrets.token_hex(2)}"
+        retired = f"{name[: _MAX_SANDBOX_NAME_LENGTH - len(suffix)]}{suffix}"
+        _await_if_needed(client.update_sandbox(name, new_name=retired))
+        stop_error: str | None = None
+        try:
+            _await_if_needed(client.stop_sandbox(retired))
+        except Exception as error:  # noqa: BLE001 - the fresh box stands either way; report it
+            stop_error = str(error) or type(error).__name__
+        backend, host_name, sandbox_id = _create_langsmith_sandbox(
+            replacement,
+            config=config,
+            connectors=connectors,
+            identity=identity,
+            scope_key=key,
+            selection_fingerprint=_sandbox_selection_fingerprint(replacement),
+            recovery_name=name,
+        )
+        fresh = _ManagedSandboxEntry(backend, host_name=host_name, sandbox_id=sandbox_id)
+        fresh.synced_threads.add(_thread_sync_key(config))
+        with _managed_sandbox_lock:
+            _managed_sandboxes[key] = fresh
+    return backend, SandboxReplacement(
+        old_name=retired,
+        new_name=host_name or name,
+        old_stopped=stop_error is None,
+        stop_error=stop_error,
+    )
+
+
+def _managed_sandbox_of(backend: object) -> _LazyManagedSandboxBackend:
+    """The run's managed sandbox behind ``runtime.backend``."""
+    if isinstance(backend, CompositeBackend):
+        backend = backend.default
+    if not isinstance(backend, _LazyManagedSandboxBackend):
+        raise TypeError("This run has no managed sandbox")
+    return backend
 
 
 def _thread_sync_key(
@@ -2119,6 +2212,22 @@ def _canonical_sandbox_value(  # noqa: C901, PLR0911, PLR0912 - exhaustive type 
     raise TypeError("sandbox options contain an unsupported value")
 
 
+def _sandbox_scope_key(
+    sandbox: SandboxDefinition,
+    config: ManagedRunConfig | None,
+    selection_fingerprint: str | None = None,
+) -> str:
+    """The process-level reuse key: the owning thread's, and the selection's unless per thread."""
+    from managed_deepagents.sandbox import is_per_thread, owning_thread  # noqa: PLC0415
+
+    thread_id = owning_thread(sandbox.options)
+    scope_config: ManagedRunConfig | None = (
+        {"configurable": {"thread_id": thread_id}} if thread_id else config
+    )
+    fingerprint = None if is_per_thread(sandbox.options) else selection_fingerprint
+    return _thread_scope_key(scope_config, fingerprint)
+
+
 def _thread_scope_key(
     config: ManagedRunConfig | None,
     selection_fingerprint: str | None = None,
@@ -2157,9 +2266,22 @@ def _managed_deployment_name() -> str | None:
     when present. ``None`` under local ``mda dev``, where sandboxes stay unnamed
     and LangSmith generates a name.
     """
-    return _string_option(os.environ.get("LANGSMITH_DEPLOYMENT_NAME")) or _string_option(
-        os.environ.get("MDA_DEPLOYMENT_NAME")
+    return (
+        _string_option(os.environ.get("LANGSMITH_DEPLOYMENT_NAME"))
+        or _string_option(os.environ.get("MDA_DEPLOYMENT_NAME"))
+        or _local_dev_deployment_name()
     )
+
+
+def _local_dev_deployment_name() -> str | None:
+    """A stable name for ``mda dev`` boxes, so a restarted dev server finds its threads' boxes.
+
+    Unique per machine and project directory, so two projects never share a box.
+    """
+    if os.environ.get("MDA_LOCAL_DEV") != "1":
+        return None
+    machine = f"{socket.gethostname()}\0{Path.cwd()}"
+    return f"mda-dev-{hashlib.sha256(machine.encode()).hexdigest()[:8]}"
 
 
 def _managed_sandbox_name(deployment: str, scope_key: str) -> str:
@@ -2252,6 +2374,28 @@ def _managed_sandbox_lookup_names(
         )
     )
     return list(dict.fromkeys(names))
+
+
+def _send_create_fields(client: LangSmithSandboxClient, fields: Mapping[str, object]) -> None:
+    """Add ``fields`` to every create request ``client`` sends.
+
+    The SDK's ``create_sandbox`` takes only the fields it models, so the rest are
+    merged into the request body on its transport.
+    """
+    if not fields:
+        return
+    http = getattr(client, "_http", None)
+    post = getattr(http, "post", None)
+    if http is None or not callable(post):
+        raise RuntimeError("This langsmith SDK cannot send sandbox _openswe_create_fields")
+
+    def post_with_fields(url: object, *args: object, **kwargs: object) -> object:
+        payload = kwargs.get("json")
+        if str(url).endswith("/boxes") and isinstance(payload, dict):
+            kwargs["json"] = {**fields, **payload}
+        return post(url, *args, **kwargs)
+
+    http.post = post_with_fields
 
 
 def _managed_sandbox_fallback_name(deployment: str, scope_key: str) -> str:
@@ -2410,14 +2554,25 @@ def _create_langsmith_sandbox(
     existing_sandbox: Sandbox | None = None,
 ) -> tuple[SandboxBackendProtocol, str | None, str | None]:
     """Build a LangSmith sandbox, optionally from the baked recipe, and wrap it."""
+    from managed_deepagents.sandbox import (  # noqa: PLC0415
+        declared_create_fields,
+        is_per_thread,
+        owning_thread,
+    )
+
     create_kwargs = _sandbox_create_kwargs(sandbox, selection_fingerprint)
     client = _sandbox_client_for(sandbox)
+    _send_create_fields(client, declared_create_fields(sandbox.options))
     deployment = _managed_deployment_name()
-    lookup_names = (
-        _managed_sandbox_lookup_names(deployment, scope_key, sandbox, config, selection_fingerprint)
-        if deployment
-        else []
-    )
+    if not deployment:
+        lookup_names = []
+    elif is_per_thread(sandbox.options) or owning_thread(sandbox.options):
+        # Names from before these options never named a box kept this way.
+        lookup_names = [_managed_sandbox_name(deployment, scope_key)]
+    else:
+        lookup_names = _managed_sandbox_lookup_names(
+            deployment, scope_key, sandbox, config, selection_fingerprint
+        )
     sandbox_name = recovery_name or (lookup_names[0] if lookup_names else None)
     fallback_name: Callable[[], str] | None = None
     if deployment:

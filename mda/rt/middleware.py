@@ -225,9 +225,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     state_schema = RunState
 
-    def __init__(self, backend: OpenSweBackend, invocation_id: str | None) -> None:
+    def __init__(
+        self,
+        backend: OpenSweBackend,
+        invocation_id: str | None,
+        open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+    ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
+        # Opens the thread's box before preparing, so the backend binds the thread to it.
+        self._open_sandbox = open_sandbox
 
     def _invocation(self) -> str:
         if self._invocation_id is not None:
@@ -235,11 +242,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return _RunConfigurable.model_validate(get_config().get("configurable", {})).thread_id
 
     @hook_config(can_jump_to=["end"])
-    async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+    async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
             return {"open_swe_backend_failure": None}
-        update = await self._phase("prepare", state)
+        sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
+        update = await self._phase("prepare", state, sandbox_id=sandbox_id)
         if not update.get("open_swe_backend_failure"):
             update.update(open_swe_prepared_for=invocation, open_swe_backend_failure=None)
         return update
@@ -248,9 +256,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         return await self._phase("before_model", state)
 
-    async def _phase(self, hook: Hook, state: RunState) -> dict[str, object]:
+    async def _phase(self, hook: Hook, state: RunState, **extra: JsonValue) -> dict[str, object]:
         try:
-            reply = await self._backend.phase(hook, run_body(run_id(), state))
+            reply = await self._backend.phase(hook, run_body(run_id(), state, **extra))
         except BackendUnavailableError:
             logger.warning(
                 "The backend interrupted a run phase", extra={"hook": hook}, exc_info=True
