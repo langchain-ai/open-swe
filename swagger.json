@@ -4452,11 +4452,6 @@
             ],
             "title": "Pr Review Links"
           },
-          "recent_thread_context_enabled": {
-            "default": false,
-            "title": "Recent Thread Context Enabled",
-            "type": "boolean"
-          },
           "review_draft_prs": {
             "anyOf": [
               {

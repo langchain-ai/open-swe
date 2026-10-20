@@ -40,11 +40,6 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
-          field="recent_thread_context_enabled"
-          label="Include recent work"
-          description="Give runs a filtered digest of your recent threads."
-        />
-        <ProfileSwitchRow
           field="experimental_task_coordination"
           label="Asynchronous task coordination (experimental)"
           description="Let your agent delegate to workers that run independently. Turning this off prevents new workers; existing workers can finish and remain available to message or cancel."
