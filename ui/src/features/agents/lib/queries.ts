@@ -708,6 +708,8 @@ export function useSidebarActiveThread({
       sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
     retry: false,
   })
+  // An open worker is already listed under its coordinator; listing it again on its own duplicates it.
+  if (loaded && loaded.id !== activeThreadId) return loaded
   return detail ?? loaded ?? query.data
 }
 
