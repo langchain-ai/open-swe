@@ -11,3 +11,5 @@ Only the SDK's `main` is vendored, and `UPSTREAM` records the exact commit the t
 
 - `uv run scripts/vendor.py` updates to the head of upstream `main`; `uv run scripts/vendor.py <sha>` updates to that commit, and refuses one that is not on `main`. Files we left alone take upstream's new version. Into files we changed, it three-way merges upstream's changes (`git merge-file`, base: the recorded commit), and stops with conflict markers where both sides changed the same lines. Then it records the commit in `UPSTREAM` and relocks `mda/`.
 - `uv run scripts/vendor.py --diff` prints our changes: the tree against `UPSTREAM`'s commit. Once upstream has one of them, the next update drops it from that list.
+
+Every change we make there has a dated note in [`mda-changes/`](mda-changes/README.md): what changed, why Open SWE needs it, and what MDA needs before we can drop it.
