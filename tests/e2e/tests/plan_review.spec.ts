@@ -169,11 +169,7 @@ test.describe("HTML artifacts", () => {
         selection?.addRange(range);
         element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
       });
-    const clearSelection = () =>
-      ownerArtifact
-        .contentFrame()
-        .locator("body")
-        .click({ position: { x: 2, y: 2 } });
+    const clearSelection = () => verificationHeading.click();
     await selectHeading();
     await expect(owner.getByTestId("comment-composer")).toBeVisible();
     await clearSelection();
