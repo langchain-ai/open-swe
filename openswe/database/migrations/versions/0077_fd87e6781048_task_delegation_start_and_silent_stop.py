@@ -18,8 +18,9 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE task_delegation
-            ADD COLUMN created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            ADD COLUMN silenced boolean NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            ADD COLUMN IF NOT EXISTS silenced boolean NOT NULL DEFAULT false,
+            DROP CONSTRAINT IF EXISTS task_delegation_silenced_cancelled,
             ADD CONSTRAINT task_delegation_silenced_cancelled CHECK (NOT silenced OR cancelled)
         """
     )
