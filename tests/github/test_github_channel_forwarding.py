@@ -52,7 +52,7 @@ async def _deliver(event_type: str, payload: dict[str, Any]) -> tuple[httpx.Resp
 
 @pytest.fixture
 def intake(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
-    """Open SWE's own issue and PR dispatch, and the forward to MDA, as stand-ins."""
+    """Open SWE's own PR dispatch, and the forward to MDA, as stand-ins."""
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", WEBHOOK_SECRET)
     monkeypatch.setattr(github_routes, "repo_is_routable", AsyncMock(return_value=True))
     monkeypatch.setattr(
@@ -60,46 +60,20 @@ def intake(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     )
     monkeypatch.setattr(github_routes, "_launch_automations", AsyncMock())
     register_github_logins(monkeypatch, "ada")
-    mocks = {
-        "issue": AsyncMock(),
-        "pr_comment": AsyncMock(),
-        "forward": AsyncMock(),
-    }
-    monkeypatch.setattr(github_webhooks, "process_github_issue", mocks["issue"])
+    mocks = {"pr_comment": AsyncMock(), "forward": AsyncMock()}
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", mocks["pr_comment"])
     monkeypatch.setattr(forwarding, "forward_to_mda_channel", mocks["forward"])
     return mocks
 
 
-@pytest.mark.parametrize("flag", [None, "", "acme/web"])
-async def test_without_the_flag_open_swe_starts_the_issue_run(
-    monkeypatch: pytest.MonkeyPatch, intake: dict[str, AsyncMock], flag: str | None
-) -> None:
-    if flag is None:
-        monkeypatch.delenv("GITHUB_ISSUES_VIA_MDA_CHANNEL", raising=False)
-    else:
-        monkeypatch.setenv("GITHUB_ISSUES_VIA_MDA_CHANNEL", flag)
-
-    response, _ = await _deliver(
-        "issues", {"action": "opened", "issue": _issue(), "repository": REPO, "sender": {}}
-    )
-
-    assert response.json()["message"] == "Processing GitHub issue event"
-    intake["issue"].assert_awaited_once()
-    intake["forward"].assert_not_awaited()
-
-
-@pytest.mark.parametrize("flag", ["*", "acme/api", "other/repo, ACME/API"])
 async def test_an_issue_mention_goes_to_mda_exactly_as_github_sent_it(
-    monkeypatch: pytest.MonkeyPatch, intake: dict[str, AsyncMock], flag: str
+    intake: dict[str, AsyncMock],
 ) -> None:
-    monkeypatch.setenv("GITHUB_ISSUES_VIA_MDA_CHANNEL", flag)
     payload = {"action": "opened", "issue": _issue(), "repository": REPO, "sender": {}}
 
     response, body = await _deliver("issues", payload)
 
-    assert response.json()["message"] == "Forwarded GitHub issue event to MDA"
-    intake["issue"].assert_not_awaited()
+    assert response.json()["message"] == "Processing GitHub issue event"
     forwarded_body, headers = intake["forward"].await_args.args
     assert forwarded_body == body
     assert headers == {
@@ -113,10 +87,7 @@ async def test_an_issue_mention_goes_to_mda_exactly_as_github_sent_it(
     github_routes._launch_automations.assert_awaited_once()  # type: ignore[attr-defined]
 
 
-async def test_an_issue_comment_mention_goes_to_mda(
-    monkeypatch: pytest.MonkeyPatch, intake: dict[str, AsyncMock]
-) -> None:
-    monkeypatch.setenv("GITHUB_ISSUES_VIA_MDA_CHANNEL", "*")
+async def test_an_issue_comment_mention_goes_to_mda(intake: dict[str, AsyncMock]) -> None:
     payload = {
         "action": "created",
         "issue": _issue(body="no tag"),
@@ -127,15 +98,11 @@ async def test_an_issue_comment_mention_goes_to_mda(
 
     response, _ = await _deliver("issue_comment", payload)
 
-    assert response.json()["message"] == "Forwarded GitHub issue comment to MDA"
+    assert response.json()["message"] == "Processing GitHub issue comment event"
     intake["forward"].assert_awaited_once()
-    intake["issue"].assert_not_awaited()
 
 
-async def test_pull_request_comments_stay_on_open_swe(
-    monkeypatch: pytest.MonkeyPatch, intake: dict[str, AsyncMock]
-) -> None:
-    monkeypatch.setenv("GITHUB_ISSUES_VIA_MDA_CHANNEL", "*")
+async def test_pull_request_comments_stay_on_open_swe(intake: dict[str, AsyncMock]) -> None:
     payload = {
         "action": "created",
         "issue": _issue(pull_request={"url": "https://api.github.com/pulls/7"}),
@@ -150,11 +117,7 @@ async def test_pull_request_comments_stay_on_open_swe(
     intake["forward"].assert_not_awaited()
 
 
-async def test_issues_open_swe_ignores_are_not_forwarded(
-    monkeypatch: pytest.MonkeyPatch, intake: dict[str, AsyncMock]
-) -> None:
-    monkeypatch.setenv("GITHUB_ISSUES_VIA_MDA_CHANNEL", "*")
-
+async def test_issues_open_swe_ignores_are_not_forwarded(intake: dict[str, AsyncMock]) -> None:
     response, _ = await _deliver(
         "issues",
         {"action": "opened", "issue": _issue(body="no tag"), "repository": REPO, "sender": {}},

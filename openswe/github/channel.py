@@ -10,19 +10,17 @@ and the signed run token the run calls back with.
 """
 
 import logging
-from collections.abc import Sequence
 from typing import Any, Final, Literal, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from managed_deepagents import EndpointAnswer, EndpointThread, GitHubEndpointEvent
+from managed_deepagents import EndpointAnswer, EndpointEvent, EndpointThread
 from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue
 from typing_extensions import TypedDict
 
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
-from openswe.github.comments import OPEN_SWE_TAGS
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.threads.router import adopt_channel_run
 from openswe.threads.runtimes import RUNTIMES
@@ -49,20 +47,18 @@ router = APIRouter(prefix="/github/channel", dependencies=[Depends(require_mda_c
 
 
 class GitHubChannelCall(TypedDict):
-    """What MDA's GitHub channel POSTs: the event, the handles it mentions, and its thread.
+    """What MDA's GitHub channel POSTs: the event and its thread.
 
     MDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a
     generic TypedDict's type arguments to a subclass, and the API schema gets a
     name of its own.
     """
 
-    event: GitHubEndpointEvent[str, dict[str, Any]]
+    event: EndpointEvent[str, dict[str, Any]]
     thread: EndpointThread
 
 
-async def trigger_rejection(
-    payload: dict[str, Any], event_type: str, mentions: Sequence[str]
-) -> str | None:
+async def trigger_rejection(payload: dict[str, Any], event_type: str) -> str | None:
     """Why an issue event starts no run, as ``/webhooks/github`` decides it; None when it does."""
     issue = payload.get("issue")
     if not isinstance(issue, dict):
@@ -84,14 +80,15 @@ async def trigger_rejection(
         changes = payload.get("changes") or {}
         if payload.get("action") == "edited" and not any(f in changes for f in ("body", "title")):
             return "Issue edit did not change title or body"
+        text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
     else:
         if payload.get("action") not in common.SUPPORTED_GH_COMMENT_ACTIONS["issue_comment"]:
             return "Unsupported GitHub issue_comment action"
         sender_login = str((payload.get("sender") or {}).get("login") or "")
         if not await service.is_accepted_commenter(sender_login):
             return "Sender is not a registered Open SWE user"
-    # MDA lists the handles the event's own text mentions, as GitHub links them.
-    if not any(tag in mentions for tag in OPEN_SWE_TAGS):
+        text = str((payload.get("comment") or {}).get("body") or "")
+    if not common.mentions_open_swe(text):
         return f"Does not mention {common.describe_open_swe_tags()}"
     gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
     if gate_rejection is not None:
@@ -150,7 +147,7 @@ async def github_channel_event(
     event_type, _, action = key.partition(".")
     if payload.get("action") != action:
         raise HTTPException(status_code=422, detail="The payload's action is not the event's")
-    reason = await trigger_rejection(payload, event_type, event["mentions"])
+    reason = await trigger_rejection(payload, event_type)
     if reason is not None:
         logger.info(
             "MDA's GitHub channel event starts no run",

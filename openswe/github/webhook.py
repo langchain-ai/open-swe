@@ -41,7 +41,6 @@ from openswe.run_config import Repo
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.thread_ids import (
-    github_issue_thread_id,
     pr_comment_thread_id,
     reviewer_thread_id,
     thread_id_from_branch,
@@ -1383,37 +1382,17 @@ class GitHubIssueRun:
     configurable: dict[str, Any]
 
 
-async def process_github_issue(payload: dict[str, Any], event_type: str) -> None:
-    """Process a GitHub issue or issue comment that tagged @open-swe."""
-    run = await prepare_github_issue_run(payload, event_type)
-    if run is None:
-        return
-    common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", run.thread_id)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    await common.dispatch_agent_run(
-        run.thread_id,
-        None,
-        run.configurable,
-        source="github_issue",
-        thread_title=None,
-        input=run.input,
-        metadata=common.AGENT_VERSION_METADATA,
-        client=langgraph_client,
-    )
-    common.logger.info("LangGraph run dispatched for thread %s from GitHub issue", run.thread_id)
-
-
 async def prepare_github_issue_run(
     payload: dict[str, Any],
     event_type: str,
-    thread_id: str | None = None,
+    thread_id: str,
     adopt: Callable[[str], Awaitable[None]] | None = None,
 ) -> GitHubIssueRun | None:
     """Prepare the run an issue or issue comment that tagged @open-swe starts, or None.
 
-    ``thread_id`` is the conversation's thread when MDA's GitHub channel owns it;
-    Open SWE's own intake uses the issue's thread. ``adopt`` indexes that thread as
-    the channel's before its metadata is written, so the write doesn't create it.
+    ``thread_id`` is the issue's thread, which MDA's GitHub channel owns. ``adopt``
+    indexes it as the channel's before its metadata is written, so the write
+    doesn't create it.
     """
     issue = payload.get("issue", {})
     repo = payload.get("repository", {})
@@ -1448,7 +1427,6 @@ async def prepare_github_issue_run(
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return None
 
-    thread_id = thread_id or github_issue_thread_id(issue_id)
     existing_thread = await common.thread_exists(thread_id)
     github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()

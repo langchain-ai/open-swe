@@ -997,7 +997,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Input"
                 },
                 "type": "object"
               },
@@ -1801,17 +1801,17 @@
         "properties": {
           "context": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
             },
             "title": "Context",
             "type": "object"
           },
           "input": {
-            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
           },
           "metadata": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
             },
             "title": "Metadata",
             "type": "object"
@@ -1827,6 +1827,31 @@
         "title": "EndpointAnswer",
         "type": "object"
       },
+      "EndpointEvent_str_dict_str__Any__": {
+        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
+        "properties": {
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "EndpointEvent",
+        "type": "object"
+      },
       "EndpointEvent_str_dict_str__JsonValue__": {
         "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
         "properties": {
@@ -1840,7 +1865,7 @@
           },
           "payload": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Input"
             },
             "title": "Payload",
             "type": "object"
@@ -2213,10 +2238,10 @@
         "type": "object"
       },
       "GitHubChannelCall": {
-        "description": "What MDA's GitHub channel POSTs: the event, the handles it mentions, and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
+        "description": "What MDA's GitHub channel POSTs: the event and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
         "properties": {
           "event": {
-            "$ref": "#/components/schemas/GitHubEndpointEvent_str_dict_str__Any__"
+            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__Any__"
           },
           "thread": {
             "$ref": "#/components/schemas/EndpointThread"
@@ -2227,37 +2252,6 @@
           "thread"
         ],
         "title": "GitHubChannelCall",
-        "type": "object"
-      },
-      "GitHubEndpointEvent_str_dict_str__Any__": {
-        "description": "The event a GitHub channel sends its endpoint, with the handles it mentions.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "mentions": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Mentions",
-            "type": "array"
-          },
-          "payload": {
-            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload",
-          "mentions"
-        ],
-        "title": "GitHubEndpointEvent",
         "type": "object"
       },
       "GitHubTrigger": {
@@ -2600,6 +2594,7 @@
         ],
         "type": "string"
       },
+      "JsonValue-Input": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -5492,7 +5487,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Input"
                 },
                 "type": "object"
               },
@@ -5517,7 +5512,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Input"
                 },
                 "type": "object"
               },
@@ -7330,7 +7325,7 @@
       },
       "ToolArguments": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          "$ref": "#/components/schemas/JsonValue-Input"
         },
         "title": "ToolArguments",
         "type": "object"
@@ -8205,7 +8200,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Input"
             },
             "title": "Create Params",
             "type": "object"
@@ -8784,7 +8779,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Input"
                 },
                 "type": "object"
               },
@@ -8942,7 +8937,7 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
-      "managed_deepagents___channels__types__JsonValue-Input": {
+      "managed_deepagents___channels__types__JsonValue": {
         "anyOf": [
           {
             "type": "boolean"
@@ -8958,44 +8953,13 @@
           },
           {
             "items": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
             },
             "type": "array"
           },
           {
             "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Input"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "managed_deepagents___channels__types__JsonValue-Output": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          },
-          {
-            "items": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
-            },
-            "type": "array"
-          },
-          {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue-Output"
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
             },
             "type": "object"
           },

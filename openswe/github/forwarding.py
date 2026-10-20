@@ -1,11 +1,11 @@
 """Hand @openswe issue mentions to the MDA deployment's GitHub channel.
 
 Open SWE's GitHub App keeps its one webhook URL here, at ``/webhooks/github``:
-reviews, pull request comments, CI and automations still start from it. For the
-repositories ``GITHUB_ISSUES_VIA_MDA_CHANNEL`` names, the issue events that would
-start an agent run go to MDA's GitHub channel instead, exactly as GitHub sent
-them, so the channel verifies GitHub's signature with the same webhook secret
-(``mda deploy`` keeps the brought App's webhook here; MDA_GITHUB_WEBHOOK_ELSEWHERE).
+reviews, pull request comments, CI and automations still start from it. The issue
+events that would start an agent run go to MDA's GitHub channel instead, exactly
+as GitHub sent them, so the channel verifies GitHub's signature with the same
+webhook secret (``mda deploy`` keeps the brought App's webhook here;
+MDA_GITHUB_WEBHOOK_ELSEWHERE).
 """
 
 import asyncio
@@ -15,7 +15,6 @@ from typing import Final
 
 import httpx2
 
-from openswe.config import ENV
 from openswe.remote_runtime.client import mda_runtime_url
 
 logger = logging.getLogger(__name__)
@@ -31,16 +30,6 @@ CHANNEL_EVENTS_PATH: Final = "/channels/github/events"
 _ATTEMPTS: Final = 4
 _TIMEOUT_SECONDS: Final = 10.0
 _FIRST_BACKOFF_SECONDS: Final = 1.0
-
-
-def forwards_issues(repo_config: Mapping[str, str]) -> bool:
-    """Whether the repository's issue mentions go to MDA's GitHub channel."""
-    raw = ENV.GITHUB_ISSUES_VIA_MDA_CHANNEL.optional() or ""
-    repositories = {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
-    if "*" in repositories:
-        return True
-    owner, name = repo_config.get("owner", ""), repo_config.get("name", "")
-    return bool(owner and name) and f"{owner}/{name}".lower() in repositories
 
 
 def forwarded_headers(headers: Mapping[str, str]) -> dict[str, str]:

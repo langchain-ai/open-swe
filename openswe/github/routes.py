@@ -17,22 +17,15 @@ router = APIRouter()
 
 
 def _start_issue_run(
-    request: common.Request,
-    body: bytes,
-    background_tasks: common.BackgroundTasks,
-    payload: dict[str, object],
-    event_type: str,
-    repo_config: dict[str, str],
-) -> bool:
-    """Start the agent run an issue mention asks for; True when MDA's GitHub channel does."""
-    if forwarding.forwards_issues(repo_config):
-        # The channel owns the issue's conversation; it asks /github/channel/events what to start.
-        background_tasks.add_task(
-            forwarding.forward_to_mda_channel, body, forwarding.forwarded_headers(request.headers)
-        )
-        return True
-    background_tasks.add_task(service.process_github_issue, payload, event_type)
-    return False
+    request: common.Request, body: bytes, background_tasks: common.BackgroundTasks
+) -> None:
+    """Hand an issue mention to MDA's GitHub channel, which owns the issue's conversation.
+
+    The channel asks ``/github/channel/events`` what to start.
+    """
+    background_tasks.add_task(
+        forwarding.forward_to_mda_channel, body, forwarding.forwarded_headers(request.headers)
+    )
 
 
 async def _launch_automations(
@@ -229,10 +222,7 @@ async def github_webhook(
             return gate_rejection
 
         common.logger.info("Accepted GitHub issue webhook, scheduling background task")
-        if _start_issue_run(
-            request, body, background_tasks, payload, event_type, webhook_repo_config
-        ):
-            return {"status": "accepted", "message": "Forwarded GitHub issue event to MDA"}
+        _start_issue_run(request, body, background_tasks)
         return {"status": "accepted", "message": "Processing GitHub issue event"}
 
     action = payload.get("action", "")
@@ -304,10 +294,7 @@ async def github_webhook(
         return {"status": "accepted", "message": f"Processing {event_type} event"}
 
     if is_issue_comment:
-        if _start_issue_run(
-            request, body, background_tasks, payload, event_type, webhook_repo_config
-        ):
-            return {"status": "accepted", "message": "Forwarded GitHub issue comment to MDA"}
+        _start_issue_run(request, body, background_tasks)
         return {"status": "accepted", "message": "Processing GitHub issue comment event"}
 
     common.logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)

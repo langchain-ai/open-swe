@@ -49,24 +49,13 @@ def _comment_payload(body: str = "@openswe try again", **issue: Any) -> dict[str
     return payload
 
 
-def _event(
-    event: str,
-    payload: dict[str, Any],
-    *,
-    mentions: tuple[str, ...] = ("@openswe",),
-    interrupted: bool = False,
-) -> dict[str, Any]:
-    """What MDA's channel POSTs its endpoint, with the handles it read in the event's text."""
+def _event(event: str, payload: dict[str, Any], *, interrupted: bool = False) -> dict[str, Any]:
+    """What MDA's channel POSTs its endpoint."""
     thread: dict[str, Any] = {"id": THREAD, "channel": {"name": "github"}}
     if interrupted:
         thread["interrupted"] = True
     return {
-        "event": {
-            "key": event,
-            "deliveryId": "delivery-1",
-            "payload": payload,
-            "mentions": list(mentions),
-        },
+        "event": {"key": event, "deliveryId": "delivery-1", "payload": payload},
         "thread": thread,
     }
 
@@ -188,21 +177,20 @@ async def test_a_comment_mention_on_an_issue_starts_a_run(prepared: AsyncMock) -
 
 
 @pytest.mark.parametrize(
-    ("event", "payload", "mentions"),
+    ("event", "payload"),
     [
         # Pull request conversations stay on Open SWE's own intake.
-        ("issue_comment.created", _comment_payload(pull_request={"url": "https://x"}), None),
-        ("issues.opened", _issue_payload(), ()),
+        ("issue_comment.created", _comment_payload(pull_request={"url": "https://x"})),
+        ("issues.opened", _issue_payload(issue={**_issue_payload()["issue"], "body": "no tag"})),
         # Another deployment's handle is not this one's.
-        ("issue_comment.created", _comment_payload(), ("@openswe-preview",)),
-        ("issues.edited", _issue_payload(action="edited", changes={"labels": {}}), None),
+        ("issue_comment.created", _comment_payload(body="@openswe-preview try again")),
+        ("issues.edited", _issue_payload(action="edited", changes={"labels": {}})),
     ],
 )
 async def test_events_open_swe_would_not_act_on_start_nothing(
-    prepared: AsyncMock, event: str, payload: dict[str, Any], mentions: tuple[str, ...] | None
+    prepared: AsyncMock, event: str, payload: dict[str, Any]
 ) -> None:
-    sent = _event(event, payload) if mentions is None else _event(event, payload, mentions=mentions)
-    response = await _post(sent)
+    response = await _post(_event(event, payload))
 
     assert response.json() is None
     prepared.assert_not_awaited()
@@ -252,14 +240,6 @@ async def test_a_run_the_issue_intake_declines_starts_nothing(prepared: AsyncMoc
 
     assert response.json() is None
     channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]
-
-
-async def test_a_call_without_mentions_is_refused(prepared: AsyncMock) -> None:
-    call = _event("issues.opened", _issue_payload())
-    del call["event"]["mentions"]
-
-    assert (await _post(call)).status_code == 422
-    prepared.assert_not_awaited()
 
 
 async def test_the_payload_must_be_the_events(prepared: AsyncMock) -> None:
