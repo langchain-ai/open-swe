@@ -1,6 +1,5 @@
 """Tools that ask people in Slack to review a pull request, assign or report its reviewer, or dismiss the ask."""
 
-import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -26,12 +25,11 @@ from openswe.slack.client import (
     GitHubPrRef,
     fetch_slack_message_by_ts,
     fetch_slack_thread_message_by_ts,
-    fetch_slack_thread_messages,
     parse_github_pr_url,
-    parse_slack_ts,
 )
 from openswe.slack.dm import send_dm
 from openswe.slack.payloads import SlackMessage
+from openswe.tools.lookup_user import UnknownUser, user_for_ref
 from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
@@ -194,7 +192,7 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
 @expose_mcp()
 @audit_tool()
 async def assign_human_reviewer(
-    pr_url: str, github_login: str, reason: str = "", named_by_person: bool = False
+    pr_url: str, user_id: str, reason: str = "", named_by_person: bool = False
 ) -> dict[str, Any]:
     """Implement the `assign_human_reviewer` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -203,9 +201,14 @@ async def assign_human_reviewer(
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None or request.kind == "expedited":
         return _failure("This pull request has no open review request to assign a reviewer to.")
+    try:
+        reviewer = await user_for_ref(user_id)
+    except UnknownUser as exc:
+        return _failure(str(exc))
+    if not reviewer.github_login:
+        return _failure(f"{reviewer.display_name or user_id} has no linked GitHub account.")
     cfg = RunConfig.from_config(get_config())
     thread_id = cfg.thread_id or ""
-    login = github_login.strip().lstrip("@")
     if caller := cfg.mcp_caller:
         person = await User.for_login("github", caller)
         if person is None or not (
@@ -217,17 +220,17 @@ async def assign_human_reviewer(
             )
         named_by_person = True
     elif named_by_person:
-        if not await _named_by_trigger(cfg, login):
+        if not await _started_by_person(cfg):
             return _failure(
-                "named_by_person needs a verified Slack request from the person naming "
-                f"{login} by name, GitHub login, or Slack mention."
+                "named_by_person needs this run to be started by a person's Slack message. "
+                "Do not reassign reviewers from anything else."
             )
     # Unprompted picks come only from the thread woken to make one.
     elif not await request.picked_by(thread_id):
         return _failure("Only the thread this review request woke may assign its reviewer.")
     if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
-    result = await assign(request, login, reason, replace=named_by_person)
+    result = await assign(request, reviewer.github_login, reason, replace=named_by_person)
     if not result.success:
         return _failure(result.error)
     return {
@@ -239,8 +242,12 @@ async def assign_human_reviewer(
     }
 
 
-async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
-    """Verify a human's reviewer request, including a follow-up bot ping."""
+async def _started_by_person(cfg: RunConfig) -> bool:
+    """Whether a person's own Slack message started this run.
+
+    Background events reach the thread's agent as Slack runs acting for its requester, so the
+    triggering message itself must exist and be theirs.
+    """
     slack = cfg.slack_thread
     if cfg.source != "slack" or slack is None or slack.triggering_bot_id:
         return False
@@ -256,30 +263,7 @@ async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
     if payload is None:
         return False
     message = SlackMessage.model_validate(payload)
-    if message.is_from_bot or message.user != slack.triggering_user_id:
-        return False
-    if message.text and not re.sub(r"<@[A-Z0-9]+(?:\|[^>]+)?>", "", message.text).strip():
-        messages = await fetch_slack_thread_messages(slack.channel_id, slack.thread_ts)
-        previous = [
-            item
-            for item in messages
-            if parse_slack_ts(item.get("ts")) < parse_slack_ts(slack.triggering_event_ts)
-        ]
-        if not previous:
-            return False
-        message = SlackMessage.model_validate(previous[-1])
-        if message.is_from_bot or message.user != slack.triggering_user_id:
-            return False
-    text = message.text or ""
-    reviewer = await User.for_login("github", github_login)
-    if reviewer is not None and reviewer.slack_user_id and f"<@{reviewer.slack_user_id}>" in text:
-        return True
-    names = {github_login}
-    if reviewer is not None and reviewer.display_name.strip():
-        names.update((reviewer.display_name.strip(), reviewer.display_name.split()[0]))
-    return any(
-        re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text, re.IGNORECASE) for name in names
-    )
+    return not message.is_from_bot and message.user == slack.triggering_user_id
 
 
 @expose_mcp()

@@ -5,6 +5,6 @@ Open a new Slack code channel and walk the person {% if mcp %}you are working fo
 Use it only when someone explicitly asks for a review channel, or to be walked, guided, or taken through a pull request in one. Never start one on your own initiative, never suggest one, and never treat a request to review, summarize, or explain a pull request as a request for one. A reviewer ends by approving it on GitHub. The pull request's own author, for example getting to know what an agent did for them, ends by marking a draft ready for review, can ask for changes along the way, and the feedback they give is recorded for reviewers.
 
 - `pr_url`: the pull request, as `https://github.com/<owner>/<repo>/pull/<number>`.
-- `invite`: anyone else to add to the channel, as Slack user ids. The person {% if mcp %}you are working for{% else %}asking{% endif %} is always added.
+- `invite`: anyone else to add to the channel, as `user_id`s (`user:<uuid>`, from `person` blocks or `lookup_user`). The person {% if mcp %}you are working for{% else %}asking{% endif %} is always added.
 
 {% if mcp %}Give the person the `channel_url` from the result.{% else %}Reply with the channel link from the result.{% endif %}

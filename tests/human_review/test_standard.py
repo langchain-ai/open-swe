@@ -225,13 +225,9 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
     monkeypatch.setattr(
         tool,
         "fetch_slack_thread_message_by_ts",
-        AsyncMock(
-            return_value={
-                "user": "U_ADA",
-                "text": "assign @grace" if source == "named" else "who is reviewing?",
-            }
-        ),
+        AsyncMock(return_value=None if source == "forged" else {"user": "U_ADA", "text": "hi"}),
     )
+    monkeypatch.setattr(User, "for_ref", AsyncMock(return_value=reviewer))
     monkeypatch.setattr(tool, "_repository_refusal", AsyncMock(return_value=None))
     monkeypatch.setattr(
         User,
@@ -257,7 +253,7 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
 
     monkeypatch.setattr(HumanReviewRequest, "locked", locked)
     result = await tool.assign_human_reviewer(
-        pr.url, "grace", "owner", named_by_person=source in {"named", "forged"}
+        pr.url, reviewer.ref, "owner", named_by_person=source in {"named", "forged"}
     )
     assert result["success"] is (source in {"named", "mcp"})
     if source in {"named", "mcp"}:

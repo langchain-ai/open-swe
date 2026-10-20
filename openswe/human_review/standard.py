@@ -1212,8 +1212,14 @@ async def _wake_picker(
     suggestions: list[Suggestion],
 ) -> bool:
     pr = request.pull_request
+    user_ids: dict[str, str] = {}
+    for suggestion in suggestions:
+        if suggestion.pick is not None:
+            user = await User.for_login("github", suggestion.pick.login)
+            user_ids[suggestion.pick.login] = user.ref if user is not None else "see lookup_user"
     text = prompt(
         "runs/human-review-unclaimed",
+        user_ids=user_ids,
         pr_url=pr.url,
         minutes=await _assignment_minutes(request),
         author=pr.author,

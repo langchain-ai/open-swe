@@ -81,7 +81,8 @@ async def test_list_threads_intersects_participant_and_admin_filters(
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(admin=True)))
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
-    result = await threads_tool.list_threads(participant="other-user", admin_threads=True)
+    monkeypatch.setattr(threads_tool, "github_login_for_ref", AsyncMock(return_value="other-user"))
+    result = await threads_tool.list_threads(participant="user:other", admin_threads=True)
 
     assert result["success"] is True
     awaited = page.await_args

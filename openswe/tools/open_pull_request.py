@@ -38,6 +38,7 @@ from openswe.slack.code_channels import (
 )
 from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
+from openswe.tools.lookup_user import github_login_for_ref
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
@@ -1213,6 +1214,10 @@ async def open_pull_request(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
+    try:
+        author_login = await github_login_for_ref(author) if author.strip() else None
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
     return await _open_pull_request(
         owner=owner,
         repo=repo,
@@ -1223,7 +1228,7 @@ async def open_pull_request(
         draft=draft,
         resolves_thread=resolves_thread,
         retitle_thread=retitle_thread,
-        author=author or None,
+        author=author_login,
         state=state,
     )
 
