@@ -335,6 +335,33 @@ describe("followTask", () => {
     expect(cursors).toEqual(["run-1", "run-1", "run-2"])
   })
 
+  test("keeps the answer when a later run has nothing new to say", async () => {
+    const quiet = [
+      ...replay,
+      lifecycle("run-3", "running"),
+      resultCall({ stdout: "", exit_code: 0 }),
+      lifecycle("run-3", "completed"),
+    ]
+    const polls = [
+      activity(["run-2"], "done"),
+      activity(["run-3"], "done", true),
+      activity([], "done", true),
+    ]
+    const outcome = await followTask(
+      {
+        events: async () => sse(quiet),
+        activity: async () => polls.shift() ?? null,
+        stop: async () => undefined,
+      },
+      "run-1",
+      { sleep: noSleep }
+    )
+    expect(outcome.result).toEqual({
+      stdout: "worker done; tests fail",
+      exitCode: 1,
+    })
+  })
+
   test("ends at the run's own result on a backend without task workers", async () => {
     let polled = 0
     const outcome = await followTask(

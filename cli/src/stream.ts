@@ -106,6 +106,21 @@ export function lifecycleRunId(eventId: string | null): string | null {
   return runId && (parts[2] ?? "").startsWith("lc|") ? runId : null
 }
 
+/**
+ * The result the terminal should end with once `next` is reported after
+ * `previous`. An empty, successful result is the coordinator having nothing new
+ * to say, as on a run a worker's report woke, so it never replaces an answer.
+ */
+export function laterResult(
+  previous: CliResult | null,
+  next: CliResult | null
+): CliResult | null {
+  if (next === null) return previous
+  if (previous !== null && next.stdout === "" && next.exitCode === 0)
+    return previous
+  return next
+}
+
 export function parseCliResult(input: unknown): CliResult | null {
   const record = isRecord(input) ? input : null
   const stdout = stringAt(record, "stdout")
@@ -163,7 +178,7 @@ export class RunCollector {
       phase === "tool-started" &&
       stringAt(data, "tool_name") === RESULT_TOOL
     ) {
-      this.result = parseCliResult(data["input"]) ?? this.result
+      this.result = laterResult(this.result, parseCliResult(data["input"]))
     }
     return null
   }
@@ -287,7 +302,7 @@ export interface TaskFollowOptions extends FollowOptions {
  * Follows the coordinator from the run the CLI started until its thread
  * settles. Workers share the thread's sandbox, this machine, and each one's
  * report wakes the coordinator in a run of its own, so a result reported while
- * anything is left to run is not final: the last one reported is. Every run
+ * anything is left to run is not final: the last answer reported is. Every run
  * the coordinator starts is followed in turn, even one that ended between polls.
  */
 export async function followTask(
@@ -320,11 +335,11 @@ export async function followTask(
     if (next !== undefined) {
       followed = next
       outcome = await followRun(events, followed, options)
-      result = outcome.result ?? result
+      result = laterResult(result, outcome.result)
       continue
     }
     if (activity.settled) break
     await sleep(pollMs)
   }
-  return { ...outcome, result: outcome.result ?? result }
+  return { ...outcome, result }
 }
