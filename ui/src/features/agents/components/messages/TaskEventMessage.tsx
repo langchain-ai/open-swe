@@ -31,7 +31,7 @@ export function TaskEventMessage({
     <TaskMessageChip
       label={
         event.sender_label ??
-        `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${event.sender_thread_id.slice(0, 8)}`
+        `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${shortThreadId(event.sender_thread_id)}`
       }
       status={
         event.kind === "message" ? "Message" : COMPLETION_LABELS[event.status]
@@ -42,6 +42,11 @@ export function TaskEventMessage({
       timestamp={timestamp}
     />
   )
+}
+
+/** A thread id's random tail: thread ids are UUIDv7s, whose first characters are a timestamp shared by threads started together. */
+function shortThreadId(threadId: string): string {
+  return threadId.slice(-8)
 }
 
 const THREAD_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
@@ -86,7 +91,7 @@ export function WorkerLaunchMessage({ chunk }: { chunk: ToolExecutionChunk }) {
         : "Launch status unknown"
   return (
     <TaskMessageChip
-      label={threadId ? `Worker ${threadId.slice(0, 8)}` : "Worker"}
+      label={threadId ? `Worker ${shortThreadId(threadId)}` : "Worker"}
       status={status}
       threadId={threadId}
       content={

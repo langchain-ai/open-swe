@@ -96,7 +96,7 @@ describe("Messages", () => {
     ).toBe("/agents/86186b55-1999-52e2-bf4b-ca3de907043e")
     expect(
       screen
-        .getByRole("link", { name: "Open Worker 7db1bbf5 thread" })
+        .getByRole("link", { name: "Open Worker 2cfc31d4 thread" })
         .getAttribute("href")
     ).toBe("/agents/7db1bbf5-0623-5a35-a5a4-db372cfc31d4")
     expect(container.textContent).not.toContain("Can I change")
@@ -149,7 +149,7 @@ describe("Messages", () => {
     await router.load()
     const { container } = render(<RouterProvider router={router} />)
     const chip = screen.getByRole("button", {
-      name: "Worker 7db1bbf5 · Started",
+      name: "Worker 2cfc31d4 · Started",
     })
     const folds = screen.getAllByRole("button", { name: "Worked · 1 action" })
     expect(folds).toHaveLength(2)
@@ -164,7 +164,7 @@ describe("Messages", () => {
     ).toBeTruthy()
     expect(
       screen
-        .getByRole("link", { name: "Open Worker 7db1bbf5 thread" })
+        .getByRole("link", { name: "Open Worker 2cfc31d4 thread" })
         .getAttribute("href")
     ).toBe(`/agents/${workerId}`)
     expect(
