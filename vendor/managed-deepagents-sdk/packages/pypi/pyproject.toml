@@ -147,6 +147,8 @@ typing = [
     "langchain[mcp]>=1.4.6,<2",
     "fastmcp>=4.0.10,<5",
     "mcp>=2.2.0,<3",
+    # Injected into deployments that use the browser; matches browser.STAGEHAND_VERSION.
+    "stagehand==4.3.0",
 ]
 
 # Dead-code pass. ``ruff`` (F841/F401) catches unused variables and imports and
