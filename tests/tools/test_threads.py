@@ -495,3 +495,39 @@ async def test_manage_thread_rejects_plan_format_conversion(
 
     assert result == {"success": False, "error": "existing plan format is html"}
     update.assert_not_awaited()
+
+
+async def test_watch_thread_waits_for_new_messages_until_the_run_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked = {"id": "m1", "type": "human", "content": "Fix the race"}
+    working = {"id": "m2", "type": "ai", "content": "On it"}
+    fixed = {"id": "m3", "type": "ai", "content": "Fixed in #12"}
+    states = iter([[asked, working], [asked, working, fixed], [asked, working, fixed]])
+    statuses = iter(["running", "running", "running", "running", "finished"])
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get_state=AsyncMock(side_effect=lambda _id: {"values": {"messages": next(states)}})
+        )
+    )
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(side_effect=lambda *_args, **_kwargs: {"id": "t-1", "status": next(statuses)}),
+    )
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "_WATCH_POLL_SECONDS", 0)
+
+    first = await threads_tool.watch_thread("4d2f7a3e-1b8c-4c55-9a77-0b5e3f6a2c11", cursor="m2")
+    assert [m["text"] for m in first["messages"]] == ["Fixed in #12"]
+    assert first["cursor"] == "m3"
+    assert first["done"] is False
+
+    last = await threads_tool.watch_thread(
+        "4d2f7a3e-1b8c-4c55-9a77-0b5e3f6a2c11", cursor=first["cursor"]
+    )
+    assert last["messages"] == []
+    assert last["done"] is True
+    assert last["status"] == "finished"
+    assert last["cursor"] == "m3"

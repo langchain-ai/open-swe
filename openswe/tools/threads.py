@@ -87,6 +87,11 @@ _MAX_RUNS = 25
 _MAX_INSPECTION_CONTENT_CHARS = 50_000
 _MAX_PLAN_COMMENTS = 100
 _MAX_PLAN_CHARS = 500_000
+_WATCH_TAIL_MESSAGES = 10
+_WATCH_POLL_SECONDS = 2.0
+# Matches the bridge's long poll, which already survives the ingress idle timeout.
+_DEFAULT_WATCH_WAIT_SECONDS = 25
+_MAX_WATCH_WAIT_SECONDS = 30
 _NO_ACTOR = "No verified triggering user is available"
 _NO_WRITER = (
     f"{_NO_ACTOR}. Automation runs can read threads with list_threads and get_thread "
@@ -437,37 +442,49 @@ def _message_id(message: Any) -> str | None:
     return str(value) if value else None
 
 
-def _transcript(state: Any) -> dict[str, Any]:
-    messages = _state_messages(state)
-    visible: list[dict[str, Any]] = []
-    omitted = 0
-    used_chars = 0
+def _transcript_entries(messages: list[Any]) -> list[dict[str, Any]]:
+    """The user and assistant messages a reader sees, with their full text."""
+    entries: list[dict[str, Any]] = []
     for message in messages:
         kind = _message_kind(message)
         if kind not in {"human", "user", "ai", "assistant"}:
-            omitted += 1
             continue
         content = _message_content(message)
         text = _plain_message_text(content)
         if not text:
-            omitted += 1
             continue
-        if len(visible) >= _MAX_TRANSCRIPT_MESSAGES or used_chars >= _MAX_TRANSCRIPT_CHARS:
-            omitted += 1
-            continue
-        remaining = _MAX_TRANSCRIPT_CHARS - used_chars
-        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
-        visible.append(
+        entries.append(
             {
                 "id": _message_id(message),
                 "role": "user" if kind in {"human", "user"} else "assistant",
-                "text": returned_text,
-                "truncated": len(returned_text) < len(text),
+                "text": text,
                 "sender_id": message_sender_id(content),
                 "timestamp": _message_timestamp(message),
             }
         )
+    return entries
+
+
+def _bounded_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The leading entries that fit the transcript budget, each marked if its text was cut."""
+    bounded: list[dict[str, Any]] = []
+    used_chars = 0
+    for entry in entries:
+        if len(bounded) >= _MAX_TRANSCRIPT_MESSAGES or used_chars >= _MAX_TRANSCRIPT_CHARS:
+            break
+        text = entry["text"]
+        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, _MAX_TRANSCRIPT_CHARS - used_chars)]
+        bounded.append(
+            {**entry, "text": returned_text, "truncated": len(returned_text) < len(text)}
+        )
         used_chars += len(returned_text)
+    return bounded
+
+
+def _transcript(state: Any) -> dict[str, Any]:
+    messages = _state_messages(state)
+    visible = _bounded_entries(_transcript_entries(messages))
+    omitted = len(messages) - len(visible)
     return {
         "messages": visible,
         "message_count": len(messages),
@@ -475,6 +492,19 @@ def _transcript(state: Any) -> dict[str, Any]:
         "omitted_count": omitted,
         "truncated": omitted > 0 or any(item["truncated"] for item in visible),
     }
+
+
+def _entries_after(messages: list[Any], cursor: str | None) -> tuple[list[dict[str, Any]], bool]:
+    """Transcript entries after the message ``cursor`` names, and whether it was lost.
+
+    Without a cursor, or once compaction drops the message it named, this is the
+    tail of the transcript, as ``tail -f`` starts.
+    """
+    if cursor:
+        for index, message in enumerate(messages):
+            if _message_id(message) == cursor:
+                return _transcript_entries(messages[index + 1 :]), False
+    return _transcript_entries(messages)[-_WATCH_TAIL_MESSAGES:], cursor is not None
 
 
 def _state_summary(state: Any) -> dict[str, Any]:
@@ -858,6 +888,61 @@ async def get_thread(
             plan=plan,
             approvals=approvals,
         ),
+    }
+
+
+@expose_mcp()
+async def watch_thread(
+    thread_id: str,
+    cursor: str | None = None,
+    wait_seconds: int = _DEFAULT_WATCH_WAIT_SECONDS,
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
+) -> dict[str, Any]:
+    """Implement the `watch_thread` tool."""
+    actor = await _reader(state)
+    if actor is None:
+        return _failure(_NO_ACTOR)
+    locator = thread_id.strip()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0, min(wait_seconds, _MAX_WATCH_WAIT_SECONDS))
+    try:
+        resolved = await _authorized_locator(locator, actor)
+        if isinstance(resolved, dict):
+            return resolved
+        thread_id, summary = resolved
+        client = langgraph_client()
+        while True:
+            # Status before state: once a run reads as stopped, the state read
+            # after it already holds that run's last message.
+            summary = await get_dashboard_thread(
+                thread_id, actor.login, email=actor.email, mark_viewed=False
+            )
+            running = summary.get("status") == "running"
+            messages = _state_messages(await client.threads.get_state(thread_id))
+            entries, cursor_reset = _entries_after(messages, cursor)
+            remaining = deadline - loop.time()
+            if entries or cursor_reset or not running or remaining <= 0:
+                break
+            await asyncio.sleep(min(_WATCH_POLL_SECONDS, remaining))
+    except HTTPException as exc:
+        return _http_failure(exc)
+    except Exception:
+        logger.exception("Could not watch thread", extra={"thread_id": thread_id})
+        return _failure("Could not watch thread")
+
+    returned = _bounded_entries(entries)
+    last_id = next((entry["id"] for entry in reversed(returned) if entry["id"]), None)
+    has_more = len(returned) < len(entries)
+    return {
+        "success": True,
+        "thread_id": thread_id,
+        "status": summary.get("status"),
+        "done": not running and not has_more,
+        "messages": returned,
+        "has_more": has_more,
+        "cursor": last_id or (None if cursor_reset else cursor),
+        "cursor_reset": cursor_reset,
+        "web_url": dashboard_thread_url(thread_id),
     }
 
 
