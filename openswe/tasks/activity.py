@@ -16,7 +16,6 @@ from openswe.tasks import store
 from openswe.tasks.events import finished_delivery_id
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.schemas import Run
-from openswe.tasks.service import cancel_worker, live_runs
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
 
@@ -24,7 +23,7 @@ type WorkerState = Literal["starting", "running", "reporting", "done", "failed",
 
 # How long a worker may take to start, or a hand-off to reach the coordinator, before it is lost.
 LOST_AFTER = timedelta(minutes=5)
-_LIVE_RUN_STATUSES = frozenset({"pending", "running"})
+_RUNS_PAGE = 100
 
 
 class WorkerActivity(BaseModel):
@@ -64,7 +63,7 @@ class WorkerActivity(BaseModel):
             return worker
         latest = Run.model_validate(runs[0])
         worker.run_status = latest.status
-        if latest.status in _LIVE_RUN_STATUSES:
+        if latest.live:
             worker.state = "running"
         elif await cls._reported(delegation, latest):
             worker.state = "done"
@@ -80,10 +79,8 @@ class WorkerActivity(BaseModel):
     @staticmethod
     async def _reported(delegation: store.TaskDelegation, run: Run) -> bool:
         """Whether the run's outcome reached the coordinator, or can no longer be expected to."""
-        if run.updated_at is None:
-            return True
-        ended = run.updated_at if run.updated_at.tzinfo else run.updated_at.replace(tzinfo=UTC)
-        if ended < datetime.now(UTC) - LOST_AFTER:
+        ended = run.ended_at
+        if ended is None or ended < datetime.now(UTC) - LOST_AFTER:
             return True
         return await TaskMessage.recorded(
             delegation.coordinator_thread_id,
@@ -92,9 +89,10 @@ class WorkerActivity(BaseModel):
 
 
 class CoordinatorActivity(BaseModel):
-    """A thread's live run and the workers it coordinates."""
+    """A thread's runs since the one a client last followed, and the workers it coordinates."""
 
-    run_id: str | None
+    runs: list[str]
+    running: bool
     awaiting_delivery: bool
     workers: list[WorkerActivity]
 
@@ -103,14 +101,20 @@ class CoordinatorActivity(BaseModel):
     def settled(self) -> bool:
         """Nothing more will run on the thread unless someone prompts it."""
         return (
-            self.run_id is None
+            not self.running
             and not self.awaiting_delivery
             and not any(worker.active for worker in self.workers)
         )
 
     @classmethod
-    async def of(cls, thread_id: str) -> Self:
-        run_ids = await live_runs(thread_id)
+    async def of(cls, thread_id: str, *, after: str | None = None) -> Self:
+        """The thread's activity; ``runs`` are the ids of those created after ``after``."""
+        newer, latest = await cls._runs_after(thread_id, after)
+        running = latest is not None and latest.live
+        lost_before = datetime.now(UTC) - LOST_AFTER
+        idle_since = latest.ended_at if latest is not None else None
+        # A message held back while the coordinator ran could not be delivered before that run ended.
+        recently_deliverable = running or (idle_since is not None and idle_since >= lost_before)
         context = await store.TaskMembership.context_for_thread(thread_id)
         delegations = (
             [
@@ -122,15 +126,39 @@ class CoordinatorActivity(BaseModel):
             else []
         )
         return cls(
-            run_id=run_ids[0] if run_ids else None,
+            runs=[run.run_id for run in reversed(newer)],
+            running=running,
             awaiting_delivery=await TaskMessage.awaiting_delivery(
-                thread_id, since=datetime.now(UTC) - LOST_AFTER
+                thread_id, since=None if recently_deliverable else lost_before
             ),
             workers=[await WorkerActivity.of(delegation) for delegation in delegations],
         )
 
+    @staticmethod
+    async def _runs_after(thread_id: str, after: str | None) -> tuple[list[Run], Run | None]:
+        """The thread's runs created after ``after``, newest first, and its latest run.
+
+        Without ``after``, or when ``after`` is not among the thread's runs, only the latest is new.
+        """
+        client = langgraph_client()
+        newer: list[Run] = []
+        limit = 1 if after is None else _RUNS_PAGE
+        offset = 0
+        while True:
+            page = await client.runs.list(thread_id, limit=limit, offset=offset)
+            for run in map(Run.model_validate, page):
+                if run.run_id == after:
+                    return newer, newer[0] if newer else run
+                newer.append(run)
+            if len(page) < limit or after is None:
+                return newer[:1], newer[0] if newer else None
+            offset += limit
+
     async def stop_workers(self) -> None:
         """Cancel the workers still active, as a person stopping the task: they report nothing."""
+        # The webapp must not import the agent stack at startup.
+        from openswe.tasks.service import cancel_worker
+
         for worker in self.workers:
             if worker.active:
                 await cancel_worker(worker.worker_thread_id, silently=True)

@@ -287,7 +287,8 @@ export interface TaskFollowOptions extends FollowOptions {
  * Follows the coordinator from the run the CLI started until its thread
  * settles. Workers share the thread's sandbox, this machine, and each one's
  * report wakes the coordinator in a run of its own, so a result reported while
- * anything is left to run is not final: the last one reported is.
+ * anything is left to run is not final: the last one reported is. Every run
+ * the coordinator starts is followed in turn, even one that ended between polls.
  */
 export async function followTask(
   thread: CoordinatorThread,
@@ -304,7 +305,7 @@ export async function followTask(
   while (outcome.status !== "closed") {
     let activity: TaskActivity | null
     try {
-      activity = await thread.activity()
+      activity = await thread.activity(followed)
       failures = 0
     } catch (cause) {
       failures += 1
@@ -315,14 +316,15 @@ export async function followTask(
     }
     if (activity === null) break
     options.onActivity?.(activity)
-    if (activity.settled) break
-    if (activity.run_id === null || activity.run_id === followed) {
-      await sleep(pollMs)
+    const next = activity.runs[0]
+    if (next !== undefined) {
+      followed = next
+      outcome = await followRun(events, followed, options)
+      result = outcome.result ?? result
       continue
     }
-    followed = activity.run_id
-    outcome = await followRun(events, followed, options)
-    result = outcome.result ?? result
+    if (activity.settled) break
+    await sleep(pollMs)
   }
   return { ...outcome, result: outcome.result ?? result }
 }
