@@ -43,6 +43,7 @@ from rt.backend import (
 )
 from rt.models import ModelSpec, build_model
 from rt.tools import STATE_KEY, run_id
+from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
 
@@ -228,9 +229,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         backend: OpenSweBackend,
         invocation_id: str | None,
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+        *,
+        trace_metadata: Mapping[str, JsonValue] | None = None,
     ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
+        self._trace_metadata = trace_metadata or {}
+        self._trace = TurnTrace()
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
 
@@ -241,6 +246,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
+        self._trace.start(self._trace_metadata)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
             return None
@@ -297,12 +303,19 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return await self._phase("after_model", state)
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        metadata = dict(self._trace_metadata)
         try:
-            return _apply(await self._backend.phase("after_agent", run_body(run_id(), state)))
+            body = run_body(run_id(), state)
+            held = body.get("state")
+            body["state"] = {**(held if isinstance(held, dict) else {}), **self._trace.evidence}
+            reply = await self._backend.phase("after_agent", body)
+            metadata.update(reply.trace_metadata)
+            return _apply(reply)
         except BackendCallError:
-            # The backend's completion webhook settles what this run left open.
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None
+        finally:
+            await self._trace.reconcile(metadata)
 
 
 class ReportRepliesMiddleware(AgentMiddleware):

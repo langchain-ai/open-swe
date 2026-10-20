@@ -24,6 +24,7 @@ from rt.backend import (
     ToolSpec,
     run_body,
 )
+from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ def backend_tool(spec: ToolSpec, backend: OpenSweBackend) -> BaseTool:
             "messages": messages_from_dict([reply.message, *reply.messages])
         }
         if reply.update:
+            TurnTrace.record_evidence(reply.update)
             update[STATE_KEY] = reply.update
         return Command(update=update)
 

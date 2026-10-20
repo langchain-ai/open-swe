@@ -33,7 +33,7 @@ from openswe.dashboard.workspace_settings import (
 from openswe.database import postgres
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
-    _run_user_id,
+    _run_user,
     create_durable_run,
     dispatch_agent_run,
 )
@@ -1067,6 +1067,10 @@ async def _enrich_run_start_command(
                     "owner_login",
                     "system_authorization",
                     "user_id",
+                    "ls_attribution_identifier",
+                    "ls_git_repo",
+                    "ls_git_branch",
+                    "open_swe_git_targets",
                 }
             },
             **agent_version_metadata(),
@@ -1087,9 +1091,12 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    user_id = await _run_user_id({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
-    if user_id:
-        run_metadata["user_id"] = user_id
+    user = await _run_user({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
+    run_metadata["ls_repo_provider"] = "github"
+    if user is not None:
+        run_metadata["user_id"] = str(user.id)
+        if user.github_login:
+            run_metadata["ls_attribution_identifier"] = user.github_login
     config_metadata = client_config.get("metadata")
     if not isinstance(config_metadata, dict):
         config_metadata = {}
@@ -1097,7 +1104,18 @@ async def _enrich_run_start_command(
         **client_config,
         "configurable": merged_configurable,
         "metadata": {
-            **{k: v for k, v in config_metadata.items() if k != "user_id"},
+            **{
+                k: v
+                for k, v in config_metadata.items()
+                if k
+                not in {
+                    "user_id",
+                    "ls_attribution_identifier",
+                    "ls_git_repo",
+                    "ls_git_branch",
+                    "open_swe_git_targets",
+                }
+            },
             **run_metadata,
         },
     }

@@ -293,9 +293,17 @@ def prepare_run_config(
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     existing_metadata = run_config.get("metadata")
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+    for key in (
+        "ls_attribution_identifier",
+        "ls_git_repo",
+        "ls_git_branch",
+        "open_swe_git_targets",
+    ):
+        merged_metadata.pop(key, None)
     if metadata is not None:
         merged_metadata.update(metadata)
     merged_metadata.update(_slack_channel_metadata(configurable))
+    merged_metadata["ls_repo_provider"] = "github"
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
     started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
@@ -307,9 +315,7 @@ def prepare_run_config(
     return run_config
 
 
-async def _run_user_id(
-    config: LangGraphRunConfig | None, *, source: str | None = None
-) -> str | None:
+async def _run_user(config: LangGraphRunConfig | None, *, source: str | None = None) -> User | None:
     configurable = (config or {}).get("configurable")
     if not isinstance(configurable, Mapping):
         return None
@@ -329,7 +335,7 @@ async def _run_user_id(
             user = await User.for_email(cfg.user_email)
         else:
             return None
-        return str(user.id) if user else None
+        return user
     except Exception:
         logger.warning("Could not resolve run user for trace metadata", exc_info=True)
         return None
@@ -367,7 +373,17 @@ async def create_durable_run(
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
-    user_id = await _run_user_id(config, source=source)
+    user = await _run_user(config, source=source)
+    user_id = str(user.id) if user else None
+    for key in (
+        "ls_attribution_identifier",
+        "ls_git_repo",
+        "ls_git_branch",
+        "open_swe_git_targets",
+    ):
+        run_metadata.pop(key, None)
+    if user is not None and user.github_login:
+        run_metadata["ls_attribution_identifier"] = user.github_login
     if user_id:
         run_metadata["user_id"] = user_id
     run_config = prepare_run_config(config, run_metadata)

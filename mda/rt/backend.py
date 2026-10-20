@@ -118,6 +118,7 @@ class Catalog(BaseModel):
     tools: list[ToolSpec] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
+    trace_metadata: dict[str, JsonValue] = {}
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.
@@ -141,6 +142,7 @@ class PhaseReply(BaseModel):
     model: ModelSpec | None = None
     fallback: ModelSpec | None = None
     use_gateway: bool = False
+    trace_metadata: dict[str, JsonValue] = {}
 
 
 class ToolReply(BaseModel):

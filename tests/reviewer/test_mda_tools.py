@@ -169,3 +169,79 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
 
     with pytest.raises(BackendCallError, match="prepare failed: RuntimeError: no sandbox provider"):
         await OpenSweBackend("secret-token").phase("prepare", {})
+
+
+async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from copy import deepcopy
+
+    from deepagents import create_deep_agent
+    from langchain_core.runnables import RunnableLambda
+    from langchain_core.tools import tool
+    from langchain_core.tracers.langchain import LangChainTracer
+    from langsmith import Client, tracing_context
+    from rt.tracing import TurnTrace
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    actor = {"ls_repo_provider": "github", "ls_attribution_identifier": "trigger"}
+    final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
+    backend = OpenSweBackend("secret-token")
+
+    @tool
+    async def nested_call(text: str) -> str:
+        """Call a nested runnable."""
+        TurnTrace.record_evidence({"git_trace_pr:nested": {"invocation": "turn", "targets": []}})
+        return await RunnableLambda(lambda value: value).ainvoke(text)
+
+    async def phase(name: str, body: dict[str, object]) -> PhaseReply:
+        if name == "before_model":
+            await nested_call.ainvoke({"text": "nested"})
+        if name == "after_agent":
+            assert body["state"] == {"git_trace_pr:nested": {"invocation": "turn", "targets": []}}
+        return PhaseReply(trace_metadata=final if name == "after_agent" else {})
+
+    monkeypatch.setattr(backend, "phase", phase)
+    client = MagicMock(spec=Client)
+    updates: list[tuple[object, dict[str, object]]] = []
+
+    def update(run_id: object, **kwargs: object) -> None:
+        updates.append((run_id, deepcopy(kwargs)))
+
+    client.update_run.side_effect = update
+    tracer = LangChainTracer(client=client, project_name="test")
+    monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    graph = create_deep_agent(
+        model=FakeListChatModel(responses=["done"]),
+        middleware=[BackendRunMiddleware(backend, "turn", trace_metadata=actor)],
+    )
+    with tracing_context(enabled=True):
+        await graph.ainvoke(
+            {"messages": [("user", "hello")]},
+            {"callbacks": [tracer], "metadata": {"existing_key": "preserved"}},
+        )
+    created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
+    assert any(run["run_type"] == "llm" for run in created.values())
+    assert any(run["run_type"] == "tool" for run in created.values())
+    reconciled = {
+        run_id: patch
+        for run_id, patch in updates
+        if patch.get("extra", {}).get("metadata", {}).get("ls_git_repo") == "org/actual"
+    }
+    attributed = {
+        run_id
+        for run_id, run in created.items()
+        if run["run_type"] in {"llm", "tool"} or run.get("parent_run_id") is None
+    }
+    assert attributed <= reconciled.keys()
+    for run_id in attributed:
+        metadata = reconciled[run_id]["extra"]["metadata"]
+        assert metadata.items() >= final.items()
+        assert metadata["existing_key"] == "preserved"
+    assert len({run["trace_id"] for run in created.values()}) == 1
+    previous_update_count = len(updates)
+    final["ls_git_branch"] = "Next/turn"
+    with tracing_context(enabled=True):
+        await graph.ainvoke({"messages": [("user", "next turn")]}, {"callbacks": [tracer]})
+    assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
