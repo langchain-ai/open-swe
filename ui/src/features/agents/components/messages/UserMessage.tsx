@@ -12,6 +12,7 @@ import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
 import { cn } from "@/lib/utils"
+import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
@@ -137,6 +138,9 @@ function StandardUserMessage({ message }: { message: Message }) {
       className={cn(
         "group/turn my-space-4 flex flex-col gap-space-1",
         isSystem ? "items-start" : "items-end"
+      )}
+      title={formatHoverTimestamp(
+        message.timestampIsFallback ? undefined : message.timestamp
       )}
       data-testid="user-message"
       data-message-id={message.id}
