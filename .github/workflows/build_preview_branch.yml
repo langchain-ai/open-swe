@@ -121,8 +121,6 @@ jobs:
       - name: Select the MDA compiler
         id: mda-source
         if: steps.mda-changed.outputs.deploy == 'true'
-        env:
-          APPROVED_SHA: ${{ vars.PREVIEW_MDA_SOURCE_SHA }}
         run: uv run scripts/preview_mda_source.py preview-tree/mda/pyproject.toml
       - uses: actions/checkout@v7.0.1
         if: steps.mda-source.outputs.sha != ''
