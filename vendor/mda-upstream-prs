@@ -1,5 +1,6 @@
 728 414659a02567872b2ce35eed2db31cb8fce83e85 feat(mda): share the lead's sandbox and trace with async subagents
 860 1362fa448007178698bd01b362318e3ef76823da feat(mda): build a graph per async subagent
+888 1567a82e4ba769271f244170b8331776e67ac843 feat(mda): let async subagents load skills, read specs with spreads, and post to the lead's channel
 897 1aa4e62bd39050f986343c68d0beb69805828363 feat(browser): browser use via define_browser
 921 18ab96f4205c72fa92bf985881cf33e375696201 feat(mda): post async subagent updates and their approvals to the lead's channel thread
 941 78078e30ac72997713468af653fd45521c984dd7 fix(mda): read sync subagent spreads in `subagents=[...]`

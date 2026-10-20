@@ -268,7 +268,8 @@ agent = define_deep_agent(
 The subagent runs under the caller's identity and uses the project's sandbox,
 identity, and connector declarations. When it leaves `model`, `tools`,
 `permissions`, or `interrupt_on` unset, it uses the agent's. It does not inherit
-the agent's middleware, skills, or memory.
+the agent's middleware or memory. Like a sync subagent, it loads only the skills
+its `skills` key names: `"skills": ["/skills/"]` gives it the agent's skills.
 
 When the project has a sandbox, the subagent works in the sandbox of the agent
 that started it, so both see the same files. MDA first checks that the subagent
@@ -282,7 +283,8 @@ When the subagent pauses for approval, the agent sees the task as waiting. If th
 agent was started from a Slack channel, the approval shows in that Slack thread,
 and the answer there resumes the subagent. Otherwise, answer it in the subagent's
 own thread. When a task finishes, the agent's reply about it is posted to the
-same Slack thread.
+same Slack thread. The subagent's tools and middleware can also post to that
+thread through `runtime.channel`, for example to show progress.
 
 With tracing on, a subagent's runs appear in the starting agent's trace, under
 the call that started it. Nesting follows the trace headers on the request, so
@@ -296,10 +298,11 @@ it shares with a subagent, and don't give it looser `interrupt_on` or permission
 than the agent that starts it.
 
 Write async subagents in `agent.py` as dict literals, or names bound to one, so
-the build can find them without running your code. `mda build` warns about
+the build can find them without running your code. Other fields can come from
+code, as long as `name` and `"async"` come after any `**spread`:
+`{**worker_spec("low"), "name": "low", "async": True}`. `mda build` warns about
 subagent entries it can't read. Async subagents are Python only, and are not
-supported in `mda eval`. Sharing the sandbox, nesting traces, and showing
-approvals in Slack need a deepagents release that sends the parent reference.
+supported in `mda eval`.
 
 ## Run context and channels
 

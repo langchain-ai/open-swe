@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TypeGuard
+from typing import TypeGuard, cast
 
 from managed_deepagents.define_deep_agent import DeepAgentDefinition
 
@@ -11,6 +11,9 @@ from managed_deepagents.define_deep_agent import DeepAgentDefinition
 _INHERITED_KEYS = ("model", "tools", "permissions", "interrupt_on")
 # Spec keys the lead never passes down, like a sync subagent.
 _OWN_KEYS = ("middleware", "response_format")
+
+#: Definition key for an async subagent's own skill sources (deepagents `SubAgent.skills`).
+SUBAGENT_SKILLS_KEY = "subagent_skills"
 
 
 def is_async_subagent(spec: object) -> TypeGuard[Mapping[str, object]]:
@@ -50,9 +53,10 @@ def async_subagent_definition(definition: DeepAgentDefinition, name: str) -> Dee
         if key not in ("subagents", *_OWN_KEYS)
     }
     config.update({key: spec[key] for key in (*_INHERITED_KEYS, *_OWN_KEYS) if key in spec})
-    # Skills and memory stay with the lead, like a sync subagent, and the lead's
-    # instructions.md is not the subagent's prompt.
-    config.update(name=name, skills=[], memory=None, instructions=spec.get("system_prompt"))
+    # Keep the lead's skills mount; load only the spec's `skills`. The lead's memory
+    # and instructions.md aren't the subagent's.
+    config[SUBAGENT_SKILLS_KEY] = list(cast("Sequence[str]", spec.get("skills") or ()))
+    config.update(name=name, memory=None, instructions=spec.get("system_prompt"))
     return DeepAgentDefinition(config)
 
 

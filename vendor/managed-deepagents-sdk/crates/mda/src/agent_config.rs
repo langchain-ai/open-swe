@@ -130,7 +130,7 @@ fn resolve_async_subagents(
                 ErrorCategory::Project,
                 format!(
                     "async subagents in {file_label} must set `name` and `\"async\": True` \
-                     as literals so MDA can build a graph for each one."
+                     as literals, after any `**spread`, so MDA can build a graph for each one."
                 ),
             ));
         };
@@ -1019,6 +1019,32 @@ mod tests {
                 "{**s, 'description': 'd'}"
             ),
             (worker, 1)
+        );
+    }
+
+    #[test]
+    fn python_async_subagents_take_literal_keys_after_a_spread() {
+        if !python3_available() {
+            return;
+        }
+        let names = py_async_subagents(concat!(
+            "agent = define_deep_agent(name='lead', subagents=[\n",
+            "    {**worker('low'), 'name': 'low', 'async': True},\n",
+            "    {'name': 'max', 'async': True, **worker('max')},\n",
+            "    {'name': 'mid', **worker('mid'), 'async': True},\n",
+            "    {'name': 'off', 'async': False, **worker('off')},\n",
+            "])\n",
+        ));
+
+        // A spread after the literal keys could replace them at runtime. A sync
+        // subagent (`"async": False`) is skipped, like one with no `async` key.
+        assert_eq!(
+            names,
+            [
+                AgentNameValue::Static("low".to_string()),
+                AgentNameValue::Dynamic,
+                AgentNameValue::Dynamic,
+            ]
         );
     }
 

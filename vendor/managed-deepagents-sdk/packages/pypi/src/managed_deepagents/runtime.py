@@ -70,6 +70,7 @@ from langsmith.run_trees import RunTree
 from langsmith.utils import tracing_is_enabled
 
 from managed_deepagents._async_subagents import (
+    SUBAGENT_SKILLS_KEY,
     async_subagent_definition,
     reject_async_subagents,
     route_async_subagents,
@@ -989,6 +990,7 @@ def _compile_managed_agent(
     merged: dict[str, object] = dict(definition.config)
     authored_instructions = merged.pop("instructions", _OMITTED)
     authored_skills = merged.pop("skills", _OMITTED)
+    subagent_skills = merged.pop(SUBAGENT_SKILLS_KEY, None)
     merged.pop("memory", None)
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
@@ -1066,8 +1068,8 @@ def _compile_managed_agent(
         if selected_skills_backend is not None
         else has_skills
     )
-    if effective_has_skills:
-        merged["skills"] = [MANAGED_SKILLS_PATH]
+    if sources := _skill_sources(subagent_skills, has_skills=effective_has_skills):
+        merged["skills"] = sources
     # Authored tools and managed Slack file tools share the current sandbox backend.
     # Wrap even without identity or a sandbox so runtime.backend is None rather
     # than an absent attribute on LangGraph's runtime.
@@ -1258,6 +1260,15 @@ def _open_context_backend(
             context_root,
         )
     return None
+
+
+def _skill_sources(subagent_skills: object, *, has_skills: bool) -> list[str]:
+    """Skill sources for the agent: an async subagent's own (`SubAgent.skills`), else the mount."""
+    if subagent_skills is None:
+        return [MANAGED_SKILLS_PATH] if has_skills else []
+    sources = list(cast("Sequence[str]", subagent_skills))
+    # Without a mount, `/skills/` would read whatever the sandbox holds there.
+    return sources if has_skills else [path for path in sources if path != MANAGED_SKILLS_PATH]
 
 
 def _resolve_run_skills(

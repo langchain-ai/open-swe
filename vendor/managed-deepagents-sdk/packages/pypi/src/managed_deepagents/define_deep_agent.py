@@ -124,7 +124,9 @@ def define_deep_agent(
 
     A subagent dict with ``"async": True`` runs as a background task in its own
     graph. Unset ``model``, ``tools``, ``permissions``, and ``interrupt_on``
-    inherit from this agent; middleware, skills, and memory do not.
+    inherit from this agent; middleware and memory do not. Like a sync subagent,
+    it loads only the skill sources its ``skills`` names (``["/skills/"]`` for
+    this agent's skills).
 
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
@@ -181,7 +183,7 @@ def define_deep_agent(
     return DeepAgentDefinition(config)
 
 
-_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode", "skills")
+_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode")
 
 
 def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
@@ -194,6 +196,9 @@ def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
             continue
         if not isinstance(spec.get("description"), str):
             raise TypeError('subagent "async": True requires a `description`')
+        skills = spec.get("skills")
+        if skills is not None and not _is_path_list(skills):
+            raise TypeError('subagent "skills" must be a list of skill source paths')
         unsupported = [key for key in _ASYNC_SUBAGENT_UNSUPPORTED_KEYS if key in spec]
         if unsupported:
             msg = (
@@ -201,6 +206,14 @@ def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
                 "launches its graph itself"
             )
             raise TypeError(msg)
+
+
+def _is_path_list(value: object) -> bool:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, str)
+        and all(isinstance(path, str) for path in value)
+    )
 
 
 __all__ = [

@@ -81,17 +81,24 @@ def literal_bindings(statements):
 
 
 def dict_entry(spec, key):
-    for spec_key, value in zip(spec.keys, spec.values):
+    """The (index, value) of the last literal `key` in a dict display, which wins at runtime."""
+    found = (None, None)
+    for index, (spec_key, value) in enumerate(zip(spec.keys, spec.values)):
         if isinstance(spec_key, ast.Constant) and spec_key.value == key:
-            return value
-    return None
+            found = (index, value)
+    return found
 
 
 def async_subagent_name(spec):
-    flag = dict_entry(spec, "async")
+    flag_at, flag = dict_entry(spec, "async")
+    # Not async, like a missing key; the runtime rejects a spread that makes it async.
     if flag is None or (isinstance(flag, ast.Constant) and flag.value is False):
         return None
-    name = dict_entry(spec, "name")
+    name_at, name = dict_entry(spec, "name")
+    first = flag_at if name_at is None else min(flag_at, name_at)
+    # A `**spread` after the literal keys could replace them at runtime.
+    if any(key is None and index > first for index, key in enumerate(spec.keys)):
+        return {"kind": "DYNAMIC"}
     if (
         isinstance(flag, ast.Constant)
         and flag.value is True

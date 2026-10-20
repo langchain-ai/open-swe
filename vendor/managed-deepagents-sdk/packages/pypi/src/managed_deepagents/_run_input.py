@@ -14,6 +14,7 @@ from managed_deepagents._channels.binding import (
     ChannelBinding,
     _current_channel,
     _current_routing,
+    _lead_channel,
     resolve_channel_binding,
 )
 from managed_deepagents._channels.schedule_delivery import (
@@ -74,6 +75,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         try:
             while True:
                 token = _current_channel.set(binding)
+                lead_token = _lead_channel.set(None if binding is not None else reports_to)
                 notify_token = _delivering_notification.set(notifying)
                 routing_token = _current_routing.set(routing)
                 try:
@@ -86,6 +88,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                 finally:
                     _delivering_notification.reset(notify_token)
                     _current_routing.reset(routing_token)
+                    _lead_channel.reset(lead_token)
                     _current_channel.reset(token)
                 yield item
         finally:
@@ -112,6 +115,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         try:
             while True:
                 token = _current_channel.set(binding)
+                lead_token = _lead_channel.set(None if binding is not None else reports_to)
                 notify_token = _delivering_notification.set(notifying)
                 routing_token = _current_routing.set(routing)
                 try:
@@ -125,6 +129,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                 finally:
                     _delivering_notification.reset(notify_token)
                     _current_routing.reset(routing_token)
+                    _lead_channel.reset(lead_token)
                     _current_channel.reset(token)
                 yield item
         finally:
