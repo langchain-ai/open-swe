@@ -112,9 +112,18 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(webhook_common, "AGENT_VERSION_METADATA", {"LANGSMITH_AGENT_VERSION": "v1"})
 
     async def context(
-        configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
+        configurable: dict[str, JsonValue],
+        *,
+        thread_id: str,
+        assistant_id: str,
+        metadata: dict[str, JsonValue] | None = None,
     ) -> dict[str, JsonValue]:
-        run = RemoteRun(thread_id=thread_id, assistant_id=assistant_id, configurable=configurable)
+        run = RemoteRun(
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            configurable=configurable,
+            metadata=metadata or {},
+        )
         return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
     monkeypatch.setattr(runtimes, "remote_run_context", context)

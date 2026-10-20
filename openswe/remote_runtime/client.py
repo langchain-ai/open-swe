@@ -23,7 +23,7 @@ HOSTED_GRAPHS: Final[frozenset[str]] = frozenset(get_args(HostedGraph))
 RUNTIME_METADATA_KEY: Final = "runtime"
 MDA_RUNTIME: Final = "mda"
 
-_configurable = TypeAdapter(dict[str, JsonValue])
+_json_object = TypeAdapter(dict[str, JsonValue])
 _hosted_graph = TypeAdapter(HostedGraph)
 
 
@@ -78,12 +78,16 @@ MDA_STUDIO_READ_HEADERS: Final[Mapping[str, str]] = {"x-auth-scheme": "langsmith
 
 
 async def remote_run_context(
-    configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
+    configurable: dict[str, JsonValue],
+    *,
+    metadata: dict[str, JsonValue],
+    thread_id: str,
+    assistant_id: str,
 ) -> RemoteRunContext:
     """Everything an MDA run needs, since a run takes either context or configurable.
 
-    The configurable rides inside the signed token; the deployment calls back with
-    the token rather than reading it.
+    The configurable and metadata ride inside the signed token; the deployment calls
+    back with the token rather than reading it.
     """
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
@@ -92,7 +96,8 @@ async def remote_run_context(
         RemoteRun(
             thread_id=thread_id,
             assistant_id=assistant_id,
-            configurable=_configurable.validate_python(configurable),
+            configurable=_json_object.validate_python(configurable),
+            metadata=_json_object.validate_python(metadata),
         )
     )
     # The webapp must not import the agent stack at startup.

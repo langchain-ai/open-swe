@@ -9,7 +9,7 @@ use serde_json::json;
 use crate::agent_config::AsyncSubagentGraph;
 use crate::project::Language;
 
-use super::{IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
+use super::{BROWSER_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
 
 /// Encode `value` as a string literal valid in both TypeScript and Python.
 ///
@@ -61,6 +61,9 @@ pub(super) struct EntryInputs<'a> {
     /// Module specifier for the root `memory` declaration, if the project opts
     /// into durable memory. Absent means the runtime mounts nothing.
     pub(super) memory_import: Option<&'a str>,
+    /// Module specifier for the root `browser` declaration (Python only), if
+    /// the project opts into browser use.
+    pub(super) browser_import: Option<&'a str>,
     /// Async subagents that get their own graph factory (served Python only).
     pub(super) async_subagents: &'a [AsyncSubagentGraph],
 }
@@ -279,8 +282,18 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
             "compile_managed_agent_async"
         }
     };
+    let is_eval = matches!(inputs.context, RuntimeContext::Eval { .. });
+    // Served entries hold `parent_run` open for the whole run: an async
+    // subagent's run is checked against the agent that launched it, and nests
+    // under that agent's trace.
+    let runtime_imports = if is_eval {
+        compile_fn.to_string()
+    } else {
+        out.push_str("from contextlib import asynccontextmanager\n\n");
+        format!("{compile_fn}, parent_run")
+    };
     out.push_str(&format!(
-        "from managed_deepagents.runtime import {compile_fn}\n"
+        "from managed_deepagents.runtime import {runtime_imports}\n"
     ));
     if !inputs.factory {
         out.push_str(
@@ -318,6 +331,11 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     if let Some(memory_import) = inputs.memory_import {
         out.push_str(&format!(
             "from {memory_import} import {MEMORY_EXPORT} as _memory\n"
+        ));
+    }
+    if let Some(browser_import) = inputs.browser_import {
+        out.push_str(&format!(
+            "from {browser_import} import {BROWSER_EXPORT} as _browser\n"
         ));
     }
     out.push('\n');
@@ -390,15 +408,15 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     if inputs.memory_import.is_some() {
         kwargs.push("memory=_memory".to_string());
     }
+    if inputs.browser_import.is_some() {
+        kwargs.push("browser=_browser".to_string());
+    }
     out.push('\n');
 
     let subagents = inputs.async_subagents;
-    // Async subagents run with the lead's managed kwargs; channels stay with the lead.
-    let mut subagent_kwargs: Vec<String> = kwargs
-        .iter()
-        .filter(|kwarg| !kwarg.starts_with("channels="))
-        .cloned()
-        .collect();
+    // Async subagents run with the lead's managed kwargs. They keep `channels` so
+    // a paused subagent can find the lead's channel thread to show its approval.
+    let mut subagent_kwargs = kwargs.clone();
     subagent_kwargs.push("runtime=runtime".to_string());
     if !subagents.is_empty() {
         let entries: Vec<String> = subagents
@@ -418,7 +436,7 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
         kwargs.push("async_subagent_graphs=_async_subagent_graphs".to_string());
     }
 
-    let await_prefix = if matches!(inputs.context, RuntimeContext::Eval { .. }) {
+    let await_prefix = if is_eval {
         if inputs.factory {
             out.push_str("\nasync def agent(config):\n");
             "await "
@@ -428,25 +446,30 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
         }
     } else {
         kwargs.push("runtime=runtime".to_string());
-        out.push_str("\nasync def agent(config, runtime: ServerRuntime):\n");
+        out.push_str("\n@asynccontextmanager\n");
+        out.push_str("async def agent(config, runtime: ServerRuntime):\n");
         "await "
     };
     if !inputs.factory {
         out.push_str("    assert_static_agent_definition(_definition)\n");
     }
-    if kwargs.is_empty() {
-        out.push_str(&format!(
-            "    return {await_prefix}{compile_fn}(_definition, config)\n"
-        ));
+    let call = if kwargs.is_empty() {
+        format!("{await_prefix}{compile_fn}(_definition, config)")
     } else {
-        out.push_str(&format!(
-            "    return {await_prefix}{compile_fn}(_definition, config, {})\n",
+        format!(
+            "{await_prefix}{compile_fn}(_definition, config, {})",
             kwargs.join(", ")
-        ));
+        )
+    };
+    if is_eval {
+        out.push_str(&format!("    return {call}\n"));
+    } else {
+        out.push_str("    async with parent_run(config):\n");
+        out.push_str(&format!("        yield {call}\n"));
     }
     for subagent in subagents {
         out.push_str(&format!(
-            "\n\nasync def {}(config, runtime: ServerRuntime):\n    return await {compile_fn}(_definition, config, {}, async_subagent={})\n",
+            "\n\n@asynccontextmanager\nasync def {}(config, runtime: ServerRuntime):\n    async with parent_run(config):\n        yield await {compile_fn}(_definition, config, {}, async_subagent={})\n",
             subagent.export,
             subagent_kwargs.join(", "),
             encode_string_literal(&subagent.name)
@@ -904,6 +927,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                browser_import: None,
                 async_subagents: &[],
             };
             for (language, check) in [
@@ -918,7 +942,11 @@ mod tests {
             ] {
                 let entry = generate_entry(language, &inputs);
                 let check_position = entry.find(check).unwrap();
-                let compile_position = entry.rfind("return ").unwrap();
+                // Served Python entries yield the graph instead of returning it.
+                let compile_position = entry
+                    .rfind("return ")
+                    .or_else(|| entry.rfind("yield "))
+                    .unwrap();
                 assert!(check_position < compile_position, "{entry}");
             }
         }
@@ -951,6 +979,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                browser_import: None,
                 async_subagents: &[],
             };
             for language in [Language::TypeScript, Language::Python] {
@@ -979,6 +1008,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                browser_import: None,
                 async_subagents: &[],
             },
         );
@@ -992,6 +1022,41 @@ mod tests {
         assert!(entry.contains("async def agent(config):"), "{entry}");
         assert!(
             entry.contains("return await compile_agent_factory_for_eval_async(_definition, config"),
+            "{entry}"
+        );
+    }
+
+    #[test]
+    fn python_served_entry_holds_parent_run_for_the_run() {
+        let entry = generate_entry(
+            Language::Python,
+            &EntryInputs {
+                agent_import: "agent",
+                factory: false,
+                context: RuntimeContext::Local {
+                    context_root: "/tmp/context",
+                    has_skills: false,
+                },
+                sandbox_import: None,
+                connectors_import: None,
+                channels_import: None,
+                identity_import: None,
+                memory_import: None,
+                browser_import: None,
+                sandbox_setup: false,
+                async_subagents: &[],
+            },
+        );
+
+        assert!(
+            entry
+                .contains("@asynccontextmanager\nasync def agent(config, runtime: ServerRuntime):"),
+            "{entry}"
+        );
+        assert!(
+            entry.contains(
+                "    async with parent_run(config):\n        yield await compile_managed_agent_async("
+            ),
             "{entry}"
         );
     }
@@ -1014,6 +1079,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                browser_import: None,
                 async_subagents: &[],
             },
         );

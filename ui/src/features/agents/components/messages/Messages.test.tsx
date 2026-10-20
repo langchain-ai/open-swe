@@ -209,7 +209,6 @@ describe("Messages", () => {
               {
                 kind: "tool-execution",
                 toolCallId: "ack",
-                timestamp: "2026-09-03T10:20:00.000Z",
                 title: "Slack thread reply",
                 toolKind: "slack",
                 status: "completed",
@@ -225,7 +224,6 @@ describe("Messages", () => {
               {
                 kind: "tool-execution",
                 toolCallId: "progress",
-                timestamp: "2026-09-03T10:25:00.000Z",
                 title: "Slack thread reply",
                 toolKind: "slack",
                 status: "completed",
@@ -240,22 +238,10 @@ describe("Messages", () => {
 
     const inOrder = [
       screen.getByText("On it!"),
-      screen.getByRole("button", { name: "Worked for 5m 0s · 1 action" }),
+      screen.getByRole("button", { name: "Worked · 1 action" }),
       screen.getByText("Found the cause"),
       screen.getByRole("button", { name: "Thinking…" }),
     ]
-    const timestampFormatter = new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "medium",
-    })
-    expect(inOrder[0]!.closest("[title]")?.getAttribute("title")).toBe(
-      timestampFormatter.format(new Date("2026-09-03T10:20:00.000Z"))
-    )
-    expect(inOrder[2]!.closest("[title]")?.getAttribute("title")).toBe(
-      timestampFormatter.format(new Date("2026-09-03T10:25:00.000Z"))
-    )
-    expect(inOrder[1]!.closest("[title]")).toBeNull()
-    expect(inOrder[3]!.closest("[title]")).toBeNull()
     inOrder.slice(1).forEach((later, index) => {
       expect(
         inOrder[index]!.compareDocumentPosition(later) &

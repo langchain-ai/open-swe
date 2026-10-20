@@ -54,13 +54,32 @@ describe("pickComposerRepo", () => {
   const offered = [{ full_name: "acme/oss" }, { full_name: "acme/docs" }]
 
   it("keeps an explicit pick, including an explicit none", () => {
-    const defaults = { userDefault: "acme/oss", workspaceDefault: "acme/oss" }
+    const defaults = {
+      userDefault: "acme/oss",
+      userWorkspaceDefault: "acme/oss",
+      workspaceDefault: "acme/oss",
+    }
     expect(
       pickComposerRepo({ ...defaults, override: "acme/docs", offered })
     ).toBe("acme/docs")
     expect(
       pickComposerRepo({ ...defaults, override: null, offered })
     ).toBeNull()
+  })
+
+  it("prefers the personal workspace default and falls back when inaccessible", () => {
+    const defaults = {
+      override: undefined,
+      userDefault: "acme/oss",
+      workspaceDefault: null,
+      offered,
+    }
+    expect(
+      pickComposerRepo({ ...defaults, userWorkspaceDefault: "ACME/docs" })
+    ).toBe("acme/docs")
+    expect(
+      pickComposerRepo({ ...defaults, userWorkspaceDefault: "acme/missing" })
+    ).toBe("acme/oss")
   })
 
   it("prefers the user's default when offered, else the workspace's, else none", () => {

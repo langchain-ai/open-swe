@@ -66,7 +66,7 @@ pub(crate) use sandbox_recipe::{
 };
 
 use discovery::{
-    agent_import_specifier, find_identity_entry, find_memory_entry,
+    agent_import_specifier, find_browser_entry, find_identity_entry, find_memory_entry,
     misspelled_channel_directory_warning, project_has_skills, read_instructions,
     sandbox_import_specifier,
 };
@@ -366,6 +366,7 @@ const IDENTITY_EXPORT: &str = "identity";
 
 /// Canonical export name for the root memory declaration, in both languages.
 const MEMORY_EXPORT: &str = "memory";
+const BROWSER_EXPORT: &str = "browser";
 
 /// Basename (without extension) of the generated managed custom-auth module.
 const AUTH_STEM: &str = "_mda_auth";
@@ -689,6 +690,15 @@ fn compile_inner(
             "async subagents are not supported in eval: there is no Agent Server to launch them on"
         );
     }
+    // Served Python agents also get an async general-purpose subagent; eval has no
+    // Agent Server to launch it on, and TypeScript doesn't build async subagents.
+    let async_subagents = if project.language == Language::Python
+        && !matches!(context, RuntimeContext::Eval { .. })
+    {
+        agent.served_async_subagents()
+    } else {
+        agent.async_subagents.clone()
+    };
     let local_packages = find_local_packages(project)?;
     prepare_out_dir(&project.root, out_dir, mode)?;
 
@@ -818,7 +828,8 @@ fn compile_inner(
         warnings.push(format!(
             "{} subagent entr{} in {} could not be read without running it. An async \
              subagent (`\"async\": True`) must be a dict literal, or a name bound to one, \
-             in `subagents=[...]`.",
+             in `subagents=[...]`. Annotate a name spread there that holds only sync \
+             subagents as `list[SubAgent]`.",
             agent.unreadable_subagents,
             if agent.unreadable_subagents == 1 {
                 "y"
@@ -876,6 +887,15 @@ fn compile_inner(
         }
     };
 
+    // Browser use is opt-in (Python only). Eval trials never get a browser.
+    let browser_import = match context {
+        RuntimeContext::Eval { .. } => None,
+        RuntimeContext::Local { .. } | RuntimeContext::ContextHub { .. } => {
+            find_browser_entry(project)
+                .map(|entry| agent_import_specifier(&entry, project.language))
+        }
+    };
+
     // Ingress channels (`channels.slack(...)`, `channels.github(...)`) and connectors with
     // Events ingress cannot fall back to a deployment service principal: require a root
     // identity declaration.
@@ -914,7 +934,8 @@ fn compile_inner(
             channels_import: channels_import.as_deref(),
             identity_import: identity_import.as_deref(),
             memory_import: memory_import.as_deref(),
-            async_subagents: &agent.async_subagents,
+            browser_import: browser_import.as_deref(),
+            async_subagents: &async_subagents,
         },
     );
     write_if_changed(&out_dir.join(&entry_file), entry_source.as_bytes())
@@ -964,8 +985,7 @@ fn compile_inner(
         };
 
     let graph = format!("./{}:agent", to_unix_path(&entry_file));
-    let extra_graphs: Vec<(String, String)> = agent
-        .async_subagents
+    let extra_graphs: Vec<(String, String)> = async_subagents
         .iter()
         .map(|subagent| {
             let export = &subagent.export;
@@ -1066,6 +1086,7 @@ fn compile_inner(
         is_dev,
         agent.model.as_deref(),
         eval_model_override,
+        find_browser_entry(project).is_some(),
     )?;
 
     vendor_runtime(project.language, runtime_source, out_dir)?;

@@ -16,7 +16,7 @@ from langchain.agents.middleware.types import AgentMiddleware, AgentState, Priva
 from langgraph.config import get_config
 
 from managed_deepagents._channels import messaging_registry
-from managed_deepagents._channels.assistant_text import extract_assistant_content
+from managed_deepagents._channels.assistant_text import extract_reply_content, run_start_id
 from managed_deepagents._channels.binding import resolve_channel_binding
 from managed_deepagents._channels.runtime import is_json_value
 from managed_deepagents._channels.schedule_delivery import is_trusted_schedule_delivery_run
@@ -144,8 +144,10 @@ class ChannelReplyMiddleware(AgentMiddleware[ChannelReplyState, Any, Any]):
         reply = _delivered_target(runtime) or _stored_target(state)
         if reply is None:
             return
-        messages = state.get("messages") if isinstance(state, Mapping) else None
-        content = extract_assistant_content({"messages": messages})
+        if not isinstance(state, Mapping):
+            return
+        # Only this run's answers: deepagents can give a run more turns.
+        content = extract_reply_content(state, start_id=run_start_id(state))
         if content is None:
             return
         transport = messaging_registry.messaging_transport_for_name(reply["name"])

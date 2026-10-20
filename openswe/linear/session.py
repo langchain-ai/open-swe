@@ -39,6 +39,7 @@ from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks import common
+from openswe.workspaces.routing import resolve_workspace
 
 #: The channel's name in run and thread metadata (``CHANNEL_METADATA_KEY``).
 LINEAR_CHANNEL = "linear"
@@ -144,14 +145,16 @@ class LinearSessionTurn:
         issue = validated["agentSession"].get("issue")
         return cls(validated, issue) if issue else None
 
-    async def repository(self) -> dict[str, str] | None:
-        """The repository the turn works in, when one is named, preferred or allowed."""
+    async def repository(self, thread_id: str) -> tuple[dict[str, str], str | None] | None:
+        """The repository the turn works in, when one is named, preferred or allowed.
+
+        With it, the workspace whose personal default chose it, if one did.
+        """
         repo = common.extract_repo_from_text(self.body, default_owner=common.DEFAULT_REPO_OWNER)
+        workspace: str | None = None
         if not repo and self.author.email:
             try:
-                repo = await common.get_profile_default_repo(
-                    await User.login_for_email(self.author.email)
-                )
+                repo, workspace = await self._personal_default(self.author.email, thread_id)
             except Exception:
                 common.logger.exception(
                     "Reading a Linear user's default repository failed",
@@ -167,20 +170,39 @@ class LinearSessionTurn:
                 extra={"linear_issue": self.issue.id},
             )
             return None
-        return repo
+        return repo, workspace
+
+    @staticmethod
+    async def _personal_default(
+        email: str, thread_id: str
+    ) -> tuple[dict[str, str] | None, str | None]:
+        """The author's default for the thread's workspace, else their global one."""
+        user = await User.for_email(email)
+        if user is None:
+            return None, None
+        workspace = await common.get_thread_workspace(thread_id)
+        if workspace is None:
+            workspace = (await resolve_workspace(login=user.github_login)).slug
+        personal = await user.default_repo(workspace, fallback_global=False)
+        if personal:
+            return personal, workspace
+        return await user.default_repo(), None
 
     async def prepare_run(self, thread_id: str) -> EndpointAnswer | None:
         """Index the session's thread and prepare the run for it, or None to start nothing."""
-        repo = await self.repository()
-        if repo is None:
+        chosen = await self.repository(thread_id)
+        if chosen is None:
             return None
+        repo, default_workspace = chosen
         repository = f"{repo['owner']}/{repo['name']}"
         title = self.issue.title or self.issue.identifier or "Linear issue"
         description = self.issue.description or "No description"
         mapped_login = await User.login_for_email(self.author.email) if self.author.email else None
-        workspace = await common.get_thread_workspace(
-            thread_id
-        ) or await common.workspace_for_repo_config(repo)
+        workspace = (
+            await common.get_thread_workspace(thread_id)
+            or default_workspace
+            or await common.workspace_for_repo_config(repo)
+        )
 
         issue_prompt = prompt(
             "runs/linear-issue",

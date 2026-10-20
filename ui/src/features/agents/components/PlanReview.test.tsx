@@ -48,7 +48,7 @@ vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
   }: {
     html: string
     className?: string
-    onTextSelected?: (anchor: PlanTextAnchor) => void
+    onTextSelected?: (anchor: PlanTextAnchor | null) => void
   }) => (
     <div data-testid="plan-artifact-frame" className={className}>
       {html}

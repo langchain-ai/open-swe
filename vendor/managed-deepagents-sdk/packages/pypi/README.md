@@ -247,6 +247,15 @@ memory.
 
 ## Async subagents
 
+Every Python agent can run its general-purpose subagent either way: blocking
+through `task`, or in the background through `start_async_task`. The agent
+picks per task, so there's nothing to declare. MDA builds the background copy
+as an extra graph, `<agent>--general-purpose`, from your own `general-purpose`
+subagent if you declare one (not a fork), keeping its `skills`, or else from the
+Deep Agents default, which loads the agent's skills. Like any async subagent, it can also be run directly as its own assistant, with
+the agent's tools but not its instructions or middleware. `mda eval` runs the
+blocking one only.
+
 Mark a subagent with `"async": True` to run it in the background. MDA builds it
 as its own graph in the same deployment, and the agent starts it, checks on it,
 and reads its result while it keeps working:
@@ -266,20 +275,41 @@ agent = define_deep_agent(
 ```
 
 The subagent runs under the caller's identity and uses the project's sandbox,
-identity, and connector declarations; its sandbox is separate from the agent's.
-When it leaves `model`, `tools`, `permissions`, or `interrupt_on` unset, it uses
-the agent's. It does not inherit the agent's middleware, skills, or memory.
+identity, and connector declarations. When it leaves `model`, `tools`,
+`permissions`, or `interrupt_on` unset, it uses the agent's. It does not inherit
+the agent's middleware or memory. Like a sync subagent, it loads only the skills
+its `skills` key names: `"skills": ["/skills/"]` gives it the agent's skills.
 
-When the subagent pauses for approval, the agent sees the task as waiting.
-Answer the approval in the subagent's own thread, and the task continues.
+When the project has a sandbox, the subagent works in the sandbox of the agent
+that started it, so both see the same files. MDA first checks that the subagent
+run's caller owns the starting agent's thread (a Slack conversation or a user),
+so a run can't name another caller's sandbox. The subagent only refreshes
+credentials in the shared sandbox; it never reruns workspace setup there or
+deletes it. If the starting agent hasn't created its sandbox yet, the subagent
+creates it, and the starting agent then uses that same sandbox.
+
+When the subagent pauses for approval, the agent sees the task as waiting. If the
+agent was started from a Slack channel, the approval shows in that Slack thread,
+and the answer there resumes the subagent. Otherwise, answer it in the subagent's
+own thread. When a task finishes, the agent's reply about it is posted to the
+same Slack thread. The subagent's tools and middleware can also post to that
+thread through `runtime.channel`, for example to show progress.
+
+With tracing on, a subagent's runs appear in the starting agent's trace, under
+the call that started it. Nesting follows the trace headers on the request, so
+any caller allowed to start runs on this deployment can place its run inside
+another trace in the same workspace.
 
 Each async subagent is its own graph, so any caller allowed to start runs on
 this deployment can also run it directly, as themselves. It doesn't get the
 agent's middleware, so don't rely on the agent's middleware to guard the tools
-it shares with a subagent.
+it shares with a subagent, and don't give it looser `interrupt_on` or permissions
+than the agent that starts it.
 
 Write async subagents in `agent.py` as dict literals, or names bound to one, so
-the build can find them without running your code. `mda build` warns about
+the build can find them without running your code. Other fields can come from
+code, as long as `name` and `"async"` come after any `**spread`:
+`{**worker_spec("low"), "name": "low", "async": True}`. `mda build` warns about
 subagent entries it can't read. Async subagents are Python only, and are not
 supported in `mda eval`.
 
