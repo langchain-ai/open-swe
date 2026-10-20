@@ -63,7 +63,6 @@ from openswe.slack.client import (
     get_slack_permalink,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
-    remove_slack_reaction,
 )
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
@@ -914,9 +913,7 @@ async def _settle_posted(
             return
         if row.approved_at is not None:
             row.approved_at = None
-            await remove_slack_reaction(
-                row.slack_channel_id, row.slack_message_ts, "white_check_mark"
-            )
+    await ReviewCard(request).update_post_reactions()
     now = datetime.now(UTC)
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
