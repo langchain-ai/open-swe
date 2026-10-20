@@ -13,7 +13,7 @@ import {
 } from "./reducer"
 import type { TranscriptState } from "./reducer"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
-import type { AnyImageChunk } from "@/features/agents/lib/types"
+import type { AnyMediaChunk } from "@/features/agents/lib/types"
 import type {
   MessageCompletedPayload,
   RunNoticePayload,
@@ -504,9 +504,10 @@ function attachment(
   }
 }
 
-function imagesOf(entry: Message | undefined): Array<AnyImageChunk> {
+function mediaOf(entry: Message | undefined): Array<AnyMediaChunk> {
   return (entry?.chunks ?? []).filter(
-    (chunk): chunk is AnyImageChunk => chunk.kind === "image"
+    (chunk): chunk is AnyMediaChunk =>
+      chunk.kind === "image" || chunk.kind === "video"
   )
 }
 
@@ -580,7 +581,8 @@ describe("message images", () => {
                 }),
                 attachment({
                   file_name: null,
-                  url: "https://example.test/remote.png",
+                  url: "https://example.test/remote.mp4",
+                  mime_type: "video/mp4",
                 }),
                 // No bytes were ever captured for this one.
                 attachment({ file_name: "lost.png" }),
@@ -591,7 +593,7 @@ describe("message images", () => {
       )
     )
 
-    expect(imagesOf(messages[0])).toEqual([
+    expect(mediaOf(messages[0])).toEqual([
       {
         kind: "image",
         url: expect.stringContaining(
@@ -602,10 +604,10 @@ describe("message images", () => {
         fileName: "shot.png",
       },
       {
-        kind: "image",
-        url: "https://example.test/remote.png",
+        kind: "video",
+        url: "https://example.test/remote.mp4",
         credentials: "none",
-        mimeType: "image/png",
+        mimeType: "video/mp4",
       },
     ])
   })

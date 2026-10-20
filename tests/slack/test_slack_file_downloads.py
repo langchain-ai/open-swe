@@ -143,8 +143,8 @@ async def test_download_slack_files_uploads_before_downloading_next_file(
     monkeypatch, tmp_path
 ) -> None:
     async def download(url: str) -> bytes:
-        if url.endswith("second.zip"):
-            assert (tmp_path / "bundle.zip").read_bytes() == b"zip"
+        if url.endswith("second.mp4"):
+            assert (tmp_path / "bundle.mp4").read_bytes() == b"zip"
         return b"zip"
 
     async def upload(files: list[tuple[str, bytes]]) -> list[dict[str, None]]:
@@ -161,17 +161,19 @@ async def test_download_slack_files_uploads_before_downloading_next_file(
 
     staged = await slack_webhook._download_slack_files_to_sandbox(
         [
-            _entry("bundle.zip", "https://files.slack.com/first.zip"),
-            _entry("bundle.zip", "https://files.slack.com/second.zip"),
+            _entry("bundle.mp4", "https://files.slack.com/first.zip"),
+            _entry("bundle.mp4", "https://files.slack.com/second.mp4"),
         ],
         "thread-1",
     )
 
     assert staged == [
-        slack_webhook.StagedSlackFile("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
-        slack_webhook.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
+        slack_webhook.StagedSlackFile("bundle.mp4", "/workspace/.open-swe/slack-files/bundle.mp4"),
+        slack_webhook.StagedSlackFile(
+            "bundle-1.mp4", "/workspace/.open-swe/slack-files/bundle-1.mp4"
+        ),
     ]
-    assert (tmp_path / "bundle-1").read_bytes() == b"zip"
+    assert (tmp_path / "bundle-1.mp4").read_bytes() == b"zip"
 
 
 @pytest.mark.asyncio

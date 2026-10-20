@@ -1,7 +1,11 @@
 import pytest
 from fastapi import HTTPException
 
-from openswe.threads.runs import _dashboard_images_from_content, _validate_command_images
+from openswe.threads.runs import (
+    _command_videos,
+    _dashboard_attachments_from_content,
+    _validate_command_images,
+)
 
 
 @pytest.mark.parametrize(
@@ -9,7 +13,7 @@ from openswe.threads.runs import _dashboard_images_from_content, _validate_comma
 )
 def test_native_image_blocks_are_validated_against_the_model(url: str | dict[str, str]) -> None:
     content = [{"type": "image_url", "image_url": url}]
-    images = _dashboard_images_from_content(content)
+    images = _dashboard_attachments_from_content(content)
     assert len(images) == 1
     assert images[0].mime_type == "image/png"
     assert images[0].base64 == "aGVsbG8="
@@ -23,5 +27,25 @@ def test_native_image_blocks_are_validated_against_the_model(url: str | dict[str
 )
 def test_native_image_blocks_reject_unsupported_sources(url: str) -> None:
     with pytest.raises(HTTPException) as failure:
-        _dashboard_images_from_content([{"type": "image_url", "image_url": {"url": url}}])
+        _dashboard_attachments_from_content([{"type": "image_url", "image_url": {"url": url}}])
+    assert failure.value.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"type": "video", "base64": "aGVsbG8=", "mime_type": "text/html"},
+        {"type": "video", "base64": "not base64", "mime_type": "video/mp4"},
+        {"type": "video", "base64": "A" * (14 * 1024 * 1024), "mime_type": "video/mp4"},
+    ],
+)
+def test_video_inputs_reject_invalid_bytes_and_types(block: dict[str, str]) -> None:
+    with pytest.raises(HTTPException) as failure:
+        _command_videos([block], 0)
+    assert failure.value.status_code == 422
+
+
+def test_video_inputs_share_attachment_count_limit_with_images() -> None:
+    with pytest.raises(HTTPException) as failure:
+        _command_videos([{"type": "video", "base64": "aGVsbG8=", "mime_type": "video/mp4"}], 5)
     assert failure.value.status_code == 422

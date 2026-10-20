@@ -46,41 +46,44 @@ describe("visibleQueuedMessages", () => {
 })
 
 describe("visiblePendingMessages", () => {
-  it("renders image-only optimistic messages and reconciles by id", () => {
-    const pending: PendingThreadMessage = {
-      id: "message-1",
-      content: "",
-      createdAt: 2_000,
-      status: "sending",
-      images: [
-        {
-          kind: "image",
-          base64: "image-data",
-          mimeType: "image/png",
-        },
-      ],
-    }
-
-    expect(visiblePendingMessages([pending], [])).toEqual([
-      expect.objectContaining({
+  it.each(["image", "video"] as const)(
+    "renders %s-only optimistic messages and reconciles by id",
+    (kind) => {
+      const pending: PendingThreadMessage = {
         id: "message-1",
-        author: "user",
-        deliveryStatus: "sending",
-        chunks: pending.images,
-      }),
-    ])
-    expect(
-      visiblePendingMessages(
-        [pending],
-        [
+        content: "",
+        createdAt: 2_000,
+        status: "sending",
+        attachments: [
           {
-            id: "message-1",
-            author: "user",
-            timestamp: new Date(3_000).toISOString(),
-            chunks: [],
+            kind,
+            base64: "media-data",
+            mimeType: kind === "video" ? "video/mp4" : "image/png",
           },
-        ]
-      )
-    ).toEqual([])
-  })
+        ],
+      }
+
+      expect(visiblePendingMessages([pending], [])).toEqual([
+        expect.objectContaining({
+          id: "message-1",
+          author: "user",
+          deliveryStatus: "sending",
+          chunks: pending.attachments,
+        }),
+      ])
+      expect(
+        visiblePendingMessages(
+          [pending],
+          [
+            {
+              id: "message-1",
+              author: "user",
+              timestamp: new Date(3_000).toISOString(),
+              chunks: [],
+            },
+          ]
+        )
+      ).toEqual([])
+    }
+  )
 })

@@ -118,6 +118,7 @@ class Catalog(BaseModel):
     tools: list[ToolSpec] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
+    subagent_vision_model: ModelSpec | None = None
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.

@@ -62,6 +62,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from openswe.dashboard.options import default_vision_model_pair, model_supports_images
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -319,6 +320,13 @@ class RunSession:
                     for subagent in self.surface.subagents
                 ],
                 "models": self.start_models().model_dump(),
+                "subagent_vision_model": (
+                    None
+                    if model_supports_images(self.models.subagent.model_id)
+                    else _model_spec(
+                        self._explicit_model(*default_vision_model_pair())
+                    ).model_dump()
+                ),
                 # Hidden from the model, as the in-process graph hides them.
                 "excluded": sorted((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS),
                 # Called from MDA's code mode, never offered to the model as schemas.
@@ -448,7 +456,18 @@ class RunSession:
         )
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
-        """The model the graph's model selection would call next."""
+        """The selected model, with a vision fallback for retained images."""
+        selected = self._selected_model(state)
+        if not model_supports_images(selected.model_id) and any(
+            block.get("type") == "image"
+            for message in _as_list(state.get("messages"))
+            for block in message.content_blocks
+        ):
+            model_id, effort = default_vision_model_pair()
+            return self._explicit_model(model_id, effort)
+        return selected
+
+    def _selected_model(self, state: Mapping[str, object]) -> ModelChoice:
         requested = state.get("requested_model")
         if isinstance(requested, str) and requested:
             return self._explicit_model(requested, state.get("requested_effort"))

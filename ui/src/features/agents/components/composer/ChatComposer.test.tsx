@@ -198,6 +198,74 @@ describe("ChatComposer stop button", () => {
   })
 })
 
+describe("ChatComposer attachments", () => {
+  it.each(["picker", "paste", "drop"] as const)(
+    "previews and submits videos from %s without relabeling them as images",
+    async (source) => {
+      const onSubmit = vi.fn()
+      renderComposer(false, { onSubmit })
+      const file = new File(["clip"], "demo.mp4", { type: "video/mp4" })
+      const input = screen.getByLabelText("Attach images or videos")
+      if (source === "picker") {
+        fireEvent.change(input, { target: { files: [file] } })
+      } else if (source === "paste") {
+        fireEvent.paste(screen.getByRole("textbox", { name: "Message" }), {
+          clipboardData: { items: [{ kind: "file", getAsFile: () => file }] },
+        })
+      } else {
+        fireEvent.drop(input.closest("[data-chat-composer]")!, {
+          dataTransfer: { types: ["Files"], files: [file], getData: () => "" },
+        })
+      }
+
+      const preview = await screen.findByLabelText("demo.mp4")
+      expect(preview.tagName).toBe("VIDEO")
+      expect(preview.getAttribute("controls")).not.toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+      await waitFor(() =>
+        expect(onSubmit).toHaveBeenCalledWith(
+          "",
+          [
+            {
+              kind: "video",
+              base64: "Y2xpcA==",
+              mimeType: "video/mp4",
+              fileName: "demo.mp4",
+            },
+          ],
+          undefined
+        )
+      )
+    }
+  )
+
+  it("limits mixed attachments and explains oversized files", async () => {
+    renderComposer(false)
+    const oversized = new File(["clip"], "large.mp4", { type: "video/mp4" })
+    Object.defineProperty(oversized, "size", { value: 10 * 1024 * 1024 + 1 })
+    fireEvent.change(screen.getByLabelText("Attach images or videos"), {
+      target: { files: [oversized] },
+    })
+    expect((await screen.findByRole("alert")).textContent).toContain("10 MiB")
+    const files = Array.from(
+      { length: 6 },
+      (_, index) =>
+        new File(["clip"], `clip-${index}`, {
+          type: index % 2 ? "video/mp4" : "image/png",
+        })
+    )
+    fireEvent.change(screen.getByLabelText("Attach images or videos"), {
+      target: { files },
+    })
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("button", { name: /Remove (image|video)/ })
+      ).toHaveLength(5)
+    )
+    expect(screen.getByRole("alert").textContent).toContain("up to 5")
+  })
+})
+
 describe("ChatComposer options", () => {
   it("offers attachments without a plan-mode toggle", async () => {
     renderComposer(false)
@@ -208,7 +276,7 @@ describe("ChatComposer options", () => {
     )
 
     expect(
-      await screen.findByRole("menuitem", { name: "Attach images" })
+      await screen.findByRole("menuitem", { name: "Attach images or videos" })
     ).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
   })

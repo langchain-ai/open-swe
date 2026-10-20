@@ -106,7 +106,7 @@ describe("useSubmitAgentMessage", () => {
 
   it("offloads without adding a user message", async () => {
     const { client, result } = setup()
-    await result.current.mutateAsync({ content: "/offload", images: [] })
+    await result.current.mutateAsync({ content: "/offload", attachments: [] })
     expect(source.startRun).toHaveBeenCalledWith({
       configurable: { offload_conversation: true },
     })
@@ -129,7 +129,7 @@ describe("useSubmitAgentMessage", () => {
     )
     const { client, result } = setup()
 
-    await result.current.mutateAsync({ content: "hi", images: [] })
+    await result.current.mutateAsync({ content: "hi", attachments: [] })
 
     expect(pendingMessages(client)).toHaveLength(1)
     const optimisticId = pendingMessages(client)?.[0]?.id
@@ -154,7 +154,7 @@ describe("useSubmitAgentMessage", () => {
     const onStartError = vi.fn()
     await result.current.mutateAsync({
       content: "try me",
-      images: [],
+      attachments: [],
       onStartError,
     })
 
@@ -183,7 +183,7 @@ describe("useSubmitAgentMessage", () => {
 
     await result.current.mutateAsync({
       content: "try me",
-      images: [],
+      attachments: [],
       enqueue: true,
     })
 

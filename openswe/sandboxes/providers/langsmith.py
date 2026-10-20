@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import mimetypes
 import shlex
 from abc import ABC, abstractmethod
 from typing import Any, Literal, NotRequired, TypedDict
@@ -69,6 +70,7 @@ _LS_MAX_ENTRIES = 1000
 # Above this, a file API read would pull the whole file into the worker to return
 # one page; the base class's read script pages inside the sandbox instead.
 _FILE_API_READ_MAX_BYTES = 2 * 1024 * 1024
+_VIDEO_READ_MAX_BYTES = 50 * 1024 * 1024
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -753,6 +755,28 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         large files, and files the API cannot stat, go through the read script,
         which pages inside the sandbox.
         """
+        mime_type = mimetypes.guess_type(file_path)[0] or ""
+        if mime_type.startswith("video/"):
+            try:
+                sandbox = self._aget_sandbox()
+                stat = await sandbox.stat(file_path)
+                if stat.size_bytes > _VIDEO_READ_MAX_BYTES:
+                    return ReadResult(
+                        error=f"Video exceeds maximum input size of {_VIDEO_READ_MAX_BYTES} bytes"
+                    )
+                raw = await sandbox.read(file_path)
+            except SandboxClientError as exc:
+                logger.warning(
+                    "Sandbox video read failed", extra={"file_path": file_path}, exc_info=True
+                )
+                return ReadResult(error=f"Failed to read video: {type(exc).__name__}")
+            if len(raw) > _VIDEO_READ_MAX_BYTES:
+                return ReadResult(
+                    error=f"Video exceeds maximum input size of {_VIDEO_READ_MAX_BYTES} bytes"
+                )
+            return ReadResult(
+                file_data={"content": base64.b64encode(raw).decode("ascii"), "encoding": "base64"}
+            )
         try:
             stat = await self._aget_sandbox().stat(file_path)
         except SandboxClientError:

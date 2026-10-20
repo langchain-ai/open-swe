@@ -53,6 +53,63 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
+@pytest.mark.parametrize(
+    "selection",
+    [
+        {},
+        {"model_route": "fast"},
+        {"requested_model": "fireworks:accounts/fireworks/models/kimi-k3"},
+    ],
+)
+@pytest.mark.parametrize("message_type", ["human", "tool"])
+def test_remote_text_only_model_uses_vision_for_retained_file_images(
+    monkeypatch: pytest.MonkeyPatch, selection: dict[str, str], message_type: str
+) -> None:
+    from langchain_core.messages import HumanMessage, ToolMessage
+    from langchain_core.messages.content import ContentBlock
+
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from openswe.utils.model import provider_model_kwargs
+
+    vision_id = "openai:gpt-6.1-sol"
+    monkeypatch.setattr(
+        "openswe.remote_runtime.graph.default_vision_model_pair", lambda: (vision_id, "medium")
+    )
+    text_only = ModelChoice("fireworks:accounts/fireworks/models/kimi-k3", {})
+    session = RunSession(
+        ToolSurface(
+            models=SurfaceModels(
+                main=text_only,
+                subagent=text_only,
+                routes={"fast": text_only},
+                use_gateway=False,
+            )
+        ),
+        {},
+        None,
+        started_here=True,
+    )
+    content: list[ContentBlock] = [{"type": "image", "url": "data:image/jpeg;base64,ZmFrZQ=="}]
+    media = (
+        HumanMessage(content_blocks=content)
+        if message_type == "human"
+        else ToolMessage(content_blocks=content, name="read_file", tool_call_id="read-video")
+    )
+
+    assert (
+        session.model_for({**selection, "messages": [HumanMessage(content="Read video")]}).model_id
+        == text_only.model_id
+    )
+    choice = session.model_for({**selection, "messages": [media]})
+    assert choice.model_id == vision_id
+    assert choice.kwargs == provider_model_kwargs(vision_id, "medium", max_tokens=64_000)
+    assert session.catalog()["subagent_vision_model"] == {
+        "model_id": choice.model_id,
+        "kwargs": choice.kwargs,
+    }
+
+
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
     from collections.abc import Awaitable, Callable
 

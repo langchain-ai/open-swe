@@ -5,7 +5,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
-import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
+import type { AgentThread, MediaChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import {
   pickComposerRepo,
@@ -438,7 +438,7 @@ export function AgentsHome({
     resetPendingSubmit()
   }
 
-  const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
+  const handleSubmit = (prompt: string, attachments: Array<MediaChunk>) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
@@ -459,7 +459,7 @@ export function AgentsHome({
     const draft = localCheckout
       ? {
           prompt,
-          images,
+          attachments,
           client_message_id: messageId,
           visibility: "private" as const,
           model_id: activeSelection?.modelId ?? null,
@@ -467,7 +467,7 @@ export function AgentsHome({
         }
       : {
           prompt,
-          images,
+          attachments,
           client_message_id: messageId,
           repo,
           visibility,
@@ -517,7 +517,7 @@ export function AgentsHome({
           threadId,
           runStartCommand({
             threadId,
-            message: { id: messageId, text: prompt, images },
+            message: { id: messageId, text: prompt, attachments },
             configurable,
           })
         )

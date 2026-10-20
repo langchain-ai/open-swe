@@ -15,7 +15,7 @@ import {
   newRequestId,
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { MediaChunk } from "@/features/agents/lib/types"
 import type {
   StoredEvent,
   ToolOutputResponse,
@@ -82,19 +82,15 @@ export function fetchToolOutput(
   )
 }
 
-/** Where one image attachment's bytes are served from. */
+/** Where one attachment's bytes are served from. */
 export function attachmentUrl(threadId: string, attachmentId: string): string {
   return dashboardApiUrl(
     transcriptPath(threadId, `/attachments/${encodeURIComponent(attachmentId)}`)
   )
 }
 
-/**
- * The bytes behind a dashboard image URL, fetched with the session cookie. An
- * `<img src>` would carry it only same-origin (a split deployment's images are
- * a third-party request), so the caller shows the blob instead.
- */
-export async function fetchImageBlob(url: string): Promise<Blob> {
+/** Fetch attachment bytes with the session cookie, including on split deployments. */
+export async function fetchAttachmentBlob(url: string): Promise<Blob> {
   const response = await timedFetch(url, { credentials: "include" })
   if (!response.ok) throw await apiError(response)
   return await response.blob()
@@ -195,7 +191,7 @@ export interface RunStartMessage {
   /** Client-minted id; the graph's HumanMessage and the log's message row share it. */
   id: string
   text: string
-  images?: ReadonlyArray<ImageChunk>
+  attachments?: ReadonlyArray<MediaChunk>
 }
 
 export interface RunStartCommand {
@@ -238,7 +234,7 @@ export function runStartCommand({
         ? {
             messages: [
               {
-                ...promptMessage(message.text, message.images),
+                ...promptMessage(message.text, message.attachments),
                 id: message.id,
               },
             ],

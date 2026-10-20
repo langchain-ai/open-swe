@@ -25,9 +25,10 @@ import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { formatRelativeTime } from "@/lib/utils"
 
 import type {
+  AnyMediaChunk,
   AgentPullRequest,
   AgentThread,
-  ImageChunk,
+  MediaChunk,
   Message,
   ThreadFixScope,
 } from "@/features/agents/lib/types"
@@ -63,7 +64,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
-  materializeImages,
+  materializeAttachments,
   visiblePendingMessages,
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
@@ -284,7 +285,7 @@ export function AgentThreadView({
   const submitMessage = useCallback(
     async (
       content: string,
-      images: Array<ImageChunk>,
+      attachments: Array<MediaChunk>,
       options?: SubmitOptions
     ) => {
       scrollControlRef.current?.scrollToBottom()
@@ -303,7 +304,7 @@ export function AgentThreadView({
         await ensureLocalBridge()
         await sendMessage.mutateAsync({
           content,
-          images,
+          attachments,
           client_message_id: messageId,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
@@ -332,13 +333,13 @@ export function AgentThreadView({
   const submitWithExcerpts = useCallback(
     async (
       content: string,
-      images: Array<ImageChunk>,
+      attachments: Array<MediaChunk>,
       options?: SubmitOptions
     ) => {
       const excerpts = reviewChat?.excerpts ?? []
       await submitMessage(
         excerpts.length ? serializeExcerpts(content, excerpts) : content,
-        images,
+        attachments,
         options
       )
       if (excerpts.length) reviewChat?.clearExcerpts?.()
@@ -358,8 +359,11 @@ export function AgentThreadView({
       .flatMap((chunk) => (chunk.kind === "text" ? [chunk.text] : []))
       .join("\n")
       .trim()
-  const queuedImages = (entry: QueuedTurn) =>
-    entry.message.chunks.filter((chunk) => chunk.kind === "image")
+  const queuedAttachments = (entry: QueuedTurn) =>
+    entry.message.chunks.filter(
+      (chunk): chunk is AnyMediaChunk =>
+        chunk.kind === "image" || chunk.kind === "video"
+    )
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
   const [appliedComposerDraft, setAppliedComposerDraft] =
@@ -370,7 +374,7 @@ export function AgentThreadView({
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: composerDraft.text,
-        images: [],
+        attachments: [],
         replacesSuggestion: true,
       }))
     }
@@ -387,7 +391,7 @@ export function AgentThreadView({
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: question,
-        images: [],
+        attachments: [],
       }))
     })
   }, [question, canPost, clearQuestion, submitWithExcerpts])
@@ -397,26 +401,28 @@ export function AgentThreadView({
     files: Array<File>
   } | null>(null)
   const restoreQueuedToComposer = useCallback(
-    (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
-      if (texts.length === 0 && images.length === 0) return
+    (texts: ReadonlyArray<string>, attachments: Array<MediaChunk>) => {
+      if (texts.length === 0 && attachments.length === 0) return
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: texts.filter(Boolean).join("\n\n"),
-        images,
+        attachments,
       }))
     },
     []
   )
-  // The images of a queued follow-up live with its run. Fetch them before that
+  // The attachments of a queued follow-up live with its run. Fetch them before that
   // run is withdrawn: a fetch that fails leaves the follow-up queued, intact.
-  const materializeQueuedImages = useCallback(
-    async (entry: QueuedTurn): Promise<Array<ImageChunk> | null> => {
-      const { images, failed } = await materializeImages(queuedImages(entry))
-      if (failed === 0) return images
+  const materializeQueuedAttachments = useCallback(
+    async (entry: QueuedTurn): Promise<Array<MediaChunk> | null> => {
+      const { attachments, failed } = await materializeAttachments(
+        queuedAttachments(entry)
+      )
+      if (failed === 0) return attachments
       toast.error(
         failed === 1
-          ? "Couldn't load the queued message's image, so it stays queued."
-          : `Couldn't load ${failed} of the queued message's images, so it stays queued.`
+          ? "Couldn't load the queued message's attachment, so it stays queued."
+          : `Couldn't load ${failed} of the queued message's attachments, so it stays queued.`
       )
       return null
     },
@@ -444,15 +450,20 @@ export function AgentThreadView({
       const entry = queued.find((candidate) => candidate.message.id === id)
       if (!entry || entry.runId === null) return
       void (async () => {
-        const images = await materializeQueuedImages(entry)
-        if (images === null) return
+        const attachments = await materializeQueuedAttachments(entry)
+        if (attachments === null) return
         await withdrawQueued(entry)
-        restoreQueuedToComposer([queuedText(entry)], images)
+        restoreQueuedToComposer([queuedText(entry)], attachments)
       })().catch((error: unknown) =>
         reportError({ title: "Couldn't cancel the queued message", error })
       )
     },
-    [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
+    [
+      materializeQueuedAttachments,
+      queued,
+      restoreQueuedToComposer,
+      withdrawQueued,
+    ]
   )
   // Stop cancels the queued runs along with the live one; the user's own come
   // back to the composer instead of starting the moment the run settles. Only
@@ -467,9 +478,9 @@ export function AgentThreadView({
     const unacknowledged = (thread.pendingMessages ?? []).filter(
       (message) => message.queued && !known.has(message.id)
     )
-    const materialized = materializeImages([
-      ...pending.flatMap(queuedImages),
-      ...unacknowledged.flatMap((message) => message.images ?? []),
+    const materialized = materializeAttachments([
+      ...pending.flatMap(queuedAttachments),
+      ...unacknowledged.flatMap((message) => message.attachments ?? []),
     ])
     if (!(await source.stop())) return
     for (const entry of pending) restoreQueuedAutoSelection(entry.message.id)
@@ -493,19 +504,19 @@ export function AgentThreadView({
           }
       )
     }
-    const { images, failed } = await materialized
+    const { attachments, failed } = await materialized
     restoreQueuedToComposer(
       [
         ...pending.map(queuedText),
         ...unacknowledged.map((message) => message.content),
       ],
-      images
+      attachments
     )
     if (failed > 0) {
       toast.error(
         failed === 1
-          ? "Couldn't load one queued image; it was not restored to the composer."
-          : `Couldn't load ${failed} queued images; they were not restored to the composer.`
+          ? "Couldn't load one queued attachment; it was not restored to the composer."
+          : `Couldn't load ${failed} queued attachments; they were not restored to the composer.`
       )
     }
   }, [
@@ -608,7 +619,7 @@ export function AgentThreadView({
       ...queued.map((entry) => ({
         id: entry.message.id,
         content: queuedText(entry),
-        images: queuedImages(entry),
+        attachments: queuedAttachments(entry),
         createdAt: Date.parse(entry.requestedAt),
         pending: entry.runId === null,
         mine: isOwnQueued(entry),
@@ -618,7 +629,7 @@ export function AgentThreadView({
         .map((message) => ({
           id: message.id,
           content: message.content,
-          images: message.images,
+          attachments: message.attachments,
           createdAt: message.createdAt,
           pending: true,
         })),
@@ -816,11 +827,7 @@ export function AgentThreadView({
             )
               return
             event.preventDefault()
-            const files = Array.from(event.dataTransfer.files).filter((file) =>
-              ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
-                file.type
-              )
-            )
+            const files = Array.from(event.dataTransfer.files)
             if (files.length)
               setDroppedFiles((previous) => ({
                 key: (previous?.key ?? 0) + 1,

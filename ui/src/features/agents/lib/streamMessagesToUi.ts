@@ -160,7 +160,7 @@ function reasoningText(raw: BaseMessage): string {
   return text.trim()
 }
 
-function imageChunks(content: unknown): Array<Chunk> {
+function mediaChunks(content: unknown): Array<Chunk> {
   if (!Array.isArray(content)) return []
 
   const chunks: Array<Chunk> = []
@@ -171,7 +171,7 @@ function imageChunks(content: unknown): Array<Chunk> {
     let base64: string | undefined
     let mimeType: string | undefined
 
-    if (type === "image") {
+    if (type === "image" || type === "video") {
       const data = block.data ?? block.base64
       const mime = block.mime_type ?? block.mimeType
       if (typeof data === "string" && typeof mime === "string") {
@@ -196,7 +196,7 @@ function imageChunks(content: unknown): Array<Chunk> {
     if (base64 && mimeType) {
       const fileName = block.fileName ?? block.file_name
       chunks.push({
-        kind: "image",
+        kind: type === "video" ? "video" : "image",
         base64,
         mimeType,
         ...(typeof fileName === "string" && fileName ? { fileName } : {}),
@@ -327,7 +327,7 @@ export function streamMessagesToUi(
       flushAgentTurn()
       turnKey = typeof raw.id === "string" ? raw.id : undefined
       const content = (raw as unknown as { content?: unknown }).content
-      const chunks = imageChunks(content)
+      const chunks = mediaChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
       if (parsed.type === "message" && isSilentSender(parsed.sender)) return

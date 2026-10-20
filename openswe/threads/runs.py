@@ -49,6 +49,7 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
+from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
 from openswe.slack.client import update_slack_trace_reply_for_web_handoff
 from openswe.slack.records import lookup_slack_thread_run_mapping
 from openswe.source_context import SourceContext
@@ -110,6 +111,12 @@ DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "events",
 )
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+_VIDEO_EXTENSIONS = {
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "video/mpeg": ".mpeg",
+}
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
@@ -128,13 +135,26 @@ class _LinkedPullRequest(BaseModel):
     pr_url: str | None = None
 
 
-class DashboardImageBody(BaseModel):
+class DashboardAttachmentBody(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     kind: str | None = None
     base64: str = Field(min_length=1)
     mime_type: str = Field(alias="mimeType", min_length=1)
     file_name: str | None = Field(default=None, alias="fileName")
+
+    def decode(self, allowed_types: frozenset[str]) -> bytes:
+        if self.mime_type not in allowed_types:
+            raise HTTPException(422, f"unsupported attachment type: {self.mime_type}")
+        if len(self.base64) > ((_MAX_DASHBOARD_IMAGE_BYTES + 2) // 3) * 4:
+            raise HTTPException(422, "attachment exceeds 10MB limit")
+        try:
+            data = base64.b64decode(self.base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(422, "invalid attachment data") from exc
+        if len(data) > _MAX_DASHBOARD_IMAGE_BYTES:
+            raise HTTPException(422, "attachment exceeds 10MB limit")
+        return data
 
 
 class ThreadRenameBody(BaseModel):
@@ -182,20 +202,8 @@ def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tu
     return fallback_model_id, fallback_effort
 
 
-def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
-    if image.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
-        raise HTTPException(422, f"unsupported image type: {image.mime_type}")
-    try:
-        data = base64.b64decode(image.base64, validate=True)
-    except binascii.Error as exc:
-        raise HTTPException(422, "invalid image data") from exc
-    if len(data) > _MAX_DASHBOARD_IMAGE_BYTES:
-        raise HTTPException(422, "image exceeds 10MB limit")
-    return data
-
-
 def _image_blocks(
-    images: list[DashboardImageBody], *, model_id: str | None
+    images: list[DashboardAttachmentBody], *, model_id: str | None
 ) -> list[ImageContentBlock]:
     if len(images) > _MAX_DASHBOARD_IMAGES:
         raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
@@ -204,7 +212,7 @@ def _image_blocks(
         raise HTTPException(422, f"model {model_label} does not support image input")
     return [
         create_image_block(
-            base64=base64.b64encode(_decode_dashboard_image(image)).decode("ascii"),
+            base64=base64.b64encode(image.decode(_SUPPORTED_IMAGE_MIME_TYPES)).decode("ascii"),
             mime_type=image.mime_type,
         )
         for image in images
@@ -212,7 +220,7 @@ def _image_blocks(
 
 
 def _user_message_content(
-    prompt: str, images: list[DashboardImageBody], *, model_id: str | None = None
+    prompt: str, images: list[DashboardAttachmentBody], *, model_id: str | None = None
 ) -> str | list[ImageContentBlock | dict[str, str]]:
     text = prompt.strip()
     if not text and not images:
@@ -251,7 +259,7 @@ async def create_dashboard_thread_record(
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
     prompt: str,
-    images: list[DashboardImageBody] | None = None,
+    images: list[DashboardAttachmentBody] | None = None,
     title: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
@@ -584,13 +592,15 @@ def _command_prompt_text(content: Any) -> str:
     return ""
 
 
-def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
-    """Read inline image blocks for size, format, and model validation."""
+def _dashboard_attachments_from_content(
+    content: object, *, kind: Literal["image", "video"] = "image"
+) -> list[DashboardAttachmentBody]:
+    """Read inline image or video bytes for attachment validation."""
     if not isinstance(content, list):
         return []
-    images: list[DashboardImageBody] = []
+    images: list[DashboardAttachmentBody] = []
     for block in content:
-        if isinstance(block, dict) and block.get("type") == "image_url":
+        if kind == "image" and isinstance(block, dict) and block.get("type") == "image_url":
             image_url = block.get("image_url")
             url = image_url.get("url") if isinstance(image_url, dict) else image_url
             if not isinstance(url, str):
@@ -602,17 +612,17 @@ def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
                 or not header.endswith(";base64")
             ):
                 raise HTTPException(422, "images must be embedded as base64 data URLs")
-            images.append(DashboardImageBody(base64=data, mimeType=header[5:-7]))
+            images.append(DashboardAttachmentBody(base64=data, mimeType=header[5:-7]))
             continue
-        if not isinstance(block, dict) or block.get("type") != "image":
+        if not isinstance(block, dict) or block.get("type") != kind:
             continue
         data = block.get("base64")
         mime = block.get("mime_type") or block.get("mimeType")
-        if not isinstance(data, str) or not isinstance(mime, str):
-            raise HTTPException(422, "invalid image data")
+        if not isinstance(data, str) or not data or not isinstance(mime, str) or not mime:
+            raise HTTPException(422, "invalid attachment data")
         file_name = block.get("file_name") or block.get("fileName")
         images.append(
-            DashboardImageBody(
+            DashboardAttachmentBody(
                 base64=data,
                 mimeType=mime,
                 fileName=file_name if isinstance(file_name, str) else None,
@@ -622,13 +632,9 @@ def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
 
 
 def _transcript_attachments(
-    images: list[DashboardImageBody], message_id: str
+    images: list[DashboardAttachmentBody], message_id: str
 ) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
-    """Attachment rows for a command's images, and the metadata the event carries.
-
-    ``_decode_dashboard_image`` re-applies the type allowlist and the 10MB cap
-    the run already validated, so nothing reaches the database unchecked.
-    """
+    """Validated attachment rows and metadata for a dashboard command."""
     metadata: list[MessageAttachment] = []
     pending: list[PendingAttachment] = []
     for position, image in enumerate(images):
@@ -640,7 +646,7 @@ def _transcript_attachments(
                 position=position,
                 mime_type=image.mime_type,
                 file_name=image.file_name,
-                data=_decode_dashboard_image(image),
+                data=image.decode(_SUPPORTED_IMAGE_MIME_TYPES | frozenset(_VIDEO_EXTENSIONS)),
             )
         )
         metadata.append(
@@ -653,9 +659,52 @@ def _transcript_attachments(
     return metadata, tuple(pending)
 
 
+async def _stage_dashboard_videos(
+    content: object,
+    videos: list[DashboardAttachmentBody],
+    *,
+    thread_id: str,
+    workspace: str | None,
+) -> object:
+    if not videos:
+        return content
+    files = [
+        (
+            f"/workspace/.open-swe/uploads/{uuid.uuid7()}{_VIDEO_EXTENSIONS[video.mime_type]}",
+            video.decode(frozenset(_VIDEO_EXTENSIONS)),
+        )
+        for video in videos
+    ]
+    backend = await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace)
+    results = await backend.aupload_files(files)
+    if len(results) != len(files) or any(result.error for result in results):
+        raise HTTPException(502, "could not stage video attachments in the sandbox")
+    blocks = (
+        [block for block in content if not isinstance(block, dict) or block.get("type") != "video"]
+        if isinstance(content, list)
+        else []
+    )
+    blocks.append(
+        {
+            "type": "text",
+            "text": prompt("runs/video-attachments", paths=[path for path, _ in files]),
+        }
+    )
+    return blocks
+
+
+def _command_videos(content: object, image_count: int) -> list[DashboardAttachmentBody]:
+    videos = _dashboard_attachments_from_content(content, kind="video")
+    if len(videos) + image_count > _MAX_DASHBOARD_IMAGES:
+        raise HTTPException(422, "at most 5 attachments are supported")
+    for video in videos:
+        video.decode(frozenset(_VIDEO_EXTENSIONS))
+    return videos
+
+
 def _validate_command_images(content: Any, *, model_id: str | None) -> None:
     """Reject images for text-only models / oversize attachments (raises 422)."""
-    images = _dashboard_images_from_content(content)
+    images = _dashboard_attachments_from_content(content)
     if images:
         _image_blocks(images, model_id=model_id)
 
@@ -869,7 +918,8 @@ async def _enrich_run_start_command(
     relayed_from = _relayed_from(params)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
-    command_images = _dashboard_images_from_content(content)
+    command_images = _dashboard_attachments_from_content(content)
+    command_videos = _command_videos(content, len(command_images))
     invocation_id = new_invocation_id()
     invocation_started_at = datetime.now(UTC).isoformat()
     overrides = with_invocation_id(None, invocation_id)
@@ -901,7 +951,7 @@ async def _enrich_run_start_command(
             repo_config=repo_config,
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
             visibility=visibility,
-            prompt=_command_prompt_text(content),
+            prompt=_command_prompt_text(content) or ("Video attachment" if command_videos else ""),
             images=command_images,
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
@@ -928,6 +978,9 @@ async def _enrich_run_start_command(
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
 
+    content = await _stage_dashboard_videos(
+        content, command_videos, thread_id=thread_id, workspace=metadata.get("workspace")
+    )
     structured, injected, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
@@ -1013,7 +1066,9 @@ async def _enrich_run_start_command(
             # deduplicates it — and the run then has to join the turn that was
             # recorded the first time rather than one nothing was written under.
             command_id = f"message:{message_id}:requested"
-            attachments, pending = _transcript_attachments(command_images, message_id)
+            attachments, pending = _transcript_attachments(
+                [*command_images, *command_videos], message_id
+            )
             appended = await append(
                 thread_id,
                 [
@@ -1143,8 +1198,9 @@ async def steer_running_thread(
         params = {}
     content = _command_message_content(params)
     relayed_from = _relayed_from(params)
-    command_images = _dashboard_images_from_content(content)
-    if not _command_prompt_text(content) and not command_images:
+    command_images = _dashboard_attachments_from_content(content)
+    command_videos = _command_videos(content, len(command_images))
+    if not _command_prompt_text(content) and not command_images and not command_videos:
         raise HTTPException(422, "a follow-up needs a message")
 
     client = langgraph_client()
@@ -1156,11 +1212,12 @@ async def steer_running_thread(
     # The run keeps the model it started with, so images are held to it. Thread
     # metadata may already name the model of a follow-up queued behind it.
     run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
-    image_blocks = _image_blocks(
-        command_images,
-        model_id=run_model if isinstance(run_model, str) else thread_model_choice(metadata)[0],
-    )
+    current_model = run_model if isinstance(run_model, str) else thread_model_choice(metadata)[0]
+    image_blocks = _image_blocks(command_images, model_id=current_model)
 
+    content = await _stage_dashboard_videos(
+        content, command_videos, thread_id=thread_id, workspace=metadata.get("workspace")
+    )
     structured, _, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
@@ -1181,7 +1238,9 @@ async def steer_running_thread(
 
     if turn is not None:
         turn_id = turn.turn_id
-        attachments, pending = _transcript_attachments(command_images, message_id)
+        attachments, pending = _transcript_attachments(
+            [*command_images, *command_videos], message_id
+        )
         await append(
             thread_id,
             [
@@ -1560,8 +1619,10 @@ async def _enrich_system_run_start_command(
     prompt = _command_prompt_text(content)
     if not prompt.strip():
         raise HTTPException(422, "a run needs a prompt")
-    if _dashboard_images_from_content(content):
-        raise HTTPException(422, "machine principals cannot attach images")
+    if _dashboard_attachments_from_content(content) or _dashboard_attachments_from_content(
+        content, kind="video"
+    ):
+        raise HTTPException(422, "machine principals cannot attach media")
 
     if not creating and client_configurable.get("sandbox_bridge_id") is not None:
         raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")

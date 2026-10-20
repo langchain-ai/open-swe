@@ -27,7 +27,7 @@ import type {
   AgentStatus,
   AgentThread,
   Chunk,
-  ImageChunk,
+  MediaChunk,
   Message,
   ReviewPageRef,
   WorkflowApprovalStatus,
@@ -1092,7 +1092,7 @@ export function useDeleteAgentSchedule() {
 export interface CreateAgentThreadVariables {
   visibility?: "public" | "private"
   prompt: string
-  images?: Array<ImageChunk>
+  attachments?: Array<MediaChunk>
   /** Id the run was started with, shared with the graph's HumanMessage. */
   client_message_id?: string
   repo?: string | null
@@ -1125,7 +1125,7 @@ export function optimisticThread(
   const text = vars.prompt.trim()
   const repoFullName = vars.repo ?? ""
   const chunks: Array<Chunk> = [
-    ...(vars.images ?? []),
+    ...(vars.attachments ?? []),
     ...(text ? [{ kind: "text", text } satisfies Chunk] : []),
   ]
   const message: Message = {
@@ -1163,7 +1163,7 @@ export function optimisticThread(
             {
               id: message.id,
               content: text,
-              images: vars.images,
+              attachments: vars.attachments,
               createdAt: now,
               status: "sending",
             },
@@ -1174,7 +1174,7 @@ export function optimisticThread(
 
 export interface SendAgentMessageVariables {
   content: string
-  images?: Array<ImageChunk>
+  attachments?: Array<MediaChunk>
   model_id?: string | null
   effort?: string | null
   model_selection_changed?: boolean

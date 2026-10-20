@@ -29,7 +29,7 @@ function QueuedMessages({
   return (
     <div className="mb-space-3 space-y-space-2" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
-        const imageCount = message.images?.length ?? 0
+        const attachmentCount = message.attachments?.length ?? 0
         const statusLabel = message.waitsForAgent
           ? "Held for the agent. It reads this before its next step, and it starts no run of its own."
           : index === 0
@@ -53,9 +53,10 @@ function QueuedMessages({
                 <SkillPromptText text={message.content} />
               </div>
             )}
-            {imageCount > 0 && (
+            {attachmentCount > 0 && (
               <div className="mt-space-1 text-xs text-secondary">
-                {imageCount} image{imageCount === 1 ? "" : "s"} attached
+                {attachmentCount} attachment{attachmentCount === 1 ? "" : "s"}{" "}
+                attached
               </div>
             )}
             <div className="mt-space-2 flex items-center gap-space-3 text-xs text-secondary">
