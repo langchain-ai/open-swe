@@ -164,7 +164,9 @@ async def offer_readiness(pr: GitHubPrRef, pull: PullRequestClient, origin: Orig
         return (
             f"An author-only Mark ready button for this revision was already sent or is being "
             f"delivered to <@{author.slack_user_id}> in Slack DM. No new card or review request "
-            "was created. Ask the author to review the changes carefully and click that button."
+            "was created. Only the conversation that sent the card resumes automatically. "
+            "In this conversation, ask for review again after the author has reviewed the "
+            "changes carefully and marked the pull request ready."
         )
     try:
         location = await send_dm_with_location(
