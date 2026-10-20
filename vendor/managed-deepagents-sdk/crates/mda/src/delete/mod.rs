@@ -13,7 +13,9 @@
 //!    not touched by host teardown; and
 //! 4. the **managed sandboxes** the runtime provisioned, which carry no
 //!    deployment reference of their own and are therefore matched by the
-//!    `{name}--` prefix the runtimes give them.
+//!    `{name}--` prefix the runtimes give them; and
+//! 5. the **Agent Auth connections** the deployment's channels set up, e.g. a
+//!    GitHub channel's App; what only the user can remove is linked instead.
 //!
 //! Managed crons live on the deployment's Agent Server, and they do go away
 //! with it — but not promptly. Host teardown of the running container is
@@ -27,7 +29,7 @@
 //! so a partially torn-down deployment can be cleaned up by running the command
 //! again.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
@@ -37,6 +39,7 @@ use cliclack::{confirm, log, note, outro, outro_cancel, spinner};
 use crate::agent_config;
 use crate::cli_output::show_wordmark_intro;
 use crate::command::CommandCompletion;
+use crate::deploy::channel_setup::{self, ChannelTeardown};
 use crate::deploy::helpers::{
     bake_snapshot_list_prefix, deployment_runtime_url, is_deployment_bake_snapshot,
     is_deployment_sandbox, resolve_context_hub_base_url, resolve_langsmith_api_bases,
@@ -99,6 +102,10 @@ struct Plan {
     recipe_lookup_error: Option<String>,
     /// Set when the deployment-owned registry could not be queried.
     registry_lookup_error: Option<String>,
+    /// The Agent Auth connections the deployment's channels set up.
+    channel_connections: Option<ChannelTeardown>,
+    /// Set when Agent Auth could not be asked for them.
+    channel_lookup_error: Option<String>,
 }
 
 impl Plan {
@@ -108,6 +115,30 @@ impl Plan {
             && self.sandboxes.is_empty()
             && self.recipe_snapshots.is_empty()
             && self.registry.is_none()
+            && self.channel_connections.is_none()
+    }
+
+    fn lookup_failed(&self) -> bool {
+        self.sandbox_lookup_error.is_some()
+            || self.recipe_lookup_error.is_some()
+            || self.registry_lookup_error.is_some()
+            || self.channel_lookup_error.is_some()
+    }
+
+    fn warn_lookup_errors(&self) -> Result<()> {
+        if self.sandbox_lookup_error.is_some() {
+            warn_sandboxes_not_deleted()?;
+        }
+        if self.recipe_lookup_error.is_some() {
+            warn_recipes_not_deleted()?;
+        }
+        if self.registry_lookup_error.is_some() {
+            warn_registry_not_deleted()?;
+        }
+        if self.channel_lookup_error.is_some() {
+            warn_channel_connections_not_deleted()?;
+        }
+        Ok(())
     }
 }
 
@@ -184,23 +215,15 @@ fn run_session(
         workspace_id,
     )?;
 
-    let plan = resolve_plan(&client, &context_client, &name, deployment_agent.as_ref())?;
+    let mut plan = resolve_plan(&client, &context_client, &name, deployment_agent.as_ref())?;
+    if let Some(deployment_id) = plan.deployment_id.clone() {
+        resolve_channel_connections(&mut plan, &client, &env_vars, &deployment_id);
+    }
     if plan.is_empty() {
         // Everything else is gone, but an unreadable sandbox list means we
         // cannot claim teardown is complete — sandboxes may still be running.
-        if plan.sandbox_lookup_error.is_some() {
-            warn_sandboxes_not_deleted()?;
-        }
-        if plan.recipe_lookup_error.is_some() {
-            warn_recipes_not_deleted()?;
-        }
-        if plan.registry_lookup_error.is_some() {
-            warn_registry_not_deleted()?;
-        }
-        if plan.sandbox_lookup_error.is_some()
-            || plan.recipe_lookup_error.is_some()
-            || plan.registry_lookup_error.is_some()
-        {
+        plan.warn_lookup_errors()?;
+        if plan.lookup_failed() {
             outro(format!("Nothing else to delete for '{name}'."))?;
         } else {
             outro(format!("Nothing to delete for '{name}'."))?;
@@ -230,19 +253,19 @@ fn run_session(
     if let Some(deployment_url) = &plan.deployment_url {
         delete_crons(&client, deployment_url)?;
     }
+    // The connections are found through the deployment ID, so they go first:
+    // a failure here leaves the deployment for a second run to find them by.
+    if let Some(teardown) = &plan.channel_connections {
+        delete_channel_connections(&client, &env_vars, teardown)?;
+    }
     if let Some(deployment_id) = &plan.deployment_id {
         delete_deployment(&client, deployment_id, &name, delete_tracing_project)?;
     }
     delete_context_hub_repos(&context_client, &plan.repos)?;
 
-    if plan.sandbox_lookup_error.is_some() {
-        warn_sandboxes_not_deleted()?;
-    }
-    if plan.recipe_lookup_error.is_some() {
-        warn_recipes_not_deleted()?;
-    }
-    if plan.registry_lookup_error.is_some() {
-        warn_registry_not_deleted()?;
+    plan.warn_lookup_errors()?;
+    for (title, message) in plan.channel_connections.iter().flat_map(|t| &t.notes) {
+        note(title, message)?;
     }
     outro(format!("Deleted '{name}'."))?;
     Ok(CommandCompletion::Succeeded)
@@ -282,6 +305,42 @@ fn warn_registry_not_deleted() -> Result<()> {
         ),
     )?;
     Ok(())
+}
+
+fn warn_channel_connections_not_deleted() -> Result<()> {
+    note(
+        "Channel connections were not deleted",
+        "Looking up the deployment's channel connections in Agent Auth failed, so they \
+         were not removed. You can remove them with `mda connections delete`.",
+    )?;
+    Ok(())
+}
+
+/// Find the Agent Auth connections the deployment's channels set up.
+/// Best-effort, like sandboxes: an unreachable Agent Auth must not block
+/// tearing down the deployment.
+fn resolve_channel_connections(
+    plan: &mut Plan,
+    client: &langsmith::Client,
+    env_vars: &BTreeMap<String, String>,
+    deployment_id: &str,
+) {
+    let sp = spinner();
+    sp.start("Looking up channel connections");
+    match channel_setup::find_teardown(client, env_vars, deployment_id) {
+        Ok(Some(teardown)) => {
+            sp.stop(format!(
+                "Found {} channel connection(s)",
+                teardown.apps.len() + teardown.connections.len()
+            ));
+            plan.channel_connections = Some(teardown);
+        }
+        Ok(None) => sp.clear(),
+        Err(error) => {
+            sp.stop("Could not look up channel connections");
+            plan.channel_lookup_error = Some(format!("{error:#}"));
+        }
+    }
 }
 
 /// Discover which of the deployment's resources still exist.
@@ -419,6 +478,8 @@ fn resolve_plan(
         sandbox_lookup_error,
         recipe_lookup_error,
         registry_lookup_error,
+        channel_connections: None,
+        channel_lookup_error: None,
     })
 }
 
@@ -499,6 +560,22 @@ fn report_plan(plan: &Plan, delete_tracing_project: bool) -> Result<()> {
             "Could not look up the sandbox registry, so it will not be deleted: {error}"
         ))?,
         (None, Some(name)) => log::warning(format!("Will delete sandbox registry '{name}'"))?,
+        (None, None) => {}
+    }
+    match (&plan.channel_lookup_error, &plan.channel_connections) {
+        (Some(error), _) => log::warning(format!(
+            "Could not look up channel connections, so none will be deleted: {error}"
+        ))?,
+        (None, Some(teardown)) => {
+            for (_, slug) in &teardown.apps {
+                log::warning(format!(
+                    "Will delete the Agent Auth app behind connection '{slug}'"
+                ))?;
+            }
+            for (_, slug) in &teardown.connections {
+                log::warning(format!("Will delete Agent Auth connection '{slug}'"))?;
+            }
+        }
         (None, None) => {}
     }
     Ok(())
@@ -649,6 +726,22 @@ fn delete_registry(client: &langsmith::Client, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn delete_channel_connections(
+    client: &langsmith::Client,
+    env_vars: &BTreeMap<String, String>,
+    teardown: &ChannelTeardown,
+) -> Result<()> {
+    let sp = spinner();
+    sp.start("Deleting channel connections");
+    let deleted = step(
+        &sp,
+        "Could not delete the channel connections",
+        channel_setup::tear_down(client, env_vars, teardown),
+    )?;
+    sp.stop(format!("Deleted {deleted} channel connection(s)"));
+    Ok(())
+}
+
 fn delete_context_hub_repos(context_client: &ContextHubClient, repos: &[String]) -> Result<()> {
     if repos.is_empty() {
         return Ok(());
@@ -744,6 +837,15 @@ mod tests {
             ..Plan::default()
         }
         .is_empty());
+        assert!(!Plan {
+            channel_connections: Some(ChannelTeardown {
+                apps: vec![("a1".into(), "mda/github-app/dep-1".into())],
+                connections: vec![],
+                notes: vec![],
+            }),
+            ..Plan::default()
+        }
+        .is_empty());
         // A runtime URL is a route to resources, not a resource: on its own it
         // must not make the command claim there is something to delete.
         assert!(Plan {
@@ -812,7 +914,14 @@ mod tests {
             ..Plan::default()
         };
         assert!(plan.is_empty());
-        assert!(plan.sandbox_lookup_error.is_some());
+        assert!(plan.lookup_failed());
+
+        let plan = Plan {
+            channel_lookup_error: Some("Agent Auth unavailable".to_string()),
+            ..Plan::default()
+        };
+        assert!(plan.is_empty());
+        assert!(plan.lookup_failed());
     }
 
     #[test]

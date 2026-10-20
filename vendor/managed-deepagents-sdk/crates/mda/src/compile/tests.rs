@@ -15,7 +15,7 @@ use super::test_support::{
     with_live_npm_lockfile, with_py_runtime,
 };
 use super::{load_sandbox_recipe_manifest, DeployContext, BUILD_MARKER, LANGGRAPH_API_VERSION};
-use crate::project::{load, Language, Project};
+use crate::project::{Language, Project};
 use crate::test_support::write_file;
 use crate::toolchain;
 
@@ -870,35 +870,6 @@ fn compile_refresh_does_not_replace_managed_lockfile_with_author_lock() {
     );
 }
 
-// A build dir written by an older CLI still holds the author's pnpm lockfile;
-// refresh must prune it rather than let it survive next to the managed lock.
-#[test]
-fn compile_refresh_prunes_lockfiles_an_older_cli_copied() {
-    let root = tempfile::tempdir().unwrap();
-    setup_mock_ts_runtime(root.path());
-    write_file(
-        root.path(),
-        "agent.ts",
-        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
-    );
-    write_file(
-        root.path(),
-        "package.json",
-        "{\n  \"name\": \"example\",\n  \"dependencies\": { \"managed-deepagents\": \"^0.0.2\" }\n}\n",
-    );
-    write_file(root.path(), "pnpm-lock.yaml", "author\n");
-    let project = load(root.path()).unwrap();
-    let out_dir = root.path().join("build");
-    compile(&project, &out_dir).unwrap();
-    assert!(!out_dir.join("pnpm-lock.yaml").exists());
-    write_file(&out_dir, "pnpm-lock.yaml", "stale\n");
-
-    compile_refresh(&project, &out_dir).unwrap();
-
-    assert!(!out_dir.join("pnpm-lock.yaml").exists());
-    assert!(out_dir.join("package-lock.json").is_file());
-}
-
 #[test]
 fn compile_refresh_keeps_the_synced_python_lockfile() {
     let root = tempfile::tempdir().unwrap();
@@ -1248,6 +1219,116 @@ fn compile_generates_a_python_entry() {
         format!("{LANGGRAPH_API_VERSION}-py3.14")
     );
     assert_eq!(value["graphs"]["agent"], "./_mda_entry.py:agent");
+}
+
+#[test]
+fn compile_builds_a_graph_per_async_subagent() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        concat!(
+            "agent = define_deep_agent(name=\"lead\", subagents=[\n",
+            "    {\"name\": \"researcher\", \"description\": \"d\", \"async\": True},\n",
+            "    {\"name\": \"helper\", \"description\": \"d\"},\n",
+            "])\n",
+        ),
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+    let out_dir = root.path().join("build");
+
+    with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["graphs"],
+        serde_json::json!({
+            "lead": "./_mda_entry.py:agent",
+            "lead--researcher": "./_mda_entry.py:agent__researcher",
+        })
+    );
+    let entry = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
+    assert!(
+        entry.contains("_async_subagent_graphs = {\"researcher\": \"lead--researcher\"}"),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("async_subagent_graphs=_async_subagent_graphs"),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("async def agent__researcher(config, runtime: ServerRuntime):"),
+        "{entry}"
+    );
+    assert!(entry.contains("async_subagent=\"researcher\")"), "{entry}");
+}
+
+#[test]
+fn eval_rejects_async_subagents() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\", subagents=[{\"name\": \"r\", \"description\": \"d\", \"async\": True}])\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+
+    let error = compile_for_eval(&project, &root.path().join("build")).unwrap_err();
+
+    assert!(
+        error.to_string().contains("not supported in eval"),
+        "{error}"
+    );
+}
+
+#[test]
+fn compile_warns_about_subagents_it_cannot_read() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\", subagents=[make_subagent()])\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+
+    let summary = with_py_runtime(root.path(), || {
+        compile(&project, &root.path().join("build"))
+    })
+    .unwrap();
+
+    assert!(
+        summary
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("1 subagent entry")),
+        "{:?}",
+        summary.warnings
+    );
 }
 
 #[test]
@@ -2846,6 +2927,91 @@ fn compile_requires_identity_for_python_ingress_channel() {
 }
 
 #[test]
+fn compile_requires_identity_for_github_channel() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "channels/github.ts",
+        concat!(
+            "import { channels } from \"managed-deepagents\";\n",
+            "export const channel = channels.github({ onEvent: {} });\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("channels/github.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let error = compile(&project, &out_dir).unwrap_err().to_string();
+    assert!(
+        error.contains("require a root identity"),
+        "expected identity gate for GitHub channel, got: {error}"
+    );
+}
+
+#[test]
+fn compile_requires_identity_for_python_github_channel() {
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"agent\", model=\"openai:gpt-5\")\n",
+    );
+    write_file(
+        root.path(),
+        "channels/github.py",
+        concat!(
+            "from managed_deepagents import channels\n",
+            "channel = channels.github(on_event={})\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "pyproject.toml",
+        "[project]\nname = \"example\"\nversion = \"0.0.0\"\ndependencies = []\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![
+            PathBuf::from("agent.py"),
+            PathBuf::from("channels/github.py"),
+            PathBuf::from("pyproject.toml"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let error = with_py_runtime(root.path(), || compile(&project, &out_dir))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("require a root identity"),
+        "expected identity gate for GitHub channel, got: {error}"
+    );
+}
+
+#[test]
 fn compile_wires_typescript_http_app_to_live_channels() {
     let root = tempfile::tempdir().unwrap();
     setup_mock_ts_runtime(root.path());
@@ -2904,7 +3070,9 @@ fn compile_wires_typescript_http_app_to_live_channels() {
 
     let http_out = fs::read_to_string(out_dir.join("_mda_http.ts")).unwrap();
     assert!(
-        http_out.contains("buildManagedHttpApp({ identity, channels })"),
+        http_out.contains(
+            "buildManagedHttpApp({ identity, channels, root: fileURLToPath(new URL(\".\", import.meta.url)) })"
+        ),
         "expected channels kwargs in buildManagedHttpApp call:\n{http_out}"
     );
     assert!(
@@ -2971,7 +3139,7 @@ fn compile_wires_python_http_app_to_live_channels() {
 
     let http_out = fs::read_to_string(out_dir.join("_mda_http.py")).unwrap();
     assert!(
-        http_out.contains("channels=_channels"),
+        http_out.contains("channels=_channels, root=str(_Path(__file__).resolve().parent)"),
         "expected channels kwargs in build_managed_http_app call:\n{http_out}"
     );
     assert!(

@@ -2,19 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
-from deepagents.backends.protocol import (
-    BackendProtocol,
-    EditResult,
-    FileDownloadResponse,
-    FileUploadResponse,
-    GlobResult,
-    GrepResult,
-    LsResult,
-    ReadResult,
-    WriteResult,
-)
+from deepagents.backends.protocol import BackendProtocol
 
 from managed_deepagents._memory.context_io import result_value, set_result_path
 from managed_deepagents._memory.paths import (
@@ -27,6 +17,16 @@ from managed_deepagents._memory.paths import (
 if TYPE_CHECKING:
     from deepagents import FilesystemPermission
     from deepagents.backends import CompositeBackend, StateBackend
+    from deepagents.backends.protocol import (
+        EditResult,
+        FileDownloadResponse,
+        FileUploadResponse,
+        GlobResult,
+        GrepResult,
+        LsResult,
+        ReadResult,
+        WriteResult,
+    )
 
 _ResultT = TypeVar("_ResultT")
 
@@ -81,118 +81,16 @@ def managed_context_routes(
         if selected_skills_backend is not None
         else MountedPathBackend.directory(context_backend, "skills", "/skills", read_only=True),
     }
-    # Unmounted layers still get a route so writes fail visibly instead of
-    # landing in the ephemeral default backend and reporting success.
-    routes["/memories/agent/"] = (
+    if mount_agent_memory:
         # Deployment-shared procedural memory on the deploy Hub repo.
-        MountedPathBackend.directory(context_backend, "memories/agent", "/memories/agent")
-        if mount_agent_memory
-        else UnmountedMemoryBackend("agent")
-    )
-    routes["/memories/user/"] = (
-        MountedPathBackend.directory(user_memory_backend, "", "/memories/user")
-        if user_memory_backend is not None
-        else UnmountedMemoryBackend("user")
-    )
+        routes["/memories/agent/"] = MountedPathBackend.directory(
+            context_backend, "memories/agent", "/memories/agent"
+        )
+    if user_memory_backend is not None:
+        routes["/memories/user/"] = MountedPathBackend.directory(
+            user_memory_backend, "", "/memories/user"
+        )
     return routes
-
-
-class UnmountedMemoryBackend(BackendProtocol):
-    """Route for a memory layer this run did not mount.
-
-    Reads and writes return tool errors so the model knows nothing was stored.
-    Searches return no matches: CompositeBackend fans root searches out to every
-    route and would fail the whole search on one route's error.
-    """
-
-    def __init__(self, layer: Literal["agent", "user"]) -> None:
-        self._layer = layer
-
-    def ls(self, path: str = "/") -> LsResult:
-        return LsResult(error=self._error("list", path))
-
-    async def als(self, path: str = "/") -> LsResult:
-        return self.ls(path)
-
-    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        del offset, limit
-        return ReadResult(error=self._error("read", file_path))
-
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return self.read(file_path, offset, limit)
-
-    def grep(
-        self,
-        pattern: str,
-        path: str | None = None,
-        glob: str | None = None,
-        *,
-        max_count: int | None = None,
-    ) -> GrepResult:
-        del pattern, path, glob, max_count
-        return GrepResult(matches=[])
-
-    async def agrep(
-        self,
-        pattern: str,
-        path: str | None = None,
-        glob: str | None = None,
-        *,
-        max_count: int | None = None,
-    ) -> GrepResult:
-        return self.grep(pattern, path, glob, max_count=max_count)
-
-    def glob(self, pattern: str, path: str | None = None) -> GlobResult:
-        del pattern, path
-        return GlobResult(matches=[])
-
-    async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
-        return self.glob(pattern, path)
-
-    def write(self, file_path: str, content: str) -> WriteResult:
-        del content
-        return WriteResult(error=self._error("write", file_path))
-
-    async def awrite(self, file_path: str, content: str) -> WriteResult:
-        return self.write(file_path, content)
-
-    def edit(
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        del old_string, new_string, replace_all
-        return EditResult(error=self._error("edit", file_path))
-
-    async def aedit(
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        return self.edit(file_path, old_string, new_string, replace_all)
-
-    def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        return [FileUploadResponse(path=path, error="permission_denied") for path, _ in files]
-
-    async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        return self.upload_files(files)
-
-    def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return [FileDownloadResponse(path=path, error="permission_denied") for path in paths]
-
-    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return self.download_files(paths)
-
-    def _error(self, action: str, path: str) -> str:
-        assert_safe_mounted_path(path)
-        visible = f"/memories/{self._layer}/{trim_slashes(path)}"
-        outcome = " Nothing was saved." if action in {"write", "edit"} else ""
-        reason = f"{self._layer} memory is not mounted for this run."
-        return f"Cannot {action} {visible}: {reason}{outcome}"
 
 
 class MountedPathBackend(BackendProtocol):

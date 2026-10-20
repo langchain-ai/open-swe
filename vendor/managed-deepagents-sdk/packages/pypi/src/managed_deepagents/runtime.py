@@ -54,6 +54,11 @@ from deepagents.backends.protocol import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph as CompiledAgent
 
+from managed_deepagents._async_subagents import (
+    async_subagent_definition,
+    reject_async_subagents,
+    route_async_subagents,
+)
 from managed_deepagents._channel import (
     Channel,
     collect_channels,
@@ -643,8 +648,14 @@ async def compile_managed_agent_async(
     run_context: object = None,
     is_run: bool = True,
     report_telemetry: bool = True,
+    async_subagent_graphs: Mapping[str, str] | None = None,
+    async_subagent: str | None = None,
 ) -> CompiledAgent:
-    """Resolve one entry and compile it with the current managed run context."""
+    """Resolve one entry and compile it with the current managed run context.
+
+    Generated entries pass `async_subagent_graphs` to the lead, and
+    `async_subagent` to build that async subagent's own graph instead.
+    """
     if runtime is not None:
         execution = runtime.execution_runtime
         is_run = execution is not None
@@ -669,6 +680,10 @@ async def compile_managed_agent_async(
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
     definition = await resolve_agent_definition(entry, factory_runtime)
+    if async_subagent is not None:
+        definition = async_subagent_definition(definition, async_subagent)
+    else:
+        definition = route_async_subagents(definition, async_subagent_graphs or {})
     return await _compile_resolved_managed_agent_async(
         definition,
         config,
@@ -1204,7 +1219,7 @@ def _declared_memory_layers(memory: MemoryDefinitionLike | None) -> MemoryLayers
     scope = config.get("scope")
     # Dynamic boundary: the declaration is imported from the author's module, so
     # its shape is checked here rather than trusted.
-    return list(scope) if isinstance(scope, list) else []
+    return cast("MemoryLayers", list(scope)) if isinstance(scope, list) else []
 
 
 def _select_system_prompt(
@@ -1260,6 +1275,7 @@ def compile_managed_agent_for_eval(
     The model override is applied to a copied definition so normal dev/deploy
     behavior remains unchanged.
     """
+    reject_async_subagents(definition)
     eval_definition = _prepare_eval_definition(definition, config, model_override)
 
     return compile_managed_agent(
@@ -1297,6 +1313,7 @@ async def compile_agent_factory_for_eval_async(
     definition = await resolve_agent_definition(
         entry, _internal_server_runtime(config, context, is_run=True)
     )
+    reject_async_subagents(definition)
     eval_definition = _prepare_eval_definition(definition, config, model_override)
     return await _compile_resolved_managed_agent_async(
         eval_definition,
@@ -1397,6 +1414,9 @@ def _wrap_declarative_subagents(
 
 def _prepend_schedule_delivery_middleware(merged: dict[str, object]) -> None:
     """Install schedule channel delivery middleware ahead of authored hooks."""
+    from managed_deepagents._channels.http.reply import (  # noqa: PLC0415
+        create_channel_reply_middleware,
+    )
     from managed_deepagents._channels.schedule_delivery import (  # noqa: PLC0415
         create_schedule_delivery_middleware,
     )
@@ -1406,7 +1426,8 @@ def _prepend_schedule_delivery_middleware(merged: dict[str, object]) -> None:
     authored = (
         list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
     )
-    merged["middleware"] = [schedule_mw, *authored]
+    # An HTTP channel run posts its own answer, before authored hooks as in TS.
+    merged["middleware"] = [schedule_mw, create_channel_reply_middleware(), *authored]
 
 
 def _prepend_credential_gate_middleware(
@@ -2258,7 +2279,7 @@ def _config_value(config: Mapping[str, object] | None, key: str) -> str | None:
     return None
 
 
-def _managed_deployment_name() -> str | None:
+def _managed_deployment_name(env: Mapping[str, str] | None = None) -> str | None:
     """Deployment this runtime belongs to, used to name the sandboxes it creates.
 
     ``MDA_DEPLOYMENT_NAME`` is injected by ``mda deploy``;
@@ -2266,10 +2287,12 @@ def _managed_deployment_name() -> str | None:
     when present. ``None`` under local ``mda dev``, where sandboxes stay unnamed
     and LangSmith generates a name.
     """
+    values = os.environ if env is None else env
     return (
-        _string_option(os.environ.get("LANGSMITH_DEPLOYMENT_NAME"))
-        or _string_option(os.environ.get("MDA_DEPLOYMENT_NAME"))
-        or _local_dev_deployment_name()
+        _string_option(values.get("LANGSMITH_DEPLOYMENT_NAME"))
+        or _string_option(values.get("MDA_DEPLOYMENT_NAME"))
+        # Sandboxes only: a link built from a given env (Studio's) names the deployment.
+        or (_local_dev_deployment_name() if env is None else None)
     )
 
 
