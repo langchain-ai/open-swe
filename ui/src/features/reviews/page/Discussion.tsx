@@ -38,7 +38,7 @@ import {
   useOpenConversations,
   type PullRequestRef,
 } from "./queries"
-import { useReviewPage } from "./store"
+import { usePageEvent } from "./store"
 import { useResolveThreads } from "./useThreadActions"
 import { plainFirstLine, plural } from "./text"
 
@@ -298,7 +298,6 @@ function OpenConversations({
   pr: PullRequestRef
   threads: Array<ReviewThread>
 }) {
-  const focusKey = useReviewPage((state) => state.openConversationsKey)
   const ref = useRef<HTMLDivElement>(null)
   const author = useQuery(reviewQueries.detail(pr)).data?.pr.author?.login
   const resolveThreads = useResolveThreads(pr)
@@ -310,19 +309,18 @@ function OpenConversations({
       sameLogin(thread.comments.at(-1)?.author?.login, author)
   )
   // Folding holds until something asks for the conversations again.
-  const [foldedAt, setFoldedAt] = useState<number | null>(null)
-  const folded = foldedAt === focusKey
-  useEffect(() => {
-    if (focusKey > 0)
-      ref.current?.scrollIntoView({ block: "start", behavior: "smooth" })
-  }, [focusKey])
+  const [folded, setFolded] = useState(false)
+  usePageEvent("showOpenConversations", () => {
+    setFolded(false)
+    ref.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+  })
   return (
     <div ref={ref} className="mb-space-4 scroll-mt-2">
       <div className="mb-space-2 flex items-center gap-space-2">
         <button
           type="button"
           aria-expanded={!folded}
-          onClick={() => setFoldedAt(folded ? null : focusKey)}
+          onClick={() => setFolded(!folded)}
           className="flex items-center gap-space-2 text-xs font-medium text-primary"
         >
           <CaretRightIcon
