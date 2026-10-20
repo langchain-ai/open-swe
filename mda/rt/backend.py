@@ -47,16 +47,14 @@ Hook = Literal[
     # The thread's box was replaced: the backend connects to the fresh one.
     "sandbox",
 ]
-# Waits before resending a call the backend never received. A refused connection
-# never reached it, so every hook is resent, briefly.
-_CONNECT_RETRY_SECONDS: Final = (1.0, 3.0)
-# ``catalog`` only reads, and ``prepare`` is the run's first call, which a restarted
-# run makes again anyway, so these are also resent after a gateway answered that it
-# could not reach the backend, for as long as a backend rollout takes. A 504 is
-# never resent: the backend may still be running the call.
-_ROLLOUT_RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
-_ROLLOUT_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare"})
-_UNREACHED_STATUSES: Final = frozenset({502, 503})
+# Waits before resending a call the backend never received, for as long as a backend
+# rollout takes. A refused connection never reached it, and neither did a 503: the
+# hooks never answer 503 themselves, so it is the gateway finding no ready backend.
+# A 502 can also come after the backend took the call, so only ``catalog``, which
+# only reads, and ``prepare``, which a restarted run makes again anyway, are resent
+# after one. A 504 is never resent: the backend may still be running the call.
+_RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
+_REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare"})
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
@@ -234,8 +232,7 @@ class OpenSweBackend:
             )
         if seconds is None:
             seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
-        rollout = hook in _ROLLOUT_HOOKS
-        waits = iter(_ROLLOUT_RETRY_SECONDS if rollout else _CONNECT_RETRY_SECONDS)
+        waits = iter(_RETRY_SECONDS)
         while True:
             try:
                 response = await _CONNECTIONS.client().post(
@@ -257,8 +254,10 @@ class OpenSweBackend:
                 ):
                     # What the hook itself raised, so the run fails with the cause, as in-process.
                     raise BackendCallError(f"{hook} failed: {failure.describe()}") from exc
-                unreached = isinstance(exc, httpx2.ConnectError) or (
-                    rollout and status in _UNREACHED_STATUSES
+                unreached = (
+                    isinstance(exc, httpx2.ConnectError)
+                    or status == 503
+                    or (status == 502 and hook in _REPEATABLE_HOOKS)
                 )
                 if unreached and (wait := next(waits, None)) is not None:
                     logger.warning(

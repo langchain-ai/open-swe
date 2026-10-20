@@ -25,17 +25,11 @@ from rt.tools import backend_tool
 
 
 @pytest.mark.parametrize(
-    ("hook", "failure", "failures", "attempts"),
-    [
-        ("call", "connect", 2, 3),
-        ("call", "connect", 3, 3),
-        ("before_model", "connect", 2, 3),
-        ("before_model", "connect", 3, 3),
-        ("call", "gateway", 1, 1),
-    ],
+    ("failure", "failures", "attempts"),
+    [("connect", 10, 11), ("connect", 11, 11), (503, 11, 11), (504, 1, 1)],
 )
-async def test_backend_connection_failures(
-    monkeypatch: pytest.MonkeyPatch, hook: str, failure: str, failures: int, attempts: int
+async def test_a_tool_call_the_backend_never_answered(
+    monkeypatch: pytest.MonkeyPatch, failure: str | int, failures: int, attempts: int
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
@@ -46,36 +40,29 @@ async def test_backend_connection_failures(
     failure_result = (
         httpx2.ConnectError("secret-token")
         if failure == "connect"
-        else httpx2.Response(503, request=request)
+        else httpx2.Response(failure, request=request)
     )
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(side_effect=[failure_result] * failures + [response])
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
-    backend = OpenSweBackend("secret-token")
-    if hook == "before_model":
-        if failures == 3:
-            with pytest.raises(BackendUnavailableError):
-                await backend.phase("before_model", {})
-        else:
-            await backend.phase("before_model", {})
-    else:
-        served = backend_tool(
-            ToolSpec(name="execute", description="Execute", parameters={"type": "object"}), backend
-        )
-        runtime = ToolRuntime(
-            state={"messages": []},
-            context=None,
-            config={},
-            stream_writer=lambda event: None,
-            tool_call_id="call-1",
-            store=None,
-        )
-        result = await served.coroutine(runtime=runtime)
-        assert isinstance(result, Command)
-        [result_message] = result.update["messages"]
-        assert result_message.tool_call_id == "call-1"
-        assert result_message.status == ("success" if failures == 2 else "error")
-        assert "secret-token" not in result_message.content
+    served = backend_tool(
+        ToolSpec(name="execute", description="Execute", parameters={"type": "object"}),
+        OpenSweBackend("secret-token"),
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    result = await served.coroutine(runtime=runtime)
+    assert isinstance(result, Command)
+    [result_message] = result.update["messages"]
+    assert result_message.tool_call_id == "call-1"
+    assert result_message.status == ("success" if failures == 10 else "error")
+    assert "secret-token" not in result_message.content
     assert client.post.await_count == attempts
 
 
@@ -84,10 +71,9 @@ async def test_backend_connection_failures(
     [
         ("prepare", 504),
         ("before_model", 502),
-        ("before_model", 503),
         ("before_model", 504),
-        ("after_model", 503),
-        ("after_agent", 503),
+        ("after_model", 502),
+        ("after_agent", 504),
     ],
 )
 async def test_phase_gateway_failure_is_not_replayed(
@@ -114,33 +100,36 @@ async def test_phase_gateway_failure_is_not_replayed(
 
 
 @pytest.mark.parametrize(("failures", "recovers"), [(10, True), (11, False)])
-async def test_preparation_waits_out_a_backend_rollout(
-    monkeypatch: pytest.MonkeyPatch, failures: int, recovers: bool
+@pytest.mark.parametrize("hook", ["prepare", "before_model"])
+async def test_a_run_waits_out_a_backend_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+    hook: Literal["prepare", "before_model"],
+    failures: int,
+    recovers: bool,
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     sleep = AsyncMock()
     monkeypatch.setattr("rt.backend.asyncio.sleep", sleep)
     request = httpx2.Request("POST", "https://backend.invalid")
-    unavailable = [
-        httpx2.Response(503, request=request),
-        httpx2.Response(502, request=request),
-        httpx2.ConnectError("secret-token"),
-    ]
+    # Only a call the backend could not have run is resent; prepare is also resent after a 502.
+    unavailable = [httpx2.Response(503, request=request), httpx2.ConnectError("secret-token")]
+    if hook == "prepare":
+        unavailable.append(httpx2.Response(502, request=request))
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(
-        side_effect=[unavailable[i % 3] for i in range(failures)]
+        side_effect=[unavailable[i % len(unavailable)] for i in range(failures)]
         + [httpx2.Response(200, request=request, json={"update": {"prepared": True}})]
     )
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     backend = OpenSweBackend("secret-token")
 
     if recovers:
-        reply = await backend.phase("prepare", {})
+        reply = await backend.phase(hook, {})
         assert reply.update == {"prepared": True}
         assert sum(call.args[0] for call in sleep.await_args_list) >= 120
     else:
         with pytest.raises(BackendUnavailableError):
-            await backend.phase("prepare", {})
+            await backend.phase(hook, {})
     assert client.post.await_count == min(failures + 1, 11)
 
 
