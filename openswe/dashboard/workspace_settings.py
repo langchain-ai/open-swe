@@ -61,7 +61,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_draft_prs: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    pr_summaries: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     review_trace_links: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -319,7 +318,6 @@ def _default_settings() -> dict[str, Any]:
     fallback_model, fallback_effort = default_model_pair()
     return {
         "review_draft_prs": False,
-        "pr_summaries": True,
         "review_trace_links": True,
         "model_routing_enabled": None,
         "gateway_enabled": None,
@@ -382,6 +380,7 @@ _STALE_FIELDS = (
     "review_author_context_enabled",
     "review_tracing_project",
     "transcription_model",
+    "pr_summaries",
     # Approval criteria moved to each repository's .open-swe/APPROVALS.md and its review style's mode.
     "approval_policy",
     "review_auto_approve",

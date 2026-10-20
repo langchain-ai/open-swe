@@ -27,20 +27,24 @@ def private_admin(grant_tool_access: Callable[..., None]) -> None:
 @pytest.mark.usefixtures("registry_db")
 async def test_instance_flags_keep_unrelated_settings_and_reset() -> None:
     await upsert_instance_settings(
-        WorkspaceSettingsUpdate(pr_summaries=False, org_guidelines="Keep me", gateway_enabled=True)
+        WorkspaceSettingsUpdate(
+            review_trace_links=False, org_guidelines="Keep me", gateway_enabled=True
+        )
     )
-    set_result = await manage_feature_flags("set", {"pr_summaries": True, "gateway_enabled": False})
+    set_result = await manage_feature_flags(
+        "set", {"review_trace_links": True, "gateway_enabled": False}
+    )
     assert set_result["effective"]["gateway_enabled"] is False
-    assert set_result["effective"]["pr_summaries"] is True
+    assert set_result["effective"]["review_trace_links"] is True
     assert (await get_workspace_settings())["org_guidelines"] == "Keep me"
-    await manage_feature_flags("set", {"pr_summaries": None})
-    assert (await get_workspace_settings())["pr_summaries"] is True
+    await manage_feature_flags("set", {"review_trace_links": None})
+    assert (await get_workspace_settings())["review_trace_links"] is True
     assert (await get_workspace_settings())["gateway_enabled"] is False
 
 
 @pytest.mark.usefixtures("registry_db")
 async def test_workspace_flags_inherit_and_keep_other_overrides() -> None:
-    await WORKSPACE_SETTINGS.put("team", {"org_guidelines": "Keep me", "pr_summaries": False})
+    await WORKSPACE_SETTINGS.put("team", {"org_guidelines": "Keep me", "review_trace_links": False})
     with (
         patch.object(
             WORKSPACES,
@@ -49,19 +53,19 @@ async def test_workspace_flags_inherit_and_keep_other_overrides() -> None:
         ),
     ):
         assert (await manage_feature_flags("read", workspace="team"))["overrides"] == {
-            "pr_summaries": False
+            "review_trace_links": False
         }
-        await manage_feature_flags("set", {"pr_summaries": True}, workspace="team")
-        assert (await get_workspace_settings("team"))["pr_summaries"] is True
-        result = await manage_feature_flags("set", {"pr_summaries": None}, workspace="team")
+        await manage_feature_flags("set", {"review_trace_links": True}, workspace="team")
+        assert (await get_workspace_settings("team"))["review_trace_links"] is True
+        result = await manage_feature_flags("set", {"review_trace_links": None}, workspace="team")
         assert result["overrides"] == {}
-        assert (await get_workspace_settings("team"))["pr_summaries"] is True
+        assert (await get_workspace_settings("team"))["review_trace_links"] is True
         assert (await WORKSPACE_SETTINGS.get("team") or {})["org_guidelines"] == "Keep me"
 
 
 @pytest.mark.parametrize(
     "flags",
-    [{"review_auto_approve": True}, {"org_guidelines": True}, {"pr_summaries": "yes"}, {}],
+    [{"review_auto_approve": True}, {"org_guidelines": True}, {"review_trace_links": "yes"}, {}],
 )
 async def test_invalid_flags_are_refused(flags: dict[str, object]) -> None:
     with pytest.raises(ValueError):

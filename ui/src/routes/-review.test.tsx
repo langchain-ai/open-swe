@@ -32,7 +32,6 @@ function rowSwitch(label: string): HTMLElement {
 
 const SETTINGS: WorkspaceSettings = {
   review_draft_prs: false,
-  pr_summaries: true,
   review_trace_links: true,
   org_guidelines: "oss guidelines",
   default_agent_model: null,
@@ -91,15 +90,15 @@ it("reads the workspace's settings and writes only its own override", async () =
   )
   expect(screen.getByText("Inherited from the instance.")).toBeTruthy()
 
-  fireEvent.click(rowSwitch("PR Summaries"))
+  fireEvent.click(rowSwitch("Reviewer trace links"))
 
   await waitFor(() => expect(writes.length).toBe(1))
   expect(writes[0]!.url).toContain("/workspaces/oss/settings")
   // Only the field that changed becomes an override; guidelines stay inherited.
-  expect(writes[0]!.body).toEqual({ pr_summaries: false })
+  expect(writes[0]!.body).toEqual({ review_trace_links: false })
   expect(
     await screen.findByRole("button", {
-      name: "Reset PR Summaries to the instance value",
+      name: "Reset Reviewer trace links to the instance value",
     })
   ).toBeTruthy()
   client.clear()
@@ -124,7 +123,7 @@ it("does not write before the workspace's settings have loaded", async () => {
     </QueryClientProvider>
   )
 
-  fireEvent.click(rowSwitch("PR Summaries"))
+  fireEvent.click(rowSwitch("Reviewer trace links"))
   expect(writes).toEqual([])
   client.clear()
 })

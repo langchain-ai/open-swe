@@ -4,7 +4,8 @@ The reviewer agent calls ``publish_review`` at the end of a run. That tool
 batches eligible findings (severity ≥ threshold, status=open) into a
 single GitHub PR Review:
 
-- Review body: a host-formatted findings summary and optional advisory assessment.
+- Review body: the reviewer's summary of the change, a host-formatted findings
+  count, and an optional advisory assessment.
 - Inline comments: one per surfaced finding, anchored to ``path`` + ``line``
   (+ ``start_line`` for ranges) + ``side``.
 - Suggestion: when ``finding.suggestion`` is set, appended to the comment body
@@ -273,6 +274,10 @@ def render_out_of_diff_section(findings: list[Finding]) -> str:
     )
 
 
+_SUMMARY_COLLAPSE_CHARS = 600
+_SUMMARY_COLLAPSE_LINES = 8
+
+
 class ReviewAssessment(BaseModel):
     """Advisory judgment for the exact commit the reviewer inspected."""
 
@@ -282,9 +287,18 @@ class ReviewAssessment(BaseModel):
     explanation: str = Field(min_length=1, max_length=1500)
 
 
+def render_review_summary(summary: str) -> str:
+    """Render the reviewer's summary of the change, collapsed when it is long."""
+    summary = summary.strip()
+    if len(summary) <= _SUMMARY_COLLAPSE_CHARS and summary.count("\n") < _SUMMARY_COLLAPSE_LINES:
+        return summary
+    return f"<details>\n<summary>Summary</summary>\n\n{summary}\n\n</details>"
+
+
 def render_review_body(
     *,
     pr_number: int,
+    summary: str,
     surfaced_count: int,
     trace_url: str | None = None,
     ui_url: str | None = None,
@@ -313,7 +327,7 @@ def render_review_body(
         issue_word = "issue" if surfaced_count == 1 else "issues"
         headline = f"**Jarvis Review** found {surfaced_count} potential {issue_word}."
 
-    parts = [headline]
+    parts = [headline, render_review_summary(summary)]
     if has_additional:
         noun = "finding" if additional_findings_count == 1 else "findings"
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")

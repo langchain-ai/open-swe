@@ -370,7 +370,6 @@ export interface AllowedSlackBotEntry {
 /** The settings record at either tier: the instance, or what a workspace's runs see. */
 export interface WorkspaceSettings {
   review_draft_prs: boolean
-  pr_summaries: boolean
   review_trace_links: boolean
   /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
   model_routing_enabled?: boolean | null

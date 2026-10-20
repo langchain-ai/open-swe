@@ -89,6 +89,7 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
 @audit_tool()
 async def publish_review(
     ranking: list[str],
+    summary: str,
     severity_threshold: Severity = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     assessment: ReviewAssessment | None = None,
@@ -104,6 +105,11 @@ async def publish_review(
         }
     if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
+    if not summary.strip():
+        return {
+            "success": False,
+            "error": "summary must describe the change. Nothing was published.",
+        }
 
     config = get_config()
     cfg = RunConfig.from_config(config)
@@ -146,6 +152,7 @@ async def publish_review(
             pr_number=pr_number,
             head_sha=head_sha,
             token=token,
+            summary=summary,
             severity_threshold=severity_threshold,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
@@ -297,6 +304,7 @@ async def _publish_review_async(
     pr_number: int,
     head_sha: str,
     token: str,
+    summary: str,
     severity_threshold: Severity,
     is_re_review: bool,
     langgraph_run_id: str | None = None,
@@ -455,6 +463,7 @@ async def _publish_review_async(
     for _ in range(2):
         review_body = render_review_body(
             pr_number=pr_number,
+            summary=summary,
             surfaced_count=len(inline_comments),
             trace_url=review_trace_url,
             ui_url=review_ui_url,
@@ -503,6 +512,7 @@ async def _publish_review_async(
             retry_inline = [p for _, p in valid_with_payload]
             retry_body = render_review_body(
                 pr_number=pr_number,
+                summary=summary,
                 surfaced_count=len(retry_inline),
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
