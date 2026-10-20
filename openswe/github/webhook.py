@@ -14,6 +14,7 @@ from openswe.database import postgres
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
 from openswe.github.notifications import notify_slack_review
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.human_review.lifecycle import close_for_pull_request
 from openswe.human_review.requests import HumanReviewRequest
@@ -561,6 +562,36 @@ async def settle_human_review_on_close(payload: dict[str, Any]) -> None:
     if identity is None or not postgres.configured():
         return
     await close_for_pull_request(*identity)
+
+
+async def withdraw_superseded_approvals(payload: dict[str, Any]) -> None:
+    """Dismiss Open SWE's approvals of earlier commits once new commits reach a pull request."""
+    event = PullRequestEvent.parse(payload)
+    identity = event.identity if event is not None else None
+    if event is None or identity is None or not event.pull_request.head_sha:
+        return
+    try:
+        async with PullRequestClient.as_app(*identity) as pull:
+            refused = await pull.withdraw_open_swe_approvals(
+                reason="New commits were pushed after Open SWE approved this pull request.",
+                keep_commit=event.pull_request.head_sha,
+            )
+    except Exception:
+        # Later background tasks of this delivery must still run.
+        common.logger.exception(
+            "Could not withdraw Open SWE approvals of superseded commits",
+            extra={"repository": event.repo_full_name, "pr_number": identity[2]},
+        )
+        return
+    if refused:
+        common.logger.error(
+            "Open SWE approvals of superseded commits are still standing",
+            extra={
+                "repository": event.repo_full_name,
+                "pr_number": identity[2],
+                "github_review_ids": refused,
+            },
+        )
 
 
 async def process_github_pr_close(payload: dict[str, Any]) -> None:

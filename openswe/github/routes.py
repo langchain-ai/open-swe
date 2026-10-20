@@ -122,6 +122,8 @@ async def github_webhook(
         if action in {"opened", "edited"} or action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
         if action == "synchronize":
+            # Not gated on auto-review: an approval outlives turning review off.
+            background_tasks.add_task(service.withdraw_superseded_approvals, payload)
             background_tasks.add_task(notify_pr_updated, payload)
         if action == "opened" or action in common.GH_PR_AGENT_STATE_ACTIONS:
             try:
