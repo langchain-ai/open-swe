@@ -701,3 +701,61 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
     assert not await subscription.match(event, EventSummary.of(event))
     assert await EventMatch.owed(_WORKER, []) == []
     assert await EventSubscription.for_thread(_WORKER) == []
+
+
+async def test_launched_runs_a_restart_left_unjoined_are_settled_once_they_end(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    from openswe.remote_runtime import async_workers
+    from openswe.threads import runtimes
+
+    runs = {"ended": "error", "running": "running", "paused": "success"}
+    workers = {name: str(uuid4()) for name in runs}
+    for name, worker in workers.items():
+        await store.Task.reserve_worker(
+            _COORDINATOR,
+            worker,
+            title="Repair login",
+            workspace="default",
+            instructions="Fix login",
+            model="openai:gpt-5.5",
+            effort="high",
+            launch_request_id=name,
+            launch_run_id=f"run-{name}",
+        )
+    names = {worker: name for name, worker in workers.items()}
+
+    async def history(
+        thread_id: str, *, limit: int, metadata: dict[str, str]
+    ) -> list[dict[str, object]]:
+        paused = names[thread_id] == "paused"
+        return [{"values": {"messages": []}, "interrupts": [{"id": "approve"}] if paused else []}]
+
+    client = MagicMock()
+    client.runs.get = AsyncMock(
+        side_effect=lambda thread_id, run_id: {"run_id": run_id, "status": runs[names[thread_id]]}
+    )
+    client.threads.get_history = AsyncMock(side_effect=history)
+    mda = MagicMock(client=client)
+    monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
+    monkeypatch.setattr(async_workers, "refresh_thread_status", AsyncMock())
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "handle_run_completion", settle)
+
+    # The ended run is reported; the paused one needs no report, its resuming run has a webhook.
+    assert await async_workers.settle_launched_runs() == 2
+    settle.assert_awaited_once()
+    assert settle.await_args.args[0]["thread_id"] == workers["ended"]
+    assert settle.await_args.args[0]["status"] == "error"
+
+    # Settled runs are not asked about again; the running one is, until it ends.
+    client.runs.get.reset_mock()
+    assert await async_workers.settle_launched_runs() == 0
+    assert [call.args[0] for call in client.runs.get.await_args_list] == [workers["running"]]
+    runs["running"] = "success"
+    assert await async_workers.settle_launched_runs() == 1
+    assert settle.await_count == 2
+    assert await async_workers.settle_launched_runs() == 0
+    assert settle.await_count == 2

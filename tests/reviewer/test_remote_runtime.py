@@ -464,8 +464,8 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
         AsyncMock(return_value={"thread_id": "worker", "github_login": "owner"}),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
-    joined: list[tuple[str, str]] = []
-    monkeypatch.setattr(async_workers, "_join", lambda *key: joined.append(key))
+    joined: list[async_workers.LaunchedRun] = []
+    monkeypatch.setattr(async_workers.LaunchedRun, "join", lambda run: joined.append(run))
     spec = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
     graph = MagicMock(
         start_models=AsyncMock(
@@ -488,8 +488,59 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
-    register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
-    assert joined == [("worker", "run-1")]
+    register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it", "run-1")
+    assert joined == [async_workers.LaunchedRun("worker", "run-1")]
+
+
+async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_other(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid7
+
+    from openswe.remote_runtime import async_workers
+    from openswe.tasks import store
+    from openswe.threads import runtimes
+
+    coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
+    task = store.Task(title="Fix login", workspace_id=uuid7(), coordinator_thread_id="coordinator")
+    first = store.TaskDelegation(
+        worker_thread_id="first-worker",
+        task_id=task.id,
+        coordinator_thread_id="coordinator",
+        instructions="Fix login",
+        model="openai:gpt-6.1-sol",
+        effort="low",
+    )
+    monkeypatch.setattr(
+        async_workers.service,
+        "register_async_worker",
+        AsyncMock(side_effect=store.WorkerAlreadyLaunchedError(task, first)),
+    )
+    monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
+    joined: list[async_workers.LaunchedRun] = []
+    monkeypatch.setattr(async_workers.LaunchedRun, "join", lambda run: joined.append(run))
+    client = MagicMock()
+    client.runs.cancel = AsyncMock()
+    mda = MagicMock(client=client)
+    monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
+
+    reply = await async_workers.launched(
+        coordinator,
+        {
+            "tool_call_id": "call-1",
+            "instructions": "Fix login",
+            "worker_thread_id": "second-worker",
+            "run_id": "run-2",
+        },
+    )
+
+    assert isinstance(reply, dict)
+    worker = reply["worker"]
+    assert isinstance(worker, dict)
+    assert worker["worker_thread_id"] == "first-worker"
+    client.runs.cancel.assert_awaited_once_with("second-worker", "run-2")
+    assert joined == []
 
 
 async def test_a_launched_worker_run_without_a_webhook_is_settled_once_it_ends(
@@ -523,11 +574,13 @@ async def test_a_launched_worker_run_without_a_webhook_is_settled_once_it_ends(
     mda = MagicMock(client=client)
     monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
     monkeypatch.setattr(async_workers.asyncio, "sleep", AsyncMock())
-    # Settling is not safe to repeat: a failure is logged, never retried.
+    # A failure is logged and left unsettled for the reconcile job to retry.
     settle = AsyncMock(side_effect=RuntimeError("delegation gone"))
     monkeypatch.setattr(completion, "handle_run_completion", settle)
+    settled = AsyncMock()
+    monkeypatch.setattr(async_workers.store.TaskDelegation, "settle_launch", settled)
 
-    await async_workers._settle_when_done("worker", "run-1")
+    await async_workers.LaunchedRun("worker", "run-1").settle_when_done()
 
     settle.assert_awaited_once_with(
         {
@@ -539,6 +592,7 @@ async def test_a_launched_worker_run_without_a_webhook_is_settled_once_it_ends(
             "error": None,
         }
     )
+    settled.assert_not_awaited()
 
 
 async def test_a_launched_worker_run_reports_its_own_answer_and_never_a_pause(
@@ -607,11 +661,12 @@ async def test_a_launched_worker_run_reports_its_own_answer_and_never_a_pause(
     monkeypatch.setattr(async_workers, "refresh_thread_status", AsyncMock())
     settle = AsyncMock()
     monkeypatch.setattr(completion, "handle_run_completion", settle)
+    monkeypatch.setattr(async_workers.store.TaskDelegation, "settle_launch", AsyncMock())
 
     # Run A finished, then a task message's run B moved the thread on before A was settled.
     await run("run-a", {"messages": [{"type": "human", "content": "A"}]})
     await run("run-b", {"messages": [{"type": "human", "content": "B"}]})
-    await async_workers._settle_when_done("worker", "run-a")
+    await async_workers.LaunchedRun("worker", "run-a").settle_when_done()
     (settled,) = settle.await_args.args
     assert await worker_result("worker", "run-a", "success", settled) == "Answered A"
 
@@ -619,7 +674,7 @@ async def test_a_launched_worker_run_reports_its_own_answer_and_never_a_pause(
     # wakes the worker with queued messages, and the approval resumes it.
     settle.reset_mock()
     await run("run-c", {"messages": [{"type": "human", "content": "push"}]})
-    await async_workers._settle_when_done("worker", "run-c")
+    await async_workers.LaunchedRun("worker", "run-c").settle_when_done()
     settle.assert_not_awaited()
     await run("run-d", Command(resume="approved"))
     assert graph.get_state(thread).values["messages"][-1]["content"] == "Pushed: approved"
