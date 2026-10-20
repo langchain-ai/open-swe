@@ -816,7 +816,8 @@ fn compile_inner(
         warnings.push(format!(
             "{} subagent entr{} in {} could not be read without running it. An async \
              subagent (`\"async\": True`) must be a dict literal, or a name bound to one, \
-             in `subagents=[...]`.",
+             in `subagents=[...]`. Annotate a name spread there that holds only sync \
+             subagents as `list[SubAgent]`.",
             agent.unreadable_subagents,
             if agent.unreadable_subagents == 1 {
                 "y"

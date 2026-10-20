@@ -54,8 +54,9 @@ def declares_disable_memory(call):
 
 
 def literal_bindings(statements):
-    # Module- or factory-level names bound to dict, list, or tuple literals, or to
-    # a subagent type call.
+    # Module- or factory-level names bound to dict, list, tuple, or comprehension
+    # literals, or to a subagent type call. A name bound to anything else under a
+    # sync subagent sequence annotation (`list[SubAgent]`) maps to the annotation.
     bindings = {}
     for node in statements:
         if isinstance(node, ast.Assign):
@@ -64,10 +65,18 @@ def literal_bindings(statements):
             targets, value = [node.target], node.value
         else:
             continue
-        if isinstance(value, (ast.Dict, ast.List, ast.Tuple)) or is_subagent_type_call(value):
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    bindings[target.id] = value
+        if not (
+            isinstance(value, (ast.Dict, ast.List, ast.Tuple, ast.ListComp))
+            or is_subagent_type_call(value)
+        ):
+            if not isinstance(node, ast.AnnAssign) or not is_sync_subagent_sequence(
+                node.annotation
+            ):
+                continue
+            value = node.annotation
+        for target in targets:
+            if isinstance(target, ast.Name):
+                bindings[target.id] = value
     return bindings
 
 
@@ -98,12 +107,74 @@ def async_subagent_name(spec):
 SUBAGENT_TYPES = frozenset({"SubAgent", "CompiledSubAgent", "AsyncSubAgent"})
 
 
+def type_name(node):
+    return node.id if isinstance(node, ast.Name) else getattr(node, "attr", None)
+
+
 def is_subagent_type_call(node):
-    if not isinstance(node, ast.Call):
+    return isinstance(node, ast.Call) and type_name(node.func) in SUBAGENT_TYPES
+
+
+SEQUENCE_TYPES = frozenset({"list", "List", "Sequence", "tuple", "Tuple"})
+SYNC_SUBAGENT_TYPES = frozenset({"SubAgent", "CompiledSubAgent"})
+
+
+def is_sync_subagent_sequence(annotation):
+    """`list[SubAgent]`, `Sequence[SubAgent | CompiledSubAgent]`,
+    `tuple[SubAgent, ...]`: a sequence that holds no async subagent."""
+    if not isinstance(annotation, ast.Subscript):
         return False
-    func = node.func
-    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-    return name in SUBAGENT_TYPES
+    if type_name(annotation.value) not in SEQUENCE_TYPES:
+        return False
+    items = annotation.slice
+    items = items.elts if isinstance(items, ast.Tuple) else [items]
+    items = [
+        item
+        for item in items
+        if not (isinstance(item, ast.Constant) and item.value is Ellipsis)
+    ]
+    return bool(items) and all(is_sync_subagent_type(item) for item in items)
+
+
+def is_sync_subagent_type(node):
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return is_sync_subagent_type(node.left) and is_sync_subagent_type(node.right)
+    return type_name(node) in SYNC_SUBAGENT_TYPES
+
+
+def subagent_entries(value, bindings, seen=frozenset()):
+    """Return the entries a subagent list contributes, with `*spread`s expanded,
+    or None when MDA can't read the list. An unreadable spread is kept as its
+    `ast.Starred` node, which the caller counts as one unreadable entry."""
+    if isinstance(value, ast.Name):
+        if value.id in seen:
+            return None
+        seen = seen | {value.id}
+        value = bindings.get(value.id)
+    if is_sync_subagent_sequence(value):
+        return []
+    if isinstance(value, (ast.ListComp, ast.GeneratorExp)):
+        # Every element comes from one expression: a subagent type call, or a dict
+        # not flagged async, means none of them is async. A `**spread` key could
+        # copy `"async": True` into every element, so such a dict isn't read.
+        element = value.elt
+        if is_subagent_type_call(element) or (
+            isinstance(element, ast.Dict)
+            and None not in element.keys
+            and async_subagent_name(element) is None
+        ):
+            return []
+        return None
+    if not isinstance(value, (ast.List, ast.Tuple)):
+        return None
+    entries = []
+    for element in value.elts:
+        if not isinstance(element, ast.Starred):
+            entries.append(element)
+            continue
+        spread = subagent_entries(element.value, bindings, seen)
+        entries.extend([element] if spread is None else spread)
+    return entries
 
 
 def async_subagents(call, bindings):
@@ -116,11 +187,10 @@ def async_subagents(call, bindings):
         value = kw.value
         if isinstance(value, ast.Constant) and value.value is None:
             continue
-        if isinstance(value, ast.Name):
-            value = bindings.get(value.id)
-        if not isinstance(value, (ast.List, ast.Tuple)):
+        entries = subagent_entries(value, bindings)
+        if entries is None:
             return names, 1
-        for element in value.elts:
+        for element in entries:
             if isinstance(element, ast.Name):
                 element = bindings.get(element.id)
             if is_subagent_type_call(element):

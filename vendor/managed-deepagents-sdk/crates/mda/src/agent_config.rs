@@ -987,6 +987,42 @@ mod tests {
     }
 
     #[test]
+    fn python_subagent_spreads_without_async_entries_are_read() {
+        if !python3_available() {
+            return;
+        }
+        let read_with = |spread: &str, built: &str| {
+            let source = format!(
+                concat!(
+                    "def agent(ctx):\n",
+                    "    {}\n",
+                    "    built = [{} for s in specs]\n",
+                    "    worker = {{'name': 'worker', 'description': 'd', 'async': True}}\n",
+                    "    return define_deep_agent(name='lead', subagents=[*sync, *built, worker])\n",
+                ),
+                spread,
+                built
+            );
+            let fields = extract_agent_config_python(&source, "agent.py").unwrap();
+            (fields.async_subagents, fields.unreadable_subagents)
+        };
+        let read = |spread: &str| read_with(spread, "{'name': s.name, 'description': 'd'}");
+        let worker = vec![AgentNameValue::Static("worker".to_string())];
+
+        assert_eq!(read("sync: list[SubAgent] = build()"), (worker.clone(), 0));
+        assert_eq!(read("sync: list[dict] = build()"), (worker.clone(), 1));
+        assert_eq!(read("sync = build()"), (worker.clone(), 1));
+        // Each `**s` could copy `"async": True` in.
+        assert_eq!(
+            read_with(
+                "sync: list[SubAgent] = build()",
+                "{**s, 'description': 'd'}"
+            ),
+            (worker, 1)
+        );
+    }
+
+    #[test]
     fn python_async_subagents_are_read_from_factories() {
         if !python3_available() {
             return;
