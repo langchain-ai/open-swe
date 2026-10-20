@@ -23,6 +23,7 @@ import contextlib
 import hashlib
 import itertools
 import json
+import logging
 import os
 import posixpath
 import re
@@ -63,11 +64,14 @@ _EXTENSION_DIR = f"{_EXTENSIONS_DIR}/stagehand-{STAGEHAND_VERSION}"
 #: browserd's windows, each with the port it serves inside the browser sandbox.
 _WINDOWS_FILE = "/var/lib/browserd/attachments.json"
 _WINDOW_NAME = "mda"
+#: The window that shares the thread's sandbox's localhost with every window.
+_LOCALHOST_WINDOW = "mda-localhost"
 #: The extension's manifest name, which tells its service worker from other extensions'.
 _STAGEHAND_EXTENSION = "Stagehand Runtime"
 _CDP_TIMEOUT_S = 30
 _HTTP_TIMEOUT = httpx.Timeout(90.0)  # creating a browser waits for Chrome
 _SETUP_TIMEOUT_S = 300
+_LOG = logging.getLogger("mda.browser")
 
 _EXTENSION_ZIP = "/tmp/mda-stagehand-extension.zip"  # noqa: S108 - in the browser sandbox, not here
 
@@ -103,6 +107,11 @@ SNAPSHOT_DESCRIPTION = (
 SCREENSHOT_DESCRIPTION = (
     "Capture a screenshot of the active page. For size-constrained MCP clients, prefer "
     'a viewport JPEG: {"type":"jpeg","quality":40,"fullPage":false}.'
+)
+# Ours, after `run`'s contract text: a thread's browser shares its sandbox's localhost.
+LOCALHOST_NOTE = (
+    " Servers running in your sandbox are reachable at http://localhost:<port> "
+    "(any port but 80 and 443)."
 )
 
 # `experimental_batch` hands the callback a worker-local batch context; the
@@ -182,6 +191,7 @@ class _Session:
     browser: StagehandBrowser
     stagehand: Stagehand
     ids: dict[str, str] = field(default_factory=dict)  # from the latest snapshot
+    shared: str | None = None  # the sandbox whose localhost the browser shares
 
     async def page(self) -> Page:
         pages = await self.browser.context.pages()
@@ -318,6 +328,32 @@ async def _open(name: str, idle_ttl_seconds: int) -> _Session:
 
         local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
         return await _attach(ws_url, local_url, headers)
+
+
+def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
+    """The run's sandbox, once it exists: MDA names one it has not made yet ``pending:…``."""
+    backend = runtime.backend
+    if not isinstance(backend, SandboxBackendProtocol) or backend.id.startswith("pending:"):
+        return None
+    return backend.id
+
+
+async def _share_localhost(name: str, sandbox: str) -> None:
+    """Let browser ``name`` open ``sandbox``'s servers at ``http://localhost:<port>``.
+
+    One window attached with ``share_localhost`` serves every window of the
+    browser, so this adds one beside the agent's instead of reopening it.
+    """
+    credentials = _credentials()
+    tenant = {"X-Tenant-Id": credentials["tenant_id"]} if "tenant_id" in credentials else {}
+    headers = {"X-Api-Key": credentials["api_key"], **tenant}
+    base = f"{_browsers_url()}/{name}"
+    async with httpx.AsyncClient(headers=headers, timeout=_HTTP_TIMEOUT) as api:
+        found = _check(await api.get(base), "look up the browser").json().get("attachments")
+        if any(window.get("localhost_alias") for window in found or []):
+            return
+        body = {"name": _LOCALHOST_WINDOW, "sandbox": sandbox, "share_localhost": True}
+        _check(await api.post(f"{base}/attachments", json=body), "share the sandbox's localhost")
 
 
 async def _install_extension(box: AsyncSandbox) -> None:
@@ -511,10 +547,11 @@ class BrowserMiddleware(AgentMiddleware):
         async with self._locks.setdefault(key, asyncio.Lock()):
             for attempt in (1, 2):
                 try:
+                    name = _browser_name(key)
                     if key not in self._sessions:
-                        name = _browser_name(key)
                         self._sessions[key] = await _open(name, self.idle_ttl_seconds)
                     session = self._sessions[key]
+                    await self._share(session, name, runtime)
                     return await fn(session, await session.page())
                 except Exception as err:  # noqa: BLE001 - recover or report
                     if _dead_session(err) and attempt == 1:
@@ -522,6 +559,22 @@ class BrowserMiddleware(AgentMiddleware):
                         continue
                     return f"error: {type(err).__name__}: {err}"
         return "error: browser unavailable"
+
+    async def _share(self, session: _Session, name: str, runtime: ManagedToolRuntime) -> None:
+        """Share the thread's sandbox's localhost with its browser, once that sandbox exists.
+
+        Only a thread's browser: a user's serves several threads, and their
+        sandboxes cannot all be ``localhost``. Browsing goes on without it.
+        """
+        sandbox = _thread_sandbox(runtime) if self.scope == "thread" else None
+        if sandbox is None or session.shared == sandbox:
+            return
+        try:
+            await _share_localhost(name, sandbox)
+        except Exception as err:  # noqa: BLE001 - tried again on the next call
+            _LOG.warning("could not share sandbox %s's localhost with %s: %s", sandbox, name, err)
+            return
+        session.shared = sandbox
 
     async def _release(self, key: str) -> None:
         if (session := self._sessions.pop(key, None)) is not None:
@@ -546,7 +599,7 @@ class BrowserMiddleware(AgentMiddleware):
 
             return await middleware._call(runtime, go)
 
-        @tool(description=RUN_DESCRIPTION)
+        @tool(description=RUN_DESCRIPTION + (LOCALHOST_NOTE if self.scope == "thread" else ""))
         async def run(
             runtime: ManagedToolRuntime,
             code: str | None = None,
