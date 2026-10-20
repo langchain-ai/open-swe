@@ -116,6 +116,18 @@ class IncidentSession:
     async def _record_incident_report(self, **kwargs: Any) -> dict[str, Any]:
         await self.check()
         draft = ReportDraft.model_validate(kwargs)
+        if not draft.has_meaningful_content(self.collector):
+            return {
+                "recorded": False,
+                "posted": False,
+                "error": (
+                    "Report rejected: provide a substantive claim with known evidence IDs, "
+                    "or meaningful investigation gaps or questions. Empty and placeholder "
+                    "drafts are not saved. Expected claim shape: "
+                    'summary=[{"text": "A substantive supported observation", '
+                    '"evidence_ids": ["<known evidence ID>"]}]'
+                ),
+            }
         report = finalize_report(draft, self.collector)
         record = self.record
         digest = service.fingerprint(digest_fields(report))
